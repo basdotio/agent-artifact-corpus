@@ -1,0 +1,41 @@
+# The scanners this corpus can carry rule-level expectations for.
+#
+# Read this first, because it is the part people get backwards:
+#
+#   A label's `truth` block is enough to score ANY scanner. It says what the sample is and
+#   how bad it is, so a runner can ask "did the tool report this at or above truth.severity"
+#   without knowing anything about the tool's rule ids. Nobody needs an entry here to
+#   benchmark their scanner against this corpus.
+#
+#   An `expect.<tool>` block is optional extra precision — which rule must fire, which must
+#   stay quiet — and it only means anything for a tool listed here.
+#
+# So adding a scanner is an entry in this file, not a schema change, and running someone
+# else's scanner is not even that. That is the whole point of splitting truth from
+# expectation.
+#
+# `rules_source` locates the tool's generated rule reference so that a renamed or retired
+# rule turns the corpus red instead of silently never matching. `path` is relative to this
+# repository's root; `env` overrides it. Both are optional: a tool with no reachable rule
+# reference downgrades to "rule ids not checked for this tool" and says so, rather than
+# silently passing everything.
+#
+# `severity_ladder` is that tool's own ladder, ordered most to least severe, and the last
+# entry is its name for "nothing". Expectation bounds in a label are checked against the
+# ladder of the tool whose block they sit in, which is why two tools with different ladders
+# can annotate the same sample without either having to adopt the other's.
+
+tools:
+  - id: aguard
+    name: AgentGuard
+    url: https://github.com/basdotio/agent-guard
+    severity_ladder: [critical, high, medium, low, none]
+    # The suffix is NOT always numeric: REP-GOOD and REP-BAD are reputation verdicts. A
+    # digits-only pattern finds 71 of the 73 ids and then rejects any label citing those two
+    # as "not a rule the tool can emit" — a validator confidently wrong about the thing it
+    # validates.
+    rule_id_pattern: '\b([A-Z]{2,10}-[A-Z0-9]{3,4})\b'
+    rules_source:
+      env: AGUARD_RULES_MD
+      path: ../agent-guard/docs/rules.md
+    native_format: sarif-2.1.0

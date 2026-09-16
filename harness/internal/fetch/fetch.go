@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/basdotio/agent-guard-corpus/harness/internal/manifest"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/manifest"
 )
 
 // Get clones the entry at its pinned commit into cacheDir/<id>, or reports that it is

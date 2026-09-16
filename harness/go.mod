@@ -1,4 +1,4 @@
-module github.com/basdotio/agent-guard-corpus/harness
+module github.com/basdotio/agent-artifact-corpus/harness
 
 go 1.23.5
 

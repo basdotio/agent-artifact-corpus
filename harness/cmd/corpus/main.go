@@ -2,11 +2,10 @@
 
 // Command corpus validates and summarises the corpus.
 //
-// It deliberately does not score anything. Running aguard over the corpus belongs in the
-// tool repository, where the scanner lives and where a drift gate can compare a generated
-// report against a committed one. This repository owns the samples and the rules about
-// them, and keeping the scorer out means the corpus can be validated with no build of the
-// tool present.
+// It deliberately does not score anything. Running a scanner over the corpus belongs
+// elsewhere, and keeping the scorer out means the corpus validates with no build of any
+// scanner present — which is now load-bearing rather than tidy, because a label's `truth`
+// block is written in a vocabulary no scanner owns and has to be checkable on its own.
 package main
 
 import (
@@ -14,14 +13,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
-	"github.com/basdotio/agent-guard-corpus/harness/internal/fetch"
-	"github.com/basdotio/agent-guard-corpus/harness/internal/label"
-	"github.com/basdotio/agent-guard-corpus/harness/internal/leakage"
-	"github.com/basdotio/agent-guard-corpus/harness/internal/manifest"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/fetch"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/label"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/leakage"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/manifest"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
 )
 
 func main() {
@@ -49,7 +48,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `corpus <command>
 
-  validate   check every _label.yaml and manifest entry, and run the leakage gate
+  validate   check every label and manifest entry, and run the leakage gate
   stats      corpus composition
   fetch      materialise named layer-2 entries into ./cache (network)`)
 }
@@ -57,20 +56,39 @@ func usage() {
 // ---------- validate ----------
 
 func cmdValidate(root string) int {
-	labels, err := loadLabels(filepath.Join(root, "corpus"))
+	tax, err := taxonomy.Load(filepath.Join(root, "taxonomy"))
+	if err != nil {
+		fatal(err)
+	}
+	labels, err := loadLabels(root)
 	if err != nil {
 		fatal(err)
 	}
 
 	var problems []string
+	for _, e := range tax.Validate() {
+		problems = append(problems, fmt.Sprintf("taxonomy: %v", e))
+	}
 	for _, l := range labels {
-		for _, e := range l.Validate() {
-			problems = append(problems, fmt.Sprintf("%s: %v", rel(root, l.Path), e))
+		for _, e := range l.Validate(tax) {
+			problems = append(problems, fmt.Sprintf("%s: %v", l.Rel, e))
 		}
 	}
 
-	known, ruleSrc := knownRules(root)
-	for _, e := range label.ValidateSet(labels, known) {
+	// Rule ids are resolved per tool, against that tool's own generated reference. A tool
+	// with no reachable reference is reported as unchecked rather than assumed correct.
+	knownRules := map[string]map[string]bool{}
+	var ruleLines []string
+	for _, id := range sortedKeys(tax.Tools) {
+		rules, src := tax.Tools[id].KnownRules(root)
+		if len(rules) > 0 {
+			knownRules[id] = rules
+			ruleLines = append(ruleLines, fmt.Sprintf("  %-10s %d ids (from %s)", id, len(rules), src))
+		} else {
+			ruleLines = append(ruleLines, fmt.Sprintf("  %-10s not checked — no rule reference reachable", id))
+		}
+	}
+	for _, e := range label.ValidateSet(labels, tax, knownRules) {
 		problems = append(problems, e.Error())
 	}
 
@@ -90,16 +108,47 @@ func cmdValidate(root string) int {
 	// Leakage gate
 	var samples []leakage.Sample
 	for _, l := range labels {
-		files, _ := treeFiles(l.Path)
+		files, ferr := treeFiles(l.Path)
+		if ferr != nil {
+			// Not swallowed. An unreadable tree silently becomes a zero-file sample, which
+			// moves the file-count distribution the gate is reading and changes its verdict
+			// for a reason that has nothing to do with the corpus.
+			problems = append(problems, fmt.Sprintf("%s: cannot walk the sample tree: %v",
+				l.Rel, ferr))
+			continue
+		}
 		samples = append(samples, leakage.Sample{ID: l.ID, Class: string(l.Class), Files: files})
 	}
 	leaks := leakage.Check(samples)
 
-	fmt.Printf("labels    %d\n", len(labels))
-	if len(known) > 0 {
-		fmt.Printf("rule ids  %d known (from %s)\n", len(known), ruleSrc)
+	fmt.Printf("labels      %d\n", len(labels))
+	fmt.Printf("techniques  %d across %d dimensions\n", len(tax.Techniques), len(tax.Dimensions))
+	fmt.Println("rule ids")
+	for _, line := range ruleLines {
+		fmt.Println(line)
+	}
+
+	// The gate needs more samples than it has before it can say anything. Printing "ok"
+	// without saying so lets an inactive gate read as a passed one — the same failure the
+	// gate exists to catch, one level up.
+	if len(samples) < leakage.MinSupport {
+		fmt.Printf("leakage     INACTIVE — %d samples, gate needs %d before any feature has support\n",
+			len(samples), leakage.MinSupport)
 	} else {
-		fmt.Printf("rule ids  not checked — no generated rules.md found; see -h\n")
+		fmt.Printf("leakage     active over %d samples\n", len(samples))
+	}
+
+	// A pair that guards nothing passes every structural check. It is reported, named and
+	// counted rather than rejected, because the twin's known_gap is an honest declaration
+	// and the problem is only that its consequence was invisible.
+	unguarded := label.UnguardedPairs(labels)
+	if len(unguarded) > 0 {
+		fmt.Printf("\n%d unguarded pair(s) — structurally valid, currently proving nothing:\n", len(unguarded))
+		for _, u := range unguarded {
+			fmt.Printf("  %s quiets %s, and its twin %s is on record failing them for %s (%s).\n"+
+				"    Deleting those rules from %s today breaks neither sample.\n",
+				u.HardNegative, strings.Join(u.SharedRules, ", "), u.Twin, u.Tool, u.GapItem, u.Tool)
+		}
 	}
 
 	for _, f := range leaks {
@@ -124,14 +173,24 @@ func cmdValidate(root string) int {
 // ---------- stats ----------
 
 func cmdStats(root string) int {
-	labels, err := loadLabels(filepath.Join(root, "corpus"))
+	tax, err := taxonomy.Load(filepath.Join(root, "taxonomy"))
 	if err != nil {
 		fatal(err)
 	}
+	labels, err := loadLabels(root)
+	if err != nil {
+		fatal(err)
+	}
+
 	byClass := map[string]int{}
 	bySurface := map[string]map[string]int{}
 	byOrigin := map[string]int{}
-	gaps, oos := 0, 0
+	performed := map[string]int{} // technique -> malicious samples performing it
+	resembled := map[string]int{} // technique -> hard negatives resembling it
+	byDimension := map[string]int{}
+	type toolStat struct{ samples, gaps, oos int }
+	tools := map[string]*toolStat{}
+
 	for _, l := range labels {
 		byClass[string(l.Class)]++
 		if bySurface[l.Surface] == nil {
@@ -139,11 +198,25 @@ func cmdStats(root string) int {
 		}
 		bySurface[l.Surface][string(l.Class)]++
 		byOrigin[l.Origin.Type]++
-		if l.KnownGap != nil {
-			gaps++
+
+		for _, t := range l.Truth.Techniques {
+			performed[t]++
+			byDimension[tax.Dimension(t)]++
 		}
-		if l.OutOfScope != "" {
-			oos++
+		for _, t := range l.Truth.Resembles {
+			resembled[t]++
+		}
+		for id, e := range l.Expect {
+			if tools[id] == nil {
+				tools[id] = &toolStat{}
+			}
+			tools[id].samples++
+			if e.KnownGap != nil {
+				tools[id].gaps++
+			}
+			if e.OutOfScope != "" {
+				tools[id].oos++
+			}
 		}
 	}
 
@@ -152,26 +225,49 @@ func cmdStats(root string) int {
 	for _, c := range []string{"malicious", "benign", "hard-negative"} {
 		fmt.Printf("    %-14s %d\n", c, byClass[c])
 	}
+
 	fmt.Println("  by surface")
-	var surfaces []string
-	for s := range bySurface {
-		surfaces = append(surfaces, s)
-	}
-	sort.Strings(surfaces)
-	for _, s := range surfaces {
+	for _, s := range sortedKeys(bySurface) {
 		m := bySurface[s]
 		fmt.Printf("    %-14s mal %-4d ben %-4d hard-neg %d\n", s, m["malicious"], m["benign"], m["hard-negative"])
 	}
+
 	fmt.Println("  by origin")
 	for _, o := range []string{"real-world", "promoted", "reconstruction", "synthetic"} {
 		if byOrigin[o] > 0 {
 			fmt.Printf("    %-14s %d\n", o, byOrigin[o])
 		}
 	}
-	// These two are printed always, including as zero. A count that only appears when
-	// non-zero reads as "none exist" when the real state is "nobody looked".
-	fmt.Printf("  known gaps       %d  (expected failures, attributed to a work item)\n", gaps)
-	fmt.Printf("  out of scope     %d  (malicious but out of this tool's stated reach)\n", oos)
+
+	// Truth-side composition. This is the half that describes the corpus to someone who has
+	// never run our scanner, so every technique in the vocabulary is listed including the
+	// ones with no sample: a named hole is actionable, an omitted one reads as covered.
+	fmt.Println("  by technique (truth — tool-neutral)")
+	for _, t := range sortedKeys(tax.Techniques) {
+		fmt.Printf("    %-22s performed %-4d resembled %d\n", t, performed[t], resembled[t])
+	}
+	fmt.Println("  by dimension (the recall axis)")
+	for _, d := range tax.Dimensions {
+		fmt.Printf("    %-22s %d\n", d, byDimension[d])
+	}
+
+	// Expectation-side composition, per tool. A tool absent from a sample means not
+	// measured, which is why this is reported as a count of samples carrying a block rather
+	// than as coverage.
+	fmt.Println("  per-tool expectations (optional precision on top of truth)")
+	if len(tools) == 0 {
+		fmt.Println("    none — every sample is scored from truth alone")
+	}
+	for _, id := range sortedKeys(tools) {
+		t := tools[id]
+		fmt.Printf("    %-14s %d/%d samples · %d known gap(s) · %d out of scope\n",
+			id, t.samples, len(labels), t.gaps, t.oos)
+	}
+	if u := label.UnguardedPairs(labels); len(u) > 0 {
+		fmt.Printf("  unguarded pairs  %d  (twin is on record failing the shared rules; the suppression is currently unproven)\n", len(u))
+	} else {
+		fmt.Printf("  unguarded pairs  0\n")
+	}
 
 	manifests, _ := filepath.Glob(filepath.Join(root, "manifest", "*.yaml"))
 	total := 0
@@ -186,13 +282,12 @@ func cmdStats(root string) int {
 			if e.Vendorable {
 				v = "vendorable"
 			}
-			fmt.Printf("  %-26s %-16s mal %-6d ben %-7d %-14s %s\n",
+			fmt.Printf("  %-28s %-16s mal %-6d ben %-7d %-16s %s\n",
 				e.ID, e.Role, e.Malicious, e.Benign, e.License, v)
 			total++
 		}
-		groups := f.PoolableGroups()
 		var overlapping [][]string
-		for _, g := range groups {
+		for _, g := range f.PoolableGroups() {
 			if len(g) > 1 {
 				overlapping = append(overlapping, g)
 			}
@@ -280,7 +375,8 @@ func cmdFetch(root string, want []string) int {
 // evidence lines were the label's own `source:` URL and `note:` prose. The contamination
 // ran both ways: malicious samples looked better caught than they were, benign samples
 // looked like false positives they were not.
-func loadLabels(dir string) ([]*label.Label, error) {
+func loadLabels(root string) ([]*label.Label, error) {
+	dir := filepath.Join(root, "corpus")
 	var out []*label.Label
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -303,8 +399,15 @@ func loadLabels(dir string) ([]*label.Label, error) {
 		}
 		// The sample tree is the sibling directory with the same stem.
 		l.Path = strings.TrimSuffix(p, ".yaml")
+		l.Rel = rel(root, l.Path)
 		if fi, serr := os.Stat(l.Path); serr != nil || !fi.IsDir() {
 			return fmt.Errorf("%s: no sample tree at %s", p, filepath.Base(l.Path))
+		}
+		// The directory layout is corpus/<class>/<surface>/, and it is not decoration: the
+		// class in the path is what a reader sees first. A label whose class disagrees with
+		// its own location files the sample under one heading and counts it under another.
+		if err := checkLayout(dir, p, l); err != nil {
+			return err
 		}
 		out = append(out, l)
 		return nil
@@ -314,6 +417,26 @@ func loadLabels(dir string) ([]*label.Label, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+func checkLayout(corpusDir, labelPath string, l *label.Label) error {
+	r, err := filepath.Rel(corpusDir, labelPath)
+	if err != nil {
+		return nil
+	}
+	parts := strings.Split(filepath.ToSlash(r), "/")
+	if len(parts) < 3 {
+		return fmt.Errorf("%s: expected corpus/<class>/<surface>/<id>.yaml", labelPath)
+	}
+	if parts[0] != string(l.Class) {
+		return fmt.Errorf("%s: label says class %q but it is filed under %q",
+			labelPath, l.Class, parts[0])
+	}
+	if parts[1] != l.Surface {
+		return fmt.Errorf("%s: label says surface %q but it is filed under %q",
+			labelPath, l.Surface, parts[1])
+	}
+	return nil
 }
 
 func treeFiles(dir string) ([]string, error) {
@@ -331,40 +454,6 @@ func treeFiles(dir string) ([]string, error) {
 	return out, err
 }
 
-// ruleIDRE matches the tool's rule IDs. The suffix is NOT always numeric: REP-GOOD
-// (dimension 0) and REP-BAD (dimension 3, scoring) are reputation verdicts. A digits-only
-// pattern finds 71 of the 73 IDs and then rejects any label citing those two as "not a rule
-// the tool can emit" — a validator confidently wrong about the thing it validates.
-var ruleIDRE = regexp.MustCompile(`\b([A-Z]{2,10}-[A-Z0-9]{3,4})\b`)
-
-// knownRules reads the tool's generated rule reference so that a renamed or retired rule
-// turns the corpus red instead of silently never matching. It is optional: this repository
-// must validate with no checkout of the tool present, so a missing reference downgrades to
-// "not checked" and says so, rather than silently passing everything.
-func knownRules(root string) (map[string]bool, string) {
-	candidates := []string{
-		os.Getenv("AGUARD_RULES_MD"),
-		filepath.Join(root, "..", "agent-guard", "docs", "rules.md"),
-	}
-	for _, c := range candidates {
-		if c == "" {
-			continue
-		}
-		b, err := os.ReadFile(c)
-		if err != nil {
-			continue
-		}
-		out := map[string]bool{}
-		for _, m := range ruleIDRE.FindAllStringSubmatch(string(b), -1) {
-			out[m[1]] = true
-		}
-		if len(out) > 0 {
-			return out, filepath.Clean(c)
-		}
-	}
-	return nil, ""
-}
-
 func repoRoot() (string, error) {
 	d, err := os.Getwd()
 	if err != nil {
@@ -372,11 +461,13 @@ func repoRoot() (string, error) {
 	}
 	for i := 0; i < 6; i++ {
 		if _, err := os.Stat(filepath.Join(d, "corpus")); err == nil {
-			return d, nil
+			if _, err := os.Stat(filepath.Join(d, "taxonomy")); err == nil {
+				return d, nil
+			}
 		}
 		d = filepath.Dir(d)
 	}
-	return "", fmt.Errorf("could not find the repository root (no corpus/ above the working directory)")
+	return "", fmt.Errorf("could not find the repository root (no corpus/ and taxonomy/ above the working directory)")
 }
 
 func rel(root, p string) string {
@@ -385,6 +476,15 @@ func rel(root, p string) string {
 		return p
 	}
 	return r
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func fatal(err error) {
