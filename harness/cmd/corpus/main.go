@@ -238,20 +238,43 @@ func cmdFetch(root string) int {
 
 // ---------- helpers ----------
 
+// loadLabels reads every <id>.yaml under corpus/. The label sits BESIDE its sample tree,
+// never inside it.
+//
+// It used to live inside, as _label.yaml, and that silently corrupted every measurement.
+// The scanner reads the whole target directory, so each sample was injecting its own
+// annotation as evidence. The reverse-shell sample scored 83 with BD-003 apparently caught
+// — on the words "textbook reverse shell" in its own note field, while the actual payload
+// went undetected. The environ-copy hard negative scored 63 on a high EXFIL-001 whose two
+// evidence lines were the label's own `source:` URL and `note:` prose. The contamination
+// ran both ways: malicious samples looked better caught than they were, benign samples
+// looked like false positives they were not.
 func loadLabels(dir string) ([]*label.Label, error) {
 	var out []*label.Label
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || d.Name() != "_label.yaml" {
+		if d.IsDir() {
+			return nil
+		}
+		if d.Name() == "_label.yaml" {
+			return fmt.Errorf("%s: a label inside the sample tree is scanned as part of the "+
+				"sample and injects its own text as evidence — move it beside the tree as "+
+				"<id>.yaml", p)
+		}
+		if filepath.Ext(p) != ".yaml" {
 			return nil
 		}
 		l, lerr := label.Load(p)
 		if lerr != nil {
 			return fmt.Errorf("%s: %w", p, lerr)
 		}
-		l.Path = filepath.Dir(p)
+		// The sample tree is the sibling directory with the same stem.
+		l.Path = strings.TrimSuffix(p, ".yaml")
+		if fi, serr := os.Stat(l.Path); serr != nil || !fi.IsDir() {
+			return fmt.Errorf("%s: no sample tree at %s", p, filepath.Base(l.Path))
+		}
 		out = append(out, l)
 		return nil
 	})
@@ -277,7 +300,11 @@ func treeFiles(dir string) ([]string, error) {
 	return out, err
 }
 
-var ruleIDRE = regexp.MustCompile(`\b([A-Z]{2,10}-[0-9]{3})\b`)
+// ruleIDRE matches the tool's rule IDs. The suffix is NOT always numeric: REP-GOOD
+// (dimension 0) and REP-BAD (dimension 3, scoring) are reputation verdicts. A digits-only
+// pattern finds 71 of the 73 IDs and then rejects any label citing those two as "not a rule
+// the tool can emit" — a validator confidently wrong about the thing it validates.
+var ruleIDRE = regexp.MustCompile(`\b([A-Z]{2,10}-[A-Z0-9]{3,4})\b`)
 
 // knownRules reads the tool's generated rule reference so that a renamed or retired rule
 // turns the corpus red instead of silently never matching. It is optional: this repository

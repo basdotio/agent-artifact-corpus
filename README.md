@@ -76,7 +76,7 @@ that layer 1 must never contain: no-license, CC-BY-NC-SA, AGPL.
 ## Usage
 
 ```bash
-make validate    # check every _label.yaml (offline, no network)
+make validate    # check every label, manifest entry and the leakage gate (offline)
 make fetch       # pull layer 2 per manifest, verify sha256
 make stats       # corpus composition
 ```
@@ -86,8 +86,11 @@ owns the corpus, not the scorer.
 
 ## Adding a sample
 
-1. Create `corpus/<class>/<surface>/<id>/`
-2. Write `_label.yaml` — schema in [`docs/label-schema.md`](docs/label-schema.md)
+1. Create the sample tree `corpus/<class>/<surface>/<id>/`
+2. Write the label **beside it**, as `corpus/<class>/<surface>/<id>.yaml` — schema in
+   [`docs/label-schema.md`](docs/label-schema.md). **Never inside the tree**: the scanner
+   reads the whole target, so a label in there injects its own text as evidence and
+   corrupts the sample's own result in both directions.
 3. **Label before running.** `origin.labeled_before_run` must be `true`. Running first and
    labelling after treats the tool's current behaviour as the correct answer, which measures
    100% every time.

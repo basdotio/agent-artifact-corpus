@@ -28,7 +28,9 @@ language-native form.
 
 ## Layer 1 — vendored, offline, ours
 
-`corpus/<class>/<surface>/<id>/_label.yaml` plus the sample tree.
+`corpus/<class>/<surface>/<id>.yaml` (the label) beside `corpus/<class>/<surface>/<id>/`
+(the sample tree). The label never goes inside the tree — see
+[`label-schema.md`](label-schema.md) for what that cost us.
 
 **Classes**: `benign`, `malicious`, `hard-negative`.
 **Surfaces**: `skills`, `hooks`, `permission`, `mcp`, `connector`, `instruction`.

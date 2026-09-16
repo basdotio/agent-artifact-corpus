@@ -1,6 +1,27 @@
-# `_label.yaml`
+# The label file
 
-One per sample directory. `make validate` enforces everything below.
+One per sample, named `<id>.yaml`, sitting **beside** the sample tree — never inside it.
+
+```
+corpus/malicious/skills/revshell-python-dup2.yaml    <- the label
+corpus/malicious/skills/revshell-python-dup2/        <- the tree `aguard check` is pointed at
+```
+
+**This is load-bearing, not tidiness.** The labels started as `_label.yaml` inside each tree,
+and that silently corrupted every measurement: the scanner reads the whole target directory,
+so each sample was injecting its own annotation as evidence.
+
+The reverse-shell sample scored 83 with `BD-003` apparently caught — on the words "textbook
+reverse shell" in its own `note:` field, while the actual payload went undetected. With the
+label moved out it scores 88 and `BD-003` is silent, which is the true result and the one
+W-027 records. The `environ-copy` hard negative scored 63 on a high `EXFIL-001` whose two
+evidence lines were the label's own `source:` URL and `note:` prose; clean, it scores 88.
+
+The contamination ran both ways: malicious samples looked better caught than they were, and
+benign samples looked like false positives they were not. The validator now rejects any
+`_label.yaml` found inside a tree.
+
+`make validate` enforces everything below.
 
 ```yaml
 id: mal-skill-revshell-python        # unique, stable, never reused
@@ -21,6 +42,7 @@ expect:
   rules: [BD-003]                    # must fire
   min_severity: high                 # gate view: sample must reach at least this
   quiet: [PERM-006]                  # must NOT fire
+  notes: [COV-000]                   # dimension-0 notes that must be present
 
 known_gap:                           # optional; present = we currently fail this
   item: W-027
@@ -51,8 +73,22 @@ in this sample's `quiet:`.
 
 **`expect.rules` and `expect.quiet` must not intersect.**
 
+**`expect.notes`** carries measurement class 3 by itself. A sample that injects a coverage
+gap — an unreadable directory, a FIFO, a symlink out of bounds — asserts here that the tool
+announced it. Without this field the corpus cannot express disclosure at all, and disclosure
+is the class where this tool has historically failed worst.
+
+**Benign bounds are bounds, not silence.** `max_severity` means "not above this", and
+setting it too tight is the common mistake. The `environ-copy` hard negative was first
+labelled `max_severity: low` and failed validation, because the sample's whole purpose is to
+run `make` in a subprocess and `EXEC-004` at medium is the tool being right. The assertion
+that matters there is `quiet: [EXFIL-004]`. Set the bound to what a correct tool would emit,
+and let `quiet` carry the real claim.
+
 **Rule IDs must exist.** Checked against the tool's generated `docs/rules.md`, so a renamed
-or retired rule turns the corpus red instead of silently never matching.
+or retired rule turns the corpus red instead of silently never matching. The check reads
+**73** IDs; note that two of them, `REP-GOOD` and `REP-BAD`, do not end in digits, so a
+`XXX-000`-shaped pattern silently finds only 71 and then rejects labels citing those two.
 
 **`origin.license` must be compatible with layer 1**, and must appear in `NOTICE` when the
 sample is vendored from a third party. No-license, NC, SA and copyleft material cannot live

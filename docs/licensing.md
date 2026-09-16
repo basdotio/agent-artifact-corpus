@@ -31,7 +31,7 @@ CC-BY-4.0 material, and that belongs nowhere near an MIT tool.
 
 ## Attribution
 
-Every vendored sample records `origin.license` and `origin.source` in its `_label.yaml`,
+Every vendored sample records `origin.license` and `origin.source` in its label,
 and appears in `NOTICE`. `make validate` fails if the two disagree. Attribution is a
 condition of Apache-2.0 and CC-BY-4.0, so this is a license obligation, not bookkeeping.
 
@@ -43,7 +43,7 @@ above, but it is still malware in a public repository.
 Layer 1 mitigates in three ways: minimal reconstructions rather than original payloads where
 a reconstruction suffices; no live network destinations in any sample we write (RFC-2606
 reserved names only, and see the shortcut-feature hazard in `design.md` before relying on
-that as a label); and every executable-shaped sample carries a `_label.yaml` marking it.
+that as a label); and every executable-shaped sample carries a label marking it.
 
 We do **not** ship the neutering that DataDog applies — their samples are zip-encrypted with
 the password `infected`, which is why they stay in layer 2 rather than being unpacked into

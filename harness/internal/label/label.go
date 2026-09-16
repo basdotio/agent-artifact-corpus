@@ -65,10 +65,19 @@ type Origin struct {
 }
 
 type Expect struct {
-	Rules       []string `yaml:"rules"`
-	Quiet       []string `yaml:"quiet"`
-	MinSeverity string   `yaml:"min_severity"`
-	MaxSeverity string   `yaml:"max_severity"`
+	Rules []string `yaml:"rules"`
+	Quiet []string `yaml:"quiet"`
+
+	// Notes are dimension-0 note IDs that must be present: COV-000, IO-000, SCOPE-001 and
+	// the rest. This is the whole of measurement class 3 (disclosure), which asks whether
+	// the tool admits what it did not read. A sample that injects a coverage gap asserts
+	// here that the gap was announced; without this field the corpus cannot express the
+	// class at all. The tool's own adversarial suite has carried the equivalent (wantNote)
+	// from the start, so the corpus was the side that was missing it.
+	Notes []string `yaml:"notes"`
+
+	MinSeverity string `yaml:"min_severity"`
+	MaxSeverity string `yaml:"max_severity"`
 }
 
 type KnownGap struct {
