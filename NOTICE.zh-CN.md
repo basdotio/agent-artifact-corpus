@@ -28,6 +28,15 @@
     这个上游**没有任何逐样本标签**，所以 class 和 severity 是本仓库**断言的常量**，
     不是读来的值；该条目的 fidelity 字段写明了这一点。
 
+  NVIDIA/SkillSpector —— Apache-2.0
+    https://github.com/NVIDIA/SkillSpector @ 2e9ae8d1cfa6，tests/fixtures
+    24 个 fixture 中引入 6 个，位于 corpus/malicious/skills/ns-* 和
+    corpus/hard-negative/skills/ns-ssd-clean，原样拷贝。
+
+    它们的标签是**手工钉的**，不是生成的：硬负样本需要 differs_by 和 pairs_with，
+    没有任何规则能产出这两样。其余 18 个 fixture 已逐个读过并**刻意不引入**，
+    理由记在 manifest/corpora.yaml 该条目的 hazards 里。
+
 关于强制执行的说明：标签与 NOTICE 的一致性校验**尚未实现**。今天 `make validate` 只检查 `origin.license` 是否属于第 1 层允许的宽松许可之一，它不读这个文件。在那项检查落地之前，让此表与标签保持同步是一项人工义务。这一点写在这里而不是略去，因为署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，因此是许可证义务，不是记账。
 
 ---
