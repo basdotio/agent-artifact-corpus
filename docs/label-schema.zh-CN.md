@@ -67,6 +67,8 @@ origin:
 truth:                                # 工具中立。这里没有任何东西指名某个扫描器。
   techniques: [reverse-shell]         # 它实际干了什么，取自 taxonomy/techniques.yaml
   severity: high                      # 它有多糟，独立于任何工具
+  tier: plain                         # 它埋得多深
+  evasion: []                         # 哪些机制在埋它；空正是 `plain` 的含义
   note: "socket to a reserved host, all three fds duplicated onto it, /bin/sh -i spawned"
 
 expect:                               # 可选，按工具划分，以 taxonomy/tools.yaml 为键。
@@ -89,6 +91,7 @@ expect:                               # 可选，按工具划分，以 taxonomy/
 class: hard-negative
 truth:
   resembles: [reverse-shell]          # 它看上去像什么
+  tier: plain                         # 要分辨出它，分析得走到多深
   differs_by: >-                      # 判别测试，明明白白写出来
     No fd redirection and no interpreter spawn. The socket is connected, written to once
     and closed.
@@ -114,6 +117,19 @@ pairs_with: mal-skill-revshell-python-dup2   # hard-negative 必填
 不是「我们在这里触发 `BD-003`」，而是「这两个制品的差别恰好就在这一点上」。
 
 **一个样本不能既执行、又相似于同一个技术。** 二者只能居其一。
+
+**恶意样本和硬负样本都必须有 `tier`。** 没有它，所有样本一样深，于是一次漏报无法归因于「匹配太字面」还是「缺一条规则」。这把尺子在两个类别上读法不同，而两种读法方向一致 —— 这正是硬负样本能够坐进它所相似的那个攻击的格子里的原因：
+
+| 类别 | `tier` 的含义 |
+|---|---|
+| 恶意 | 攻击埋得多深 |
+| 硬负 | 分析要走到多深，才能把它和攻击分辨开 |
+
+**超过校准级的恶意样本必须点名它的 `evasion` 机制**，取自封闭词表，并且**它的 tier 不得低于这些机制所蕴含的最深那一级**。没有这条边界，一个被包装过的载荷可以被标成 `plain`，而 `plain` 恰恰是「漏报意味着扫描器坏了而不是弱」的那一级。
+
+**硬负样本有 tier，但没有 `evasion`。** 它没有在埋任何东西。让它难的是什么，已经写在 `differs_by` 里了 —— 那是这个类别本来就必填的字段，而且比任何词表条目都是更好的散文。
+
+**普通良性样本两者都没有。** 这两条轴量的是攻击埋得多深，而那里没有攻击。一个相似于攻击的良性样本，类别是硬负。
 
 **技术名称必须存在于 `taxonomy/techniques.yaml` 中**，这样一个拼写错误会让语料库变红，
 而不是悄悄造出一条只有一个成员的召回轴、读起来却像是完整覆盖。

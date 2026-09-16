@@ -122,6 +122,20 @@ type Truth struct {
 	// "was it reported at or above here". Malicious samples only.
 	Severity string `yaml:"severity"`
 
+	// Tier is how deeply the attack is buried, from taxonomy/techniques.yaml. It is the axis
+	// that turns "this scanner misses 40% of exfiltration" into "this scanner catches every
+	// plain exfiltration and misses every encoded one" — the first is a score, the second
+	// tells you what to fix.
+	//
+	// On a hard negative the same scale reads as how strongly it resembles the attack: at the
+	// calibration tier it is obviously benign and only a broken scanner fires, at the deepest
+	// tier telling it apart needs semantics rather than matching.
+	Tier string `yaml:"tier"`
+
+	// Evasion names the mechanisms doing the burying, from the closed vocabulary. An empty
+	// list means none, which is what the calibration tier requires.
+	Evasion []string `yaml:"evasion"`
+
 	Note string `yaml:"note"`
 }
 
@@ -249,6 +263,8 @@ func (l *Label) validateTruth(tax *taxonomy.Set) []error {
 			"performs it or merely looks like it", t)
 	}
 
+	errs = append(errs, l.validateDepth(tax)...)
+
 	switch l.Class {
 	case Malicious:
 		if len(l.Truth.Techniques) == 0 {
@@ -294,6 +310,87 @@ func (l *Label) validateTruth(tax *taxonomy.Set) []error {
 				"absent is the discrimination test, and it is the one thing the author of " +
 				"another scanner needs from this sample")
 		}
+	}
+	return errs
+}
+
+// validateDepth checks the tier and evasion axes.
+//
+// These two answer a different question from `dimension`. Dimension says the scanner is
+// missing a capability; tier says its matching is too literal; evasion says exactly which
+// transformation to handle. A corpus with only the first axis can report that a scanner is
+// weak but never why.
+func (l *Label) validateDepth(tax *taxonomy.Set) []error {
+	var errs []error
+	bad := func(f string, a ...any) { errs = append(errs, fmt.Errorf(f, a...)) }
+
+	if l.Class == Benign {
+		// An ordinary benign sample is not hiding anything and is not imitating anything, so
+		// neither axis applies to it.
+		if l.Truth.Tier != "" {
+			bad("benign sample sets truth.tier — the axis measures how deeply an attack is " +
+				"buried, and a sample with no attack has no depth. A benign sample that " +
+				"resembles one is class hard-negative")
+		}
+		if len(l.Truth.Evasion) > 0 {
+			bad("benign sample lists truth.evasion")
+		}
+		return errs
+	}
+
+	if l.Truth.Tier == "" {
+		bad("%s sample must set truth.tier — without it every sample is equally deep, and a "+
+			"miss cannot be attributed to literal matching rather than to a missing rule",
+			l.Class)
+		return errs
+	}
+	tier, known := tax.Tiers[l.Truth.Tier]
+	if !known {
+		bad("truth.tier %q is not a tier in taxonomy/techniques.yaml (%s)",
+			l.Truth.Tier, strings.Join(tax.TierOrder, ", "))
+		return errs
+	}
+
+	seen := map[string]bool{}
+	for _, e := range l.Truth.Evasion {
+		if seen[e] {
+			bad("truth.evasion lists %s twice", e)
+			continue
+		}
+		seen[e] = true
+
+		mech, ok := tax.Evasions[e]
+		if !ok {
+			bad("truth.evasion names %q, which is not in the closed vocabulary in "+
+				"taxonomy/techniques.yaml. Adding a mechanism means adding it there, in the "+
+				"same change as the sample that needs it — an open field degrades into free "+
+				"text, and free text cannot be aggregated", e)
+			continue
+		}
+		// The bound that matters. Without it a wrapped payload could be labelled at the
+		// calibration tier, where a miss is supposed to mean the scanner is broken.
+		if !tax.TierAtLeast(l.Truth.Tier, mech.ImpliesTier) {
+			bad("truth.tier is %s but evasion %s implies at least %s — %s",
+				l.Truth.Tier, e, mech.ImpliesTier, mech.What)
+		}
+	}
+
+	if tier.Calibration && len(l.Truth.Evasion) > 0 {
+		bad("tier %s means nothing hides the attack, so truth.evasion must be empty; it "+
+			"lists %s", l.Truth.Tier, strings.Join(l.Truth.Evasion, ", "))
+	}
+
+	// The "name the mechanism" rule binds malicious samples only.
+	//
+	// A hard negative is not burying anything — it has no attack to bury. Its tier reads as
+	// how deep an analysis has to go before it can be told apart: at the calibration level a
+	// surface check suffices, at the deepest one no amount of matching wins and the reader
+	// needs semantics. What makes it hard is already written out in truth.differs_by, which
+	// is required for the class and is better prose than any vocabulary term would be.
+	if l.Class == Malicious && !tier.Calibration && len(l.Truth.Evasion) == 0 {
+		bad("tier %s is past the calibration level, so something is doing the burying and "+
+			"truth.evasion must name it. If nothing does, the sample belongs at the "+
+			"calibration tier", l.Truth.Tier)
 	}
 	return errs
 }
@@ -395,7 +492,7 @@ type Unguarded struct {
 }
 
 // ValidateSet checks the properties that only exist across the whole corpus.
-func ValidateSet(labels []*Label, tax *taxonomy.Set, knownRules map[string]map[string]bool) []error {
+func ValidateSet(labels []*Label, tax *taxonomy.Set, knownRules map[string]*taxonomy.RuleIndex) []error {
 	var errs []error
 	bad := func(f string, a ...any) { errs = append(errs, fmt.Errorf(f, a...)) }
 
@@ -447,14 +544,14 @@ func ValidateSet(labels []*Label, tax *taxonomy.Set, knownRules map[string]map[s
 	for _, l := range labels {
 		for _, toolID := range sortedExpectKeys(l.Expect) {
 			rules := knownRules[toolID]
-			if len(rules) == 0 {
+			if rules.Len() == 0 {
 				continue
 			}
 			e := l.Expect[toolID]
 			cited := append(append([]string{}, e.Rules...), e.Quiet...)
 			cited = append(cited, e.Notes...)
 			for _, r := range cited {
-				if !rules[r] {
+				if !rules.Has(r) {
 					bad("%s: expect.%s cites %s, which is not something %s can emit",
 						l.where(), toolID, r, toolID)
 				}

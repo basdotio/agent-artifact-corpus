@@ -69,6 +69,8 @@ origin:
 truth:                                # tool-neutral. Nothing here names a scanner.
   techniques: [reverse-shell]         # what it actually does, from taxonomy/techniques.yaml
   severity: high                      # how bad it is, independent of any tool
+  tier: plain                         # how deeply it is buried
+  evasion: []                         # which mechanisms bury it; empty is what `plain` means
   note: "socket to a reserved host, all three fds duplicated onto it, /bin/sh -i spawned"
 
 expect:                               # optional, per tool, keyed by taxonomy/tools.yaml.
@@ -91,6 +93,7 @@ Benign and hard-negative invert the bound and move the technique to `resembles`:
 class: hard-negative
 truth:
   resembles: [reverse-shell]          # what it LOOKS like
+  tier: plain                         # how deep an analysis must go to tell it apart
   differs_by: >-                      # the discrimination test, written out
     No fd redirection and no interpreter spawn. The socket is connected, written to once
     and closed.
@@ -118,6 +121,28 @@ thing the author of another scanner actually needs from the sample: not "we fire
 here", but "these two artifacts differ by exactly this".
 
 **A sample cannot both perform and resemble the same technique.** It does one or the other.
+
+**Malicious and hard-negative samples need a `tier`.** Without it every sample is equally
+deep, and a miss cannot be attributed to literal matching rather than to a missing rule. The
+scale reads differently per class, and both readings run the same direction, which is what
+lets a hard negative sit in the grid cell of the attack it imitates:
+
+| Class | `tier` means |
+|---|---|
+| malicious | how deeply the attack is buried |
+| hard-negative | how deep an analysis must go before it can tell this apart |
+
+**A malicious sample past the calibration tier must name its `evasion` mechanisms**, from the
+closed vocabulary, and **its tier may not be lower than the deepest tier those mechanisms
+imply**. Without that bound a wrapped payload could be labelled `plain`, and `plain` is the
+level where a miss is supposed to mean the scanner is broken rather than weak.
+
+**A hard negative carries a tier but no `evasion`.** It is not burying anything. What makes
+it hard is already written out in `differs_by`, which the class requires and which is better
+prose than any vocabulary term.
+
+**An ordinary benign sample has neither.** The axes measure how deeply an attack is buried,
+and there is no attack. A benign sample that resembles one is a hard negative.
 
 **Technique names must exist in `taxonomy/techniques.yaml`**, so a typo turns the corpus red
 rather than silently creating a one-member recall axis that reads as full coverage.

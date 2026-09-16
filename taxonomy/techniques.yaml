@@ -1,34 +1,174 @@
-# The tool-neutral half of a label's vocabulary.
+# The label vocabulary. None of it belongs to any scanner.
 #
-# `truth.techniques` on a malicious sample and `truth.resembles` on a hard negative both draw
-# from here. That is what lets a sample say what it IS before any scanner says what it should
-# emit about it, and it is the half another team can cite without running our tool.
+# A sample is placed on three axes, and the reason there are three rather than one is that
+# each answers a different question about a scanner that failed:
 #
-# `dimension` is the recall axis. classification.md requires recall per dimension rather than
-# pooled, and the dimension cannot come from a scanner's own rule taxonomy without making
-# every cross-tool comparison circular. These names are the generic industry categories, not
-# any one product's.
+#   dimension  what the sample achieves      -> the scanner is missing a capability
+#   tier       how deeply it is buried       -> the scanner's matching is too literal
+#   evasion    which mechanism buries it     -> exactly which transformation to handle
 #
-# `benign_lookalike` is the discrimination test written out once, at the vocabulary level
-# rather than repeated in every label. It is what the author of another scanner actually
-# needs from us: not "we fire rule BD-003 here", but "these two shapes differ by exactly
-# this, and a tool that cannot tell them apart is guessing".
+# `truth.techniques` on a malicious sample and `truth.resembles` on a hard negative draw from
+# `techniques`. `dimension` is the recall axis; taking it from a scanner's own rule categories
+# would make every cross-tool comparison circular.
 #
 # DELIBERATELY NOT MAPPED to OWASP Agentic or MITRE ATLAS. A mapping written from memory
 # validates exactly as well as a correct one, and this file is cited by the published report.
-# Add a `mappings:` field per entry once each has been checked against the source taxonomy.
 
+# ---------------------------------------------------------------------------------------
+# Axis 1 — what the sample achieves.
+#
+# `obfuscation` is NOT here, and its absence is the point. Obfuscation is how an attack
+# hides, not what it accomplishes, and both skillsgoat's category list and AgentGuard's
+# scoring dimensions put the two on one axis. The cost of that is concrete: a sample is
+# either "backdoor" or "obfuscation" and never both, so you cannot ask whether a scanner
+# handles an OBFUSCATED BACKDOOR — which is the question worth asking. Here a base64-wrapped
+# reverse shell is dimension backdoor, tier evasive, evasion base64-wrapper.
+# ---------------------------------------------------------------------------------------
 dimensions:
   - injection
   - exfiltration
   - execution
   - backdoor
   - supply-chain
-  - obfuscation
   - permission
   - filesystem
   - resource-abuse
 
+# ---------------------------------------------------------------------------------------
+# Axis 2 — how deeply the attack is buried. Ordinal: later entries are harder.
+#
+# `maps_to` records the equivalent level in skillsgoat and in cisco-ai-defense/mcp-scanner,
+# both of which number their samples on the same four-level scale. Using our own words costs
+# the ability to cross-reference their published figures; this field buys it back.
+# ---------------------------------------------------------------------------------------
+tiers:
+  - id: plain
+    maps_to: "skillsgoat / cisco 000"
+    what: >-
+      Nothing hides it. The attack is readable in the artifact exactly as written.
+    calibration: true
+
+  - id: indirect
+    maps_to: "skillsgoat / cisco 100"
+    what: >-
+      The payload is one hop away: in another file, behind a run-time fetch, or gated on a
+      trigger. Nothing is transformed — you simply have to follow the hop.
+
+  - id: evasive
+    maps_to: "skillsgoat / cisco 200"
+    what: >-
+      The text is transformed to defeat matching: encoded, split, padded, or written in
+      characters that look like other characters.
+
+  - id: structural
+    maps_to: "skillsgoat / cisco 300"
+    what: >-
+      No single artifact contains the whole attack, or the analyzer itself is the target.
+      It defeats static analysis by its shape rather than by hiding a string.
+
+# `calibration: true` marks the level every scanner must catch. A miss there is a property
+# failure, not a low score — it says the scanner is broken rather than weak, and the two
+# should never appear in the same number.
+#
+# The scale reads differently for the two classes, and both readings are ordinal in the same
+# direction, which is what lets a hard negative sit in the same grid cell as the attack it
+# imitates:
+#
+#   malicious       how deeply the attack is buried
+#   hard negative   how deep an analysis must go before it can tell this apart from the attack
+#
+# So a `plain` hard negative is one a surface check clears, and firing on it means the scanner
+# is broken. A `structural` hard negative is one no amount of matching can clear, because the
+# difference is semantic — use versus mention, say. Hard negatives therefore carry a tier but
+# no `evasion`: they are not burying anything, and what makes them hard is written out in
+# `truth.differs_by`, which the class already requires.
+
+# ---------------------------------------------------------------------------------------
+# Axis 3 — which mechanism does the burying. Closed vocabulary.
+#
+# Closed on purpose. An open field degrades into free text, and free text cannot be
+# aggregated, which defeats the only reason this axis exists. Adding a mechanism means
+# adding an entry here, in the same change as the sample that needs it.
+#
+# `implies_tier` is enforced: a sample's tier may not be lower than the highest tier its
+# evasion list implies. Without that rule a base64-wrapped payload could be labelled `plain`
+# and would then sit in the calibration set, where a miss is supposed to mean "broken".
+#
+# An empty list means none, which is what `plain` requires.
+# ---------------------------------------------------------------------------------------
+evasion:
+  # --- one hop away, nothing transformed ---
+  - id: external-fetch
+    implies_tier: indirect
+    what: "The payload is downloaded at run time rather than shipped in the artifact."
+
+  - id: config-indirection
+    implies_tier: indirect
+    what: "The artifact points at a settings or config file that carries the payload."
+
+  - id: dormant-trigger
+    implies_tier: indirect
+    what: "The payload is present but gated on a condition: an env var, a date, a codeword."
+
+  # --- the text is transformed ---
+  - id: base64-wrapper
+    implies_tier: evasive
+    what: "The payload is encoded and decoded at run time. Any wrapper counts, not only base64."
+
+  - id: line-continuation
+    implies_tier: evasive
+    what: "A command word is broken across lines so a line-oriented matcher sees neither half."
+
+  - id: quote-splitting
+    implies_tier: evasive
+    what: "Quotes are opened and closed inside a command word to break the literal."
+
+  - id: zero-width
+    implies_tier: evasive
+    what: "Zero-width characters are inserted inside the strings a matcher looks for."
+
+  - id: blank-padding
+    implies_tier: evasive
+    what: "The payload is pushed far down the file, past where a truncating reader stops."
+
+  - id: unicode-confusable
+    implies_tier: evasive
+    what: "Characters that render like ASCII stand in for it, typically in a hostname."
+
+  - id: bidi-override
+    implies_tier: evasive
+    what: "Directional control characters make a filename or line read as something else."
+
+  - id: extension-magic-mismatch
+    implies_tier: evasive
+    what: "The extension and the file's actual content type disagree, so the wrong reader runs."
+
+  - id: split-across-files
+    implies_tier: evasive
+    what: >-
+      Each fragment is innocuous on its own and only the concatenation is the payload, so a
+      per-file verdict cannot see it.
+
+  # --- the shape defeats the analysis ---
+  - id: multi-stage-chain
+    implies_tier: structural
+    what: "One artifact writes or installs the next; neither alone is the attack."
+
+  - id: bundled-pyc
+    implies_tier: structural
+    what: "The payload ships compiled rather than as source. Any binary artifact counts."
+
+  - id: judge-targeting
+    implies_tier: structural
+    what: "The content attacks the analyzer or its LLM judge rather than the agent."
+
+# ---------------------------------------------------------------------------------------
+# The techniques themselves.
+#
+# `benign_lookalike` is the discrimination test written out once, at the vocabulary level
+# rather than repeated in every label. It is what the author of another scanner needs from
+# us: not "we fire rule BD-003 here", but "these two shapes differ by exactly this".
+# ---------------------------------------------------------------------------------------
 techniques:
   - id: reverse-shell
     title: Reverse shell

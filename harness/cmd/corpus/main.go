@@ -77,15 +77,37 @@ func cmdValidate(root string) int {
 
 	// Rule ids are resolved per tool, against that tool's own generated reference. A tool
 	// with no reachable reference is reported as unchecked rather than assumed correct.
-	knownRules := map[string]map[string]bool{}
+	knownRules := map[string]*taxonomy.RuleIndex{}
 	var ruleLines []string
 	for _, id := range sortedKeys(tax.Tools) {
-		rules, src := tax.Tools[id].KnownRules(root)
-		if len(rules) > 0 {
-			knownRules[id] = rules
-			ruleLines = append(ruleLines, fmt.Sprintf("  %-10s %d ids (from %s)", id, len(rules), src))
-		} else {
+		tool := tax.Tools[id]
+		idx := tool.ReadRules(root)
+		if idx.Len() == 0 {
 			ruleLines = append(ruleLines, fmt.Sprintf("  %-10s not checked — no rule reference reachable", id))
+			continue
+		}
+		knownRules[id] = idx
+
+		// Measurement part 2 needs every rule to resolve to one of our dimensions or to be
+		// deliberately unmapped. Count both: a tool whose findings mostly map to nothing can
+		// pass part 1 on every sample and still never say what kind of problem it found.
+		mapped := 0
+		for _, d := range idx.Dimension {
+			if d != nil {
+				mapped++
+			}
+		}
+		ruleLines = append(ruleLines, fmt.Sprintf(
+			"  %-10s %d ids, %d carry a dimension (from %s)", id, idx.Len(), mapped, idx.Source))
+
+		// A section mapped to nil is a decision. A section missing from the map is an
+		// oversight, and the two must not look alike.
+		for _, sec := range idx.Unmapped {
+			problems = append(problems, fmt.Sprintf(
+				"taxonomy/tools.yaml: %s emits rules under %q, which has no dimension_map "+
+					"entry. Map it to one of our dimensions, or to null to record that it "+
+					"names no kind of attack — leaving it out makes an oversight look like "+
+					"a decision", id, sec))
 		}
 	}
 	for _, e := range label.ValidateSet(labels, tax, knownRules) {
@@ -187,7 +209,13 @@ func cmdStats(root string) int {
 	byOrigin := map[string]int{}
 	performed := map[string]int{} // technique -> malicious samples performing it
 	resembled := map[string]int{} // technique -> hard negatives resembling it
-	byDimension := map[string]int{}
+	// grid[dimension][tier] is the primary reporting surface: it is the pair of axes that
+	// turns "this scanner is weak at exfiltration" into "it catches plain exfiltration and
+	// misses every encoded one". Surface is reported separately rather than as a third
+	// dimension of the same table — 8 x 4 x 6 is 192 cells for a handful of samples, and a
+	// hole-naming discipline that emits 190 lines of noise is one people learn to ignore.
+	grid := map[string]map[string]int{}
+	byEvasion := map[string]int{}
 	type toolStat struct{ samples, gaps, oos int }
 	tools := map[string]*toolStat{}
 
@@ -201,10 +229,16 @@ func cmdStats(root string) int {
 
 		for _, t := range l.Truth.Techniques {
 			performed[t]++
-			byDimension[tax.Dimension(t)]++
+			addCell(grid, tax.Dimension(t), l.Truth.Tier)
 		}
 		for _, t := range l.Truth.Resembles {
 			resembled[t]++
+			// A hard negative sits in the cell of what it imitates. That is the point of it:
+			// the pair is what tests whether a hit is on the difference rather than the topic.
+			addCell(grid, tax.Dimension(t), l.Truth.Tier)
+		}
+		for _, e := range l.Truth.Evasion {
+			byEvasion[e]++
 		}
 		for id, e := range l.Expect {
 			if tools[id] == nil {
@@ -240,15 +274,45 @@ func cmdStats(root string) int {
 	}
 
 	// Truth-side composition. This is the half that describes the corpus to someone who has
-	// never run our scanner, so every technique in the vocabulary is listed including the
+	// never run any scanner of ours, so every value in the vocabulary is listed including the
 	// ones with no sample: a named hole is actionable, an omitted one reads as covered.
 	fmt.Println("  by technique (truth — tool-neutral)")
 	for _, t := range sortedKeys(tax.Techniques) {
 		fmt.Printf("    %-22s performed %-4d resembled %d\n", t, performed[t], resembled[t])
 	}
-	fmt.Println("  by dimension (the recall axis)")
+
+	fmt.Printf("\n  dimension x tier — the grid a scanner's failures are read off\n")
+	fmt.Printf("    %-16s", "")
+	for _, t := range tax.TierOrder {
+		fmt.Printf(" %9s", t)
+	}
+	fmt.Println("   total")
+	empty := 0
 	for _, d := range tax.Dimensions {
-		fmt.Printf("    %-22s %d\n", d, byDimension[d])
+		fmt.Printf("    %-16s", d)
+		row := 0
+		for _, t := range tax.TierOrder {
+			n := grid[d][t]
+			row += n
+			if n == 0 {
+				empty++
+				fmt.Printf(" %9s", ".")
+				continue
+			}
+			fmt.Printf(" %9d", n)
+		}
+		fmt.Printf("   %d\n", row)
+	}
+	fmt.Printf("    %d of %d cells have no sample. A dot is a question no measurement here can answer.\n",
+		empty, len(tax.Dimensions)*len(tax.TierOrder))
+
+	fmt.Println("\n  by evasion mechanism (which transformation a miss would be attributed to)")
+	for _, e := range sortedKeys(tax.Evasions) {
+		mark := " "
+		if byEvasion[e] == 0 {
+			mark = "."
+		}
+		fmt.Printf("    %-26s %s %d  (implies tier %s)\n", e, mark, byEvasion[e], tax.Evasions[e].ImpliesTier)
 	}
 
 	// Expectation-side composition, per tool. A tool absent from a sample means not
@@ -490,4 +554,17 @@ func sortedKeys[V any](m map[string]V) []string {
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "error:", err)
 	os.Exit(2)
+}
+
+// addCell records one sample in the dimension x tier grid. A sample with no tier (an
+// ordinary benign one) has no cell, which is correct: the axis measures how deeply an
+// attack is buried and there is no attack.
+func addCell(grid map[string]map[string]int, dimension, tier string) {
+	if dimension == "" || tier == "" {
+		return
+	}
+	if grid[dimension] == nil {
+		grid[dimension] = map[string]int{}
+	}
+	grid[dimension][tier]++
 }

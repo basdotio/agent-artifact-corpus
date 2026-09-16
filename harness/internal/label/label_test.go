@@ -16,6 +16,16 @@ import (
 func testTax() *taxonomy.Set {
 	return &taxonomy.Set{
 		Dimensions: []string{"backdoor", "exfiltration"},
+		TierOrder:  []string{"plain", "evasive", "structural"},
+		Tiers: map[string]taxonomy.Tier{
+			"plain":      {ID: "plain", Rank: 0, What: "x", MapsTo: "000", Calibration: true},
+			"evasive":    {ID: "evasive", Rank: 1, What: "x", MapsTo: "200"},
+			"structural": {ID: "structural", Rank: 2, What: "x", MapsTo: "300"},
+		},
+		Evasions: map[string]taxonomy.Evasion{
+			"base64-wrapper":    {ID: "base64-wrapper", ImpliesTier: "evasive", What: "x"},
+			"multi-stage-chain": {ID: "multi-stage-chain", ImpliesTier: "structural", What: "x"},
+		},
 		Techniques: map[string]taxonomy.Technique{
 			"reverse-shell":    {ID: "reverse-shell", Title: "Reverse shell", Dimension: "backdoor", What: "x", BenignLookalike: "y"},
 			"env-exfiltration": {ID: "env-exfiltration", Title: "Env exfil", Dimension: "exfiltration", What: "x", BenignLookalike: "y"},
@@ -41,7 +51,7 @@ func malicious() *Label {
 	return &Label{
 		ID: "mal-x", Class: Malicious, Surface: "skills", Kind: "skill", Entry: ".",
 		Origin: goodOrigin(),
-		Truth:  Truth{Techniques: []string{"reverse-shell"}, Severity: "high"},
+		Truth:  Truth{Techniques: []string{"reverse-shell"}, Severity: "high", Tier: "plain"},
 		Expect: map[string]*ToolExpect{"aguard": {Rules: []string{"BD-003"}, MinSeverity: "high"}},
 	}
 }
@@ -50,7 +60,7 @@ func hardNegative() *Label {
 	return &Label{
 		ID: "hn-x", Class: HardNegative, Surface: "skills", Kind: "skill", Entry: ".",
 		Origin:    goodOrigin(),
-		Truth:     Truth{Resembles: []string{"reverse-shell"}, DiffersBy: "no fd redirection"},
+		Truth:     Truth{Resembles: []string{"reverse-shell"}, DiffersBy: "no fd redirection", Tier: "plain"},
 		Expect:    map[string]*ToolExpect{"aguard": {Quiet: []string{"BD-003"}, MaxSeverity: "low"}},
 		PairsWith: "mal-x",
 	}
@@ -382,7 +392,10 @@ func TestPairingRunsThroughTruth(t *testing.T) {
 
 func TestValidateSetChecksRuleIDsPerTool(t *testing.T) {
 	t.Parallel()
-	known := map[string]map[string]bool{"aguard": {"BD-003": true}}
+	bd := "backdoor"
+	known := map[string]*taxonomy.RuleIndex{
+		"aguard": {Source: "test", Dimension: map[string]*string{"BD-003": &bd}},
+	}
 
 	m := malicious()
 	if got := errText(ValidateSet([]*Label{m}, testTax(), known)); got != "" {
@@ -485,5 +498,115 @@ func TestUnguardedPairNamesTheEvidence(t *testing.T) {
 	}
 	if len(u.SharedRules) != 1 || u.SharedRules[0] != "BD-003" {
 		t.Fatalf("expected the shared rule to be named, got %v", u.SharedRules)
+	}
+}
+
+// TestDepthAxes covers the two axes that say WHY a scanner failed rather than that it did.
+// Dimension says a capability is missing; tier says the matching is too literal; evasion says
+// exactly which transformation to handle.
+func TestDepthAxes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		mutate  func(*Label)
+		wantErr string
+	}{
+		{
+			name: "a wrapped payload is deeper than plain",
+			mutate: func(l *Label) {
+				l.Truth.Tier = "evasive"
+				l.Truth.Evasion = []string{"base64-wrapper"}
+			},
+		},
+		{
+			name:    "a malicious sample must carry a tier",
+			mutate:  func(l *Label) { l.Truth.Tier = "" },
+			wantErr: "must set truth.tier",
+		},
+		{
+			name:    "the tier must be in the vocabulary",
+			mutate:  func(l *Label) { l.Truth.Tier = "sneaky" },
+			wantErr: "is not a tier in taxonomy/techniques.yaml",
+		},
+		{
+			// The bound that protects the calibration set. Without it a wrapped payload sits
+			// where a miss is supposed to mean the scanner is broken.
+			name: "evasion may not undercut the tier it implies",
+			mutate: func(l *Label) {
+				l.Truth.Evasion = []string{"base64-wrapper"} // tier is still plain
+			},
+			wantErr: "evasion base64-wrapper implies at least evasive",
+		},
+		{
+			name: "the deepest mechanism sets the floor",
+			mutate: func(l *Label) {
+				l.Truth.Tier = "evasive"
+				l.Truth.Evasion = []string{"base64-wrapper", "multi-stage-chain"}
+			},
+			wantErr: "evasion multi-stage-chain implies at least structural",
+		},
+		{
+			name:    "the mechanism must be in the closed vocabulary",
+			mutate:  func(l *Label) { l.Truth.Tier = "evasive"; l.Truth.Evasion = []string{"rot13"} },
+			wantErr: "not in the closed vocabulary",
+		},
+		{
+			name: "past calibration, a malicious sample must name the mechanism",
+			mutate: func(l *Label) {
+				l.Truth.Tier = "evasive"
+				l.Truth.Evasion = nil
+			},
+			wantErr: "truth.evasion must name it",
+		},
+		{
+			name: "a duplicate mechanism is a mistake, not emphasis",
+			mutate: func(l *Label) {
+				l.Truth.Tier = "evasive"
+				l.Truth.Evasion = []string{"base64-wrapper", "base64-wrapper"}
+			},
+			wantErr: "lists base64-wrapper twice",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			l := malicious()
+			tt.mutate(l)
+			got := errText(l.Validate(testTax()))
+			if tt.wantErr == "" {
+				if got != "" {
+					t.Fatalf("expected a clean label, got:\n%s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.wantErr) {
+				t.Fatalf("expected an error containing %q, got:\n%s", tt.wantErr, got)
+			}
+		})
+	}
+}
+
+// A hard negative buries nothing, so the name-the-mechanism rule does not bind it. Its tier
+// reads as how deep an analysis must go to tell it apart, and what makes it hard is written
+// out in differs_by.
+func TestHardNegativeDepth(t *testing.T) {
+	t.Parallel()
+	h := hardNegative()
+	h.Truth.Tier = "structural"
+	h.Truth.DiffersBy = "the override phrase is mentioned, not used"
+	if got := errText(h.Validate(testTax())); got != "" {
+		t.Fatalf("a deep hard negative needs no evasion mechanism, got:\n%s", got)
+	}
+
+	// An ordinary benign sample has no attack, so it has no depth at all.
+	b := hardNegative()
+	b.Class = Benign
+	b.PairsWith = ""
+	b.Truth = Truth{Tier: "plain"}
+	b.Expect["aguard"].Quiet = nil
+	b.Expect["aguard"].MaxSeverity = "low"
+	if got := errText(b.Validate(testTax())); !strings.Contains(got, "benign sample sets truth.tier") {
+		t.Fatalf("expected a benign sample to be refused a tier, got:\n%s", got)
 	}
 }

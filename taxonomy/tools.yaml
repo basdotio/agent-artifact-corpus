@@ -2,28 +2,46 @@
 #
 # Read this first, because it is the part people get backwards:
 #
-#   A label's `truth` block is enough to score ANY scanner. It says what the sample is and
-#   how bad it is, so a runner can ask "did the tool report this at or above truth.severity"
-#   without knowing anything about the tool's rule ids. Nobody needs an entry here to
-#   benchmark their scanner against this corpus.
+#   A label's `truth` block is enough to score ANY scanner. It says what the sample is, how
+#   deeply it is buried and how bad it is, so a runner can ask "did the tool report this at
+#   or above truth.severity" without knowing anything about the tool's rule ids. Nobody needs
+#   an entry here to benchmark their scanner against this corpus.
 #
-#   An `expect.<tool>` block is optional extra precision — which rule must fire, which must
-#   stay quiet — and it only means anything for a tool listed here.
+#   An entry here buys two things: `expect.<tool>` blocks in labels, and part 2 of the
+#   measurement below.
 #
-# So adding a scanner is an entry in this file, not a schema change, and running someone
-# else's scanner is not even that. That is the whole point of splitting truth from
-# expectation.
+# ---------------------------------------------------------------------------------------
+# The measurement has two parts, and an entry here is what makes the second one possible.
 #
-# `rules_source` locates the tool's generated rule reference so that a renamed or retired
-# rule turns the corpus red instead of silently never matching. `path` is relative to this
-# repository's root; `env` overrides it. Both are optional: a tool with no reachable rule
-# reference downgrades to "rule ids not checked for this tool" and says so, rather than
-# silently passing everything.
+#   Part 1 — did it find a problem at all?  Scored from `truth` alone. Needs nothing here.
+#   Part 2 — having found one, did it say what KIND?  Needs `dimension_map`.
 #
-# `severity_ladder` is that tool's own ladder, ordered most to least severe, and the last
-# entry is its name for "nothing". Expectation bounds in a label are checked against the
-# ladder of the tool whose block they sit in, which is why two tools with different ladders
-# can annotate the same sample without either having to adopt the other's.
+# Part 2 is where scanners separate. Two tools at the same recall can differ completely: one
+# names the technique, the other only reports that something is encoded. Both "caught" it;
+# only one told you what you are dealing with.
+#
+# ---------------------------------------------------------------------------------------
+# `dimension_map` translates the tool's own finding categories into this corpus's dimensions.
+#
+# It is keyed on SECTION NAME, not on rule id and not on rule id prefix. Prefix would be
+# wrong: in AgentGuard, `PERM-*` rules live under three different dimensions, and `LLM-*`
+# under six. The per-rule assignment is read from the tool's own generated rule reference, so
+# it cannot drift from the tool; this file only has to map its dimension names onto ours,
+# which is a dozen lines rather than seventy-three.
+#
+# A null value means the category maps to no dimension of ours. That is not a gap to be
+# filled — it is a real and interesting outcome. A scanner whose only finding on a
+# base64-wrapped reverse shell is "Obfuscation" passes part 1 and fails part 2: it detected
+# that something was hidden, not that there was a backdoor.
+#
+# `rules_source` locates the generated reference. `path` is relative to this repository's
+# root; `env` overrides it. Both optional: a tool with no reachable reference downgrades to
+# "rule ids not checked for this tool" and says so, rather than silently passing everything.
+#
+# `severity_ladder` is that tool's own ladder, ordered most to least severe, last entry being
+# its name for "nothing". Expectation bounds in a label are checked against the ladder of the
+# tool whose block they sit in, which is why two tools with different ladders can annotate
+# the same sample without either adopting the other's.
 
 tools:
   - id: aguard
@@ -35,7 +53,28 @@ tools:
     # as "not a rule the tool can emit" — a validator confidently wrong about the thing it
     # validates.
     rule_id_pattern: '\b([A-Z]{2,10}-[A-Z0-9]{3,4})\b'
+    # Captures the section name from headings like "## 3 — Data exfiltration" and
+    # "## Scan notes (dimension 0)". One capture group, the name.
+    section_pattern: '^## (?:[0-9]+ — )?(.+)$'
     rules_source:
       env: AGUARD_RULES_MD
       path: ../agent-guard/docs/rules.md
     native_format: sarif-2.1.0
+    dimension_map:
+      Prompt injection: injection
+      Excessive permissions: permission
+      Data exfiltration: exfiltration
+      Code execution: execution
+      Supply chain: supply-chain
+      Backdoor: backdoor
+      Resource abuse: resource-abuse
+      Filesystem: filesystem
+      # Deliberately unmapped. Obfuscation is this corpus's `tier`/`evasion` axis, not a
+      # dimension; a finding here says the sample was hidden, never what it does.
+      Obfuscation: ~
+      # Deliberately unmapped. A mismatch between stated purpose and behaviour is a property
+      # of the artifact's honesty, not a category of attack.
+      Intent mismatch: ~
+      # Dimension 0. These describe the scan, not the artifact.
+      Scan notes (dimension 0): ~
+      Load-time gate: ~

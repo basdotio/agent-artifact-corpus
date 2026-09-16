@@ -39,6 +39,75 @@ guarantees, its permission modes and its process. A scanner that makes no such p
 fail these, and scoring it against them would be measuring the absence of a feature rather
 than a defect. These are expressed inside `expect.<tool>` for exactly that reason.
 
+## Two parts: did it find anything, and did it say what
+
+Classes 1 and 2 each split in two, and collapsing the halves is how two very different
+scanners end up with the same number.
+
+**Part 1 — detection.** Did it report a finding at or above the sample's `truth.severity`?
+Benign and hard-negative samples assert the reverse. Scored from `truth` alone, so it needs
+nothing from us but the sample trees.
+
+**Part 2 — attribution.** Having found something, did it say what *kind*? The tool reports in
+its own categories, so each entry in [`taxonomy/tools.yaml`](../taxonomy/tools.yaml) carries a
+`dimension_map` from those categories to ours. Evaluated only on samples that passed part 1.
+
+The outcome of a run is one of these per sample, never a boolean:
+
+| Outcome | Meaning |
+|---|---|
+| `hit` | flagged at or above `truth.severity` |
+| `weak-hit` | flagged, but below it — caught and still allowed to load |
+| `wrong-reason` | flagged, but the rule `expect.<tool>` named did not fire |
+| `miss` | not flagged |
+| `false-positive` | a benign or hard-negative sample flagged above its bound |
+| `clean` | a benign or hard-negative sample within its bound |
+| `error` | the scanner crashed or timed out; counts as a miss |
+| `not-measured` | no result for this tool |
+
+And on the samples that passed part 1: `classified` (the right dimension), `misclassified`
+(a different one), or **`smelled`** — every finding mapped to no dimension of ours. A scanner
+whose only output on a wrapped reverse shell is "obfuscation" detected that something was
+hidden, not that there was a backdoor. Both pass part 1. Only one is usable.
+
+Two scanners at the same recall can be entirely different tools:
+
+| | detected | of those, classified | of those, smelled |
+|---|---|---|---|
+| A | 80% | 90% | 4% |
+| B | 80% | 30% | 65% |
+
+B is a smell detector. No single score separates it from A.
+
+## The grid a failure is read off
+
+A result has to be locatable, or "it is weak at exfiltration" is the end of the conversation
+rather than the start. Every sample carries three coordinates, and each one, when a cell
+fails, points at a different fix.
+
+| Axis | Says | A failure here means |
+|---|---|---|
+| `dimension` | what the sample achieves | a capability is missing |
+| `tier` | how deeply it is buried | the matching is too literal |
+| `evasion` | which mechanism buries it | exactly which transformation to handle |
+
+`tier` runs `plain` → `indirect` → `evasive` → `structural`, with `maps_to` recording the
+equivalent level in skillsgoat and cisco so their published figures stay comparable.
+**`plain` is a calibration floor**: a miss there is a property failure, not a low score. It
+says the scanner is broken rather than weak, and the two must never land in the same number.
+The same reading runs in reverse for hard negatives — firing on a `plain` hard negative means
+broken.
+
+`obfuscation` is deliberately **not** a dimension, though both skillsgoat's categories and
+AgentGuard's scoring dimensions make it one. It describes how an attack hides, not what it
+achieves, and on one axis with the rest a sample is either a backdoor or obfuscated and never
+both. The question worth asking — *does this scanner handle an obfuscated backdoor* — becomes
+inexpressible. Here that sample is `backdoor` / `evasive` / `base64-wrapper`.
+
+The reporting grid is `dimension × tier`, 32 cells. Surface is a separate table rather than a
+third axis of the same one: 8 × 4 × 6 is 192 cells for a corpus this size, and a hole-naming
+discipline that emits 190 lines of noise is one people learn to ignore.
+
 The recall axis in class 2 is the `dimension` of a technique in
 [`taxonomy/techniques.yaml`](../taxonomy/techniques.yaml), never a scanner's own rule
 categories. Taking the axis from the tool under test is how a per-dimension recall figure

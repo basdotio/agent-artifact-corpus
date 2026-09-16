@@ -18,6 +18,18 @@ func write(t *testing.T, dir, name, body string) {
 
 const goodTechniques = `
 dimensions: [backdoor, exfiltration]
+tiers:
+  - id: plain
+    maps_to: "000"
+    what: nothing hides it
+    calibration: true
+  - id: evasive
+    maps_to: "200"
+    what: the text is transformed
+evasion:
+  - id: base64-wrapper
+    implies_tier: evasive
+    what: encoded and decoded at run time
 techniques:
   - id: reverse-shell
     title: Reverse shell
@@ -33,10 +45,14 @@ tools:
     url: https://example.invalid
     severity_ladder: [critical, high, medium, low, none]
     rule_id_pattern: '\b([A-Z]{2,10}-[A-Z0-9]{3,4})\b'
+    section_pattern: '^## (?:[0-9]+ — )?(.+)$'
     rules_source:
       env: TEST_RULES_MD
       path: ../nowhere/rules.md
     native_format: sarif-2.1.0
+    dimension_map:
+      Backdoor: backdoor
+      Obfuscation: ~
 `
 
 func loadFrom(t *testing.T, techniques, tools string) (*Set, error) {
@@ -182,9 +198,9 @@ func TestKnownRulesDowngradesWhenUnreachable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rules, src := s.Tools["aguard"].KnownRules(t.TempDir())
-	if rules != nil || src != "" {
-		t.Fatalf("expected an unreachable reference to yield nothing, got %d ids from %q", len(rules), src)
+	idx := s.Tools["aguard"].ReadRules(t.TempDir())
+	if idx != nil {
+		t.Fatalf("expected an unreachable reference to yield nothing, got %d ids from %q", idx.Len(), idx.Source)
 	}
 }
 
@@ -198,14 +214,112 @@ func TestKnownRulesReadsTheReference(t *testing.T) {
 	ref := filepath.Join(dir, "rules.md")
 	// REP-GOOD is the case a digits-only pattern gets wrong: it is a real rule id whose
 	// suffix is not numeric, and a validator that misses it rejects any label citing it.
-	write(t, dir, "rules.md", "| `BD-003` | high | ... |\n| `REP-GOOD` | none | ... |\n")
+	write(t, dir, "rules.md",
+		"## 7 — Backdoor\n| `BD-003` | high | ... |\n"+
+			"## 6 — Obfuscation\n| `OBF-001` | medium | ... |\n"+
+			"## Scan notes (dimension 0)\n| `REP-GOOD` | none | ... |\n")
 	t.Setenv("TEST_RULES_MD", ref)
 
-	rules, src := s.Tools["aguard"].KnownRules(dir)
-	if src != ref {
-		t.Fatalf("expected the env override to win, got %q", src)
+	idx := s.Tools["aguard"].ReadRules(dir)
+	if idx == nil {
+		t.Fatal("expected the reference to be read")
 	}
-	if !rules["BD-003"] || !rules["REP-GOOD"] {
-		t.Fatalf("expected both ids, got %v", rules)
+	if idx.Source != ref {
+		t.Fatalf("expected the env override to win, got %q", idx.Source)
+	}
+	if !idx.Has("BD-003") || !idx.Has("REP-GOOD") {
+		t.Fatalf("expected both ids, got %v", idx.Dimension)
+	}
+}
+
+// A rule's dimension is read from the tool's own generated reference, so it cannot drift
+// from the tool. Keying on rule id prefix would be wrong: in AgentGuard `PERM-*` rules sit
+// under three different dimensions.
+func TestReadRulesAttributesDimensionPerSection(t *testing.T) {
+	s, err := loadFrom(t, goodTechniques, goodTools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write(t, dir, "rules.md",
+		"## 7 — Backdoor\n| `BD-003` | high | ... |\n"+
+			"## 6 — Obfuscation\n| `OBF-001` | medium | ... |\n")
+	t.Setenv("TEST_RULES_MD", filepath.Join(dir, "rules.md"))
+
+	idx := s.Tools["aguard"].ReadRules(dir)
+	if idx == nil {
+		t.Fatal("expected the reference to be read")
+	}
+	if d := idx.Dimension["BD-003"]; d == nil || *d != "backdoor" {
+		t.Fatalf("BD-003 should attribute to backdoor, got %v", d)
+	}
+	// Measurement part 2 in one assertion: the tool found something and named no kind of
+	// attack. That is a pass on part 1 and a failure on part 2, and it has to be
+	// representable rather than collapsed into "caught it".
+	if d, ok := idx.Dimension["OBF-001"]; !ok || d != nil {
+		t.Fatalf("OBF-001 should be present and map to no dimension, got %v present=%v", d, ok)
+	}
+}
+
+// A section carrying rules but missing from dimension_map is an oversight; a section mapped
+// to null is a decision. They must not look alike.
+func TestUnmappedSectionsAreReported(t *testing.T) {
+	s, err := loadFrom(t, goodTechniques, goodTools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write(t, dir, "rules.md",
+		"## 7 — Backdoor\n| `BD-003` | high | ... |\n"+
+			"## 4 — Code execution\n| `EXEC-001` | high | ... |\n")
+	t.Setenv("TEST_RULES_MD", filepath.Join(dir, "rules.md"))
+
+	idx := s.Tools["aguard"].ReadRules(dir)
+	if idx == nil {
+		t.Fatal("expected the reference to be read")
+	}
+	if len(idx.Unmapped) != 1 || idx.Unmapped[0] != "Code execution" {
+		t.Fatalf("expected Code execution to be reported as unmapped, got %v", idx.Unmapped)
+	}
+}
+
+// A section that only MENTIONS rules defined elsewhere is not a category. AgentGuard's
+// reference ends with exactly such a section, and counting mentions made the check cry wolf
+// about its own document's prose.
+func TestMentionsDoNotCreateSections(t *testing.T) {
+	s, err := loadFrom(t, goodTechniques, goodTools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write(t, dir, "rules.md",
+		"## 7 — Backdoor\n| `BD-003` | high | ... |\n"+
+			"## Not covered by any rule\n- see `BD-003` for the adjacent case\n")
+	t.Setenv("TEST_RULES_MD", filepath.Join(dir, "rules.md"))
+
+	idx := s.Tools["aguard"].ReadRules(dir)
+	if len(idx.Unmapped) != 0 {
+		t.Fatalf("a prose mention must not register as a category, got %v", idx.Unmapped)
+	}
+	if d := idx.Dimension["BD-003"]; d == nil || *d != "backdoor" {
+		t.Fatalf("the defining section must win, got %v", d)
+	}
+}
+
+func TestTierOrdering(t *testing.T) {
+	t.Parallel()
+	s, err := loadFrom(t, goodTechniques, goodTools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.TierAtLeast("evasive", "plain") {
+		t.Fatal("evasive must rank at or above plain")
+	}
+	if s.TierAtLeast("plain", "evasive") {
+		t.Fatal("plain must not rank at or above evasive")
+	}
+	// An unknown tier is not comparable, so a typo fails the bound rather than passing it.
+	if s.TierAtLeast("typo", "plain") || s.TierAtLeast("plain", "typo") {
+		t.Fatal("an unknown tier must never satisfy a bound")
 	}
 }
