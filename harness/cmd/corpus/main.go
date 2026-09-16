@@ -143,9 +143,16 @@ func cmdValidate(root string) int {
 				l.Rel, ferr))
 			continue
 		}
-		samples = append(samples, leakage.Sample{ID: l.ID, Class: string(l.Class), Files: files})
+		group := "hand-pinned"
+		if l.Origin.DerivedFrom != nil && l.Origin.DerivedFrom.Entry != "" {
+			group = l.Origin.DerivedFrom.Entry
+		}
+		samples = append(samples, leakage.Sample{
+			ID: l.ID, Class: string(l.Class), Files: files, Group: group,
+		})
 	}
 	leaks := leakage.Check(samples)
+	crossPop := leakage.CrossPopulation(samples)
 
 	fmt.Printf("labels      %d\n", len(labels))
 	fmt.Printf("techniques  %d across %d dimensions\n", len(tax.Techniques), len(tax.Dimensions))
@@ -179,9 +186,26 @@ func cmdValidate(root string) int {
 
 	for _, f := range leaks {
 		problems = append(problems, fmt.Sprintf(
-			"leakage: %q appears in %d samples and %d of them are %s (%.0f%% pure) — "+
-				"a classifier can separate the classes without reading content",
-			f.Name, f.Total, f.With, f.Class, f.Purity()*100))
+			"leakage in %s: %q appears in %d of its samples and %d of them are %s (%.0f%% pure) "+
+				"— within one population a classifier can separate the classes without reading content",
+			f.Group, f.Name, f.Total, f.With, f.Class, f.Purity()*100))
+	}
+
+	// Not a failure, and not silenced either. These features separate the classes only once
+	// populations are pooled, which measures how differently the two halves are BUILT: the
+	// benign side is real public repositories with licences, TypeScript and twenty files, the
+	// malicious side is purpose-built fixtures with three. It is the reason a single rate over
+	// the whole corpus would be meaningless, and it is printed so nobody computes one.
+	if len(crossPop) > 0 {
+		fmt.Printf("\ncross-population structure — %d feature(s) separate the classes only when\n"+
+			"populations are pooled. They are not defects; they are why a pooled rate is invalid:\n", len(crossPop))
+		for i, f := range crossPop {
+			if i == 5 {
+				fmt.Printf("  … and %d more\n", len(crossPop)-5)
+				break
+			}
+			fmt.Printf("  %-22s %d samples, %d %s (%.0f%%)\n", f.Name, f.Total, f.With, f.Class, f.Purity()*100)
+		}
 	}
 
 	if len(problems) == 0 {
@@ -677,6 +701,14 @@ func loadLabels(root string) ([]*label.Label, error) {
 				"<id>.yaml", p)
 		}
 		if filepath.Ext(p) != ".yaml" {
+			return nil
+		}
+		// A label is defined by its POSITION, not by its extension: it sits beside its tree at
+		// corpus/<class>/<surface>/<id>.yaml, exactly three components deep. Anything deeper is
+		// inside a sample tree and is sample content — real skills ship yaml of their own, and
+		// one vendored sample carries a promptfoo config that parsed as a malformed label and
+		// failed the whole run. Reading by extension only worked while every sample was ours.
+		if r, rerr := filepath.Rel(dir, p); rerr != nil || len(strings.Split(filepath.ToSlash(r), "/")) != 3 {
 			return nil
 		}
 		l, lerr := label.Load(p)

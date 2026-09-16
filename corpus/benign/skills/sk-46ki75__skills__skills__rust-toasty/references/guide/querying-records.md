@@ -1,0 +1,327 @@
+# Querying Records
+
+Toasty generates several ways to retrieve records: by primary key, by indexed
+fields, or by building queries with filters.
+
+## Get by primary key
+
+`<YourModel>::get_by_id()` fetches a single record by its primary key. It
+returns the record directly, or an error if no record exists with that key.
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[unique]
+#     email: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let user = User::get_by_id(&mut db, &1).await?;
+println!("Found: {}", user.name);
+# Ok(())
+# }
+```
+
+The method name matches the key field name. A model with `#[key] code: String`
+generates `get_by_code()`. Composite keys generate combined names like
+`get_by_student_id_and_course_id()`.
+
+## Get all records
+
+`<YourModel>::all()` returns a query for all records of that model.
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[unique]
+#     email: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let users = User::all().exec(&mut db).await?;
+
+for user in &users {
+    println!("{}: {}", user.id, user.name);
+}
+# Ok(())
+# }
+```
+
+## Executing queries
+
+Queries returned by `all()`, `filter()`, and `filter_by_*()` are not executed
+until you call a terminal method. Toasty provides three terminal methods:
+
+### `.exec()` — collect all results
+
+Returns all matching records as a `Vec`:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[unique]
+#     email: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let users: Vec<User> = User::all().exec(&mut db).await?;
+# Ok(())
+# }
+```
+
+### `.first()` — get the first result or `None`
+
+Returns `Option<User>` — `Some` if at least one record matches, `None` if the
+query returns no results:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[unique]
+#     email: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let maybe_user = User::all().first().exec(&mut db).await?;
+
+match maybe_user {
+    Some(user) => println!("Found: {}", user.name),
+    None => println!("No users found"),
+}
+# Ok(())
+# }
+```
+
+### `.get()` — get exactly one result
+
+Returns the record directly, or an error if no record matches. Use this when you
+expect the query to return exactly one result:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[unique]
+#     email: String,
+# }
+# async fn __example(mut db: toasty::Db, user_id: u64) -> toasty::Result<()> {
+let user = User::filter_by_id(user_id).get(&mut db).await?;
+# Ok(())
+# }
+```
+
+## Filtering by indexed fields
+
+Toasty generates `filter_by_*` methods for indexed and key fields. These return
+a query builder that you can execute with any terminal method.
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[unique]
+#     email: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+// filter_by_id returns a query builder
+let user = User::filter_by_id(1).get(&mut db).await?;
+
+// filter_by_email is generated because email has #[unique]
+let user = User::filter_by_email("alice@example.com")
+    .get(&mut db)
+    .await?;
+# Ok(())
+# }
+```
+
+The difference between `get_by_*` and `filter_by_*`: `get_by_*` methods execute
+immediately and return the record. `filter_by_*` methods return a query builder
+that you can further customize before executing.
+
+## Filtering with expressions
+
+For queries beyond simple field equality, use `<YourModel>::filter()` with field
+expressions. The [Filtering with Expressions](./filtering-with-expressions.md)
+chapter covers this in detail. Here is a quick example:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[unique]
+#     email: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let users = User::filter(User::fields().name().eq("Alice"))
+    .exec(&mut db)
+    .await?;
+# Ok(())
+# }
+```
+
+## Chaining filters
+
+You can chain `.filter()` on an existing query to add more conditions:
+
+```rust,ignore
+let users = User::filter_by_name("Alice")
+    .filter(User::fields().age().gt(25))
+    .exec(&mut db)
+    .await?;
+```
+
+Each `.filter()` call adds an AND condition to the query.
+
+## Projecting columns with `.select()`
+
+By default a query returns full model rows. `.select()` replaces the
+projection so the query returns one or more chosen field values
+instead. The terminal `.exec()` then yields `Vec<T>` where `T` matches
+the projection — a single field path yields `Vec<FieldType>`, a tuple
+yields `Vec<(...)>`.
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[unique]
+#     email: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+// Just the names.
+let names: Vec<String> = User::all()
+    .select(User::fields().name())
+    .exec(&mut db)
+    .await?;
+
+// A tuple of two fields.
+let pairs: Vec<(u64, String)> = User::all()
+    .select((User::fields().id(), User::fields().name()))
+    .exec(&mut db)
+    .await?;
+# Ok(())
+# }
+```
+
+`.select()` works on any query — `all()`, `filter()`, and
+`filter_by_*()` — and lets the database skip reading columns the caller
+will not look at. Chain it after a filter to project a subset of
+columns from the matching rows:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[unique]
+#     email: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let name: Option<String> = User::filter_by_email("alice@example.com")
+    .select(User::fields().name())
+    .first()
+    .exec(&mut db)
+    .await?;
+# Ok(())
+# }
+```
+
+`.select()` can also project a [multi-step (`via`)
+relation](./has-many.md#multi-step-relations-via), returning the related
+records per row — a `Vec<T>` for a `has_many` `via`, or a single optional
+record for a `has_one` `via`:
+
+```rust,ignore
+// The distinct articles each user has commented on.
+let per_user: Vec<Vec<Article>> = User::all()
+    .select(User::fields().commented_articles())
+    .exec(&mut db)
+    .await?;
+```
+
+Projecting a `via` relation is supported on SQL backends; it is not yet
+available on DynamoDB.
+
+## Sorting by most recent
+
+`.latest_by(field)` sorts the query in descending order of the named
+field — shorthand for `order_by(field.desc())`:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct Post {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     title: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let recent = Post::all()
+    .latest_by(Post::fields().id())
+    .limit(10)
+    .exec(&mut db)
+    .await?;
+# Ok(())
+# }
+```
+
+Use it when the natural ordering for a model is "newest first" and the
+sort field doubles as a recency proxy — auto-incrementing keys, UUIDv7
+keys, or a `created_at` timestamp.
+
+## What gets generated
+
+For a model with `#[key]` on `id` and `#[unique]` on `email`, Toasty generates:
+
+| Method | Returns | Description |
+|---|---|---|
+| `User::all()` | Query builder | All records |
+| `User::filter(expr)` | Query builder | Records matching expression |
+| `User::filter_by_id(id)` | Query builder | Records matching key |
+| `User::filter_by_email(email)` | Query builder | Records matching unique field |
+| `User::get_by_id(&mut db, &id)` | `Result<User>` | One record by key (immediate) |
+| `User::get_by_email(&mut db, email)` | `Result<User>` | One record by unique field (immediate) |
+
+Query builders support these terminal methods:
+
+| Method | Returns |
+|---|---|
+| `.exec(&mut db)` | `Result<Vec<User>>` |
+| `.first().exec(&mut db)` | `Result<Option<User>>` |
+| `.get(&mut db)` | `Result<User>` |

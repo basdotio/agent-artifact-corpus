@@ -28,6 +28,7 @@ type Feature struct {
 	Class string // the class it co-occurs with
 	With  int    // samples in that class carrying the feature
 	Total int    // samples carrying the feature, all classes
+	Group string // the population it was found in; empty when pooled
 }
 
 func (f Feature) Purity() float64 {
@@ -50,11 +51,73 @@ type Sample struct {
 	ID    string
 	Class string
 	Files []string
+
+	// Group is the population a sample belongs to: the manifest entry it was derived from, or
+	// "hand-pinned". The gate tests WITHIN a population, because comparing a curated attack
+	// fixture against a real-world public skill is a category error — real repositories ship
+	// LICENSE.txt, TypeScript sources and twenty files, and purpose-built fixtures ship three.
+	// Pooling them makes `has a LICENSE.txt` look like a perfect benign predictor when all it
+	// predicts is which corpus a sample came from.
+	Group string
 }
 
 // Check returns the features that predict a class too well. A non-empty result fails the
 // build.
+// Check finds features that predict the class WITHIN one population. A feature has to give
+// the answer away among samples that are genuinely comparable before it counts as leakage.
 func Check(samples []Sample) []Feature {
+	byGroup := map[string][]Sample{}
+	for _, s := range samples {
+		byGroup[s.Group] = append(byGroup[s.Group], s)
+	}
+	var out []Feature
+	for _, g := range sortedGroups(byGroup) {
+		out = append(out, checkOne(byGroup[g], g)...)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Total != out[j].Total {
+			return out[i].Total > out[j].Total
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// CrossPopulation reports features that separate the classes only once populations are pooled.
+// They are not corpus defects and they are not silenced either: they are the measurement of how
+// differently the benign and malicious halves are built, and the reason a single rate computed
+// over the whole corpus would be meaningless.
+func CrossPopulation(samples []Sample) []Feature {
+	pooled := checkOne(samples, "")
+	within := map[string]bool{}
+	for _, f := range Check(samples) {
+		within[f.Name] = true
+	}
+	var out []Feature
+	for _, f := range pooled {
+		if !within[f.Name] {
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Total != out[j].Total {
+			return out[i].Total > out[j].Total
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func sortedGroups(m map[string][]Sample) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func checkOne(samples []Sample, group string) []Feature {
 	// _label.yaml is present in every sample by construction and carries the answer, so it
 	// is excluded rather than reported — it would be the top hit forever and would train
 	// people to ignore this list.
@@ -72,6 +135,16 @@ func Check(samples []Sample) []Feature {
 		}
 	}
 
+	// A population holding one class cannot give anything away: every feature in it is 100%
+	// pure by construction and none of it is evidence.
+	classes := map[string]bool{}
+	for _, s := range samples {
+		classes[s.Class] = true
+	}
+	if len(classes) < 2 {
+		return nil
+	}
+
 	var out []Feature
 	for f, total := range support {
 		if total < MinSupport {
@@ -79,16 +152,10 @@ func Check(samples []Sample) []Feature {
 		}
 		for class, n := range byClass[f] {
 			if float64(n)/float64(total) > MaxPurity {
-				out = append(out, Feature{Name: f, Class: class, With: n, Total: total})
+				out = append(out, Feature{Name: f, Class: class, With: n, Total: total, Group: group})
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Total != out[j].Total {
-			return out[i].Total > out[j].Total
-		}
-		return out[i].Name < out[j].Name
-	})
 	return out
 }
 

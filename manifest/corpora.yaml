@@ -67,6 +67,10 @@ entries:
         as `skipped` by `corpus derive`. Dimension for 41 of the 66 malicious samples comes
         from the category map; the other 25 are labelled upstream by technique only and were
         read by hand into dimension_overrides, with the deciding evidence recorded per entry.
+      benign_note: >-
+        A deliberate false-positive decoy: skillsgoat ships these to be tripped over. This
+        subset is adversarially selected and must never be read as a neutral false-positive
+        denominator.
       category_axis_map:
         # --- what it achieves (dimension) ---
         data-exfiltration: dim:exfiltration
@@ -274,6 +278,45 @@ entries:
   # by license, caps at 5 trees per repo, and pins each target — a manifest of manifests.
   # Recording it here with a placeholder URL was worse than leaving it out: a fake pin
   # validates, and a validated fake is exactly the failure this file exists to prevent.
+
+  - id: skillet-wild
+    name: "shenyimings/skillet (benchmark/wild)"
+    url: https://github.com/shenyimings/skillet
+    commit: b778fe53f45646c48793e81a7da6cd6b30a0e9af
+    sha256: ""
+    license: MIT
+    role: fp-denominator
+    subset: benchmark/wild
+    malicious: 0
+    benign: 483                     # 338 dev + 145 heldout, verified by reading wild.lock.tsv
+    vendorable: true
+    hazards:
+      - "PROVENANCE IS TWO HOPS AND THE FIRST ONE IS UNDOCUMENTED HERE. skillet did not classify these itself: the safe/suspicious labels come from MaliciousAgentSkillsBench v0.2 (Liu et al., MIT, zenodo.org/records/20286334), 98,380 real skills of which only 157 are behaviourally-confirmed malicious. How the remaining 98,223 earned `safe` is not stated in anything fetched here, and a residual `safe` most likely means `not flagged` rather than `reviewed and found benign`. Red line 3 applies: never let this alone carry a headline false-positive figure"
+      - "the 206 `suspicious` rows are NOT imported. `suspicious` is a weaker claim than malicious and importing them as malicious would overclaim a label nobody made"
+      - "MaliciousAgentSkillsBench may overlap protectskills/MaliciousSkillBench, which the catalogue records as aggregating 13 sources. The relationship is unverified, so do not pool this entry with that one"
+    prep:
+      - "report per source. Each sample records its originating repository in origin.source, because 483 samples from 178 repositories reported as one number is the pooled figure this repository forbids"
+    # skillet already applies the sampling discipline design.md demands: repo-disjoint dev and
+    # heldout splits, and a cap of 5 samples per repository (110 of the 178 repos sit at exactly
+    # 5). That is why this is usable as a denominator at all.
+    derive:
+      layout: "benchmark/wild/*/safe/*"
+      label_file: ""                # the class is the directory, there is no per-sample label
+      surface: skills
+      id_prefix: sk
+      class_from: "constant:benign"
+      source_from: "dirname-parts:2"   # trees are named owner__repo__path__…
+      benign_note: >-
+        A real public skill, pinned to its originating repository and commit by
+        shenyimings/skillet. Its `safe` label is inherited from MaliciousAgentSkillsBench and
+        most likely means "not flagged" rather than "reviewed and found benign", so it is
+        usable as a false-positive denominator but not as evidence that any particular sample
+        is harmless.
+      fidelity: >-
+        Class is a constant: only the `safe` directories are matched by the layout, so nothing
+        is inferred. Benign samples carry no tier, dimension or severity, so there is no lossy
+        axis mapping here at all — this is the most mechanical derivation in the corpus. What
+        is weak is not the derivation but the upstream label, and that is recorded in hazards.
 
   # ---------- hard negatives ----------
   - id: automatelab-mcp-tools

@@ -52,6 +52,10 @@ type Coord struct {
 	Tier       string
 	Severity   string
 
+	// Source is the originating repository when the entry is a collection of them. Empty means
+	// the entry itself is the source.
+	Source string
+
 	// HandReadDimension is true when the dimension came from a dimension_overrides entry
 	// rather than the category map: a person read the sample because the upstream labelled it
 	// by technique and never said what it achieves. It is tracked so the two kinds of
@@ -121,11 +125,10 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		}
 	}
 
-	labelFile := d.LabelFile
-	if labelFile == "" && d.CategoryFrom == "" && d.TierFrom != "path-segment" {
-		// Back-compatible default: an entry written before label_file existed means
-		// expected.yaml, which is what skillsgoat uses.
-		labelFile = "expected.yaml"
+	// Absent means the default; explicitly empty means the upstream has no per-sample label.
+	labelFile := "expected.yaml"
+	if d.LabelFile != nil {
+		labelFile = *d.LabelFile
 	}
 
 	dirs, skipped, err := sampleDirs(root, d.Layout, labelFile)
@@ -153,6 +156,13 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		}
 		rel, _ := filepath.Rel(root, dir)
 		c := Coord{UpstreamID: up.ID, SamplePath: rel}
+		if n, ok := strings.CutPrefix(d.SourceFrom, "dirname-parts:"); ok {
+			want := 0
+			fmt.Sscanf(n, "%d", &want)
+			if parts := strings.Split(filepath.Base(dir), "__"); want > 0 && len(parts) >= want {
+				c.Source = strings.Join(parts[:want], "/")
+			}
+		}
 
 		verdict := resolve(d.ClassFrom, up.Verdict, dir)
 		switch verdict {

@@ -145,14 +145,24 @@ func renderLabel(e manifest.Entry, p Plan) string {
 
 	fmt.Fprintf(&b, "origin:\n")
 	fmt.Fprintf(&b, "  type: derived\n")
-	fmt.Fprintf(&b, "  source: %q\n", fmt.Sprintf("%s @ %s", e.URL, short12(e.Commit)))
+	src := fmt.Sprintf("%s @ %s", e.URL, short12(e.Commit))
+	if c.Source != "" {
+		// The originating repository, not the collection that pinned it. A false positive rate
+		// has to be reported per source, and that is impossible if every sample names the
+		// aggregator instead of where it actually came from.
+		src = fmt.Sprintf("https://github.com/%s (via %s @ %s)", c.Source, e.ID, short12(e.Commit))
+	}
+	fmt.Fprintf(&b, "  source: %q\n", src)
 	fmt.Fprintf(&b, "  license: %s\n", e.License)
 	note := "coordinates derived from the upstream's own labels; the artifact is vendored unchanged"
 	if c.HandReadDimension {
 		note = "dimension hand-read from the sample because the upstream labels this by technique only; other axes derived"
 	}
 	if c.Class == "benign" {
-		note = "upstream benign. skillsgoat's benign entries are deliberate false-positive decoys, so this subset is adversarially selected and must not be read as a neutral false-positive denominator"
+		note = e.Derive.BenignNote
+		if note == "" {
+			note = "upstream benign; this entry does not state what that label was based on"
+		}
 	}
 	fmt.Fprintf(&b, "  note: %q\n", note)
 	fmt.Fprintf(&b, "  added: %s\n", time.Now().Format("2006-01-02"))

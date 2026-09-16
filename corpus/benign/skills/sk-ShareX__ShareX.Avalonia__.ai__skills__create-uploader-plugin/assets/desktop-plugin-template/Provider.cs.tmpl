@@ -1,0 +1,104 @@
+#region License Information (GPL v3)
+
+/*
+    XerahS - The Avalonia UI implementation of ShareX
+    Copyright (c) 2007-2026 ShareX Team
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+    Optionally you can also view the license at <http://www.gnu.org/licenses/>.
+*/
+
+#endregion License Information (GPL v3)
+
+using Newtonsoft.Json;
+using XerahS.Uploaders;
+using XerahS.Uploaders.PluginSystem;
+
+namespace __NAMESPACE__;
+
+public sealed class __PROVIDER_CLASS__ : UploaderProviderBase
+{
+    public override string ProviderId => "__PLUGIN_ID__";
+    public override string Name => "__DISPLAY_NAME__";
+    public override string Description => "Upload files to __DISPLAY_NAME__";
+    public override Version Version => new(1, 0, 0);
+    public override UploaderCategory[] SupportedCategories => new[] { UploaderCategory.Image, UploaderCategory.Text, UploaderCategory.File };
+    public override Type ConfigModelType => typeof(__CONFIG_MODEL_CLASS__);
+
+    public override Uploader CreateInstance(string settingsJson)
+    {
+        __CONFIG_MODEL_CLASS__ config = DeserializeConfig(settingsJson);
+        string apiToken = ResolveSecret(config.SecretKey, "apiToken");
+        return new __UPLOADER_CLASS__(config, apiToken);
+    }
+
+    public override bool ValidateSettings(string settingsJson)
+    {
+        __CONFIG_MODEL_CLASS__ config = DeserializeConfig(settingsJson);
+        return !string.IsNullOrWhiteSpace(config.BaseUrl) &&
+               !string.IsNullOrWhiteSpace(ResolveSecret(config.SecretKey, "apiToken"));
+    }
+
+    public override Dictionary<UploaderCategory, string[]> GetSupportedFileTypes()
+    {
+        string[] allTypes =
+        {
+            "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "svg",
+            "mp4", "avi", "mov", "mkv", "flv", "wmv", "webm",
+            "txt", "log", "json", "xml", "md", "html", "css", "js",
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+            "zip", "rar", "7z", "tar", "gz",
+            "exe", "dll", "so", "dmg", "apk", "ipa"
+        };
+
+        return new Dictionary<UploaderCategory, string[]>
+        {
+            { UploaderCategory.Image, allTypes },
+            { UploaderCategory.Text, allTypes },
+            { UploaderCategory.File, allTypes }
+        };
+    }
+
+    public override object? CreateConfigView()
+    {
+        return new Views.__CONFIG_VIEW_CLASS__();
+    }
+
+    public override IUploaderConfigViewModel? CreateConfigViewModel()
+    {
+        return new ViewModels.__CONFIG_VIEWMODEL_CLASS__();
+    }
+
+    private string ResolveSecret(string secretKey, string secretName)
+    {
+        if (Secrets == null || string.IsNullOrWhiteSpace(secretKey))
+        {
+            return string.Empty;
+        }
+
+        return Secrets.GetSecret(ProviderId, secretKey, secretName) ?? string.Empty;
+    }
+
+    private static __CONFIG_MODEL_CLASS__ DeserializeConfig(string? settingsJson)
+    {
+        if (string.IsNullOrWhiteSpace(settingsJson))
+        {
+            return new __CONFIG_MODEL_CLASS__();
+        }
+
+        return JsonConvert.DeserializeObject<__CONFIG_MODEL_CLASS__>(settingsJson) ?? new __CONFIG_MODEL_CLASS__();
+    }
+}

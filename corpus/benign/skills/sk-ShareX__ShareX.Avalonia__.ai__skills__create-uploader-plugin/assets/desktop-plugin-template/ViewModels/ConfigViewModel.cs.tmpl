@@ -1,0 +1,138 @@
+#region License Information (GPL v3)
+
+/*
+    XerahS - The Avalonia UI implementation of ShareX
+    Copyright (c) 2007-2026 ShareX Team
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+    Optionally you can also view the license at <http://www.gnu.org/licenses/>.
+*/
+
+#endregion License Information (GPL v3)
+
+using CommunityToolkit.Mvvm.ComponentModel;
+using Newtonsoft.Json;
+using XerahS.Uploaders.PluginSystem;
+
+namespace __NAMESPACE__.ViewModels;
+
+public partial class __CONFIG_VIEWMODEL_CLASS__ : ObservableObject, IUploaderConfigViewModel, IProviderContextAware
+{
+    [ObservableProperty]
+    private string _baseUrl = string.Empty;
+
+    [ObservableProperty]
+    private string _uploadPath = string.Empty;
+
+    [ObservableProperty]
+    private bool _createShareableLink;
+
+    [ObservableProperty]
+    private string _apiToken = string.Empty;
+
+    [ObservableProperty]
+    private string? _statusMessage;
+
+    private string _secretKey = Guid.NewGuid().ToString("N");
+    private ISecretStore? _secrets;
+
+    public void LoadFromJson(string json)
+    {
+        try
+        {
+            __CONFIG_MODEL_CLASS__? config = JsonConvert.DeserializeObject<__CONFIG_MODEL_CLASS__>(json);
+            if (config == null)
+            {
+                return;
+            }
+
+            _secretKey = string.IsNullOrWhiteSpace(config.SecretKey) ? Guid.NewGuid().ToString("N") : config.SecretKey;
+            BaseUrl = config.BaseUrl ?? string.Empty;
+            UploadPath = config.UploadPath ?? string.Empty;
+            CreateShareableLink = config.CreateShareableLink;
+
+            if (_secrets != null)
+            {
+                ApiToken = _secrets.GetSecret("__PLUGIN_ID__", _secretKey, "apiToken") ?? string.Empty;
+            }
+        }
+        catch
+        {
+            StatusMessage = "Failed to load configuration.";
+        }
+    }
+
+    public string ToJson()
+    {
+        PersistSecrets();
+
+        __CONFIG_MODEL_CLASS__ config = new()
+        {
+            SecretKey = _secretKey,
+            BaseUrl = BaseUrl ?? string.Empty,
+            UploadPath = UploadPath ?? string.Empty,
+            CreateShareableLink = CreateShareableLink
+        };
+
+        return JsonConvert.SerializeObject(config, Formatting.Indented);
+    }
+
+    public bool Validate()
+    {
+        if (string.IsNullOrWhiteSpace(BaseUrl))
+        {
+            StatusMessage = "Base URL is required.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(ApiToken))
+        {
+            StatusMessage = "API token is required.";
+            return false;
+        }
+
+        PersistSecrets();
+        StatusMessage = null;
+        return true;
+    }
+
+    public void SetContext(IProviderContext context)
+    {
+        _secrets = context.Secrets;
+
+        if (_secrets != null && !string.IsNullOrWhiteSpace(_secretKey))
+        {
+            ApiToken = _secrets.GetSecret("__PLUGIN_ID__", _secretKey, "apiToken") ?? ApiToken;
+        }
+    }
+
+    private void PersistSecrets()
+    {
+        if (_secrets == null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ApiToken))
+        {
+            _secrets.DeleteSecret("__PLUGIN_ID__", _secretKey, "apiToken");
+        }
+        else
+        {
+            _secrets.SetSecret("__PLUGIN_ID__", _secretKey, "apiToken", ApiToken);
+        }
+    }
+}

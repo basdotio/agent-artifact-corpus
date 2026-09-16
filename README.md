@@ -155,11 +155,15 @@ measures.
   above is a design, not a mechanism.
 - **`sha256` is never verified.** Every manifest entry carries an empty `sha256`, and the
   fetcher checks the pinned commit only. Integrity rests on git, not on the hash.
-- **Four HuggingFace entries cannot be fetched** by the current fetcher, which does a plain
-  `git clone`. They need git-lfs. Two of them are the primary false-positive denominator.
+- **The HuggingFace entries need more than a fetch.** git access works and the pinned commits
+  resolve, but the payload is behind git-lfs, which is not installed here, and `SkillMD-138K`
+  is a single 560MB `train.parquet` rather than sample trees. Using it as a denominator needs
+  git-lfs, then an extraction step, then the per-repo cap its own hazards call for.
+- **`subset` is declared but ignored by the fetcher.** `datadog-ai-skills` names
+  `samples/ai-skills` and `cisco-mcp-scanner-evals` names `evals`, yet both would clone whole.
 - **One tool wired up.** `taxonomy/tools.yaml` has a single entry.
 - **`NOTICE` is not cross-checked** against label licenses by `make validate`.
-- **Three harness packages have no tests**: `fetch`, `leakage`, `manifest`.
+- **One harness package has no tests**: `fetch`.
 - **Six of nine technique dimensions have no sample.** `make stats` names them.
 
 ## License

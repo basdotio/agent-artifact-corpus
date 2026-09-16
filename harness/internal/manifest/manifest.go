@@ -113,7 +113,11 @@ type Derive struct {
 	// the upstream ships no per-sample label at all — skillcraft-audit is that case — and then
 	// every axis has to come from the path or from a constant, which is a weaker derivation
 	// and must say so in Fidelity.
-	LabelFile string `yaml:"label_file"`
+	// A pointer so that "absent" and "explicitly empty" are different statements. Absent means
+	// the entry predates this field and wants the expected.yaml default; `label_file: ""` means
+	// the upstream genuinely ships no per-sample label. Inferring the difference from unrelated
+	// fields was tried and silently skipped 483 samples whose only sin was needing no tier.
+	LabelFile *string `yaml:"label_file"`
 
 	// TierFrom / SeverityFrom / ClassFrom name where each axis is read. Each takes one of:
 	//
@@ -132,6 +136,26 @@ type Derive struct {
 	// corpus identified by its layout gets a stable name: skillcraft-audit's samples are
 	// T11-hook-weaponize/easy, and neither segment alone is unique.
 	IDFrom string `yaml:"id_from"`
+
+	// BenignNote is what a benign sample from this entry actually means, written into every
+	// benign label. It is per-entry because the meaning differs sharply and getting it wrong
+	// corrupts a false positive rate: skillsgoat's benign entries are deliberate decoys chosen
+	// to trip a scanner, while skillet's are ordinary public skills. Reading the first as a
+	// neutral denominator would overstate over-alerting; reading the second as adversarial
+	// would understate it.
+	BenignNote string `yaml:"benign_note"`
+
+	// SourceFrom recovers the ORIGINATING repository of each sample, which matters whenever an
+	// entry is a collection of other people's repositories rather than one corpus.
+	//
+	// Without it every sample in such an entry collapses to a single source, and a false
+	// positive rate computed over them is the pooled figure this repository forbids: design.md
+	// requires every rate to be reported per source, with n and with the source count, because
+	// a machine-wide 12.9% once turned out to be 7 sources with two of them at 87%.
+	//
+	//   dirname-parts:<n>   the first n "__"-separated parts of the sample directory name,
+	//                       joined with "/" — skillet names its trees owner__repo__path__…
+	SourceFrom string `yaml:"source_from"`
 
 	// CategoryFrom says where the tokens fed to CategoryAxisMap come from:
 	//

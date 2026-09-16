@@ -100,10 +100,11 @@ make test        # harness 单元测试
 
 - **没有 CI。** 没有任何东西会自动跑 `make validate`，所以上面说的回归闸门是一个设计，不是一个机制。
 - **`sha256` 从未被校验。** 每条 manifest 条目的 `sha256` 都是空的，拉取器只核对钉住的 commit。完整性靠的是 git，不是哈希。
-- **四条 HuggingFace 条目用当前的拉取器拉不下来**，它只做一次普通的 `git clone`，而那些条目需要 git-lfs。其中两条是主要的假阳性分母。
+- **HuggingFace 那几条不止差一次拉取。** git 访问是通的、钉住的 commit 也能解析，但内容在 git-lfs 后面，而本机没装 lfs；并且 `SkillMD-138K` 是单个 560MB 的 `train.parquet`，不是样本树。要拿它当分母，需要 git-lfs、再加一步抽取，再按它自己 hazards 要求的逐仓库上限采样。
+- **`subset` 声明了却被拉取器忽略。** `datadog-ai-skills` 写了 `samples/ai-skills`、`cisco-mcp-scanner-evals` 写了 `evals`，但两者都会被整仓克隆。
 - **只接入了一个工具。** `taxonomy/tools.yaml` 里只有一条 entry。
 - **`NOTICE` 没有被 `make validate` 与标签的许可证做交叉校验。**
-- **harness 里有三个包没有测试**：`fetch`、`leakage`、`manifest`。
+- **harness 里有一个包没有测试**：`fetch`。
 - **九个技术维度中有六个还没有样本。** `make stats` 会把它们点名列出。
 
 ## 许可证

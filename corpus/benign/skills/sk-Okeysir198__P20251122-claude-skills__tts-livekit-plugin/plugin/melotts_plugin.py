@@ -1,0 +1,315 @@
+"""
+LiveKit TTS Plugin for MeloTTS API
+Integrates self-hosted MeloTTS with LiveKit agents
+"""
+import asyncio
+import aiohttp
+import logging
+from typing import Optional
+from dataclasses import dataclass
+
+from livekit import agents
+from livekit.agents import tts, utils
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _TTSOptions:
+    """Configuration options for MeloTTS"""
+    api_base_url: str
+    language: str
+    speaker: Optional[str]
+    speed: float
+    timeout: float
+    max_retries: int = 3
+    retry_delay: float = 1.0
+
+
+class TTS(tts.TTS):
+    """
+    LiveKit TTS plugin for MeloTTS API
+
+    This plugin connects to a self-hosted MeloTTS API server
+    and streams audio back to LiveKit agents.
+
+    Example usage:
+        async with TTS(api_base_url="http://localhost:8000") as tts:
+            stream = tts.synthesize("Hello world")
+    """
+
+    def __init__(
+        self,
+        *,
+        api_base_url: str = "http://localhost:8000",
+        language: str = "EN",
+        speaker: Optional[str] = "EN-US",
+        speed: float = 1.0,
+        timeout: float = 30.0,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        sample_rate: int = 44100,
+        num_channels: int = 1,
+    ) -> None:
+        """
+        Initialize MeloTTS plugin
+
+        Args:
+            api_base_url: Base URL of the MeloTTS API server
+            language: Language code (EN, ES, FR, ZH, JP, KR)
+            speaker: Speaker ID (e.g., EN-US, EN-BR, EN-AU, EN-IN)
+            speed: Speech speed (0.5 to 2.0)
+            timeout: Request timeout in seconds
+            max_retries: Maximum number of retry attempts
+            retry_delay: Delay between retries in seconds
+            sample_rate: Audio sample rate (MeloTTS outputs 44100)
+            num_channels: Number of audio channels (1 for mono)
+        """
+        super().__init__(
+            capabilities=tts.TTSCapabilities(
+                streaming=True,  # We support streaming via chunked HTTP
+            ),
+            sample_rate=sample_rate,
+            num_channels=num_channels,
+        )
+
+        self._opts = _TTSOptions(
+            api_base_url=api_base_url.rstrip("/"),
+            language=language,
+            speaker=speaker,
+            speed=speed,
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+        )
+        self._session: Optional[aiohttp.ClientSession] = None
+        logger.info(f"Initialized MeloTTS plugin: {api_base_url}, lang={language}, speaker={speaker}")
+
+    async def _ensure_session(self) -> aiohttp.ClientSession:
+        """Ensure aiohttp session exists (async context)"""
+        if self._session is None or self._session.closed:
+            # Create session with proper configuration for production
+            connector = aiohttp.TCPConnector(
+                limit=100,  # Max total connections
+                limit_per_host=10,  # Max connections per host
+                ttl_dns_cache=300,  # DNS cache TTL
+                enable_cleanup_closed=True,  # Clean up closed connections
+            )
+            timeout = aiohttp.ClientTimeout(
+                total=self._opts.timeout,
+                connect=10,  # Connection timeout
+                sock_read=self._opts.timeout  # Read timeout
+            )
+            self._session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+                raise_for_status=False,  # We handle status manually
+            )
+            logger.debug("Created new aiohttp session")
+        return self._session
+
+    async def aclose(self) -> None:
+        """Close the aiohttp session"""
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+            # Wait for connections to close
+            await asyncio.sleep(0.25)
+            self._session = None
+            logger.debug("Closed aiohttp session")
+
+    def synthesize(
+        self,
+        text: str,
+        *,
+        conn_options: agents.APIConnectOptions = agents.DEFAULT_API_CONNECT_OPTIONS,
+    ) -> "ChunkedStream":
+        """
+        Synthesize text to speech
+
+        Args:
+            text: Text to synthesize
+            conn_options: API connection options
+
+        Returns:
+            ChunkedStream that yields audio data
+        """
+        logger.debug(f"Creating synthesis stream for {len(text)} chars")
+        return ChunkedStream(
+            tts=self,
+            input_text=text,
+            conn_options=conn_options,
+            opts=self._opts,
+        )
+
+    @property
+    def model(self) -> str:
+        """Return the model identifier"""
+        return "melotts"
+
+    @property
+    def provider(self) -> str:
+        """Return the provider name"""
+        return "custom-melotts"
+
+    async def __aenter__(self):
+        """Context manager entry"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit with automatic cleanup"""
+        await self.aclose()
+        return False  # Don't suppress exceptions
+
+
+class ChunkedStream(tts.ChunkedStream):
+    """
+    Handles streaming audio from MeloTTS API with retry logic
+    """
+
+    def __init__(
+        self,
+        *,
+        tts: TTS,
+        input_text: str,
+        conn_options: agents.APIConnectOptions,
+        opts: _TTSOptions,
+    ) -> None:
+        super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
+        self._opts = opts
+        self._tts = tts
+
+    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        """
+        Execute the TTS synthesis and stream audio chunks
+
+        Args:
+            output_emitter: Emitter to push audio data to LiveKit
+        """
+        request_id = utils.shortuuid()
+        segment_id = utils.shortuuid()
+
+        # Retry logic for transient failures
+        last_exception = None
+        for attempt in range(self._opts.max_retries):
+            try:
+                logger.info(f"[{request_id}] Synthesis attempt {attempt + 1}/{self._opts.max_retries}")
+
+                # Prepare request payload
+                payload = {
+                    "text": self._input_text,
+                    "language": self._opts.language,
+                    "speaker": self._opts.speaker,
+                    "speed": self._opts.speed,
+                }
+
+                url = f"{self._opts.api_base_url}/synthesize/stream"
+
+                # Make HTTP request to TTS API
+                session = await self._tts._ensure_session()
+
+                async with session.post(
+                    url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=self._opts.timeout),
+                ) as resp:
+                    # Check response status
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        logger.error(f"[{request_id}] API returned status {resp.status}: {error_text}")
+
+                        # Don't retry on 4xx errors (client errors)
+                        if 400 <= resp.status < 500:
+                            raise agents.APIStatusError(
+                                message=f"TTS API returned status {resp.status}: {error_text}",
+                                status_code=resp.status,
+                                request_id=request_id,
+                                body=error_text,
+                            )
+                        # Retry on 5xx errors (server errors)
+                        else:
+                            raise agents.APIConnectionError(
+                                message=f"TTS API server error {resp.status}: {error_text}"
+                            )
+
+                    # Verify content type
+                    content_type = resp.headers.get("Content-Type", "")
+                    if not content_type.startswith("audio/"):
+                        logger.error(f"[{request_id}] Unexpected content type: {content_type}")
+                        raise agents.APIStatusError(
+                            message=f"Unexpected content type: {content_type}. Expected audio/*",
+                            status_code=resp.status,
+                            request_id=request_id,
+                            body=None,
+                        )
+
+                    # Initialize the output emitter
+                    # MeloTTS outputs WAV format
+                    output_emitter.initialize(
+                        mime_type="audio/wav",
+                        sample_rate=self._tts.sample_rate,
+                        num_channels=self._tts.num_channels,
+                    )
+
+                    # Start audio segment
+                    output_emitter.start_segment(segment_id)
+
+                    # Stream audio chunks
+                    chunk_count = 0
+                    bytes_received = 0
+                    async for chunk in resp.content.iter_chunked(8192):
+                        if chunk:
+                            output_emitter.push(chunk)
+                            chunk_count += 1
+                            bytes_received += len(chunk)
+
+                    # End segment and flush
+                    output_emitter.end_segment(segment_id)
+                    output_emitter.flush()
+
+                    logger.info(f"[{request_id}] Success: {bytes_received} bytes in {chunk_count} chunks")
+                    return  # Success - exit retry loop
+
+            except asyncio.TimeoutError as e:
+                last_exception = e
+                logger.warning(f"[{request_id}] Attempt {attempt + 1} timed out")
+                if attempt < self._opts.max_retries - 1:
+                    await asyncio.sleep(self._opts.retry_delay * (attempt + 1))
+                    continue
+                raise agents.APITimeoutError() from e
+
+            except aiohttp.ClientError as e:
+                last_exception = e
+                logger.warning(f"[{request_id}] Attempt {attempt + 1} failed: {str(e)}")
+                if attempt < self._opts.max_retries - 1:
+                    await asyncio.sleep(self._opts.retry_delay * (attempt + 1))
+                    continue
+                raise agents.APIConnectionError(
+                    message=f"Failed to connect to TTS API after {self._opts.max_retries} attempts: {str(e)}"
+                ) from e
+
+            except agents.APIStatusError:
+                # Don't retry on status errors (usually 4xx)
+                raise
+
+            except agents.APIError:
+                # Re-raise other API errors as-is
+                raise
+
+            except Exception as e:
+                last_exception = e
+                logger.error(f"[{request_id}] Unexpected error: {str(e)}", exc_info=True)
+                # Don't retry on unexpected errors
+                raise agents.APIConnectionError(
+                    message=f"Unexpected error during TTS synthesis: {str(e)}"
+                ) from e
+
+        # If we get here, all retries failed
+        if last_exception:
+            logger.error(f"[{request_id}] All {self._opts.max_retries} attempts failed")
+            if isinstance(last_exception, asyncio.TimeoutError):
+                raise agents.APITimeoutError() from last_exception
+            else:
+                raise agents.APIConnectionError(
+                    message=f"Failed after {self._opts.max_retries} attempts"
+                ) from last_exception

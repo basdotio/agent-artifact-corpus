@@ -1,0 +1,64 @@
+{
+  "skill_name": "prompt-evaluation",
+  "evals": [
+    {
+      "id": 1,
+      "name": "classifier-improvement",
+      "prompt": "I have a prompt that classifies customer support tickets into Billing, Technical, Account, or Other. It works most of the time but I keep finding edge cases where it picks the wrong category, especially when a ticket touches two areas (like a billing issue caused by a login problem). Here's the prompt:\n\n```\nClassify this customer support ticket into one of: Billing, Technical, Account, Other.\n\nTicket: {{ticket}}\n\nCategory:\n```\n\nHelp me set this up so I can actually tell when I'm improving it and when I'm just shuffling failures around. I'd prefer promptfoo since I want to compare against Sonnet too, but I'm open to suggestions.",
+      "expected_output": "An evals/ directory with a runnable promptfoo config, a dataset of ~15-30 tickets covering single-area, multi-area and adversarial cases, golden answers, a correctness assertion that handles the multi-area case, and a v2 prompt with a stated hypothesis. Must use *current* Anthropic model IDs (Claude 4.x family) and cite the cross-model comparison rationale.",
+      "assertions": [
+        "Uses promptfoo (user explicitly preferred it); produces promptfooconfig.yaml",
+        "Uses CURRENT Anthropic model IDs (claude-haiku-4-5-*, claude-sonnet-4-*, claude-opus-4-*) — NOT claude-3-* or claude-opus-4-5/4-6 (deprecated for new work)",
+        "Configures a second provider for cross-model comparison",
+        "Sets temperature=0 on both providers for reproducibility",
+        "Dataset contains at least 15 ticket test cases",
+        "Dataset includes at least 3 multi-area tickets matching the user's stated failure mode",
+        "Dataset includes adversarial / ambiguous cases beyond simple typical ones",
+        "Proposes at least one revised prompt with a stated hypothesis tied to a specific failure category",
+        "Grading approach handles multi-label case (set-match, contains-all, or justified single-label with priority rule)",
+        "README lists exact run commands AND mentions --filter-failing for the iteration loop",
+        "Failure-mode analysis groups failures into named categories tied to specific prompt edits"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "sql-generation-eval",
+      "prompt": "I'm working on a prompt that takes a natural-language question about our analytics table and produces a SQL query against it. The table is `orders(id, user_id, product, amount_cents, created_at)`. I want to evaluate this prompt before I trust it in our internal tool. The tricky part is that two different SQL queries can both be correct — what I actually care about is whether the query returns the right rows when executed. How do I set up evals for this?",
+      "expected_output": "A reasoned approach that picks execution-based grading (run SQL against a fixture DB, compare result sets) rather than string match. Should scaffold either a Python eval or a promptfoo config with a custom Python assertion that executes the SQL. Should include a small dataset, a fixture DB, and address the 'multiple correct queries' problem.",
+      "assertions": [
+        "Grader executes SQL against a real fixture DB and compares result sets (not strings)",
+        "Provides a fixture / seed for the orders table",
+        "Custom grader code is present",
+        "Dataset has at least 5 (question, expected) test cases including edge cases",
+        "Result-set comparison handles row ordering correctly (order_matters flag or sorted comparison)",
+        "Addresses 'multiple correct queries' issue explicitly",
+        "Grader handles SQL execution errors gracefully (try/except, surfaces error as fail reason)",
+        "Uses CURRENT Anthropic model IDs if Claude is called for generation",
+        "README explains how to run and how to add test cases"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "meeting-summary-rubric",
+      "prompt": "I'm refining a prompt that summarizes meeting transcripts into a short brief for execs who didn't attend. I have two versions of the prompt and I want to know which is better. The outputs are 3-4 paragraphs so there's no single 'right answer' to match against. What's the right way to set this up? I have about 8 real (anonymized) transcripts I can use.",
+      "expected_output": "Picks model-graded (LLM-as-judge) since outputs are open-ended. Designs a rubric with multi-axis criteria (faithfulness, coverage, conciseness, tone) using BINARY verdicts per axis (or low-cardinality numeric with behavioral anchors). Uses Structured Outputs (output_config.format) — NOT the deprecated prefill pattern. Calibrates the judge against hand-graded examples. Notes that the judge needs the original transcript for faithfulness grading. Caches the rubric.",
+      "assertions": [
+        "Picks model-graded (LLM-as-judge) and explains why",
+        "Uses Structured Outputs (output_config.format with JSON schema) — does NOT use the deprecated <json>-prefill + stop-sequence pattern",
+        "Judge prompt has CoT-before-scoring (reasoning field before verdict)",
+        "Either uses binary verdicts (preferred) OR low-cardinality numeric (1-5 / 0-3) with behavioral anchors — NOT 1-10 or 0-100",
+        "If multi-axis: uses one isolated judge per criterion OR explicitly justifies the composite",
+        "Judge prompt has access to the original transcript for faithfulness",
+        "Recommends calibrating judge against hand-graded examples; mentions Cohen's κ or ≥80% agreement target",
+        "Uses temperature=0 and pins the judge model ID (current 4.x family)",
+        "Caches the rubric / system block (cache_control: ephemeral) for cost",
+        "Both prompt versions present",
+        "Mentions verbosity bias mitigation OR length-neutral instruction in rubric (Claude judges are 91% verbosity-biased)",
+        "README includes runnable command and how to interpret per-axis scores"
+      ],
+      "files": []
+    }
+  ]
+}

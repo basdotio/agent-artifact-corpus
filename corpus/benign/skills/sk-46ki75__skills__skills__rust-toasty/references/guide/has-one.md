@@ -1,0 +1,402 @@
+# HasOne
+
+A `HasOne` relationship connects a parent model to a single child record. Like
+[HasMany](./has-many.md), the foreign key lives on the child model, but
+`HasOne` enforces that at most one child exists per parent.
+
+## Defining a HasOne relationship
+
+Add a `#[has_one]` field on the parent model. Use `Deferred<T>` or
+`Deferred<Option<T>>` for lazy loading, or `T` / `Option<T>` for eager loading.
+The child model must have a corresponding `#[belongs_to]` field with a
+`#[unique]` foreign key (since each parent maps to at most one child):
+
+```rust
+# use toasty::Model;
+#[derive(Debug, toasty::Model)]
+struct User {
+    #[key]
+    #[auto]
+    id: u64,
+
+    name: String,
+
+    #[has_one]
+    profile: toasty::Deferred<Option<Profile>>,
+}
+
+#[derive(Debug, toasty::Model)]
+struct Profile {
+    #[key]
+    #[auto]
+    id: u64,
+
+    #[unique]
+    user_id: Option<u64>,
+
+    #[belongs_to(key = user_id, references = id)]
+    user: toasty::Deferred<Option<User>>,
+
+    bio: String,
+}
+```
+
+The child's foreign key has `#[unique]` instead of `#[index]`, which guarantees
+that only one profile can reference a given user. In the database:
+
+```sql
+CREATE TABLE profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    bio TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_profiles_user_id ON profiles (user_id);
+```
+
+With an eager field, Toasty loads the child whenever it loads the parent:
+
+```rust,ignore
+#[has_one]
+profile: Option<Profile>,
+```
+
+This behaves like an implicit `.include(User::fields().profile())` on every
+query that returns `User`.
+
+## Optional vs required HasOne
+
+The type parameter on `HasOne` controls whether the parent must have a child.
+
+### Optional: `Deferred<Option<Profile>>` or `Option<Profile>`
+
+The parent may or may not have a child. Creating a parent without a child is
+allowed:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[has_one]
+#     profile: toasty::Deferred<Option<Profile>>,
+# }
+# #[derive(Debug, toasty::Model)]
+# struct Profile {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     #[unique]
+#     user_id: Option<u64>,
+#     #[belongs_to(key = user_id, references = id)]
+#     user: toasty::Deferred<Option<User>>,
+#     bio: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+// A user without a profile — this is fine
+let user = toasty::create!(User { name: "Alice" }).exec(&mut db).await?;
+
+assert!(user.profile().exec(&mut db).await?.is_none());
+# Ok(())
+# }
+```
+
+### Required: `Deferred<Profile>` or `Profile`
+
+The parent must have a child. Creating a parent requires providing a child:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     #[has_one]
+#     profile: toasty::Deferred<Profile>,
+# }
+# #[derive(Debug, toasty::Model)]
+# struct Profile {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     #[unique]
+#     user_id: Option<u64>,
+#     #[belongs_to(key = user_id, references = id)]
+#     user: toasty::Deferred<Option<User>>,
+#     bio: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+// Must provide a profile when creating the user
+let user = toasty::create!(User {
+    profile: { bio: "Hello" },
+})
+.exec(&mut db)
+.await?;
+
+let profile = user.profile().exec(&mut db).await?;
+assert_eq!(profile.bio, "Hello");
+# Ok(())
+# }
+```
+
+## Accessing the related record
+
+Call the relation method on the parent instance to load the child:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[has_one]
+#     profile: toasty::Deferred<Option<Profile>>,
+# }
+# #[derive(Debug, toasty::Model)]
+# struct Profile {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     #[unique]
+#     user_id: Option<u64>,
+#     #[belongs_to(key = user_id, references = id)]
+#     user: toasty::Deferred<Option<User>>,
+#     bio: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+# let user = toasty::create!(User { name: "Alice", profile: { bio: "A person" } })
+#     .exec(&mut db)
+#     .await?;
+// For Deferred<Option<Profile>> — returns Option<Profile>
+let profile = user.profile().exec(&mut db).await?;
+
+if let Some(profile) = profile {
+    println!("Bio: {}", profile.bio);
+}
+# Ok(())
+# }
+```
+
+For a required `Deferred<Profile>`, `.get()` returns `Profile` directly (not
+wrapped in `Option`).
+
+Each call to `.profile().exec()` executes a database query. To avoid this, use
+[preloading](./preloading-associations.md).
+
+## Creating through the relation
+
+Create a child for an existing parent through the relation accessor:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[has_one]
+#     profile: toasty::Deferred<Option<Profile>>,
+# }
+# #[derive(Debug, toasty::Model)]
+# struct Profile {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     #[unique]
+#     user_id: Option<u64>,
+#     #[belongs_to(key = user_id, references = id)]
+#     user: toasty::Deferred<Option<User>>,
+#     bio: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let user = toasty::create!(User { name: "Alice" }).exec(&mut db).await?;
+
+let profile = toasty::create!(in user.profile() { bio: "A person" })
+    .exec(&mut db)
+    .await?;
+
+assert_eq!(profile.user_id, Some(user.id));
+# Ok(())
+# }
+```
+
+Or create the parent and child together:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[has_one]
+#     profile: toasty::Deferred<Option<Profile>>,
+# }
+# #[derive(Debug, toasty::Model)]
+# struct Profile {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     #[unique]
+#     user_id: Option<u64>,
+#     #[belongs_to(key = user_id, references = id)]
+#     user: toasty::Deferred<Option<User>>,
+#     bio: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let user = toasty::create!(User {
+    name: "Alice",
+    profile: { bio: "A person" },
+})
+.exec(&mut db)
+.await?;
+# Ok(())
+# }
+```
+
+## Updating the relation
+
+### Replacing with a new child
+
+Create a new child and associate it with the parent in an update:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     name: String,
+#     #[has_one]
+#     profile: toasty::Deferred<Option<Profile>>,
+# }
+# #[derive(Debug, toasty::Model)]
+# struct Profile {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     #[unique]
+#     user_id: Option<u64>,
+#     #[belongs_to(key = user_id, references = id)]
+#     user: toasty::Deferred<Option<User>>,
+#     bio: String,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+# let mut user = toasty::create!(User { name: "Alice", profile: { bio: "Old bio" } })
+#     .exec(&mut db)
+#     .await?;
+user.update()
+    .profile(toasty::create!(Profile { bio: "New bio" }))
+    .exec(&mut db)
+    .await?;
+
+let profile = user.profile().exec(&mut db).await?.unwrap();
+assert_eq!(profile.bio, "New bio");
+# Ok(())
+# }
+```
+
+### Associating an existing child
+
+Pass a reference to an existing child record:
+
+```rust
+# use toasty::Model;
+# #[derive(Debug, toasty::Model)]
+# struct User {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     #[has_one]
+#     profile: toasty::Deferred<Option<Profile>>,
+# }
+# #[derive(Debug, toasty::Model)]
+# struct Profile {
+#     #[key]
+#     #[auto]
+#     id: u64,
+#     #[unique]
+#     user_id: Option<u64>,
+#     #[belongs_to(key = user_id, references = id)]
+#     user: toasty::Deferred<Option<User>>,
+# }
+# async fn __example(mut db: toasty::Db) -> toasty::Result<()> {
+let user = toasty::create!(User {}).exec(&mut db).await?;
+let profile = toasty::create!(Profile {}).exec(&mut db).await?;
+
+User::filter_by_id(user.id)
+    .update()
+    .profile(&profile)
+    .exec(&mut db)
+    .await?;
+# Ok(())
+# }
+```
+
+### Unsetting the relation
+
+For an optional HasOne, pass `None` to disassociate the child:
+
+```rust,ignore
+user.update().profile(None).exec(&mut db).await?;
+
+// The profile no longer belongs to the user
+assert!(user.profile().exec(&mut db).await?.is_none());
+```
+
+What happens to the child when you unset the relation depends on the child's
+foreign key:
+
+| Child's foreign key type | Effect of unsetting |
+|---|---|
+| Required (`user_id: u64`) | Deletes the child record |
+| Optional (`user_id: Option<u64>`) | Sets the foreign key to `NULL` |
+
+## Deleting behavior
+
+When you delete a parent, the behavior depends on the child's foreign key type:
+
+- **Required foreign key** (`user_id: u64`): Toasty deletes the child record,
+  since it cannot exist without a parent.
+- **Optional foreign key** (`user_id: Option<u64>`): Toasty sets the foreign key
+  to `NULL`, leaving the child record in place.
+
+## Multi-step relations (`via`)
+
+Like `HasMany`, a `HasOne` can reach its target through a path of existing
+relations with `via` instead of a single foreign key. Declare it when the path
+is expected to reach at most one target:
+
+```rust,ignore
+// User → account → subscription
+#[has_one(via = account.subscription)]
+subscription: toasty::Deferred<Option<Subscription>>,
+```
+
+See [Multi-step relations on HasMany](./has-many.md#multi-step-relations-via)
+for the full rules — distinct targets and read-only access apply the same way.
+Preload it with `.include()` or project it with `.select()` on SQL backends;
+both are not yet available on DynamoDB.
+
+## What gets generated
+
+For a `User` model with `#[has_one] profile: Deferred<Option<Profile>>`, Toasty
+generates:
+
+| Method | Returns | Description |
+|---|---|---|
+| `user.profile()` | Relation accessor | Accessor for the associated profile |
+| `.get(&mut db)` | `Result<Option<Profile>>` | Load the associated profile |
+| `.create()` | Create builder | Create a profile with the foreign key pre-filled |
+| `toasty::create!(User { profile: { ... } })` | Create builder | Associate a profile on creation |
+| `user.update().profile(...)` | Update builder | Replace or associate a profile |
+| `user.update().profile(None)` | Update builder | Disassociate the profile |
+| `User::fields().profile()` | Field path | Used with `.include()` for preloading |

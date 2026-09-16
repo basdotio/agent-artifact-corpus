@@ -1,0 +1,125 @@
+# promptfoo eval template.
+#
+# Replace placeholders. Then:
+#   export ANTHROPIC_API_KEY=...
+#   npx promptfoo@latest eval
+#   npx promptfoo@latest view
+#
+# Iteration flags worth knowing:
+#   --filter-failing results.json     # re-run only previous failures
+#   --repeat 3                        # average over N runs for variance
+#   --retry-errors                    # rerun only ERROR rows
+#   --fail-on-error                   # exit non-zero on any failure (CI)
+#   --resume                          # continue an aborted run
+#   --grader anthropic:messages:...   # override the judge model
+#
+# Synthesize cases / assertions when stuck:
+#   npx promptfoo@latest generate dataset -c promptfooconfig.yaml -o tests.yaml
+#   npx promptfoo@latest generate assertions --type llm-rubric -w
+
+description: "REPLACE WITH ONE-LINE DESCRIPTION OF THE TASK"
+
+# Option 1: load prompt-builder functions from a Python file
+prompts:
+  - prompts.py:v1_prompt
+  - prompts.py:v2_prompt
+# Option 2: inline Nunjucks templates
+# prompts:
+#   - >-
+#     Classify the following complaint into one of:
+#     Software Bug, Hardware Malfunction, User Error, Feature Request,
+#     Service Outage. Respond with only the category name.
+#     Complaint: {{complaint}}
+#     Classification:
+
+# Anthropic provider strings: `anthropic:messages:<model-id>`.
+# Use `-latest` aliases for auto-updates within a generation, or
+# pinned IDs for frozen reproducibility (regression suites).
+providers:
+  - id: anthropic:messages:claude-haiku-4-5-20251001
+    label: "Haiku 4.5"
+    config:
+      temperature: 0
+      max_tokens: 1024
+  - id: anthropic:messages:claude-sonnet-4-6
+    label: "Sonnet 4.6"
+    config:
+      temperature: 0
+      max_tokens: 1024
+
+# Test cases. Three loading patterns:
+#   tests: dataset.csv            # CSV with `__expected` syntax
+#   tests: file://tests/*.yaml    # multi-file glob
+#   tests: file://gen.py:make     # programmatic generator
+tests: dataset.csv
+
+defaultTest:
+  # Optional: transform every model output before assertions.
+  # Useful for stripping <answer>...</answer> tags from CoT outputs,
+  # or extracting a tool_use block from a tool-using prompt.
+  options:
+    transform: file://transform.py
+
+  # Assertions applied to every test. Mix and match.
+  assert:
+    # ---- Deterministic ----
+    # - type: equals
+    #   value: "expected exact string"
+    # - type: contains-all
+    #   value: ["required", "keywords"]
+    # - type: regex
+    #   value: '^[0-9]+$'
+    # - type: is-json
+    # - type: similar          # cosine similarity of embeddings
+    #   value: "expected meaning"
+    #   threshold: 0.8
+    # - type: levenshtein      # edit-distance tolerance
+    #   value: "expected text"
+    #   threshold: 5
+    # - type: cost
+    #   threshold: 0.001       # USD per row
+    # - type: latency
+    #   threshold: 2000        # ms
+
+    # ---- Custom Python grader ----
+    - type: python
+      value: file://grader.py
+
+    # ---- Model-graded (LLM-as-judge) ----
+    # llm-rubric: general-purpose. Default grader is auto-selected
+    # from available API keys (Anthropic with ANTHROPIC_API_KEY only).
+    - type: llm-rubric
+      provider: anthropic:messages:claude-haiku-4-5-20251001
+      value: "Response is polite and avoids blaming the user"
+      threshold: 0.8
+
+    # Other model-graded options to know:
+    # - type: g-eval                       # CoT-anchored numeric, default 0.7
+    #   value: ["Factually accurate", "Well-structured"]
+    # - type: factuality                   # five-way A/B/C/D/E classifier
+    #   value: "Sacramento is the capital of California"
+    # - type: model-graded-closedqa        # binary Y/N
+    #   value: "Avoids technical jargon"
+    # - type: answer-relevance             # RAG: answer addresses the question
+    #   threshold: 0.7
+    # - type: context-faithfulness         # RAG: claims supported by context
+    #   contextTransform: "output.context"
+    #   threshold: 0.9
+    # - type: context-recall               # RAG: did retrieval cover the answer
+    #   value: "expected fact"
+    # - type: context-relevance            # RAG: is context on-topic
+    #   contextTransform: "output.context"
+    # - type: max-score                    # pick the highest-scoring of N
+    # - type: select-best                  # pick the best of parallel outputs
+    #   value: "criterion for 'best'"
+
+# Optional: persist results for CLI flags like --filter-failing.
+outputPath:
+  - results.json
+  - results.html
+  # - results.junit.xml          # for CI (GitLab, Jenkins, GitHub Actions)
+
+# Optional: post-eval derived metrics computed via math.js or a file.
+# derivedMetrics:
+#   - name: accuracy_excluding_format_fails
+#     value: "(namedScores.correct || 0) / (namedScores.well_formed || 1)"

@@ -173,6 +173,8 @@ categories: [persistence-backdoor, deferred-resolution]
 	}
 }
 
+func ptr(s string) *string { return &s }
+
 func containsErr(errs []error, sub string) bool {
 	for _, e := range errs {
 		if strings.Contains(e.Error(), sub) {
@@ -267,7 +269,7 @@ func TestDeriveFromLayoutWithoutLabelFile(t *testing.T) {
 
 	e := manifest.Entry{ID: "skillcraft-audit", Derive: &manifest.Derive{
 		Layout:       "poc/T*/*",
-		LabelFile:    "", // there is none
+		LabelFile:    ptr(""), // there is none
 		Fidelity:     "class and severity are constants we assert",
 		ClassFrom:    "constant:malicious",
 		SeverityFrom: "constant:high",

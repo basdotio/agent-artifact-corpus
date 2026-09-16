@@ -1,0 +1,149 @@
+---
+name: document
+description: |
+  Document canvas for displaying and editing markdown content.
+  Use when showing documents, emails, or when users need to select text for editing.
+---
+
+# Document Canvas
+
+Display markdown documents with optional text selection and diff highlighting.
+
+## Example Prompts
+
+Try asking Claude:
+
+- "Draft an email to the marketing team about the Q1 product launch"
+- "Help me edit this blog post - show it so I can highlight the parts to revise"
+- "Write a project proposal and let me review it"
+- "Show me the README so I can select sections to update"
+- "Compose a response to this customer complaint"
+
+## Scenarios
+
+### `display` (default)
+Read-only document view with markdown rendering. User can scroll but cannot select text.
+
+```typescript
+canvas_spawn({
+  kind: "document",
+  scenario: "display",
+  config: JSON.stringify({
+    content: "# Hello World\n\nThis is **markdown** content.",
+    title: "My Document"
+  })
+})
+```
+
+### `edit`
+Interactive document view with text selection. User can click and drag to select text, which is sent via IPC in real-time.
+
+- Renders markdown with syntax highlighting (headers, bold, italic, code, links, lists, blockquotes)
+- Diff highlighting: green background for additions, red for deletions
+- Click and drag to select text
+- Selection automatically sent via IPC
+
+```typescript
+canvas_spawn({
+  kind: "document",
+  scenario: "edit",
+  config: JSON.stringify({
+    content: "# My Blog Post\n\nThis is the **introduction** to my post.\n\n## Section One\n\n- Point one\n- Point two",
+    title: "Blog Post Draft",
+    diffs: [
+      {startOffset: 50, endOffset: 62, type: "add"}
+    ]
+  })
+})
+```
+
+### `email-preview`
+Specialized view for email content display.
+
+```typescript
+canvas_spawn({
+  kind: "document",
+  scenario: "email-preview",
+  config: JSON.stringify({
+    content: "Dear Team,\n\nPlease review the attached document.\n\nBest regards,\nAlice",
+    title: "RE: Project Update"
+  })
+})
+```
+
+## Configuration
+
+```typescript
+interface DocumentConfig {
+  content: string;        // Markdown content
+  title?: string;         // Document title (shown in header)
+  diffs?: DocumentDiff[]; // Optional diff markers for highlighting
+  readOnly?: boolean;     // Disable selection (default: false for edit)
+}
+
+interface DocumentDiff {
+  startOffset: number;    // Character offset in content
+  endOffset: number;
+  type: "add" | "delete";
+}
+```
+
+## Markdown Rendering
+
+Supported markdown features:
+- **Headers** (`# H1`, `## H2`, etc.)
+- **Bold** (`**text**`)
+- **Italic** (`*text*`)
+- **Code** (`` `inline` `` and fenced blocks)
+- **Links** (`[text](url)`)
+- **Lists** (`-` or `*` bullets)
+- **Blockquotes** (`>`)
+
+## Selection Result
+
+```typescript
+interface DocumentSelection {
+  selectedText: string;   // The selected text
+  startOffset: number;    // Start character offset
+  endOffset: number;      // End character offset
+  startLine: number;      // Line number (1-based)
+  endLine: number;
+  startColumn: number;    // Column in start line
+  endColumn: number;
+}
+```
+
+## Controls
+
+- **Mouse click and drag**: Select text (edit scenario)
+- `Up/Down` or scroll: Navigate document
+- `q` or `Esc`: Close/cancel
+
+## API Usage
+
+```typescript
+// Display read-only document
+canvas_spawn({
+  kind: "document",
+  scenario: "display",
+  config: JSON.stringify({
+    content: "# My Document\n\nContent here.",
+    title: "View Mode",
+  })
+});
+
+// Interactive editing with selection
+canvas_spawn({
+  kind: "document",
+  scenario: "edit",
+  config: JSON.stringify({
+    content: "# My Document\n\nSelect some **text** here.",
+    title: "Edit Mode",
+    diffs: [{ startOffset: 20, endOffset: 30, type: "add" }],
+  })
+});
+
+// Get current selection from a running canvas
+canvas_selection({ id: "document-1234567890-abc123" });
+// Returns: { success: true, selection: { selectedText: "text", startOffset: 30, endOffset: 34 } }
+```
