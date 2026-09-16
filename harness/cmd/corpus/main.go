@@ -220,6 +220,14 @@ func cmdStats(root string) int {
 	// hole-naming discipline that emits 190 lines of noise is one people learn to ignore.
 	grid := map[string]map[string]int{}
 	byEvasion := map[string]int{}
+	// Credibility is tracked apart from every other count. A hand-pinned truth and a coordinate
+	// derived from someone else's label are both "in the corpus", and summing them into one
+	// number is exactly the flattering arithmetic this repository exists to refuse.
+	selfPinned, derivedCount, harvested := 0, 0, 0
+	// depthUnnamed counts derived malicious samples buried past the calibration tier whose
+	// burying mechanism the upstream never recorded. The tier is the upstream's rating; the
+	// mechanism is simply unknown. It is a declared hole, not a clean row.
+	depthUnnamed := 0
 	type toolStat struct{ samples, gaps, oos int }
 	tools := map[string]*toolStat{}
 
@@ -230,10 +238,28 @@ func cmdStats(root string) int {
 		}
 		bySurface[l.Surface][string(l.Class)]++
 		byOrigin[l.Origin.Type]++
+		switch l.Origin.Type {
+		case "derived":
+			derivedCount++
+			if l.Class == label.Malicious && l.Truth.Tier != "" && len(l.Truth.Evasion) == 0 {
+				if t, ok := tax.Tiers[l.Truth.Tier]; ok && !t.Calibration {
+					depthUnnamed++
+				}
+			}
+		case "harvested":
+			harvested++
+		default:
+			selfPinned++
+		}
 
 		for _, t := range l.Truth.Techniques {
 			performed[t]++
 			addCell(grid, tax.Dimension(t), l.Truth.Tier)
+		}
+		// Derived samples name their dimension directly: the upstream knew its category, not
+		// which technique the sample uses.
+		for _, d := range l.Truth.Dimensions {
+			addCell(grid, d, l.Truth.Tier)
 		}
 		for _, t := range l.Truth.Resembles {
 			resembled[t]++
@@ -264,6 +290,17 @@ func cmdStats(root string) int {
 		fmt.Printf("    %-14s %d\n", c, byClass[c])
 	}
 
+	fmt.Println("  by coordinate credibility — never summed")
+	fmt.Printf("    %-34s %d\n", "hand-pinned (we wrote the truth)", selfPinned)
+	fmt.Printf("    %-34s %d\n", "derived (upstream label + rule)", derivedCount)
+	if harvested > 0 {
+		fmt.Printf("    %-34s %d\n", "harvested (collected, not written)", harvested)
+	}
+	if depthUnnamed > 0 {
+		fmt.Printf("    of the derived, %d are buried past the calibration tier with no evasion\n", depthUnnamed)
+		fmt.Printf("      mechanism recorded upstream — the depth is known, the mechanism is not\n")
+	}
+
 	fmt.Println("  by surface")
 	for _, s := range sortedKeys(bySurface) {
 		m := bySurface[s]
@@ -271,7 +308,7 @@ func cmdStats(root string) int {
 	}
 
 	fmt.Println("  by origin")
-	for _, o := range []string{"real-world", "promoted", "reconstruction", "synthetic"} {
+	for _, o := range []string{"real-world", "promoted", "reconstruction", "synthetic", "harvested", "derived"} {
 		if byOrigin[o] > 0 {
 			fmt.Printf("    %-14s %d\n", o, byOrigin[o])
 		}
@@ -438,6 +475,19 @@ func cmdFetch(root string, want []string) int {
 // into layer 1 versus derived locally from a reference — is a deliberate later step, not a
 // side effect of inspecting coverage.
 func cmdDerive(root string, want []string) int {
+	// --write is opt-in. Reading coverage must never have the side effect of rewriting the
+	// corpus, so the dry run is the default and materialising is a thing you ask for.
+	write := false
+	var args []string
+	for _, a := range want {
+		if a == "--write" {
+			write = true
+			continue
+		}
+		args = append(args, a)
+	}
+	want = args
+
 	tax, err := taxonomy.Load(filepath.Join(root, "taxonomy"))
 	if err != nil {
 		fatal(err)
@@ -496,6 +546,23 @@ func cmdDerive(root string, want []string) int {
 		if res != nil {
 			reportDerived(tax, res)
 		}
+
+		if write && res != nil {
+			if len(errs) > 0 {
+				// Materialising a derivation that already has problems would write labels whose
+				// coordinates we have just been told not to trust.
+				fmt.Fprintf(os.Stderr, "  refusing to write: resolve the %d problem(s) below first\n", len(errs))
+			} else {
+				plans, perrs := derive.PlanMaterialize(e, res)
+				errs = append(errs, perrs...)
+				if len(perrs) == 0 {
+					n, werrs := derive.Materialize(root, upRoot, e, plans)
+					errs = append(errs, werrs...)
+					fmt.Printf("  wrote %d sample(s) into corpus/\n", n)
+				}
+			}
+		}
+
 		if len(errs) > 0 {
 			sort.Slice(errs, func(i, j int) bool { return errs[i].Error() < errs[j].Error() })
 			fmt.Printf("\n  %d problem(s) — the derivation is not trustworthy until these are resolved:\n", len(errs))

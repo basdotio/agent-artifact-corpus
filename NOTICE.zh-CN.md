@@ -8,7 +8,17 @@
 
 当前 vendored 的第三方内容：
 
-  （暂无。第 1 层目前只有 basdotio 自己编写的样本。）
+  optimuslabs-io/skillsgoat —— MIT
+    https://github.com/optimuslabs-io/skillsgoat @ c03d70d80c32
+    76 个样本树，位于 corpus/malicious/skills/sg-* 和 corpus/benign/skills/sg-*，
+    原样拷自该 commit 的 pasture/<category>/<id>/skill/ 目录。
+
+    它们的标签是**生成的，不是 vendored 的**：坐标是我们的，按 manifest/corpora.yaml
+    里的规则从 skillsgoat 自己的 expected.yaml 派生而来。每个标签都记着
+    origin.type `derived` 和指回上游路径的 derived_from。
+
+    上游自己的 expected.yaml **刻意不拷贝** —— 放在样本树里的标签会被当成样本的一部分
+    读取，这个错误已经污染过本语料库的测量一次。
 
 关于强制执行的说明：标签与 NOTICE 的一致性校验**尚未实现**。今天 `make validate` 只检查 `origin.license` 是否属于第 1 层允许的宽松许可之一，它不读这个文件。在那项检查落地之前，让此表与标签保持同步是一项人工义务。这一点写在这里而不是略去，因为署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，因此是许可证义务，不是记账。
 

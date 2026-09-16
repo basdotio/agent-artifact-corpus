@@ -74,6 +74,20 @@ type Derive struct {
 	// root, e.g. "pasture/<category>/<id>/{expected.yaml, skill/}".
 	Layout string `yaml:"layout"`
 
+	// TreeSubdir is the directory inside each sample that holds the artifact itself, as
+	// opposed to the upstream's own label. skillsgoat keeps expected.yaml beside a skill/
+	// directory; only the latter is the sample a scanner is pointed at. Copying the upstream
+	// label in would repeat the mistake that corrupted this corpus once already, when a label
+	// inside the tree was read as part of the sample.
+	TreeSubdir string `yaml:"tree_subdir"`
+
+	// Surface is the load surface every sample from this upstream lands on.
+	Surface string `yaml:"surface"`
+
+	// IDPrefix namespaces derived sample ids so they cannot collide with hand-pinned ones and
+	// so their source is visible at a glance, e.g. "sg" for skillsgoat.
+	IDPrefix string `yaml:"id_prefix"`
+
 	// TierFrom / SeverityFrom / ClassFrom name where each mechanical axis is read. These are
 	// high-fidelity: a prefix or a field, no judgement.
 	TierFrom     string `yaml:"tier_from"`

@@ -453,7 +453,13 @@ func (l *Label) validateDepth(tax *taxonomy.Set) []error {
 	// surface check suffices, at the deepest one no amount of matching wins and the reader
 	// needs semantics. What makes it hard is already written out in truth.differs_by, which
 	// is required for the class and is better prose than any vocabulary term would be.
-	if l.Class == Malicious && !tier.Calibration && len(l.Truth.Evasion) == 0 {
+	// Derived samples are exempt. Their tier is the upstream's own rating, not ours, and the
+	// upstream category often describes what a sample achieves while saying nothing about the
+	// mechanism. Enforcing the rule there would leave two dishonest options: invent a
+	// mechanism, or downgrade the tier — and downgrading is the worse of the two, because it
+	// moves the sample into the calibration set, where a miss is supposed to mean the scanner
+	// is broken. The gap is real, so `make stats` counts and names it instead.
+	if l.Class == Malicious && !tier.Calibration && len(l.Truth.Evasion) == 0 && l.Origin.Type != "derived" {
 		bad("tier %s is past the calibration level, so something is doing the burying and "+
 			"truth.evasion must name it. If nothing does, the sample belongs at the "+
 			"calibration tier", l.Truth.Tier)
