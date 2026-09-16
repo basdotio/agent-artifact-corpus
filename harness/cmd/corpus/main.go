@@ -39,7 +39,7 @@ func main() {
 	case "stats":
 		os.Exit(cmdStats(root))
 	case "fetch":
-		os.Exit(cmdFetch(root))
+		os.Exit(cmdFetch(root, os.Args[2:]))
 	default:
 		usage()
 		os.Exit(2)
@@ -51,7 +51,7 @@ func usage() {
 
   validate   check every _label.yaml and manifest entry, and run the leakage gate
   stats      corpus composition
-  fetch      materialise layer 2 into ./cache (network)`)
+  fetch      materialise named layer-2 entries into ./cache (network)`)
 }
 
 // ---------- validate ----------
@@ -212,9 +212,15 @@ func cmdStats(root string) int {
 
 // ---------- fetch ----------
 
-func cmdFetch(root string) int {
+// cmdFetch materialises named entries. It deliberately has no "fetch everything" default:
+// the manifest holds 138,133 skills in one entry and 7,944 in another, so a bare `fetch`
+// that pulled all thirteen would be several gigabytes triggered by a command that reads
+// like a no-op. Naming what you want is one word of typing and removes the trap.
+func cmdFetch(root string, want []string) int {
 	manifests, _ := filepath.Glob(filepath.Join(root, "manifest", "*.yaml"))
 	cache := filepath.Join(root, "cache")
+
+	var all []manifest.Entry
 	rc := 0
 	for _, mp := range manifests {
 		f, err := manifest.Load(mp)
@@ -223,14 +229,39 @@ func cmdFetch(root string) int {
 			rc = 1
 			continue
 		}
-		for _, e := range f.Entries {
-			dst, err := fetch.Get(e, cache)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %-26s FAILED %v\n", e.ID, err)
-				rc = 1
-				continue
-			}
-			fmt.Printf("  %-26s %s\n", e.ID, rel(root, dst))
+		all = append(all, f.Entries...)
+	}
+
+	if len(want) == 0 {
+		fmt.Println("Name the entries to fetch. Available:\n")
+		fmt.Printf("  %-28s %-16s %-8s %s\n", "ID", "ROLE", "SAMPLES", "LICENSE")
+		for _, e := range all {
+			fmt.Printf("  %-28s %-16s %-8d %s\n", e.ID, e.Role, e.Malicious+e.Benign, e.License)
+		}
+		fmt.Println("\n  corpus fetch <id> [<id>...]")
+		return 2
+	}
+
+	byID := map[string]manifest.Entry{}
+	for _, e := range all {
+		byID[e.ID] = e
+	}
+	for _, id := range want {
+		e, ok := byID[id]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "  %-28s no such entry\n", id)
+			rc = 1
+			continue
+		}
+		dst, err := fetch.Get(e, cache)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  %-28s FAILED %v\n", e.ID, err)
+			rc = 1
+			continue
+		}
+		fmt.Printf("  %-28s %s\n", e.ID, rel(root, dst))
+		for _, p := range e.Prep {
+			fmt.Printf("  %-28s PREP REQUIRED: %s\n", "", p)
 		}
 	}
 	return rc

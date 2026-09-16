@@ -12,7 +12,7 @@ HARNESS := cd harness && go run ./cmd/corpus
 help:
 	@echo "validate   check every _label.yaml and manifest entry; run the leakage gate (offline)"
 	@echo "stats      corpus composition"
-	@echo "fetch      materialise layer 2 into ./cache (network; verifies pinned commits)"
+	@echo "fetch      materialise named layer-2 entries: make fetch E=\"id1 id2\""
 	@echo "test       harness unit tests"
 
 ## Offline. CI runs this on every change.
@@ -22,9 +22,12 @@ validate:
 stats:
 	@$(HARNESS) stats
 
-## Network. Refuses to silently re-pull a checkout that has drifted from its pinned commit.
+## Network. Name the entries: `make fetch E="datadog-ai-skills skillsgoat"`.
+## Bare `make fetch` lists what is available and fetches nothing — one manifest entry is
+## 138,133 samples, so there is no fetch-everything default.
+## Refuses to silently re-pull a checkout that has drifted from its pinned commit.
 fetch:
-	@$(HARNESS) fetch
+	@$(HARNESS) fetch $(E)
 
 test:
 	@cd harness && go test -race ./...
