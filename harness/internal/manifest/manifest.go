@@ -61,6 +61,27 @@ type Entry struct {
 	Derive *Derive `yaml:"derive"`
 }
 
+// Targets is one or more axis placements for a single upstream token, written in YAML as
+// either a scalar or a list. One token frequently carries two facts at once: skillcraft-audit's
+// `hard` says both how deep the sample sits and that a compliance narrative is what buries it.
+// Forcing a single target would mean dropping one of them, and a silently dropped mechanism is
+// exactly the quiet loss this corpus exists to refuse.
+type Targets []string
+
+func (t *Targets) UnmarshalYAML(value *yaml.Node) error {
+	var one string
+	if err := value.Decode(&one); err == nil {
+		*t = Targets{one}
+		return nil
+	}
+	var many []string
+	if err := value.Decode(&many); err != nil {
+		return fmt.Errorf("category_axis_map value must be a string or a list of strings: %w", err)
+	}
+	*t = many
+	return nil
+}
+
 // Derive is the rule that turns one upstream dataset's labels into our coordinates.
 //
 // It is per-axis on purpose. Upstream taxonomies conflate the three axes we deliberately
@@ -88,17 +109,45 @@ type Derive struct {
 	// so their source is visible at a glance, e.g. "sg" for skillsgoat.
 	IDPrefix string `yaml:"id_prefix"`
 
-	// TierFrom / SeverityFrom / ClassFrom name where each mechanical axis is read. These are
-	// high-fidelity: a prefix or a field, no judgement.
+	// LabelFile is the upstream's own per-sample label, read for the fields below. Empty means
+	// the upstream ships no per-sample label at all — skillcraft-audit is that case — and then
+	// every axis has to come from the path or from a constant, which is a weaker derivation
+	// and must say so in Fidelity.
+	LabelFile string `yaml:"label_file"`
+
+	// TierFrom / SeverityFrom / ClassFrom name where each axis is read. Each takes one of:
+	//
+	//   field:<name>        a field in the upstream label file
+	//   id-prefix           the leading numeric token of the sample directory name
+	//   constant:<value>    asserted by us, not read from anywhere
+	//
+	// `constant:` is the weakest and is called out for that reason: it is a judgement applied
+	// uniformly to every sample in the entry, not something the upstream told us.
 	TierFrom     string `yaml:"tier_from"`
 	SeverityFrom string `yaml:"severity_from"`
 	ClassFrom    string `yaml:"class_from"`
+
+	// IDFrom says what identifies a sample when the upstream ships no label to read an id
+	// from. `path-segments:1,0` joins the directory names at those depths, which is how a
+	// corpus identified by its layout gets a stable name: skillcraft-audit's samples are
+	// T11-hook-weaponize/easy, and neither segment alone is unique.
+	IDFrom string `yaml:"id_from"`
+
+	// CategoryFrom says where the tokens fed to CategoryAxisMap come from:
+	//
+	//   field:<name>            a list field in the upstream label file (the default)
+	//   path-segments:<a,b,…>   directory names at those depths above the sample, 0 being the
+	//                           sample directory itself
+	//
+	// Path segments are how a corpus that labels by directory layout gets read without
+	// inventing a label file for it.
+	CategoryFrom string `yaml:"category_from"`
 
 	// CategoryAxisMap is the lossy part: each upstream category maps to one of our axis
 	// values, written as "dim:<x>", "evasion:<y>", "tier:<z>" or "ignore". A category present
 	// upstream but absent here fails derivation rather than being silently dropped — the same
 	// rule the tool dimension_map follows.
-	CategoryAxisMap map[string]string `yaml:"category_axis_map"`
+	CategoryAxisMap map[string]Targets `yaml:"category_axis_map"`
 
 	// DimensionOverrides assigns a dimension to a named upstream sample that the category map
 	// cannot place, keyed by upstream sample id.
@@ -198,10 +247,15 @@ func (f *File) Validate() []error {
 				bad("%s: derive.layout is empty — it must say where the sample tree and the "+
 					"upstream label sit within the fetched root", e.ID)
 			}
-			for cat, target := range d.CategoryAxisMap {
-				if !validAxisTarget(target) {
-					bad("%s: derive.category_axis_map[%q] is %q — it must be dim:<x>, "+
-						"evasion:<y>, tier:<z> or ignore", e.ID, cat, target)
+			for cat, targets := range d.CategoryAxisMap {
+				if len(targets) == 0 {
+					bad("%s: derive.category_axis_map[%q] is empty", e.ID, cat)
+				}
+				for _, target := range targets {
+					if !validAxisTarget(target) {
+						bad("%s: derive.category_axis_map[%q] is %q — it must be dim:<x>, "+
+							"evasion:<y>, tier:<z> or ignore", e.ID, cat, target)
+					}
 				}
 			}
 		}

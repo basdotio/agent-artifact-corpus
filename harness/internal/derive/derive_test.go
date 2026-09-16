@@ -42,7 +42,7 @@ func writeSample(t *testing.T, root, category, id, body string) {
 	}
 }
 
-func entry(m map[string]string) manifest.Entry {
+func entry(m map[string]manifest.Targets) manifest.Entry {
 	return manifest.Entry{
 		ID: "skillsgoat",
 		Derive: &manifest.Derive{
@@ -72,10 +72,10 @@ verdict: benign
 categories: [benign]
 `)
 
-	m := map[string]string{
-		"persistence-backdoor": "dim:backdoor",
-		"obfuscation-encoding": "evasion:base64-wrapper",
-		"benign":               "ignore",
+	m := map[string]manifest.Targets{
+		"persistence-backdoor": {"dim:backdoor"},
+		"obfuscation-encoding": {"evasion:base64-wrapper"},
+		"benign":               {"ignore"},
 	}
 	res, errs := Derive(entry(m), root, testTax())
 	if len(errs) != 0 {
@@ -112,7 +112,7 @@ verdict: malicious
 severity: high
 categories: [persistence-backdoor, something-new]
 `)
-	m := map[string]string{"persistence-backdoor": "dim:backdoor"}
+	m := map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}}
 	_, errs := Derive(entry(m), root, testTax())
 	if !containsErr(errs, `category "something-new" has no category_axis_map entry`) {
 		t.Fatalf("an unmapped category must fail derivation, got:\n%v", errs)
@@ -128,7 +128,7 @@ verdict: malicious
 severity: high
 categories: [persistence-backdoor]
 `)
-	m := map[string]string{"persistence-backdoor": "dim:telepathy"}
+	m := map[string]manifest.Targets{"persistence-backdoor": {"dim:telepathy"}}
 	_, errs := Derive(entry(m), root, testTax())
 	if !containsErr(errs, `dimension "telepathy", which is not in the vocabulary`) {
 		t.Fatalf("an axis target outside the vocabulary must fail, got:\n%v", errs)
@@ -145,7 +145,7 @@ verdict: malicious
 severity: critical
 categories: [llm-judge-manipulation]
 `)
-	m := map[string]string{"llm-judge-manipulation": "evasion:judge-targeting"}
+	m := map[string]manifest.Targets{"llm-judge-manipulation": {"evasion:judge-targeting"}}
 	_, errs := Derive(entry(m), root, testTax())
 	if !containsErr(errs, "sits on no recall axis") {
 		t.Fatalf("a malicious sample with no dimension must be flagged, got:\n%v", errs)
@@ -163,9 +163,9 @@ verdict: malicious
 severity: high
 categories: [persistence-backdoor, deferred-resolution]
 `)
-	m := map[string]string{
-		"persistence-backdoor": "dim:backdoor",
-		"deferred-resolution":  "tier:structural", // disagrees with the 200 prefix -> evasive
+	m := map[string]manifest.Targets{
+		"persistence-backdoor": {"dim:backdoor"},
+		"deferred-resolution":  {"tier:structural"}, // disagrees with the 200 prefix -> evasive
 	}
 	_, errs := Derive(entry(m), root, testTax())
 	if !containsErr(errs, "id prefix says tier") {
@@ -195,7 +195,7 @@ verdict: malicious
 severity: high
 categories: [dispersion-splitting]
 `)
-	e := entry(map[string]string{"dispersion-splitting": "evasion:base64-wrapper"})
+	e := entry(map[string]manifest.Targets{"dispersion-splitting": {"evasion:base64-wrapper"}})
 	e.Derive.DimensionOverrides = map[string]string{"200-split": "exfiltration"}
 
 	res, errs := Derive(e, root, testTax())
@@ -222,7 +222,7 @@ verdict: malicious
 severity: high
 categories: [persistence-backdoor]
 `)
-	e := entry(map[string]string{"persistence-backdoor": "dim:backdoor"})
+	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
 	e.Derive.DimensionOverrides = map[string]string{"200-x": "exfiltration"}
 
 	_, errs := Derive(e, root, testTax())
@@ -240,11 +240,82 @@ verdict: malicious
 severity: high
 categories: [persistence-backdoor]
 `)
-	e := entry(map[string]string{"persistence-backdoor": "dim:backdoor"})
+	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
 	e.Derive.DimensionOverrides = map[string]string{"200-other": "telepathy"}
 
 	_, errs := Derive(e, root, testTax())
 	if !containsErr(errs, `is "telepathy", which is not a dimension`) {
 		t.Fatalf("an override outside the vocabulary must fail, got:\n%v", errs)
+	}
+}
+
+// A second upstream shape: no per-sample label at all, everything encoded in the directory
+// layout. skillcraft-audit is this case, and reading it must not require inventing a label
+// file for it.
+func TestDeriveFromLayoutWithoutLabelFile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, lvl := range []string{"easy", "hard"} {
+		dir := filepath.Join(root, "poc", "T11-hook-weaponize", lvl)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# s\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e := manifest.Entry{ID: "skillcraft-audit", Derive: &manifest.Derive{
+		Layout:       "poc/T*/*",
+		LabelFile:    "", // there is none
+		Fidelity:     "class and severity are constants we assert",
+		ClassFrom:    "constant:malicious",
+		SeverityFrom: "constant:high",
+		TierFrom:     "path-segment",
+		IDFrom:       "path-segments:1,0",
+		CategoryFrom: "path-segments:0,1",
+		CategoryAxisMap: map[string]manifest.Targets{
+			"easy":               {"tier:plain"},
+			"hard":               {"tier:evasive", "evasion:judge-targeting"},
+			"T11-hook-weaponize": {"dim:backdoor"},
+		},
+	}}
+	tax := testTax()
+	tax.Evasions["judge-targeting"] = taxonomy.Evasion{ID: "judge-targeting", ImpliesTier: "evasive"}
+
+	res, errs := Derive(e, root, tax)
+	if len(errs) != 0 {
+		t.Fatalf("expected a clean derivation, got:\n%v", errs)
+	}
+	if len(res.Coords) != 2 {
+		t.Fatalf("expected 2 coords, got %d", len(res.Coords))
+	}
+
+	byID := map[string]Coord{}
+	for _, c := range res.Coords {
+		byID[c.UpstreamID] = c
+	}
+	// Neither path segment alone is unique, so the id is the join of both.
+	easy, ok := byID["T11-hook-weaponize-easy"]
+	if !ok {
+		t.Fatalf("expected a composite id, got %v", byID)
+	}
+	if easy.Class != "malicious" || easy.Severity != "high" {
+		t.Fatalf("constants should supply class and severity: %+v", easy)
+	}
+	if easy.Tier != "plain" || len(easy.Evasion) != 0 {
+		t.Fatalf("easy should be plain with no mechanism: %+v", easy)
+	}
+
+	// One token carrying two facts: how deep, and what does the burying.
+	hard := byID["T11-hook-weaponize-hard"]
+	if hard.Tier != "evasive" {
+		t.Fatalf("hard should be evasive, got %q", hard.Tier)
+	}
+	if len(hard.Evasion) != 1 || hard.Evasion[0] != "judge-targeting" {
+		t.Fatalf("hard should also carry its mechanism, got %v", hard.Evasion)
+	}
+	if len(hard.Dimensions) != 1 || hard.Dimensions[0] != "backdoor" {
+		t.Fatalf("dimension should come from the technique segment, got %v", hard.Dimensions)
 	}
 }

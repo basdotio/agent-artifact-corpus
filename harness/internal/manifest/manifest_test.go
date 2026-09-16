@@ -99,7 +99,7 @@ func TestValidateDeriveBlock(t *testing.T) {
 			derive: &Derive{
 				Layout:          "pasture/*/*",
 				Fidelity:        "tier mechanical, dimension lossy",
-				CategoryAxisMap: map[string]string{"a": "dim:backdoor", "b": "evasion:zero-width", "c": "tier:plain", "d": "ignore"},
+				CategoryAxisMap: map[string]Targets{"a": {"dim:backdoor"}, "b": {"evasion:zero-width"}, "c": {"tier:plain"}, "d": {"ignore"}},
 			},
 		},
 		{
@@ -118,7 +118,7 @@ func TestValidateDeriveBlock(t *testing.T) {
 			name: "an axis target must name its axis",
 			derive: &Derive{
 				Layout: "x/*", Fidelity: "f",
-				CategoryAxisMap: map[string]string{"a": "backdoor"},
+				CategoryAxisMap: map[string]Targets{"a": {"backdoor"}},
 			},
 			wantErr: "must be dim:<x>, evasion:<y>, tier:<z> or ignore",
 		},
@@ -126,7 +126,7 @@ func TestValidateDeriveBlock(t *testing.T) {
 			name: "an empty value after the prefix is not a target",
 			derive: &Derive{
 				Layout: "x/*", Fidelity: "f",
-				CategoryAxisMap: map[string]string{"a": "dim:"},
+				CategoryAxisMap: map[string]Targets{"a": {"dim:"}},
 			},
 			wantErr: "must be dim:<x>",
 		},

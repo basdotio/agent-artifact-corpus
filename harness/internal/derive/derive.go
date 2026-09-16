@@ -92,23 +92,25 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 
 	// Semantic check of the map targets, which the manifest package could not do without a
 	// taxonomy dependency. The value after the colon must be a real member of its axis.
-	for cat, target := range d.CategoryAxisMap {
-		axis, val, ok := splitTarget(target)
-		if !ok {
-			continue // shape already reported by manifest.Validate
-		}
-		switch axis {
-		case "dim":
-			if !oneOf(val, tax.Dimensions) {
-				bad("%s: category_axis_map[%q] targets dimension %q, which is not in the vocabulary", e.ID, cat, val)
+	for cat, targets := range d.CategoryAxisMap {
+		for _, target := range targets {
+			axis, val, ok := splitTarget(target)
+			if !ok {
+				continue // shape already reported by manifest.Validate
 			}
-		case "evasion":
-			if _, ok := tax.Evasions[val]; !ok {
-				bad("%s: category_axis_map[%q] targets evasion %q, which is not in the vocabulary", e.ID, cat, val)
-			}
-		case "tier":
-			if _, ok := tax.Tiers[val]; !ok {
-				bad("%s: category_axis_map[%q] targets tier %q, which is not in the vocabulary", e.ID, cat, val)
+			switch axis {
+			case "dim":
+				if !oneOf(val, tax.Dimensions) {
+					bad("%s: category_axis_map[%q] targets dimension %q, which is not in the vocabulary", e.ID, cat, val)
+				}
+			case "evasion":
+				if _, ok := tax.Evasions[val]; !ok {
+					bad("%s: category_axis_map[%q] targets evasion %q, which is not in the vocabulary", e.ID, cat, val)
+				}
+			case "tier":
+				if _, ok := tax.Tiers[val]; !ok {
+					bad("%s: category_axis_map[%q] targets tier %q, which is not in the vocabulary", e.ID, cat, val)
+				}
 			}
 		}
 	}
@@ -119,22 +121,41 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		}
 	}
 
-	dirs, skipped, err := sampleDirs(root, d.Layout)
+	labelFile := d.LabelFile
+	if labelFile == "" && d.CategoryFrom == "" && d.TierFrom != "path-segment" {
+		// Back-compatible default: an entry written before label_file existed means
+		// expected.yaml, which is what skillsgoat uses.
+		labelFile = "expected.yaml"
+	}
+
+	dirs, skipped, err := sampleDirs(root, d.Layout, labelFile)
 	if err != nil {
 		return nil, []error{fmt.Errorf("%s: %w", e.ID, err)}
 	}
 
 	res := &Result{CategorySeen: map[string]int{}, Skipped: skipped}
 	for _, dir := range dirs {
-		up, err := readUpstream(dir)
+		up, err := readUpstream(dir, labelFile)
 		if err != nil {
 			bad("%s: %v", e.ID, err)
 			continue
 		}
+		if rest, ok := strings.CutPrefix(d.IDFrom, "path-segments:"); ok {
+			var parts []string
+			for _, n := range strings.Split(rest, ",") {
+				if seg := pathSegment(dir, strings.TrimSpace(n)); seg != "" {
+					parts = append(parts, seg)
+				}
+			}
+			if len(parts) > 0 {
+				up.ID = strings.Join(parts, "-")
+			}
+		}
 		rel, _ := filepath.Rel(root, dir)
 		c := Coord{UpstreamID: up.ID, SamplePath: rel}
 
-		switch up.Verdict {
+		verdict := resolve(d.ClassFrom, up.Verdict, dir)
+		switch verdict {
 		case "malicious":
 			c.Class = "malicious"
 		case "benign":
@@ -144,51 +165,58 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			// derived label. So it lands as benign, and its decoy nature travels in prose.
 			c.Class = "benign"
 		default:
-			bad("%s/%s: upstream verdict %q is neither malicious nor benign", e.ID, up.ID, up.Verdict)
+			bad("%s/%s: resolved class %q is neither malicious nor benign", e.ID, up.ID, verdict)
 			continue
 		}
 
 		if c.Class == "malicious" {
-			c.Severity = up.Severity
-			if tok := prefixToken(filepath.Base(dir)); tok != "" {
-				if t, ok := tax.TierByMapsToken(tok); ok {
-					c.Tier = t.ID
+			c.Severity = resolve(d.SeverityFrom, up.Severity, dir)
+			if d.TierFrom == "id-prefix" || d.TierFrom == "" {
+				if tok := prefixToken(filepath.Base(dir)); tok != "" {
+					if t, ok := tax.TierByMapsToken(tok); ok {
+						c.Tier = t.ID
+					} else {
+						bad("%s/%s: id prefix %q maps to no tier via any tier's maps_to", e.ID, up.ID, tok)
+					}
 				} else {
-					bad("%s/%s: id prefix %q maps to no tier via any tier's maps_to", e.ID, up.ID, tok)
+					bad("%s/%s: no numeric id prefix to read a tier from", e.ID, up.ID)
 				}
-			} else {
-				bad("%s/%s: no numeric id prefix to read a tier from", e.ID, up.ID)
 			}
 		}
 
-		for _, cat := range up.Categories {
+		for _, cat := range categoryTokens(d, up, dir) {
 			res.CategorySeen[cat]++
-			target, mapped := d.CategoryAxisMap[cat]
+			targets, mapped := d.CategoryAxisMap[cat]
 			if !mapped {
 				bad("%s: upstream category %q has no category_axis_map entry — map it to dim:, "+
 					"evasion:, tier: or ignore; leaving it out silently drops the axis it carries", e.ID, cat)
 				continue
 			}
-			axis, val, ok := splitTarget(target)
-			if !ok {
-				continue
-			}
-			switch axis {
-			case "dim":
-				if c.Class == "malicious" {
-					c.Dimensions = appendUnique(c.Dimensions, val)
+			for _, target := range targets {
+				axis, val, ok := splitTarget(target)
+				if !ok {
+					continue
 				}
-			case "evasion":
-				if c.Class == "malicious" {
-					c.Evasion = appendUnique(c.Evasion, val)
+				switch axis {
+				case "dim":
+					if c.Class == "malicious" {
+						c.Dimensions = appendUnique(c.Dimensions, val)
+					}
+				case "evasion":
+					if c.Class == "malicious" {
+						c.Evasion = appendUnique(c.Evasion, val)
+					}
+				case "tier":
+					// Where an id prefix gave a tier it is authoritative and a disagreement is
+					// surfaced. Where it did not, the token is the only tier source there is.
+					switch {
+					case c.Tier == "":
+						c.Tier = val
+					case c.Tier != val:
+						bad("%s/%s: id prefix says tier %q but token %q says %q", e.ID, up.ID, c.Tier, cat, val)
+					}
+				case "ignore":
 				}
-			case "tier":
-				// A category may hint a tier, but the id prefix is authoritative. Disagreement
-				// is worth surfacing rather than silently preferring one.
-				if c.Tier != "" && c.Tier != val {
-					bad("%s/%s: id prefix says tier %q but category %q says %q", e.ID, up.ID, c.Tier, cat, val)
-				}
-			case "ignore":
 			}
 		}
 
@@ -226,7 +254,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 // many matches were skipped for having no expected.yaml. A sample directory is defined as one
 // that carries an upstream label; a layout match without one is an intermediate directory
 // (skillsgoat's compound-chain nodes are the case) and is counted, not read.
-func sampleDirs(root, layout string) (dirs []string, skipped int, err error) {
+func sampleDirs(root, layout, labelFile string) (dirs []string, skipped int, err error) {
 	if layout == "" {
 		return nil, 0, fmt.Errorf("derive.layout is empty")
 	}
@@ -239,23 +267,30 @@ func sampleDirs(root, layout string) (dirs []string, skipped int, err error) {
 		if err != nil || !fi.IsDir() {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(m, "expected.yaml")); err != nil {
-			skipped++
-			continue
+		if labelFile != "" {
+			if _, err := os.Stat(filepath.Join(m, labelFile)); err != nil {
+				skipped++
+				continue
+			}
 		}
 		dirs = append(dirs, m)
 	}
 	sort.Strings(dirs)
 	if len(dirs) == 0 {
-		return nil, skipped, fmt.Errorf("layout %q matched no labelled sample directories under %s — is the corpus fetched?", layout, root)
+		return nil, skipped, fmt.Errorf("layout %q matched no sample directories under %s — is the corpus fetched?", layout, root)
 	}
 	return dirs, skipped, nil
 }
 
-func readUpstream(dir string) (*upstreamLabel, error) {
-	b, err := os.ReadFile(filepath.Join(dir, "expected.yaml"))
+func readUpstream(dir, labelFile string) (*upstreamLabel, error) {
+	// An upstream with no per-sample label is a legitimate shape, not an error: skillcraft-audit
+	// encodes everything in its directory layout. The sample directory name still identifies it.
+	if labelFile == "" {
+		return &upstreamLabel{ID: filepath.Base(dir)}, nil
+	}
+	b, err := os.ReadFile(filepath.Join(dir, labelFile))
 	if err != nil {
-		return nil, fmt.Errorf("read expected.yaml in %s: %w", filepath.Base(dir), err)
+		return nil, fmt.Errorf("read %s in %s: %w", labelFile, filepath.Base(dir), err)
 	}
 	var up upstreamLabel
 	if err := yaml.Unmarshal(b, &up); err != nil {
@@ -265,6 +300,54 @@ func readUpstream(dir string) (*upstreamLabel, error) {
 		up.ID = filepath.Base(dir)
 	}
 	return &up, nil
+}
+
+// resolve reads one axis from its configured source. An empty spec falls back to the value
+// already read from the upstream label, which keeps entries written before these sources
+// existed working unchanged.
+func resolve(spec, fromLabel, dir string) string {
+	switch {
+	case spec == "":
+		return fromLabel
+	case strings.HasPrefix(spec, "constant:"):
+		return strings.TrimPrefix(spec, "constant:")
+	case strings.HasPrefix(spec, "field:"):
+		return fromLabel
+	case strings.HasPrefix(spec, "path-segment:"):
+		return pathSegment(dir, strings.TrimPrefix(spec, "path-segment:"))
+	}
+	return fromLabel
+}
+
+// categoryTokens are the strings fed to category_axis_map. They come from a list field in the
+// upstream label, or from directory names when the upstream labels by layout.
+func categoryTokens(d *manifest.Derive, up *upstreamLabel, dir string) []string {
+	spec := d.CategoryFrom
+	if spec == "" || strings.HasPrefix(spec, "field:") {
+		return up.Categories
+	}
+	if rest, ok := strings.CutPrefix(spec, "path-segments:"); ok {
+		var out []string
+		for _, n := range strings.Split(rest, ",") {
+			if seg := pathSegment(dir, strings.TrimSpace(n)); seg != "" {
+				out = append(out, seg)
+			}
+		}
+		return out
+	}
+	return up.Categories
+}
+
+// pathSegment returns the directory name n levels above the sample directory; 0 is the sample
+// directory itself.
+func pathSegment(dir, n string) string {
+	depth := 0
+	fmt.Sscanf(n, "%d", &depth)
+	p := filepath.Clean(dir)
+	for range depth {
+		p = filepath.Dir(p)
+	}
+	return filepath.Base(p)
 }
 
 // prefixToken returns the leading numeric token of a directory name ("200-foo" -> "200"), or

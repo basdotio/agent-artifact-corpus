@@ -20,6 +20,14 @@
     上游自己的 expected.yaml **刻意不拷贝** —— 放在样本树里的标签会被当成样本的一部分
     读取，这个错误已经污染过本语料库的测量一次。
 
+  Clay-HHK/skillcraft-audit —— MIT
+    https://github.com/Clay-HHK/skillcraft-audit @ 0b9c36f28e05
+    42 个样本树，位于 corpus/malicious/skills/sc-*，原样拷自该 commit 的
+    experiments/poc-skills/T*/<难度>/ 目录。标签同样是生成的。
+
+    这个上游**没有任何逐样本标签**，所以 class 和 severity 是本仓库**断言的常量**，
+    不是读来的值；该条目的 fidelity 字段写明了这一点。
+
 关于强制执行的说明：标签与 NOTICE 的一致性校验**尚未实现**。今天 `make validate` 只检查 `origin.license` 是否属于第 1 层允许的宽松许可之一，它不读这个文件。在那项检查落地之前，让此表与标签保持同步是一项人工义务。这一点写在这里而不是略去，因为署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，因此是许可证义务，不是记账。
 
 ---

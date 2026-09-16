@@ -12,7 +12,7 @@ import (
 )
 
 func materialEntry() manifest.Entry {
-	e := entry(map[string]string{"persistence-backdoor": "dim:backdoor"})
+	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
 	e.URL = "https://github.com/optimuslabs-io/skillsgoat"
 	e.Commit = "c03d70d80c32f37617ce5739ebf2e782b1ac94ce"
 	e.License = "MIT"
