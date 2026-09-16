@@ -11,13 +11,25 @@
 
 HARNESS := cd harness && go run ./cmd/corpus
 
-.PHONY: validate check-docs stats fetch test fmt help
+.PHONY: validate check-docs stats fetch derive derive-write test fmt help
 
 help:
-	@echo "validate   check every label, the taxonomy, every manifest entry and the doc pairs (offline)"
-	@echo "stats      corpus composition"
-	@echo "fetch      materialise named layer-2 entries: make fetch E=\"id1 id2\""
-	@echo "test       harness unit tests"
+	@echo "validate      check every label, the taxonomy, every manifest entry and the doc pairs (offline)"
+	@echo "stats         corpus composition, by credibility and by dimension x tier"
+	@echo "fetch         materialise named layer-2 entries: make fetch E=\"id1 id2\""
+	@echo "derive        dry-run coordinate derivation:  make derive E=\"skillsgoat\""
+	@echo "derive-write  write derived labels into corpus/: make derive-write E=\"skillsgoat\""
+	@echo "test          harness unit tests"
+
+## Dry run. Reports what coordinates an upstream would yield and where the mapping is
+## incomplete. Writes nothing — reading coverage must not rewrite the corpus.
+derive:
+	@$(HARNESS) derive $(E)
+
+## Writes. Separate target rather than a flag on `derive` so that materialising the corpus is
+## always something you asked for by name, never a side effect of looking at it.
+derive-write:
+	@$(HARNESS) derive $(E) --write
 
 ## Offline. Runs both checks and reports both, rather than stopping at the first — the same
 ## discipline the corpus applies to the scanners it measures.
