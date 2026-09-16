@@ -53,6 +53,13 @@
     vendored 的目录只用测试用例名，绝不带类别名：类别目录是上游的标签，把它放进路径
     会让一个读路径的测试工具作弊。
 
+  fevziegeyurtsevenler/prompt-injection-corpus —— CC-BY-4.0
+    https://github.com/fevziegeyurtsevenler/prompt-injection-corpus @ 05fd3571d53a
+    全部五篇文档，位于 corpus/hard-negative/instruction/fz-*，原样拷贝。
+
+    它们是土耳其语的注入防御参考文档，密集包含着它们要教防御者识别的那些字面载荷，
+    而这正是它们成为硬负样本的原因。标签是手工钉的：differs_by 派生不出来。
+
 关于强制执行的说明：标签与 NOTICE 的一致性校验**尚未实现**。今天 `make validate` 只检查 `origin.license` 是否属于第 1 层允许的宽松许可之一，它不读这个文件。在那项检查落地之前，让此表与标签保持同步是一项人工义务。这一点写在这里而不是略去，因为署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，因此是许可证义务，不是记账。
 
 ---

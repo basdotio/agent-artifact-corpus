@@ -83,6 +83,34 @@ func Check(samples []Sample) []Feature {
 	return out
 }
 
+// Imbalanced names the populations the gate cannot judge, because one class already exceeds
+// the purity threshold on its own. A gate that silently says nothing about a population is
+// indistinguishable from one that checked it and found it clean.
+func Imbalanced(samples []Sample) []string {
+	byGroup := map[string][]Sample{}
+	for _, s := range samples {
+		byGroup[s.Group] = append(byGroup[s.Group], s)
+	}
+	var out []string
+	for _, g := range sortedGroups(byGroup) {
+		ss := byGroup[g]
+		classCount := map[string]int{}
+		for _, s := range ss {
+			classCount[s.Class]++
+		}
+		if len(classCount) < 2 {
+			continue // single-class populations are reported elsewhere as having no comparison
+		}
+		for cls, n := range classCount {
+			if r := float64(n) / float64(len(ss)); r > MaxPurity {
+				out = append(out, fmt.Sprintf("%s (%d samples, %.0f%% %s)", g, len(ss), r*100, cls))
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // CrossPopulation reports features that separate the classes only once populations are pooled.
 // They are not corpus defects and they are not silenced either: they are the measurement of how
 // differently the benign and malicious halves are built, and the reason a single rate computed
@@ -137,12 +165,24 @@ func checkOne(samples []Sample, group string) []Feature {
 
 	// A population holding one class cannot give anything away: every feature in it is 100%
 	// pure by construction and none of it is evidence.
-	classes := map[string]bool{}
+	classCount := map[string]int{}
 	for _, s := range samples {
-		classes[s.Class] = true
+		classCount[s.Class]++
 	}
-	if len(classes) < 2 {
+	if len(classCount) < 2 {
 		return nil
+	}
+
+	// Nor can a population that is already more lopsided than the purity threshold. With 121
+	// malicious samples against 3 benign, every feature present in all of them — `ext:.py`, say
+	// — reads as 97.6% pure malicious while telling you nothing you did not already know from
+	// the class balance. Purity has to beat the base rate to be evidence, and here no feature
+	// can. Reporting the imbalance is the honest answer; reporting `ext:.py` as leakage would
+	// teach people to ignore this list.
+	for _, n := range classCount {
+		if float64(n)/float64(len(samples)) > MaxPurity {
+			return nil
+		}
 	}
 
 	var out []Feature

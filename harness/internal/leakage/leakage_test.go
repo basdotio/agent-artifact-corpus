@@ -2,7 +2,11 @@
 
 package leakage
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func sample(id, class, group string, files ...string) Sample {
 	return Sample{ID: id, Class: class, Group: group, Files: files}
@@ -84,5 +88,45 @@ func TestSupportThreshold(t *testing.T) {
 		if f.Name == "file:rare.txt" {
 			t.Fatalf("a feature under MinSupport (%d) must not be reported: %+v", MinSupport, f)
 		}
+	}
+}
+
+// A population already more lopsided than the purity threshold cannot demonstrate leakage: a
+// feature present in every sample reads as pure while telling you only the class balance.
+func TestImbalancedPopulationYieldsNothing(t *testing.T) {
+	t.Parallel()
+	var ss []Sample
+	for i := range 121 {
+		ss = append(ss, sample(fmt.Sprintf("m%d", i), "malicious", "cisco", "server.py"))
+	}
+	for i := range 3 {
+		ss = append(ss, sample(fmt.Sprintf("b%d", i), "benign", "cisco", "server.py"))
+	}
+	// ext:.py is in all 124 and would read as 97.6% pure malicious.
+	if got := Check(ss); len(got) != 0 {
+		t.Fatalf("a ubiquitous feature in a lopsided population is not evidence: %+v", got)
+	}
+	im := Imbalanced(ss)
+	if len(im) != 1 || !strings.Contains(im[0], "cisco") {
+		t.Fatalf("the population the gate cannot judge must be named, got %v", im)
+	}
+}
+
+// The case the gate exists for still fires: balanced classes, one file present in only one.
+func TestBalancedPopulationStillLeaks(t *testing.T) {
+	t.Parallel()
+	var ss []Sample
+	for i := range 10 {
+		ss = append(ss, sample(fmt.Sprintf("b%d", i), "benign", "bench", "SKILL.md", "_meta.json"))
+		ss = append(ss, sample(fmt.Sprintf("m%d", i), "malicious", "bench", "SKILL.md"))
+	}
+	var found bool
+	for _, f := range Check(ss) {
+		if f.Name == "file:_meta.json" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a real giveaway in a balanced population must still be reported")
 	}
 }
