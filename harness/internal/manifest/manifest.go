@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: MIT
+
+// Package manifest describes layer 2: external corpora referenced by url+commit+sha256 and
+// never vendored.
+//
+// The layer exists for a legal reason and a measurement reason, and they point the same way.
+// Recording a URL and a hash is not distribution, so this layer may reference no-license,
+// NonCommercial, ShareAlike and copyleft corpora that layer 1 must never contain. And the
+// corpora that matter most for false-positive and recall rates are exactly the ones we did
+// not write, so the layer that carries them is the layer the published numbers come from.
+package manifest
+
+import (
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+type File struct {
+	Entries []Entry `yaml:"entries"`
+}
+
+type Entry struct {
+	ID      string `yaml:"id"`
+	Name    string `yaml:"name"`
+	URL     string `yaml:"url"`
+	Commit  string `yaml:"commit"`
+	SHA256  string `yaml:"sha256"`
+	License string `yaml:"license"`
+	Role    string `yaml:"role"` // fp-denominator | recall | hard-negative | touchstone | probe
+
+	// Counts are what the source claims, recorded so that a later fetch disagreeing with
+	// them is visible rather than silently changing a denominator.
+	Malicious int `yaml:"malicious"`
+	Benign    int `yaml:"benign"`
+
+	// Subset narrows the fetch to the part that is actually corpus.
+	Subset string `yaml:"subset"`
+
+	// Overlaps names other entry IDs that share samples. make stats refuses to pool totals
+	// across overlapping entries, because that sum errs in the safe-looking direction.
+	Overlaps []string `yaml:"overlaps"`
+
+	// Hazards are the traps that produce a good score for a bad reason. Every entry must
+	// declare at least one or explicitly say none; an undeclared hazard is how a corpus
+	// gets used wrong by the next person.
+	Hazards []string `yaml:"hazards"`
+
+	// Prep is the mandatory preparation before the entry may be counted — deduplication,
+	// deleting a leaking file. Empty means none needed.
+	Prep []string `yaml:"prep"`
+
+	Vendorable bool `yaml:"vendorable"`
+}
+
+func Load(path string) (*File, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest: %w", err)
+	}
+	var f File
+	dec := yaml.NewDecoder(strings.NewReader(string(b)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&f); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	return &f, nil
+}
+
+var validRoles = []string{"fp-denominator", "recall", "hard-negative", "touchstone", "probe"}
+
+func (f *File) Validate() []error {
+	var errs []error
+	bad := func(fs string, a ...any) { errs = append(errs, fmt.Errorf(fs, a...)) }
+
+	seen := map[string]bool{}
+	for _, e := range f.Entries {
+		if e.ID == "" {
+			bad("an entry has no id")
+			continue
+		}
+		if seen[e.ID] {
+			bad("%s: duplicate id", e.ID)
+		}
+		seen[e.ID] = true
+
+		if e.URL == "" {
+			bad("%s: url is empty", e.ID)
+		}
+		if e.License == "" {
+			bad("%s: license is empty — the license decides whether it may ever be vendored", e.ID)
+		}
+		if !oneOf(e.Role, validRoles) {
+			bad("%s: role %q is not one of %s", e.ID, e.Role, strings.Join(validRoles, ", "))
+		}
+		if len(e.Hazards) == 0 {
+			bad("%s: hazards is empty — write \"none known\" explicitly. An undeclared hazard "+
+				"is how the next person uses the corpus wrong", e.ID)
+		}
+		// commit is what makes the reference reproducible; without it the corpus silently
+		// changes under the numbers already published against it.
+		if e.Commit == "" && e.Role != "probe" {
+			bad("%s: commit is empty — a moving reference makes published numbers irreproducible", e.ID)
+		}
+	}
+
+	for _, e := range f.Entries {
+		for _, o := range e.Overlaps {
+			if !seen[o] {
+				bad("%s: overlaps %q which is not an entry here", e.ID, o)
+			}
+		}
+	}
+	return errs
+}
+
+// PoolableGroups partitions entries into sets that may be summed. Entries that overlap end
+// up in the same group, and a group with more than one entry may not be pooled.
+func (f *File) PoolableGroups() [][]string {
+	parent := map[string]string{}
+	var find func(string) string
+	find = func(x string) string {
+		if parent[x] == "" || parent[x] == x {
+			return x
+		}
+		parent[x] = find(parent[x])
+		return parent[x]
+	}
+	for _, e := range f.Entries {
+		parent[e.ID] = e.ID
+	}
+	for _, e := range f.Entries {
+		for _, o := range e.Overlaps {
+			if _, ok := parent[o]; !ok {
+				continue
+			}
+			a, b := find(e.ID), find(o)
+			if a != b {
+				parent[a] = b
+			}
+		}
+	}
+	groups := map[string][]string{}
+	for _, e := range f.Entries {
+		r := find(e.ID)
+		groups[r] = append(groups[r], e.ID)
+	}
+	var out [][]string
+	for _, g := range groups {
+		sort.Strings(g)
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
+	return out
+}
+
+func oneOf(v string, set []string) bool {
+	for _, s := range set {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}

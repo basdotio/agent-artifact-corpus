@@ -1,0 +1,222 @@
+# Layer 2 — referenced, never vendored.
+#
+# Only url + commit + sha256 + labels live here. Recording a URL and a hash is not
+# distribution, which is why this file may reference no-license, NonCommercial and copyleft
+# corpora that corpus/ must never contain. See docs/licensing.md.
+#
+# Every entry declares `hazards`. An entry with no known hazard says "none known" explicitly
+# — the validator rejects an empty list, because an undeclared hazard is how the next person
+# uses a corpus wrong.
+#
+# `commit` is pinned deliberately. A moving reference makes every number already published
+# against it irreproducible, and the fetcher refuses to silently re-pull a checkout that has
+# drifted.
+
+entries:
+  # ---------- recall ----------
+  - id: datadog-ai-skills
+    name: "DataDog malicious-software-packages-dataset (samples/ai-skills)"
+    url: https://github.com/DataDog/malicious-software-packages-dataset
+    commit: d156188d1e45763d6cb7995543a428de6c4056b8
+    sha256: ""
+    license: Apache-2.0
+    role: recall
+    subset: samples/ai-skills
+    malicious: 204
+    benign: 0
+    vendorable: true
+    overlaps: [trailofbits-overt]
+    hazards:
+      - "40% of samples (81/204) carry one vendor's name; ~40 are near-duplicates"
+      - "~26/204 (13%) are other scanners' synthetic tests, not in-the-wild samples"
+      - "samples are zip-encrypted with the password `infected`"
+    prep:
+      - "deduplicate by author and by canonical tree hash before counting recall"
+
+  - id: skillsgoat
+    name: "optimuslabs-io/skillsgoat"
+    url: https://github.com/optimuslabs-io/skillsgoat
+    commit: c03d70d80c32f37617ce5739ebf2e782b1ac94ce
+    sha256: ""
+    license: MIT
+    role: probe
+    malicious: 101                  # 66 single + 35 chains
+    benign: 10                      # intentional false-positive decoys
+    vendorable: true
+    hazards:
+      - "contains 10 deliberate false-positive decoys — firing on them is the failure, not the fix"
+      - "answers are held outside the tree by design; an error counts as a miss"
+
+  - id: skillcraft-audit
+    name: "Clay-HHK/skillcraft-audit"
+    url: https://github.com/Clay-HHK/skillcraft-audit
+    commit: 0b9c36f28e051011c363d1007dc2d32ea600d6d0
+    sha256: ""
+    license: MIT
+    role: recall
+    malicious: 150
+    benign: 0
+    vendorable: true
+    hazards:
+      - "single author, so shapes are stylistically correlated"
+      - "the only public coverage of hook weaponisation and permission bypass — no second opinion exists"
+
+  - id: cisco-mcp-scanner-evals
+    name: "cisco-ai-defense/mcp-scanner (evals)"
+    url: https://github.com/cisco-ai-defense/mcp-scanner
+    commit: be87b90d88bca2527a6e2075769a7608decd8f27
+    sha256: ""
+    license: Apache-2.0
+    role: recall
+    subset: evals
+    malicious: 154
+    benign: 4
+    vendorable: true
+    hazards:
+      - "only 4 benign samples — unusable as an MCP false-positive denominator"
+      - "directory name is the label, so a path-aware harness can cheat"
+
+  - id: trailofbits-overt
+    name: "trailofbits/overtly-malicious-skills"
+    url: https://github.com/trailofbits/overtly-malicious-skills
+    commit: 4ffbf9461ef0505f9ce76a0d3694a18ec33ea531
+    sha256: ""
+    license: none
+    role: touchstone
+    malicious: 4
+    benign: 0
+    vendorable: false               # zero grant — never vendor
+    overlaps: [datadog-ai-skills]
+    hazards:
+      - "no license: zero grant, may be measured against but never redistributed"
+      - "contained in DataDog (tjade273-* is simple-formatter) and in SkillTrustBench"
+
+  # ---------- false-positive denominator ----------
+  - id: skillmd-138k
+    name: "HF FayeZC/SkillMD-138K"
+    url: https://huggingface.co/datasets/FayeZC/SkillMD-138K
+    commit: 0d73048abf2fb6ee91f6f9f5ac598d5be8d6bdd7
+    sha256: ""
+    license: CC-BY-4.0
+    role: fp-denominator
+    malicious: 0
+    benign: 138133                  # across 20,556 repos
+    vendorable: true
+    hazards:
+      - "SKILL.md body only, no scripts — every script-surface rule is untested by it"
+      - "repo count is the real n; sampling by file over-weights large repos"
+    prep:
+      - "report per repo, cap samples per repo, and publish both sample-weighted and source-unweighted rates"
+
+  - id: clawhub-security-signals
+    name: "HF OpenClaw/clawhub-security-signals (clean split)"
+    url: https://huggingface.co/datasets/OpenClaw/clawhub-security-signals
+    commit: 69dcbd323c155312fb000ec89ea0b1efdf6a5757
+    sha256: ""
+    license: MIT
+    role: fp-denominator
+    malicious: 0
+    benign: 41743
+    vendorable: true
+    hazards:
+      - "PARTLY CIRCULAR: labels derive from an OWASP Agentic Top 10 rating, the same taxonomy our rules derive from"
+      - "labels are silver-standard (model-judged), not human review"
+    prep:
+      - "never use as the headline false-positive figure; report it beside a non-circular source"
+
+  # NOT YET AN ENTRY: awesome-list link targets (1,231 trees / 382 repos, the permissive
+  # 457 of 573). It is a list of repositories, not one repository, so it does not fit this
+  # file's one-url-one-commit shape. It needs its own resolver that reads the lists, filters
+  # by license, caps at 5 trees per repo, and pins each target — a manifest of manifests.
+  # Recording it here with a placeholder URL was worse than leaving it out: a fake pin
+  # validates, and a validated fake is exactly the failure this file exists to prevent.
+
+  # ---------- hard negatives ----------
+  - id: automatelab-mcp-tools
+    name: "HF automatelab/mcp-servers-tool-catalog"
+    # A HuggingFace dataset, not a GitHub repo. The GitHub side is
+    # AutomateLab-tech/mcp-tool-catalog, which is the generator, not the data.
+    url: https://huggingface.co/datasets/automatelab/mcp-servers-tool-catalog
+    commit: a413afb7b02ac7d615ddf1e8dfcccc815893110d
+    sha256: ""
+    license: CC-BY-4.0
+    role: hard-negative
+    malicious: 0
+    benign: 9922                    # tools, across 359 servers
+    vendorable: true
+    hazards:
+      - "none known for the data itself"
+      - "our MCP-001..004 have only ever been validated against 44 tools; this is a 225x expansion and may surface many false positives at once"
+
+  - id: nvidia-skillspector-fixtures
+    name: "NVIDIA/SkillSpector tests/fixtures"
+    url: https://github.com/NVIDIA/SkillSpector
+    commit: 2e9ae8d1cfa6e339f7035f876d3ac2e1c6ce24e6
+    sha256: ""
+    license: Apache-2.0
+    role: hard-negative
+    malicious: 6
+    benign: 6
+    vendorable: true
+    hazards:
+      - "tiny (about 6 pairs); its value is the paired-twin structure, not the count"
+
+  - id: guarddog-benign
+    name: "DataDog/guarddog benign test fixtures"
+    url: https://github.com/DataDog/guarddog
+    commit: 1f4a66c064fb2087c224750507f3b65c7633deeb
+    sha256: ""
+    license: Apache-2.0
+    role: hard-negative
+    malicious: 0
+    benign: 25
+    vendorable: true
+    hazards:
+      - "targets Python package rules, not agent skills — shapes transfer, the surface does not"
+
+  - id: fevzi-injection-corpus
+    name: "fevziegeyurtsevenler/prompt-injection-corpus"
+    url: https://github.com/fevziegeyurtsevenler/prompt-injection-corpus
+    commit: 05fd3571d53aded0c06b9f6044e54f0e6fc8403f
+    sha256: ""
+    license: CC-BY-4.0
+    role: hard-negative
+    malicious: 0
+    benign: 5
+    vendorable: true
+    hazards:
+      - "it is documentation ABOUT injection, so every INJ-* hit on it is a false positive by construction"
+
+  # ---------- external validation, never vendored ----------
+  - id: skilltrustbench
+    name: "HF cuhk-zhuque/SkillTrustBench"
+    # A HuggingFace dataset. There is no GitHub repository under this name.
+    url: https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench
+    commit: f90517b7058fdcfea89af114c069fbf973f42bc7
+    sha256: ""
+    license: CC-BY-NC-SA-4.0
+    role: recall
+    malicious: 3877                 # 2,863 + 1,014
+    benign: 1643
+    vendorable: false               # NonCommercial + ShareAlike contagion
+    overlaps: [trailofbits-overt]
+    hazards:
+      - "CC-BY-NC-SA: local measurement and aggregate figures only, never redistribution"
+      - "contains overtly-malicious-skills (4)"
+      - "the injected_d8 subset (119, of which 118 are labelled normal) is the only public labelling of defensive-prose false positives anywhere"
+
+  - id: malskillbench
+    name: "lxyeternal/MalSkillBench"
+    url: https://github.com/lxyeternal/MalSkillBench
+    commit: 06e083125d5ec5dd7a189dfedadfe587a70635b9
+    sha256: ""
+    license: none
+    role: recall
+    malicious: 3944
+    benign: 4000
+    vendorable: false
+    hazards:
+      - "SEVERE LABEL LEAKAGE: _meta.json is present in 3,878/4,000 benign and 0/3,944 malicious — the classes separate at 97% without reading any content"
+      - "no license: zero grant"
+    prep:
+      - "delete _meta.json from every sample before any measurement"
