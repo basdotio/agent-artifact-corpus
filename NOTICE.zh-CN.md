@@ -44,6 +44,15 @@
     原始仓库，因为假阳性率必须按来源报告，而把来自 178 个仓库的 483 个样本报成一个
     数字，正是本仓库明令禁止的汇总数字。
 
+  cisco-ai-defense/mcp-scanner —— Apache-2.0
+    https://github.com/cisco-ai-defense/mcp-scanner @ be87b90d88bc，evals
+    121 个样本树，位于 corpus/malicious/mcp/ci-*，每个是一份实现真实 MCP server 的
+    单个 .py，原样拷贝并各自包进一个目录。上游 141 个测试用例中有 20 个被刻意排除，
+    理由见该条目的 hazards。
+
+    vendored 的目录只用测试用例名，绝不带类别名：类别目录是上游的标签，把它放进路径
+    会让一个读路径的测试工具作弊。
+
 关于强制执行的说明：标签与 NOTICE 的一致性校验**尚未实现**。今天 `make validate` 只检查 `origin.license` 是否属于第 1 层允许的宽松许可之一，它不读这个文件。在那项检查落地之前，让此表与标签保持同步是一项人工义务。这一点写在这里而不是略去，因为署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，因此是许可证义务，不是记账。
 
 ---

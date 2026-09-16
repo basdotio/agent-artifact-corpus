@@ -217,12 +217,51 @@ entries:
     license: Apache-2.0
     role: recall
     subset: evals
-    malicious: 154
-    benign: 4
+    malicious: 142                  # 141 behavioural cases + 1 remote server, verified by reading
+    benign: 3
     vendorable: true
     hazards:
-      - "only 4 benign samples — unusable as an MCP false-positive denominator"
-      - "directory name is the label, so a path-aware harness can cheat"
+      - "COUNT CORRECTION: this entry read 154 malicious and 4 benign. The tree holds 141 behavioural test cases under evals/behavioral-analysis/data plus one malicious and three benign servers under evals/remote. The other files in evals/ are scanner drivers, not samples"
+      - "only 3 benign samples — unusable as an MCP false-positive denominator"
+      - "the category directory IS the label, so a path-aware harness can cheat. The vendored trees are named after the test case alone, never the category, so the answer does not travel in the path"
+      - "two categories are excluded rather than mapped. `defense-evasion` is anti-debugging with no attack outcome — it names a technique, not something achieved — and `general-description-code-mismatch` is intent mismatch, a dimension this corpus deliberately does not model. 20 samples, declared and counted"
+    # The first entry to reach the MCP surface, which had no samples at all. Each test case is a
+    # single .py implementing a real MCP server, so samples are file-shaped and get wrapped in a
+    # directory of their own. The category directory maps to a dimension, which is the whole of
+    # the derivation: there is no difficulty axis here, and the code is plainly written.
+    derive:
+      layout: "evals/behavioral-analysis/data/*/*.py"
+      sample_is_file: true
+      label_file: ""
+      surface: mcp
+      id_prefix: ci
+      class_from: "constant:malicious"
+      severity_from: "constant:high"
+      tier_from: "constant:plain"
+      category_from: "path-segments:1"    # the category directory holding the file
+      exclude_tokens: [defense-evasion, general-description-code-mismatch]
+      fidelity: >-
+        Dimension comes from the category directory and is reliable — these categories name
+        outcomes, unlike skillsgoat's, which mix outcome with technique. Class and severity are
+        constants we assert. Tier is the constant `plain`, which is a real claim and not a
+        default: the payloads are readable Python (os.system on user input, dict(os.environ),
+        a fetch of the cloud metadata endpoint), so a scanner that misses them is broken rather
+        than weak. Nothing here is encoded, deferred or split, so no sample earns a deeper tier.
+      category_axis_map:
+        arbitrary-resource-read-write: dim:filesystem
+        backdoor: dim:backdoor
+        data-exfiltration: dim:exfiltration
+        goal-manipulation: dim:injection
+        prompt-injection: dim:injection
+        tool-poisoning: dim:injection
+        injection-attacks: dim:execution          # os.system with shell metacharacters
+        template-injection: dim:execution
+        unauthorized-code-execution: dim:execution
+        resource-exhaustion: dim:resource-abuse
+        unauthorized-network-access: dim:exfiltration   # cloud metadata endpoint, credential extraction
+        unauthorized-system-access: dim:exfiltration    # enumerates the environment and filters secrets
+        defense-evasion: ignore                   # excluded above; mapped so the token is accounted for
+        general-description-code-mismatch: ignore # excluded above
 
   - id: trailofbits-overt
     name: "trailofbits/overtly-malicious-skills"

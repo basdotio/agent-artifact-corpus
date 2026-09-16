@@ -106,8 +106,14 @@ func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (writt
 		if d.TreeSubdir != "" {
 			src = filepath.Join(src, d.TreeSubdir)
 		}
-		if fi, err := os.Stat(src); err != nil || !fi.IsDir() {
-			errs = append(errs, fmt.Errorf("%s/%s: upstream tree %s is missing", e.ID, p.Coord.UpstreamID, src))
+		fi, serr := os.Stat(src)
+		if serr != nil {
+			errs = append(errs, fmt.Errorf("%s/%s: upstream sample %s is missing", e.ID, p.Coord.UpstreamID, src))
+			continue
+		}
+		if fi.IsDir() == d.SampleIsFile {
+			errs = append(errs, fmt.Errorf("%s/%s: sample_is_file is %v but %s is not that shape",
+				e.ID, p.Coord.UpstreamID, d.SampleIsFile, src))
 			continue
 		}
 
@@ -115,7 +121,18 @@ func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (writt
 			errs = append(errs, fmt.Errorf("%s: clear %s: %w", e.ID, p.Dir, err))
 			continue
 		}
-		if err := copyTree(src, absDir); err != nil {
+		// A file-shaped sample becomes a directory holding that one file, because `entry: .`
+		// points a scanner at a directory and every other sample in the corpus is one.
+		if d.SampleIsFile {
+			if err := os.MkdirAll(absDir, 0o755); err != nil {
+				errs = append(errs, fmt.Errorf("%s: create %s: %w", e.ID, p.Dir, err))
+				continue
+			}
+			if err := copyFile(src, filepath.Join(absDir, filepath.Base(src))); err != nil {
+				errs = append(errs, fmt.Errorf("%s: copy %s: %w", e.ID, p.Dir, err))
+				continue
+			}
+		} else if err := copyTree(src, absDir); err != nil {
 			errs = append(errs, fmt.Errorf("%s: copy %s: %w", e.ID, p.Dir, err))
 			continue
 		}
@@ -200,6 +217,21 @@ func short12(s string) string {
 		return s[:12]
 	}
 	return s
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 func copyTree(src, dst string) error {

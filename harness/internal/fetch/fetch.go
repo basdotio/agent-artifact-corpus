@@ -35,13 +35,34 @@ func Get(e manifest.Entry, cacheDir string) (string, error) {
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return "", fmt.Errorf("%s: create cache dir: %w", e.ID, err)
 	}
-	if err := run("", "git", "clone", "--quiet", e.URL, dst); err != nil {
-		return "", fmt.Errorf("%s: clone %s: %w", e.ID, e.URL, err)
-	}
-	if e.Commit != "" {
-		if err := run(dst, "git", "checkout", "--quiet", e.Commit); err != nil {
-			return "", fmt.Errorf("%s: checkout %s: %w", e.ID, short(e.Commit), err)
+
+	// A partial clone fetches file contents on demand instead of every blob in the history.
+	// It matters here because several entries are small corpora inside large repositories:
+	// skillcraft-audit is 130MB for 51 samples, and DataDog's is a whole malware dataset of
+	// which we want one subdirectory. Servers that cannot serve a partial clone are not an
+	// error — the plain clone still works, it just costs more.
+	partial := []string{"clone", "--quiet", "--filter=blob:none", "--no-checkout", e.URL, dst}
+	if err := run("", "git", partial...); err != nil {
+		_ = os.RemoveAll(dst)
+		if err := run("", "git", "clone", "--quiet", "--no-checkout", e.URL, dst); err != nil {
+			return "", fmt.Errorf("%s: clone %s: %w", e.ID, e.URL, err)
 		}
+	}
+
+	// Subset was declared by two entries and ignored by this function until now, so `fetch`
+	// materialised whole repositories to use one directory of them.
+	if e.Subset != "" {
+		if err := run(dst, "git", "sparse-checkout", "set", "--no-cone", e.Subset); err != nil {
+			return "", fmt.Errorf("%s: sparse-checkout %s: %w", e.ID, e.Subset, err)
+		}
+	}
+
+	ref := e.Commit
+	if ref == "" {
+		ref = "HEAD"
+	}
+	if err := run(dst, "git", "checkout", "--quiet", ref); err != nil {
+		return "", fmt.Errorf("%s: checkout %s: %w", e.ID, short(ref), err)
 	}
 	return dst, nil
 }

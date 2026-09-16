@@ -321,3 +321,79 @@ func TestDeriveFromLayoutWithoutLabelFile(t *testing.T) {
 		t.Fatalf("dimension should come from the technique segment, got %v", hard.Dimensions)
 	}
 }
+
+// A third upstream shape: each sample is a single file, and the directory holding it is the
+// category. cisco's MCP evals ship one .py per test case.
+func TestDeriveFileShapedSamples(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for cat, name := range map[string]string{"backdoor": "dns_tunnel.py", "defense-evasion": "anti_debug.py"} {
+		dir := filepath.Join(root, "data", cat)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("# server\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e := manifest.Entry{ID: "cisco", Derive: &manifest.Derive{
+		Layout:        "data/*/*.py",
+		SampleIsFile:  true,
+		LabelFile:     ptr(""),
+		Fidelity:      "dimension from the category directory; class, severity and tier asserted",
+		ClassFrom:     "constant:malicious",
+		SeverityFrom:  "constant:high",
+		TierFrom:      "constant:plain",
+		CategoryFrom:  "path-segments:1",
+		ExcludeTokens: []string{"defense-evasion"},
+		CategoryAxisMap: map[string]manifest.Targets{
+			"backdoor":        {"dim:backdoor"},
+			"defense-evasion": {"ignore"},
+		},
+	}}
+
+	res, errs := Derive(e, root, testTax())
+	if len(errs) != 0 {
+		t.Fatalf("expected a clean derivation, got:\n%v", errs)
+	}
+	if len(res.Coords) != 1 {
+		t.Fatalf("one sample survives the exclusion, got %d", len(res.Coords))
+	}
+	// An exclusion shrinks the denominator, so it is counted rather than invisible.
+	if res.Excluded != 1 {
+		t.Fatalf("the excluded sample must be counted, got %d", res.Excluded)
+	}
+	c := res.Coords[0]
+	if c.UpstreamID != "dns_tunnel" {
+		t.Fatalf("a file-shaped sample is identified by its filename, got %q", c.UpstreamID)
+	}
+	if c.Tier != "plain" || c.Severity != "high" || c.Class != "malicious" {
+		t.Fatalf("constants should supply class, severity and tier: %+v", c)
+	}
+	if len(c.Dimensions) != 1 || c.Dimensions[0] != "backdoor" {
+		t.Fatalf("dimension should come from the category directory, got %v", c.Dimensions)
+	}
+}
+
+// A constant tier that is not in the vocabulary, and a tier that resolves to nothing, are both
+// caught here rather than left for the validator to reject one step later.
+func TestDeriveCatchesUnresolvableTier(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSample(t, root, "x", "no-prefix-here", `
+verdict: malicious
+severity: high
+categories: [persistence-backdoor]
+`)
+	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
+	e.Derive.TierFrom = "constant:sneaky"
+	if _, errs := Derive(e, root, testTax()); !containsErr(errs, `tier_from asserts "sneaky"`) {
+		t.Fatalf("a constant tier outside the vocabulary must fail, got %v", errs)
+	}
+
+	e2 := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
+	if _, errs := Derive(e2, root, testTax()); !containsErr(errs, "no numeric id prefix") {
+		t.Fatalf("an unreadable tier must be reported, got %v", errs)
+	}
+}

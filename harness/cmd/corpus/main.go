@@ -667,6 +667,9 @@ func reportDerived(tax *taxonomy.Set, res *derive.Result) {
 			mech, res.HandRead)
 	}
 	fmt.Printf("  upstream categories seen: %d distinct\n", len(cats))
+	if res.Excluded > 0 {
+		fmt.Printf("  excluded %d sample(s) by exclude_tokens — declared, not quietly dropped\n", res.Excluded)
+	}
 	if res.Skipped > 0 {
 		fmt.Printf("  skipped %d layout match(es) with no upstream label (e.g. compound-chain nodes)\n", res.Skipped)
 	}

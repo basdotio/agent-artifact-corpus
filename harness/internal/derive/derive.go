@@ -73,6 +73,10 @@ type Result struct {
 	// HandRead counts samples whose dimension came from a hand-read override.
 	HandRead int
 
+	// Excluded counts samples left out by exclude_tokens. Declared exclusions are counted so a
+	// shrinking denominator is never invisible.
+	Excluded int
+
 	// Skipped counts layout matches that carried no upstream label. skillsgoat's pasture holds
 	// 66 single-artifact samples with an expected.yaml and 35 compound-chain nodes without
 	// one; the chains need a different, multi-node derivation. Skipping them is correct but it
@@ -131,7 +135,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		labelFile = *d.LabelFile
 	}
 
-	dirs, skipped, err := sampleDirs(root, d.Layout, labelFile)
+	dirs, skipped, err := sampleDirs(root, d.Layout, labelFile, d.SampleIsFile)
 	if err != nil {
 		return nil, []error{fmt.Errorf("%s: %w", e.ID, err)}
 	}
@@ -142,6 +146,10 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		if err != nil {
 			bad("%s: %v", e.ID, err)
 			continue
+		}
+		if d.SampleIsFile {
+			base := filepath.Base(dir)
+			up.ID = strings.TrimSuffix(base, filepath.Ext(base))
 		}
 		if rest, ok := strings.CutPrefix(d.IDFrom, "path-segments:"); ok {
 			var parts []string
@@ -181,7 +189,16 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 
 		if c.Class == "malicious" {
 			c.Severity = resolve(d.SeverityFrom, up.Severity, dir)
-			if d.TierFrom == "id-prefix" || d.TierFrom == "" {
+			// Tier goes through the same sources as every other axis. It did not, and a
+			// `constant:` tier fell through silently: 121 samples would have been written with
+			// no tier at all, for the validator to reject one step later.
+			switch {
+			case strings.HasPrefix(d.TierFrom, "constant:"):
+				c.Tier = strings.TrimPrefix(d.TierFrom, "constant:")
+				if _, ok := tax.Tiers[c.Tier]; !ok {
+					bad("%s: tier_from asserts %q, which is not a tier in the vocabulary", e.ID, c.Tier)
+				}
+			case d.TierFrom == "id-prefix" || d.TierFrom == "":
 				if tok := prefixToken(filepath.Base(dir)); tok != "" {
 					if t, ok := tax.TierByMapsToken(tok); ok {
 						c.Tier = t.ID
@@ -194,7 +211,12 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			}
 		}
 
-		for _, cat := range categoryTokens(d, up, dir) {
+		tokens := categoryTokens(d, up, dir)
+		if slices.ContainsFunc(tokens, func(t string) bool { return slices.Contains(d.ExcludeTokens, t) }) {
+			res.Excluded++
+			continue
+		}
+		for _, cat := range tokens {
 			res.CategorySeen[cat]++
 			targets, mapped := d.CategoryAxisMap[cat]
 			if !mapped {
@@ -247,6 +269,11 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			}
 		}
 
+		// Caught here rather than left for the validator, so a derivation reports its own
+		// incompleteness instead of writing labels that fail one step later.
+		if c.Class == "malicious" && c.Tier == "" {
+			bad("%s/%s: no tier could be resolved from tier_from %q", e.ID, up.ID, d.TierFrom)
+		}
 		if c.Class == "malicious" && len(c.Dimensions) == 0 {
 			bad("%s/%s: no category mapped to a dimension and no dimension_overrides entry, so "+
 				"this malicious sample sits on no recall axis. Its categories were %v — either "+
@@ -264,7 +291,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 // many matches were skipped for having no expected.yaml. A sample directory is defined as one
 // that carries an upstream label; a layout match without one is an intermediate directory
 // (skillsgoat's compound-chain nodes are the case) and is counted, not read.
-func sampleDirs(root, layout, labelFile string) (dirs []string, skipped int, err error) {
+func sampleDirs(root, layout, labelFile string, isFile bool) (dirs []string, skipped int, err error) {
 	if layout == "" {
 		return nil, 0, fmt.Errorf("derive.layout is empty")
 	}
@@ -274,7 +301,17 @@ func sampleDirs(root, layout, labelFile string) (dirs []string, skipped int, err
 	}
 	for _, m := range matches {
 		fi, err := os.Stat(m)
-		if err != nil || !fi.IsDir() {
+		if err != nil {
+			continue
+		}
+		if isFile {
+			// Each match is the sample itself; it gets wrapped in a directory when written.
+			if fi.Mode().IsRegular() {
+				dirs = append(dirs, m)
+			}
+			continue
+		}
+		if !fi.IsDir() {
 			continue
 		}
 		if labelFile != "" {
@@ -350,6 +387,9 @@ func categoryTokens(d *manifest.Derive, up *upstreamLabel, dir string) []string 
 
 // pathSegment returns the directory name n levels above the sample directory; 0 is the sample
 // directory itself.
+// pathSegment returns the directory name n levels above the sample; 0 is the sample itself.
+// For a file-shaped sample, 0 is the file and 1 is the directory holding it, which is where a
+// corpus that labels by layout keeps its category.
 func pathSegment(dir, n string) string {
 	depth := 0
 	fmt.Sscanf(n, "%d", &depth)

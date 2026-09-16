@@ -137,6 +137,18 @@ type Derive struct {
 	// T11-hook-weaponize/easy, and neither segment alone is unique.
 	IDFrom string `yaml:"id_from"`
 
+	// SampleIsFile says each sample is a single file rather than a directory. cisco's MCP
+	// evals ship one .py per test case; wrapping each in a directory of its own is what makes
+	// it a sample tree a scanner can be pointed at.
+	SampleIsFile bool `yaml:"sample_is_file"`
+
+	// ExcludeTokens names upstream categories whose samples are left out entirely, with the
+	// reason belonging in Fidelity. It exists because some upstream categories name a technique
+	// with no outcome (cisco's defense-evasion is anti-debugging and nothing else) or a concept
+	// this corpus deliberately does not model (description/code mismatch). Excluding them by
+	// name keeps the decision visible; excluding them by quietly narrowing a glob would not.
+	ExcludeTokens []string `yaml:"exclude_tokens"`
+
 	// BenignNote is what a benign sample from this entry actually means, written into every
 	// benign label. It is per-entry because the meaning differs sharply and getting it wrong
 	// corrupts a false positive rate: skillsgoat's benign entries are deliberate decoys chosen
