@@ -1,3 +1,5 @@
+> English · [中文](classification.zh-CN.md)
+
 # What is measured
 
 Eight classes. Each row states what the number answers, what it needs, and — the column that
@@ -9,10 +11,10 @@ support a sentence it could not support.
 |---|---|---|---|---|
 | 1 | **False positive** | Will operators turn it off? | precision, per source | "On corpus X, N% of benign artifacts are blocked" |
 | 2 | **Recall** | Does it catch real attacks? | recall, per dimension | "Of N labelled malicious samples from M sources, it flags K" |
-| 3 | **Disclosure** | Does it admit what it did not look at? | disclosed / total gaps | "Every injected coverage gap produced a note" |
+| 3 | **Disclosure** | Does it admit what it did not look at? | disclosed / injected | "Every injected coverage gap produced a note" |
 | 4 | **Evasion resistance** | Does re-encoding the payload defeat it? | survived / variants | "Payload P survives K of N transformations" |
 | 5 | **Invariants** | Does it violate its own guarantees? | pass/fail, no rate | "No sample caused execution, egress, or a leaked secret" |
-| 6 | **Gate** | Does a verdict actually stop a load? | pass/fail + latency | "A high verdict blocks under permission mode M" |
+| 6 | **Gate** | Does a verdict actually stop a load? | pass/fail + latency | "Verdict V produces decision D under permission mode M" |
 | 7 | **Robustness** | Can the scanned target kill the scanner? | terminates, peak RSS | "Bounded memory and a verdict within T on adversarial input" |
 | 8 | **Performance** | Does it finish inside the gate deadline? | p50/p95 wall time | "p95 scan of a real environment is T seconds" |
 
@@ -20,6 +22,28 @@ Classes 1 and 2 are rates and carry all the sampling hazards. Classes 3 through 
 properties: a single counterexample refutes them, so they need no denominator and cannot be
 diluted by a convenient one. **Prefer a property over a rate whenever the question admits
 one.**
+
+## Which of these travel to another scanner
+
+The classes split a second way, and it has to be stated or someone benchmarking a different
+tool will find half the corpus inapplicable and assume it is broken rather than by design.
+
+**Portable — classes 1, 2, 4, 8.** False positive, recall, evasion resistance and
+performance are questions about any scanner. They are answered from a label's `truth` block,
+which is written in technique names no product owns, so running them needs nothing from us
+beyond the sample trees. See [`label-schema.md`](label-schema.md#the-two-halves).
+
+**Specific to one tool — classes 3, 5, 6, 7.** Disclosure asks whether the tool admits what
+it did not read; invariants, gate and robustness are assertions about one implementation's
+guarantees, its permission modes and its process. A scanner that makes no such promise cannot
+fail these, and scoring it against them would be measuring the absence of a feature rather
+than a defect. These are expressed inside `expect.<tool>` for exactly that reason.
+
+The recall axis in class 2 is the `dimension` of a technique in
+[`taxonomy/techniques.yaml`](../taxonomy/techniques.yaml), never a scanner's own rule
+categories. Taking the axis from the tool under test is how a per-dimension recall figure
+becomes circular: it reports that the tool covers the categories it chose to have categories
+for.
 
 ---
 
@@ -36,7 +60,8 @@ spread (0.0%–30.8%) was wider than the pooled figure.
   real-world distribution available.
 - **Secondary**: `clawhub-security-signals` clean split (41,743, MIT). **Caveat that must
   travel with it**: its labels come from an OWASP Agentic Top 10 rating, which is the same
-  taxonomy our rules derive from. Using it to select benign samples is partly circular. Use
+  taxonomy most scanners in this space derive their rules from. Using it to select benign
+  samples is partly circular against almost any of them. Use
   it for scale, never as the headline.
 - **Full trees**: awesome-list link targets (1,231 trees / 382 repos, cap 5 per repo) — the
   only benign source with real scripts alongside the manifest, and human-collected, so
@@ -58,8 +83,10 @@ string literals and misses every language-native reverse shell.
   in-the-wild, manually triaged, Apache-2.0). **Deduplicate by author before counting** —
   40% carry one vendor's name and about 40 are near-duplicates, so an undeduplicated recall
   figure measures whether one template was caught.
-- **Capability probes**: `skillsgoat` (112, MIT) — blind, answers held outside the tree, an
-  error counts as a miss.
+- **Capability probes**: `skillsgoat` (101 malicious — 66 single plus 35 chains — MIT) —
+  blind, answers held outside the tree, an error counts as a miss. Its 10 deliberate
+  false-positive decoys are not part of that figure and are not recall material: firing on
+  them is the failure, not the fix.
 - **Hook and permission weaponisation**: `skillcraft-audit` (150, MIT) — the only public
   corpus covering these at all.
 - **MCP**: `cisco-ai-defense/mcp-scanner` evals (154, Apache-2.0).
@@ -73,8 +100,9 @@ silently dropping them overstates it. Naming them does neither.
 
 ## 3. Disclosure
 
-Invariant #5: nothing is omitted silently. **No competitor measures this**, and it is the
-class where `aguard` has historically failed worst — a `chmod 0111` once turned a 26/100
+Nothing is omitted silently. **Almost no scanner in this space measures this at all**, which
+is why the corpus has to carry it rather than expect it. The one scanner measured here so far
+fails it worst of the eight classes: a `chmod 0111` once turned a 26/100
 artifact with four findings into 100/100 with zero notes (W-001).
 
 Method: take a known artifact, inject one coverage gap, assert the score is unchanged *and*
