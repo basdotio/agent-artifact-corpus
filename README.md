@@ -25,6 +25,8 @@ from nobody else.**
 
 Start with [`docs/classification.md`](docs/classification.md) for what is measured, then
 [`docs/design.md`](docs/design.md) for how it is built.
+For the public corpora themselves — what each is good for, and what it will do to your
+numbers if you use it wrong — see [`docs/catalogue.md`](docs/catalogue.md).
 
 ---
 

@@ -17,6 +17,8 @@
 一句话概括：**分母来自世界，分子来自我们，闸门不来自任何别人。**
 
 先读 [`docs/classification.zh-CN.md`](docs/classification.zh-CN.md) 了解测量什么，再读 [`docs/design.zh-CN.md`](docs/design.zh-CN.md) 了解怎么建起来的。
+公开语料本身（每一份适合回答什么问题、用错了会把数字变成什么样）见
+[`docs/catalogue.zh-CN.md`](docs/catalogue.zh-CN.md)。
 
 ---
 
