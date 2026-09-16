@@ -269,6 +269,19 @@ func (s *Set) Validate() []error {
 	return errs
 }
 
+// TierByMapsToken finds the tier whose maps_to lists the given upstream token (e.g. "000").
+// A derivation reads tier from an upstream id prefix without restating the mapping: it is
+// already declared in each tier's maps_to ("skillsgoat / cisco 000"), so the one place the
+// correspondence lives is the vocabulary, not a second table in the derive rule.
+func (s *Set) TierByMapsToken(token string) (Tier, bool) {
+	for _, id := range s.TierOrder {
+		if slices.Contains(strings.Fields(s.Tiers[id].MapsTo), token) {
+			return s.Tiers[id], true
+		}
+	}
+	return Tier{}, false
+}
+
 // TierAtLeast reports whether tier a is at least as deep as tier b. Unknown tiers are not
 // comparable and answer false, so a typo fails the bound rather than passing it.
 func (s *Set) TierAtLeast(a, b string) bool {

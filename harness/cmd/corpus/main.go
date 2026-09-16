@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/derive"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/fetch"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/label"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/leakage"
@@ -39,6 +40,8 @@ func main() {
 		os.Exit(cmdStats(root))
 	case "fetch":
 		os.Exit(cmdFetch(root, os.Args[2:]))
+	case "derive":
+		os.Exit(cmdDerive(root, os.Args[2:]))
 	default:
 		usage()
 		os.Exit(2)
@@ -50,7 +53,8 @@ func usage() {
 
   validate   check every label and manifest entry, and run the leakage gate
   stats      corpus composition
-  fetch      materialise named layer-2 entries into ./cache (network)`)
+  fetch      materialise named layer-2 entries into ./cache (network)
+  derive     dry-run the coordinate derivation for a fetched entry and report coverage`)
 }
 
 // ---------- validate ----------
@@ -426,6 +430,157 @@ func cmdFetch(root string, want []string) int {
 	return rc
 }
 
+// ---------- derive ----------
+
+// cmdDerive is a dry run: it reads a fetched upstream, applies its derive rule, and reports
+// what coordinates would be produced and where the mapping is incomplete. It writes no
+// labels. Turning derived coordinates into on-disk labels — and deciding which get vendored
+// into layer 1 versus derived locally from a reference — is a deliberate later step, not a
+// side effect of inspecting coverage.
+func cmdDerive(root string, want []string) int {
+	tax, err := taxonomy.Load(filepath.Join(root, "taxonomy"))
+	if err != nil {
+		fatal(err)
+	}
+	manifests, _ := filepath.Glob(filepath.Join(root, "manifest", "*.yaml"))
+	var all []manifest.Entry
+	for _, mp := range manifests {
+		f, err := manifest.Load(mp)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", rel(root, mp), err)
+			return 1
+		}
+		all = append(all, f.Entries...)
+	}
+
+	byID := map[string]manifest.Entry{}
+	var derivable []string
+	for _, e := range all {
+		byID[e.ID] = e
+		if e.Derive != nil {
+			derivable = append(derivable, e.ID)
+		}
+	}
+
+	if len(want) == 0 {
+		sort.Strings(derivable)
+		if len(derivable) == 0 {
+			fmt.Println("No manifest entry has a derive block yet.")
+			return 2
+		}
+		fmt.Println("Entries with a derive rule:")
+		for _, id := range derivable {
+			fmt.Printf("  %s\n", id)
+		}
+		fmt.Println("\n  corpus derive <id>   (the entry must be fetched first)")
+		return 2
+	}
+
+	rc := 0
+	for _, id := range want {
+		e, ok := byID[id]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "%s: no such entry\n", id)
+			rc = 1
+			continue
+		}
+		upRoot := filepath.Join(root, "cache", id)
+		if _, err := os.Stat(upRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: not fetched — run `make fetch E=%q` first\n", id, id)
+			rc = 1
+			continue
+		}
+
+		res, errs := derive.Derive(e, upRoot, tax)
+		fmt.Printf("%s — %s\n", id, e.Derive.Fidelity)
+		if res != nil {
+			reportDerived(tax, res)
+		}
+		if len(errs) > 0 {
+			sort.Slice(errs, func(i, j int) bool { return errs[i].Error() < errs[j].Error() })
+			fmt.Printf("\n  %d problem(s) — the derivation is not trustworthy until these are resolved:\n", len(errs))
+			for _, e := range errs {
+				fmt.Printf("    - %v\n", e)
+			}
+			rc = 1
+		}
+	}
+	return rc
+}
+
+// reportDerived prints the dimension x tier grid the derived coordinates land in, plus the
+// upstream category tally so a reviewer can see the mapping's coverage rather than trust it.
+func reportDerived(tax *taxonomy.Set, res *derive.Result) {
+	grid := map[string]map[string]int{}
+	byClass := map[string]int{}
+	for _, c := range res.Coords {
+		byClass[c.Class]++
+		for _, d := range c.Dimensions {
+			if grid[d] == nil {
+				grid[d] = map[string]int{}
+			}
+			grid[d][c.Tier]++
+		}
+	}
+	fmt.Printf("  %d sample(s): ", len(res.Coords))
+	for _, cl := range []string{"malicious", "benign", "hard-negative"} {
+		if byClass[cl] > 0 {
+			fmt.Printf("%s %d  ", cl, byClass[cl])
+		}
+	}
+	fmt.Println()
+
+	fmt.Printf("    %-16s", "")
+	for _, t := range tax.TierOrder {
+		fmt.Printf(" %9s", t)
+	}
+	fmt.Println()
+	for _, d := range tax.Dimensions {
+		if grid[d] == nil {
+			continue
+		}
+		fmt.Printf("    %-16s", d)
+		for _, t := range tax.TierOrder {
+			if n := grid[d][t]; n > 0 {
+				fmt.Printf(" %9d", n)
+			} else {
+				fmt.Printf(" %9s", ".")
+			}
+		}
+		fmt.Println()
+	}
+
+	// The category tally is the honest counterpart to the grid: it shows what the upstream
+	// actually carried, so an over-broad ignore or a lopsided map is visible.
+	var cats []string
+	for c := range res.CategorySeen {
+		cats = append(cats, c)
+	}
+	sort.Slice(cats, func(i, j int) bool {
+		if res.CategorySeen[cats[i]] != res.CategorySeen[cats[j]] {
+			return res.CategorySeen[cats[i]] > res.CategorySeen[cats[j]]
+		}
+		return cats[i] < cats[j]
+	})
+	// Mechanical and hand-read dimensions are never summed into one "derived" number: one
+	// came from the upstream's own field through a stated rule, the other from a person
+	// reading the sample because the upstream never recorded what it achieves.
+	if res.HandRead > 0 {
+		mech := 0
+		for _, c := range res.Coords {
+			if c.Class == "malicious" && !c.HandReadDimension {
+				mech++
+			}
+		}
+		fmt.Printf("  dimension source: %d from the category map, %d hand-read (dimension_overrides)\n",
+			mech, res.HandRead)
+	}
+	fmt.Printf("  upstream categories seen: %d distinct\n", len(cats))
+	if res.Skipped > 0 {
+		fmt.Printf("  skipped %d layout match(es) with no upstream label (e.g. compound-chain nodes)\n", res.Skipped)
+	}
+}
+
 // ---------- helpers ----------
 
 // loadLabels reads every <id>.yaml under corpus/. The label sits BESIDE its sample tree,
@@ -523,7 +678,7 @@ func repoRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		if _, err := os.Stat(filepath.Join(d, "corpus")); err == nil {
 			if _, err := os.Stat(filepath.Join(d, "taxonomy")); err == nil {
 				return d, nil

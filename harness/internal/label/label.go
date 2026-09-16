@@ -86,17 +86,39 @@ func (l *Label) where() string {
 }
 
 type Origin struct {
-	Type    string `yaml:"type"` // real-world | promoted | reconstruction | synthetic
+	Type    string `yaml:"type"` // real-world | promoted | reconstruction | synthetic | harvested | derived
 	Source  string `yaml:"source"`
 	License string `yaml:"license"`
 	Note    string `yaml:"note"`
 	Added   string `yaml:"added"`
 
-	// LabeledBeforeRun must be true. Labelling after running treats a tool's current
-	// behaviour as the correct answer, which measures 100% every time. Note that under the
-	// split this is a claim about `truth`, which is the half that must not be derived from
-	// any run.
+	// LabeledBeforeRun must be true for samples we pin by hand. Labelling after running
+	// treats a tool's current behaviour as the correct answer, which measures 100% every
+	// time. It is a claim about `truth`, the half that must not be derived from any run.
+	//
+	// It does NOT apply to `derived` samples: their coordinates come from an upstream
+	// dataset's own labels through a stated rule, not from running any scanner, so there is
+	// no run whose result could have leaked in. Traceability replaces it there — see
+	// DerivedFrom.
 	LabeledBeforeRun bool `yaml:"labeled_before_run"`
+
+	// DerivedFrom is required when Type is `derived` and forbidden otherwise. A derived
+	// sample's coordinates were produced by a rule rather than pinned by a person, so the
+	// label is only trustworthy if you can re-run that rule against the named upstream and
+	// see the same thing. Without it, `derived` would be an unfalsifiable claim of provenance.
+	DerivedFrom *DerivedFrom `yaml:"derived_from"`
+}
+
+// DerivedFrom points a derived label back at the upstream it came from.
+type DerivedFrom struct {
+	Entry  string `yaml:"entry"`  // manifest entry id the sample was fetched or vendored from
+	Sample string `yaml:"sample"` // path of the sample within that upstream tree
+
+	// Fidelity records how lossy this particular derivation is: which axes were mechanical
+	// (tier from an id prefix, severity from a field) and which came through a lossy category
+	// map. It is per-sample honesty about a coordinate nobody hand-pinned. The manifest entry
+	// carries the aggregate; this carries the specific.
+	Fidelity string `yaml:"fidelity"`
 }
 
 // Truth is what the sample is. Nothing in here names a scanner, a rule, or a score.
@@ -106,6 +128,13 @@ type Truth struct {
 	// recall per dimension rather than pooled, and taking the dimension from a scanner's own
 	// rule taxonomy would make every cross-tool comparison circular.
 	Techniques []string `yaml:"techniques"`
+
+	// Dimensions is the coarse alternative to Techniques, and it exists for derived samples
+	// only. An upstream dataset labels by category, which is dimension-grained at best; it
+	// does not know which specific technique a sample uses. Rather than invent a technique we
+	// cannot support, a derived sample names the dimension directly and admits it knows no
+	// finer. A hand-pinned sample may not use this: if we wrote it, we know the technique.
+	Dimensions []string `yaml:"dimensions"`
 
 	// Resembles is what a hard negative LOOKS like. The pairing invariant runs through this
 	// field rather than through rule ids, which is what makes it a statement about the two
@@ -175,7 +204,7 @@ type KnownGap struct {
 
 var (
 	validSurfaces = []string{"skills", "hooks", "permission", "mcp", "connector", "instruction"}
-	validOrigins  = []string{"real-world", "promoted", "reconstruction", "synthetic"}
+	validOrigins  = []string{"real-world", "promoted", "reconstruction", "synthetic", "harvested", "derived"}
 
 	// truthSeverities is the tool-neutral ladder. Per-tool bounds are checked against that
 	// tool's own ladder from taxonomy/tools.yaml instead.
@@ -227,12 +256,31 @@ func (l *Label) Validate(tax *taxonomy.Set) []error {
 	if !oneOf(l.Origin.Type, validOrigins) {
 		bad("origin.type %q is not one of %s", l.Origin.Type, strings.Join(validOrigins, ", "))
 	}
-	if !l.Origin.LabeledBeforeRun {
-		// 100%% is not a typo: bad() is a printf wrapper, so a bare % here is parsed as a
-		// verb and the message renders as "100%!e(MISSING)very time". It did, until this
-		// comment was written.
-		bad("origin.labeled_before_run must be true — labelling after running treats the " +
-			"tool's current behaviour as the correct answer, which measures 100%% every time")
+
+	derived := l.Origin.Type == "derived"
+	if derived {
+		// A derived sample's coordinates came from a rule over an upstream label, not from a
+		// run of any scanner, so labeled_before_run does not bind it. Traceability does.
+		if l.Origin.DerivedFrom == nil {
+			bad("origin.type is `derived` but origin.derived_from is absent — a derived " +
+				"coordinate that cannot be traced back to its upstream is an unfalsifiable " +
+				"claim of provenance")
+		} else if l.Origin.DerivedFrom.Entry == "" {
+			bad("origin.derived_from.entry is empty — it must name the manifest entry the " +
+				"sample was derived from")
+		}
+	} else {
+		if l.Origin.DerivedFrom != nil {
+			bad("origin.derived_from is set but origin.type is %q, not `derived` — only a "+
+				"derived sample records where its coordinates came from", l.Origin.Type)
+		}
+		if !l.Origin.LabeledBeforeRun {
+			// 100%% is not a typo: bad() is a printf wrapper, so a bare % here is parsed as a
+			// verb and the message renders as "100%!e(MISSING)very time". It did, until this
+			// comment was written.
+			bad("origin.labeled_before_run must be true — labelling after running treats the " +
+				"tool's current behaviour as the correct answer, which measures 100%% every time")
+		}
 	}
 	if l.Origin.Added == "" {
 		bad("origin.added is empty")
@@ -263,14 +311,28 @@ func (l *Label) validateTruth(tax *taxonomy.Set) []error {
 			"performs it or merely looks like it", t)
 	}
 
+	for _, d := range l.Truth.Dimensions {
+		if !oneOf(d, tax.Dimensions) {
+			bad("truth.dimensions names %q, which is not a dimension in taxonomy/techniques.yaml", d)
+		}
+	}
+	if len(l.Truth.Dimensions) > 0 && l.Origin.Type != "derived" {
+		bad("truth.dimensions is for derived samples only — a sample we pinned by hand knows " +
+			"the specific technique, not just the dimension. Use truth.techniques")
+	}
+	if len(l.Truth.Techniques) > 0 && len(l.Truth.Dimensions) > 0 {
+		bad("truth lists both techniques and dimensions — a technique already implies its " +
+			"dimension, so a sample is labelled at one grain or the other, not both")
+	}
+
 	errs = append(errs, l.validateDepth(tax)...)
 
 	switch l.Class {
 	case Malicious:
-		if len(l.Truth.Techniques) == 0 {
-			bad("malicious sample lists no truth.techniques — without one it asserts nothing " +
-				"that any scanner other than ours could be measured against, and it sits on no " +
-				"recall axis")
+		if len(l.Truth.Techniques) == 0 && len(l.Truth.Dimensions) == 0 {
+			bad("malicious sample names neither truth.techniques nor truth.dimensions — " +
+				"without one it sits on no recall axis and asserts nothing any scanner could " +
+				"be measured against")
 		}
 		if len(l.Truth.Resembles) > 0 {
 			bad("truth.resembles is for benign look-alikes, not for malicious samples")
@@ -292,6 +354,10 @@ func (l *Label) validateTruth(tax *taxonomy.Set) []error {
 		if len(l.Truth.Techniques) > 0 {
 			bad("%s sample lists truth.techniques — a benign sample performs none; if it "+
 				"looks like one, that is truth.resembles", l.Class)
+		}
+		if len(l.Truth.Dimensions) > 0 {
+			bad("%s sample lists truth.dimensions — only malicious samples sit on the recall "+
+				"axis; a benign look-alike names what it resembles", l.Class)
 		}
 		if l.Truth.Severity != "" {
 			bad("%s sample sets truth.severity — the correct report on it is no finding, "+

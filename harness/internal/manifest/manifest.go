@@ -54,6 +54,56 @@ type Entry struct {
 	Prep []string `yaml:"prep"`
 
 	Vendorable bool `yaml:"vendorable"`
+
+	// Derive states how this upstream's own labels map onto our three axes, so a rule can
+	// produce derived coordinates instead of a person hand-pinning every sample. Absent means
+	// this corpus cannot be derived from and its samples, if used, must be pinned by hand.
+	Derive *Derive `yaml:"derive"`
+}
+
+// Derive is the rule that turns one upstream dataset's labels into our coordinates.
+//
+// It is per-axis on purpose. Upstream taxonomies conflate the three axes we deliberately
+// split: skillsgoat's category list mixes what an attack achieves (data-exfiltration), how
+// it hides (obfuscation-encoding) and how deep it sits (deferred-resolution) on one field.
+// So there is no single mapping; each axis is read from wherever that dataset happens to
+// keep it, and the honest ones (tier from an id prefix, severity from a field) are separated
+// from the lossy one (dimension and evasion from a category map).
+type Derive struct {
+	// Layout says where the sample tree and the upstream label sit, relative to the fetched
+	// root, e.g. "pasture/<category>/<id>/{expected.yaml, skill/}".
+	Layout string `yaml:"layout"`
+
+	// TierFrom / SeverityFrom / ClassFrom name where each mechanical axis is read. These are
+	// high-fidelity: a prefix or a field, no judgement.
+	TierFrom     string `yaml:"tier_from"`
+	SeverityFrom string `yaml:"severity_from"`
+	ClassFrom    string `yaml:"class_from"`
+
+	// CategoryAxisMap is the lossy part: each upstream category maps to one of our axis
+	// values, written as "dim:<x>", "evasion:<y>", "tier:<z>" or "ignore". A category present
+	// upstream but absent here fails derivation rather than being silently dropped — the same
+	// rule the tool dimension_map follows.
+	CategoryAxisMap map[string]string `yaml:"category_axis_map"`
+
+	// DimensionOverrides assigns a dimension to a named upstream sample that the category map
+	// cannot place, keyed by upstream sample id.
+	//
+	// It exists because some upstream samples are labelled by TECHNIQUE, not by outcome:
+	// skillsgoat categorises 200-split-across-files as `dispersion-splitting`, which says how
+	// the payload hides and nothing about what it achieves. Our axes need both, so a person
+	// reads the sample and records the dimension here. Each entry is therefore a hand-read
+	// judgement standing in the open, countable and reviewable, rather than a guess buried in
+	// the category map. `corpus derive` reports these separately from mechanically derived
+	// coordinates, because they carry a different kind of confidence.
+	DimensionOverrides map[string]string `yaml:"dimension_overrides"`
+
+	// Fidelity is the aggregate honesty statement for the whole entry: which axes are
+	// mechanical, which are lossy, and how much of the derivation was spot-checked by hand.
+	// An empty Derive with no Fidelity is not "derivable with no caveats"; it is a
+	// contradiction the validator rejects, because a derivation with no stated loss is the
+	// most dangerous kind.
+	Fidelity string `yaml:"fidelity"`
 }
 
 func Load(path string) (*File, error) {
@@ -71,6 +121,21 @@ func Load(path string) (*File, error) {
 }
 
 var validRoles = []string{"fp-denominator", "recall", "hard-negative", "touchstone", "probe"}
+
+// validAxisTarget checks the shape of a category_axis_map value. The value after the colon
+// (the actual axis member) is checked against the taxonomy in the derive package, where the
+// taxonomy is in scope; here we only reject a malformed prefix.
+func validAxisTarget(t string) bool {
+	if t == "ignore" {
+		return true
+	}
+	for _, prefix := range []string{"dim:", "evasion:", "tier:"} {
+		if strings.HasPrefix(t, prefix) && len(t) > len(prefix) {
+			return true
+		}
+	}
+	return false
+}
 
 func (f *File) Validate() []error {
 	var errs []error
@@ -104,6 +169,27 @@ func (f *File) Validate() []error {
 		// changes under the numbers already published against it.
 		if e.Commit == "" && e.Role != "probe" {
 			bad("%s: commit is empty — a moving reference makes published numbers irreproducible", e.ID)
+		}
+
+		// Derive is format-checked here; the semantic check (do the axis targets exist, is
+		// every upstream category covered) needs the taxonomy and lives in the derive package,
+		// so that this package stays free of a taxonomy dependency and validates on its own.
+		if d := e.Derive; d != nil {
+			if d.Fidelity == "" {
+				bad("%s: has a derive block but no derive.fidelity — a derivation with no "+
+					"stated loss is the most dangerous kind, because it reads as exact. State "+
+					"which axes are mechanical, which are lossy, and how much was spot-checked", e.ID)
+			}
+			if d.Layout == "" {
+				bad("%s: derive.layout is empty — it must say where the sample tree and the "+
+					"upstream label sit within the fetched root", e.ID)
+			}
+			for cat, target := range d.CategoryAxisMap {
+				if !validAxisTarget(target) {
+					bad("%s: derive.category_axis_map[%q] is %q — it must be dim:<x>, "+
+						"evasion:<y>, tier:<z> or ignore", e.ID, cat, target)
+				}
+			}
 		}
 	}
 

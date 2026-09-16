@@ -86,9 +86,45 @@ func TestValidate(t *testing.T) {
 
 		// --- truth is the tool-neutral half and carries the class's real assertion ---
 		{
-			name:    "malicious without techniques asserts nothing portable",
+			name:    "malicious without techniques or dimensions asserts nothing portable",
 			mutate:  func(l *Label) { l.Truth.Techniques = nil },
-			wantErr: "lists no truth.techniques",
+			wantErr: "names neither truth.techniques nor truth.dimensions",
+		},
+		{
+			name: "a derived sample may name only its dimension",
+			mutate: func(l *Label) {
+				l.Origin.Type = "derived"
+				l.Origin.DerivedFrom = &DerivedFrom{Entry: "skillsgoat", Sample: "pasture/x"}
+				l.Truth.Techniques = nil
+				l.Truth.Dimensions = []string{"backdoor"}
+			},
+		},
+		{
+			name: "a hand-pinned sample may not fall back to a bare dimension",
+			mutate: func(l *Label) {
+				l.Truth.Techniques = nil
+				l.Truth.Dimensions = []string{"backdoor"}
+			},
+			wantErr: "truth.dimensions is for derived samples only",
+		},
+		{
+			name: "techniques and dimensions are two grains, not both",
+			mutate: func(l *Label) {
+				l.Origin.Type = "derived"
+				l.Origin.DerivedFrom = &DerivedFrom{Entry: "skillsgoat"}
+				l.Truth.Dimensions = []string{"backdoor"}
+			},
+			wantErr: "labelled at one grain or the other",
+		},
+		{
+			name: "a dimension must exist in the vocabulary",
+			mutate: func(l *Label) {
+				l.Origin.Type = "derived"
+				l.Origin.DerivedFrom = &DerivedFrom{Entry: "skillsgoat"}
+				l.Truth.Techniques = nil
+				l.Truth.Dimensions = []string{"telepathy"}
+			},
+			wantErr: "not a dimension in taxonomy",
 		},
 		{
 			name:    "malicious without severity cannot be scored by an unlisted tool",
@@ -608,5 +644,71 @@ func TestHardNegativeDepth(t *testing.T) {
 	b.Expect["aguard"].MaxSeverity = "low"
 	if got := errText(b.Validate(testTax())); !strings.Contains(got, "benign sample sets truth.tier") {
 		t.Fatalf("expected a benign sample to be refused a tier, got:\n%s", got)
+	}
+}
+
+// A derived sample's coordinates come from a rule over an upstream label, not from a run, so
+// labeled_before_run does not bind it — but it must be traceable, or `derived` is an
+// unfalsifiable claim of provenance.
+func TestDerivedOrigin(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		mutate  func(*Label)
+		wantErr string
+	}{
+		{
+			name: "derived needs no labeled_before_run but needs a source",
+			mutate: func(l *Label) {
+				l.Origin.Type = "derived"
+				l.Origin.LabeledBeforeRun = false
+				l.Origin.DerivedFrom = &DerivedFrom{Entry: "skillsgoat", Sample: "pasture/x"}
+				l.Truth.Techniques = nil
+				l.Truth.Dimensions = []string{"backdoor"}
+			},
+		},
+		{
+			name: "derived without a source is untraceable",
+			mutate: func(l *Label) {
+				l.Origin.Type = "derived"
+				l.Truth.Techniques = nil
+				l.Truth.Dimensions = []string{"backdoor"}
+			},
+			wantErr: "origin.derived_from is absent",
+		},
+		{
+			name: "derived_from must name the entry",
+			mutate: func(l *Label) {
+				l.Origin.Type = "derived"
+				l.Origin.DerivedFrom = &DerivedFrom{Sample: "pasture/x"}
+				l.Truth.Techniques = nil
+				l.Truth.Dimensions = []string{"backdoor"}
+			},
+			wantErr: "origin.derived_from.entry is empty",
+		},
+		{
+			name: "a hand-pinned sample may not claim a derived source",
+			mutate: func(l *Label) {
+				l.Origin.DerivedFrom = &DerivedFrom{Entry: "skillsgoat"}
+			},
+			wantErr: "only a derived sample records where its coordinates came from",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			l := malicious()
+			tt.mutate(l)
+			got := errText(l.Validate(testTax()))
+			if tt.wantErr == "" {
+				if got != "" {
+					t.Fatalf("expected clean, got:\n%s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.wantErr) {
+				t.Fatalf("expected %q, got:\n%s", tt.wantErr, got)
+			}
+		})
 	}
 }

@@ -1,0 +1,250 @@
+// SPDX-License-Identifier: MIT
+
+package derive
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/manifest"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
+)
+
+// testTax mirrors the shape of the real vocabulary: tiers whose maps_to carry the upstream
+// token, a couple of dimensions and evasions.
+func testTax() *taxonomy.Set {
+	return &taxonomy.Set{
+		Dimensions: []string{"backdoor", "exfiltration", "supply-chain"},
+		TierOrder:  []string{"plain", "evasive", "structural"},
+		Tiers: map[string]taxonomy.Tier{
+			"plain":      {ID: "plain", Rank: 0, MapsTo: "skillsgoat / cisco 000", Calibration: true},
+			"evasive":    {ID: "evasive", Rank: 1, MapsTo: "skillsgoat / cisco 200"},
+			"structural": {ID: "structural", Rank: 2, MapsTo: "skillsgoat / cisco 300"},
+		},
+		Evasions: map[string]taxonomy.Evasion{
+			"base64-wrapper":  {ID: "base64-wrapper", ImpliesTier: "evasive"},
+			"judge-targeting": {ID: "judge-targeting", ImpliesTier: "structural"},
+		},
+	}
+}
+
+// writeSample creates root/<layoutDir>/<id>/expected.yaml with the given body.
+func writeSample(t *testing.T, root, category, id, body string) {
+	t.Helper()
+	dir := filepath.Join(root, "pasture", category, id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "expected.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func entry(m map[string]string) manifest.Entry {
+	return manifest.Entry{
+		ID: "skillsgoat",
+		Derive: &manifest.Derive{
+			Layout:          "pasture/*/*",
+			Fidelity:        "tier mechanical from prefix; dimension/evasion via category map",
+			CategoryAxisMap: m,
+		},
+	}
+}
+
+func TestDerive(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	// A malicious evasive sample whose two categories split across axes: one is what it does
+	// (dimension), the other is how it hides (evasion). This is the whole reason the map is
+	// per-axis rather than one-to-one.
+	writeSample(t, root, "obfuscation-encoding", "200-wrapped-backdoor", `
+id: 200-wrapped-backdoor
+verdict: malicious
+severity: high
+categories: [persistence-backdoor, obfuscation-encoding]
+`)
+	// A benign decoy: no tier, no dimension, class benign.
+	writeSample(t, root, "benign", "000-base64-logo", `
+id: 000-base64-logo
+verdict: benign
+categories: [benign]
+`)
+
+	m := map[string]string{
+		"persistence-backdoor": "dim:backdoor",
+		"obfuscation-encoding": "evasion:base64-wrapper",
+		"benign":               "ignore",
+	}
+	res, errs := Derive(entry(m), root, testTax())
+	if len(errs) != 0 {
+		t.Fatalf("expected clean derivation, got:\n%v", errs)
+	}
+	if len(res.Coords) != 2 {
+		t.Fatalf("expected 2 coords, got %d", len(res.Coords))
+	}
+
+	// Coords are sorted by upstream id, so 000-base64-logo is first.
+	benign := res.Coords[0]
+	if benign.Class != "benign" || benign.Tier != "" || len(benign.Dimensions) != 0 {
+		t.Fatalf("benign decoy derived wrong: %+v", benign)
+	}
+
+	mal := res.Coords[1]
+	if mal.Class != "malicious" || mal.Tier != "evasive" || mal.Severity != "high" {
+		t.Fatalf("malicious axes wrong: %+v", mal)
+	}
+	if len(mal.Dimensions) != 1 || mal.Dimensions[0] != "backdoor" {
+		t.Fatalf("dimension should come from persistence-backdoor, got %v", mal.Dimensions)
+	}
+	if len(mal.Evasion) != 1 || mal.Evasion[0] != "base64-wrapper" {
+		t.Fatalf("evasion should come from obfuscation-encoding, got %v", mal.Evasion)
+	}
+}
+
+func TestDeriveRefusesUnmappedCategory(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSample(t, root, "misc", "200-x", `
+id: 200-x
+verdict: malicious
+severity: high
+categories: [persistence-backdoor, something-new]
+`)
+	m := map[string]string{"persistence-backdoor": "dim:backdoor"}
+	_, errs := Derive(entry(m), root, testTax())
+	if !containsErr(errs, `category "something-new" has no category_axis_map entry`) {
+		t.Fatalf("an unmapped category must fail derivation, got:\n%v", errs)
+	}
+}
+
+func TestDeriveRefusesBadAxisTarget(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSample(t, root, "x", "200-x", `
+id: 200-x
+verdict: malicious
+severity: high
+categories: [persistence-backdoor]
+`)
+	m := map[string]string{"persistence-backdoor": "dim:telepathy"}
+	_, errs := Derive(entry(m), root, testTax())
+	if !containsErr(errs, `dimension "telepathy", which is not in the vocabulary`) {
+		t.Fatalf("an axis target outside the vocabulary must fail, got:\n%v", errs)
+	}
+}
+
+func TestDeriveRefusesMaliciousWithoutDimension(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	// All its categories are evasion or ignore, so it lands on no recall axis.
+	writeSample(t, root, "x", "300-judge", `
+id: 300-judge
+verdict: malicious
+severity: critical
+categories: [llm-judge-manipulation]
+`)
+	m := map[string]string{"llm-judge-manipulation": "evasion:judge-targeting"}
+	_, errs := Derive(entry(m), root, testTax())
+	if !containsErr(errs, "sits on no recall axis") {
+		t.Fatalf("a malicious sample with no dimension must be flagged, got:\n%v", errs)
+	}
+}
+
+// The id prefix is authoritative for tier; a category hint that disagrees is surfaced, not
+// silently resolved.
+func TestDeriveTierConflict(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSample(t, root, "x", "200-x", `
+id: 200-x
+verdict: malicious
+severity: high
+categories: [persistence-backdoor, deferred-resolution]
+`)
+	m := map[string]string{
+		"persistence-backdoor": "dim:backdoor",
+		"deferred-resolution":  "tier:structural", // disagrees with the 200 prefix -> evasive
+	}
+	_, errs := Derive(entry(m), root, testTax())
+	if !containsErr(errs, "id prefix says tier") {
+		t.Fatalf("a tier conflict must be surfaced, got:\n%v", errs)
+	}
+}
+
+func containsErr(errs []error, sub string) bool {
+	for _, e := range errs {
+		if strings.Contains(e.Error(), sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// Some upstream samples are categorised by technique alone — "dispersion-splitting" says how
+// the payload hides and nothing about what it achieves. The category map cannot place them, so
+// a person reads the sample and records the dimension. These stay countable and separate from
+// mechanically derived coordinates.
+func TestDimensionOverrides(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSample(t, root, "dispersion-splitting", "200-split", `
+id: 200-split
+verdict: malicious
+severity: high
+categories: [dispersion-splitting]
+`)
+	e := entry(map[string]string{"dispersion-splitting": "evasion:base64-wrapper"})
+	e.Derive.DimensionOverrides = map[string]string{"200-split": "exfiltration"}
+
+	res, errs := Derive(e, root, testTax())
+	if len(errs) != 0 {
+		t.Fatalf("an override should place the sample, got:\n%v", errs)
+	}
+	c := res.Coords[0]
+	if len(c.Dimensions) != 1 || c.Dimensions[0] != "exfiltration" {
+		t.Fatalf("expected the hand-read dimension, got %v", c.Dimensions)
+	}
+	if !c.HandReadDimension || res.HandRead != 1 {
+		t.Fatalf("a hand-read dimension must be marked and counted: %+v / %d", c, res.HandRead)
+	}
+}
+
+// An override that the category map has since made redundant is stale, and saying so stops it
+// outliving the reason it was written.
+func TestStaleOverrideIsReported(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSample(t, root, "x", "200-x", `
+id: 200-x
+verdict: malicious
+severity: high
+categories: [persistence-backdoor]
+`)
+	e := entry(map[string]string{"persistence-backdoor": "dim:backdoor"})
+	e.Derive.DimensionOverrides = map[string]string{"200-x": "exfiltration"}
+
+	_, errs := Derive(e, root, testTax())
+	if !containsErr(errs, "it is stale") {
+		t.Fatalf("a redundant override must be reported, got:\n%v", errs)
+	}
+}
+
+func TestOverrideTargetMustExist(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSample(t, root, "x", "200-x", `
+id: 200-x
+verdict: malicious
+severity: high
+categories: [persistence-backdoor]
+`)
+	e := entry(map[string]string{"persistence-backdoor": "dim:backdoor"})
+	e.Derive.DimensionOverrides = map[string]string{"200-other": "telepathy"}
+
+	_, errs := Derive(e, root, testTax())
+	if !containsErr(errs, `is "telepathy", which is not a dimension`) {
+		t.Fatalf("an override outside the vocabulary must fail, got:\n%v", errs)
+	}
+}
