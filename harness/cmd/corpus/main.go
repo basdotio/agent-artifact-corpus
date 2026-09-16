@@ -233,7 +233,7 @@ func cmdFetch(root string, want []string) int {
 	}
 
 	if len(want) == 0 {
-		fmt.Println("Name the entries to fetch. Available:\n")
+		fmt.Print("Name the entries to fetch. Available:\n\n")
 		fmt.Printf("  %-28s %-16s %-8s %s\n", "ID", "ROLE", "SAMPLES", "LICENSE")
 		for _, e := range all {
 			fmt.Printf("  %-28s %-16s %-8d %s\n", e.ID, e.Role, e.Malicious+e.Benign, e.License)
