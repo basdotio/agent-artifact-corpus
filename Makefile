@@ -1,23 +1,61 @@
-# agent-guard-corpus
+# agent-artifact-corpus
 #
 # This repository owns the samples and the rules about them. It does not own the scorer:
-# running aguard over the corpus lives in the tool repository, where a drift gate can compare
-# a generated report against a committed one. Keeping the scorer out means the corpus
-# validates with no build of the tool present.
+# running a scanner over the corpus lives in that scanner's repository, where a drift gate
+# can compare a generated report against a committed one.
+#
+# Keeping the scorer out is load-bearing rather than tidy. A label's `truth` block is written
+# in technique names no scanner owns, so it has to be checkable with no build of any scanner
+# present — which is also what lets someone benchmark their own tool against this corpus
+# without us being involved.
 
 HARNESS := cd harness && go run ./cmd/corpus
 
-.PHONY: validate stats fetch test fmt help
+.PHONY: validate check-docs stats fetch test fmt help
 
 help:
-	@echo "validate   check every _label.yaml and manifest entry; run the leakage gate (offline)"
+	@echo "validate   check every label, the taxonomy, every manifest entry and the doc pairs (offline)"
 	@echo "stats      corpus composition"
 	@echo "fetch      materialise named layer-2 entries: make fetch E=\"id1 id2\""
 	@echo "test       harness unit tests"
 
-## Offline. CI runs this on every change.
+## Offline. Runs both checks and reports both, rather than stopping at the first — the same
+## discipline the corpus applies to the scanners it measures.
+## The subshell matters: HARNESS begins with `cd harness`, and without the parentheses that
+## cd leaks into the rest of the recipe, so the recursive make runs from harness/ and reports
+## "No rule to make target".
 validate:
-	@$(HARNESS) validate
+	@rc=0; ( $(HARNESS) validate ) || rc=$$?; \
+	 $(MAKE) --no-print-directory check-docs || rc=1; \
+	 exit $$rc
+
+## Every hand-written document exists in both languages.
+##
+## This is a shell loop and not a Go package on purpose. It asks whether a file exists, which
+## is what shell is for; it was 74 lines of Go plus 105 of test, which is four times the data
+## it guards.
+##
+## It catches a MISSING translation, never a stale one. No line-count or heading-count
+## heuristic is attempted: Chinese and English prose differ in length for ordinary reasons, so
+## such a check would cry wolf and train people to ignore it. Content drift between the two
+## languages is a real hole and it is named here rather than papered over.
+check-docs:
+	@missing=0; \
+	for f in README.md docs/*.md; do \
+	  case "$$f" in *.zh-CN.md) continue;; esac; \
+	  z="$${f%.md}.zh-CN.md"; \
+	  [ -f "$$z" ] || { echo "  - $$f has no Chinese counterpart; expected $$z"; missing=1; }; \
+	done; \
+	for z in README.zh-CN.md docs/*.zh-CN.md; do \
+	  e="$${z%.zh-CN.md}.md"; \
+	  [ -f "$$e" ] || { echo "  - $$z has no English counterpart; expected $$e"; missing=1; }; \
+	done; \
+	[ -f NOTICE.zh-CN.md ] || { echo "  - NOTICE has no Chinese counterpart; expected NOTICE.zh-CN.md"; missing=1; }; \
+	if [ $$missing -ne 0 ]; then \
+	  echo "docs: every hand-written document in this repository exists in both languages"; \
+	  exit 1; \
+	fi; \
+	echo "documents   English and Chinese paired"
 
 stats:
 	@$(HARNESS) stats

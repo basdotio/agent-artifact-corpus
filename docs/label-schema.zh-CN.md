@@ -1,0 +1,230 @@
+> [English](label-schema.md) · 中文
+
+# 标签文件
+
+每个样本一份，命名为 `<id>.yaml`，放在样本树**旁边**，绝不放在样本树里面。
+
+```
+corpus/malicious/skills/revshell-python-dup2.yaml    <- 标签
+corpus/malicious/skills/revshell-python-dup2/        <- 扫描器被指向的那棵树
+```
+
+**这是承重结构，不是整洁强迫症。** 标签最初是放在每棵树内部的 `_label.yaml`，
+而这悄无声息地污染了每一项测量：扫描器会读取整个目标目录，
+于是每个样本都在把自己的注释当成证据注入。
+
+那个反向 shell 样本拿到 83 分，`BD-003` 看上去被检出了——命中的却是它自己 `note:`
+字段里「textbook reverse shell」这几个字，而真正的载荷根本没被发现。把标签移出去之后，
+它得 88 分，`BD-003` 保持沉默，这才是真实结果，也正是 W-027 记录下来的那个。
+`environ-copy` 硬负样本拿到 63 分，源于一条高危 `EXFIL-001`，
+而它那两行证据分别是标签自己的 `source:` URL 和 `note:` 里的散文；清理干净后，它得 88 分。
+
+污染是双向的：恶意样本看起来比实际更容易被抓住，良性样本看起来像是它们本来并不是的假阳性。
+验证器现在会拒绝任何在样本树内部发现的 `_label.yaml`。
+
+---
+
+## 两个半部分
+
+一个标签有两个半部分，而它们分属不同的人。
+
+**`truth` 说明这个样本是什么。** 它用 [`taxonomy/techniques.yaml`](../taxonomy/techniques.yaml)
+里的技术名称书写，不归任何扫描器所有。仅凭它就足以给任何扫描器打分：运行器只需要问
+「这个工具报告这个样本时，是否达到或超过了 `truth.severity`」，而不必知道任何一个规则 ID。
+
+**`expect.<tool>` 说明某个具名扫描器应该输出什么。** 它用那个扫描器自己的规则 ID 书写，
+对照那个扫描器自己的严重度阶梯来检查，并且它是**可选的**。缺少这个块意味着*此处未测量*，
+这和*通过了*是完全不同的陈述。
+
+在拆分之前，只存在后一个半部分。语料库里的每一条断言都用某一个产品的词汇来表述，
+`known_gap` 把某一个产品的不足记录成了仿佛是制品自身的属性，
+而配对不变式则是两个规则 ID 列表之间的重叠。
+这样的语料库无法向任何没有构建过那个产品的人描述一个样本。
+
+**任何人都可以拿自己的扫描器对照本语料库做基准测试，无需出现在
+[`taxonomy/tools.yaml`](../taxonomy/tools.yaml) 里。** 那个文件只在需要承载规则级期望时才用得上。
+`truth` 才是契约。
+
+---
+
+## 这个文件
+
+```yaml
+id: mal-skill-revshell-python-dup2    # 唯一、稳定、永不复用
+class: malicious                      # malicious | benign | hard-negative
+surface: skills                       # skills | hooks | permission | mcp | connector | instruction
+kind: skill                           # 在 agent 生态里的制品类型，而不是任何扫描器里的类型
+entry: .                              # 扫描器被指向的对象
+
+origin:
+  type: reconstruction                # real-world | promoted | reconstruction | synthetic
+  source: "https://…"                 # 文章或仓库 url+commit
+  license: MIT                        # 样本自身的许可证；若是 vendored（随仓库分发）则必须与 NOTICE 一致
+  note: "minimal sample rebuilt from the described shape, not the original payload"
+  added: 2026-09-16
+  labeled_before_run: true            # 必须为 true —— 见下文
+
+truth:                                # 工具中立。这里没有任何东西指名某个扫描器。
+  techniques: [reverse-shell]         # 它实际干了什么，取自 taxonomy/techniques.yaml
+  severity: high                      # 它有多糟，独立于任何工具
+  note: "socket to a reserved host, all three fds duplicated onto it, /bin/sh -i spawned"
+
+expect:                               # 可选，按工具划分，以 taxonomy/tools.yaml 为键。
+                                      # 下面的 `aguard` 只是一个示例工具；这些规则 ID 和
+                                      # 这套阶梯是它自己的，不是 schema 的。
+  aguard:
+    rules: [BD-003]                   # 必须触发
+    min_severity: high                # 门禁视角：在 aguard 的阶梯上至少要达到这一级
+    quiet: [PERM-006]                 # 必须不触发
+    notes: [COV-000]                  # 必须出现的维度 0 注记
+    known_gap:                        # 出现即表示该工具当前在这个样本上失败
+      item: W-027
+      since: 2026-09-16
+      observed: "88/100, only EXEC-004 medium; --fail-on high passes it"
+```
+
+良性和硬负样本把边界反过来，并把技术挪到 `resembles` 下：
+
+```yaml
+class: hard-negative
+truth:
+  resembles: [reverse-shell]          # 它看上去像什么
+  differs_by: >-                      # 判别测试，明明白白写出来
+    No fd redirection and no interpreter spawn. The socket is connected, written to once
+    and closed.
+expect:
+  aguard:
+    max_severity: low                 # low/advisory 可以容忍；高于此就是假阳性
+    quiet: [BD-003, EXFIL-001]
+pairs_with: mal-skill-revshell-python-dup2   # hard-negative 必填
+```
+
+---
+
+## 验证器强制执行的规则
+
+### 关于 `truth`
+
+**恶意样本需要 `techniques` 和 `severity`。** 没有技术，样本就不落在任何召回轴上，
+也就没有任何断言能用来衡量除我们之外的扫描器。没有严重度，就没有关于它有多糟的工具中立陈述，
+于是一个在这里没有 `expect` 块的扫描器根本无法被打分。
+
+**硬负样本需要 `resembles` 和 `differs_by`。** 像一次攻击，正是这个类别的全部定义。
+`differs_by` 指出那个缺席的要素，而这恰恰是另一个扫描器的作者真正需要从样本里拿到的东西：
+不是「我们在这里触发 `BD-003`」，而是「这两个制品的差别恰好就在这一点上」。
+
+**一个样本不能既执行、又相似于同一个技术。** 二者只能居其一。
+
+**技术名称必须存在于 `taxonomy/techniques.yaml` 中**，这样一个拼写错误会让语料库变红，
+而不是悄悄造出一条只有一个成员的召回轴、读起来却像是完整覆盖。
+
+### 关于 `expect`
+
+**这个工具必须在 `taxonomy/tools.yaml` 中声明。** 未声明工具的规则 ID 和严重度边界无从对照检查，
+因而会永远得不到验证。
+
+**严重度边界是对照那个工具自己的阶梯来检查的。** 正是这一点，让两个刻度不同的扫描器可以标注同一个样本，
+而不必谁去采纳谁的刻度。
+
+**规则 ID 必须存在**，对照那个工具生成的规则参考来检查，
+这样一条被改名或退役的规则会让语料库变红，而不是悄悄地永远匹配不上。
+规则参考不可达的工具会降级为「未检查」，并且明说这一点——本仓库必须在本地不存在任何扫描器代码检出的情况下
+也能通过验证。
+
+**`rules` 和 `quiet` 不得相交**，否则不管工具做什么，样本都算通过。
+
+**良性边界是边界，不是沉默。** `max_severity` 的意思是「不高于此」，
+把它设得太紧是常见的错误。`environ-copy` 硬负样本最初被标成 `max_severity: low` 并且没通过验证，
+因为这个样本的全部目的就是在子进程里跑 `make`，中危的 `EXEC-004` 是工具判断正确。
+把边界设成一个正确的工具会输出的值，让 `quiet` 去承载真正的主张。
+
+**空的块会被拒绝；请把这个 key 删掉。** 一个空块读起来像是「已测量且干净」，
+而缺席本应意味着「未测量」。
+
+**`notes`** 本身承载测量类别 3（披露）。一个注入了覆盖缺口的样本——一个不可读的目录、一个 FIFO、
+一个指向界外的符号链接——在这里断言：工具宣告了它。它被刻意放在按工具划分的块内部：
+几乎没有别的扫描器有这个概念，把它上提就等于把某一个产品的属性陈述成制品的属性。
+
+**`out_of_scope`**（字符串，可选）意味着这个样本的恶意之处，正是**这个工具**声明自己不检测的那一种——
+纯运行时行为，以及任何需要活的 MCP 连接的东西。它会离开那个工具的召回分母，
+**并且会在报告中被点名**。悄悄把它留在分母里会低估召回，悄悄把它丢掉会高估召回，点名则两者都不会。
+这同样是按工具而定的：纯运行时行为对静态扫描器超出检测范围，对动态扫描器则在检测范围之内。
+
+### 其他所有地方
+
+**`labeled_before_run` 必须为 `true`。** 先标注，后运行。先运行、事后再标注，
+等于把工具当前的行为当成了正确答案，那样每次都能测出 100%，并且永远什么也发现不了。
+在拆分之后，这首先是一个关于 `truth` 的主张，而 `truth` 正是绝不可以从一次运行中推导出来的那一半。
+
+**目录必须与标签一致。** `corpus/<class>/<surface>/` 是读者最先去看的地方，
+所以一个归档在某个类别下、却声明了另一个类别的标签会被拒绝。
+
+**`origin.license` 必须与第 1 层兼容。** 无许可证、NC、SA 以及 copyleft 的材料不能待在这里——
+它们属于 `manifest/`。参见 [`licensing.zh-CN.md`](licensing.zh-CN.md)。
+
+---
+
+## 配对，以及它为什么现在走 `truth`
+
+**`hard-negative` 要求 `pairs_with`**，指名一个仍然必须被抓到的恶意样本。
+没有它，「减少假阳性」就退化成「把规则删了」，而且没有任何东西会察觉。
+
+配对是按**孪生样本执行了本样本所相似的某个技术**来检查的。
+这是一个关于两个制品的陈述，因此它对每一个扫描器都成立。
+
+它过去是按两个标签的规则 ID 列表之间的重叠来检查的。那个版本在两个方向上都更弱：
+只要两个标签碰巧提到了同一个正则名字，一个配对就算有效；
+而对于一个我们并不知道其规则 ID 的扫描器，这条不变式根本无法表达。
+
+### 空转配对
+
+有一种状态，能通过每一项结构检查，却什么也保证不了。硬负样本让一条规则保持沉默，
+孪生样本本应该触发它，而孪生样本带着一个 `known_gap`，说那个工具当前并不会触发。
+把这条规则删掉，**两个样本都不会坏**。
+
+今天有一对正处于这种状态：`hn-skill-socket-client-plain` 让 `BD-003` 沉默，
+而它的孪生样本在 W-027 下有案可查，对 `aguard` 而言 `BD-003` 是失败的。
+
+这不会被拒绝。孪生样本的 `known_gap` 是一份诚实的声明，而拒绝它只会让「删掉样本」
+成为变绿的最廉价手段。取而代之的是，`make validate` 和 `make stats` 会把它**点名并计数**，
+原则和工具自己的覆盖注记一样：一个被声明出来的洞是操作者可以据以行动的东西，
+一个被隐藏的洞则是谎言。这个计数会进入发布的报告。
+
+---
+
+## `known_gap`，以及它为什么不只是一个失败的测试
+
+一个工具当前满足不了其期望的样本，是最有价值的一类，也是最容易丢失的一类。
+如果没有一个字段来承载它，加入那个反向 shell 样本会在提交时让 CI 变红，
+而变绿的最廉价手段就是把样本删掉——连带删掉这个缺陷唯一的证据。
+
+所以 `known_gap` 让这次失败**成为预期之内、并且有归属的**：
+这次运行会把它报告成针对某个工作项的已知缺口，而不是一次回归；
+这个数字会作为一个未关闭的缺口出现在发布的报告里；并且**缺口被关闭时同样会让构建失败**——
+你不可以在同一次变更里既不删掉这个字段、也不更新报告，就把它修好。
+
+它**按工具**存在，因为「不足」按定义就是按工具而定的。一个扫描器的缺口不是另一个扫描器的缺口，
+把它记在顶层，就等于把某一个产品的弱点陈述成了关于制品的事实。
+
+一个带着 `known_gap` 的样本会计入那个工具的召回分母。它是一次漏报，不是一次排除。
+
+---
+
+## 添加一个扫描器
+
+在 [`taxonomy/tools.yaml`](../taxonomy/tools.yaml) 里加一个条目，而不是改 schema：
+
+```yaml
+  - id: yourscanner
+    name: Your Scanner
+    url: https://…
+    severity_ladder: [error, warning, note]   # 从最严重到最不严重；最后一个表示「什么都没有」
+    rule_id_pattern: '…'                      # 它的规则 id 是怎么写的
+    rules_source:
+      env: YOURSCANNER_RULES
+      path: ../yourscanner/docs/rules.md      # 相对于本仓库根目录
+    native_format: sarif-2.1.0
+```
+
+而如果压根不加条目也想给它打分：拿它跑一遍样本树，然后和 `truth` 比对。
+这条路径不需要本文件里的任何东西。
