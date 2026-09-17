@@ -128,6 +128,17 @@ and publish aggregate figures, all outside the reach of their distribution terms
 
 ### Benign — the half that decides the false positive rate
 
+The benign side of layer 1 is roughly thirteen times the malicious side, and that is a
+measurement requirement rather than an accident: a false-positive rate is a small proportion
+and a recall figure is a large one, so pinning the first to a useful precision costs about an
+order of magnitude more samples than the second. Past a point the extra samples stop buying
+precision and start buying **source diversity**, which is what the no-pooling rule exists to
+protect. The arithmetic and the measured diminishing-returns curve are in
+[`classification.md`](classification.md#why-the-benign-side-is-13x-the-malicious-side), stated
+once — this repository has just spent an audit correcting a count that was restated in five
+documents and updated in one.
+
+
 | Corpus | License | Size | Role | Hazard |
 |---|---|---:|---|---|
 | **HF `FayeZC/SkillMD-138K`** | CC-BY-4.0 | 138,133 / 20,556 repos | **Primary FP denominator.** Widest real-world distribution | `SKILL.md` body only — no scripts, so script-surface rules are untested by it |
