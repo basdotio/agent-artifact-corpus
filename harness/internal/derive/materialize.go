@@ -281,7 +281,11 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+// target2 is just the destination path; named so the symlink branch reads in one line.
+func target2(_, dst, rel string) string { return filepath.Join(dst, rel) }
+
 func copyTree(src, dst string) error {
+	// filepath.Walk uses Lstat, so a symlink arrives as a symlink rather than as its target.
 	return filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -294,9 +298,31 @@ func copyTree(src, dst string) error {
 		if fi.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			// Symlinks ARE copied, as links, and this reversed an earlier decision. The old
+			// rule dropped every non-regular file on the reasoning that copying one imports a
+			// filesystem hazard we did not choose — true in general, and false for exactly the
+			// sample that proved it: skillsgoat's `200-symlink-escape` IS a symlink escaping
+			// its own directory, and vendoring it without the link left a 230-byte SKILL.md
+			// telling the agent to read a file that no longer exists. The sample sat in the
+			// malicious recall denominator carrying no attack at all, and its label said "the
+			// artifact is vendored unchanged".
+			//
+			// Copying the link is safe and faithful: git stores the link text, the target is
+			// outside the tree so it dangles, and a dangling symlink escaping a skill
+			// directory is precisely the artifact a scanner is supposed to notice.
+			target, rerr := os.Readlink(p)
+			if rerr != nil {
+				return rerr
+			}
+			if err := os.MkdirAll(filepath.Dir(target2(target, dst, rel)), 0o755); err != nil {
+				return err
+			}
+			return os.Symlink(target, filepath.Join(dst, rel))
+		}
 		if !fi.Mode().IsRegular() {
-			// Non-regular files are not corpus content and copying them would import a
-			// filesystem-level hazard we did not choose.
+			// Sockets, devices, fifos. These are not corpus content and nothing upstream ships
+			// them; importing one would be a filesystem hazard we did not choose.
 			return nil
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
