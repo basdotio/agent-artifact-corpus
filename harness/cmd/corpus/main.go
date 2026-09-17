@@ -73,9 +73,19 @@ func cmdValidate(root string) int {
 	for _, e := range tax.Validate() {
 		problems = append(problems, fmt.Sprintf("taxonomy: %v", e))
 	}
+	verified := 0
 	for _, l := range labels {
 		for _, e := range l.Validate(tax) {
 			problems = append(problems, fmt.Sprintf("%s: %v", l.Rel, e))
+		}
+		// Layer 1 holds the bytes, so a hash on a vendored sample is checkable — and an
+		// unchecked hash is worse than none, because it reads like integrity.
+		if errs := l.VerifySha256(); len(errs) > 0 {
+			for _, e := range errs {
+				problems = append(problems, fmt.Sprintf("%s: %v", l.Rel, e))
+			}
+		} else if l.Origin.Sha256 != "" {
+			verified++
 		}
 	}
 
@@ -143,9 +153,18 @@ func cmdValidate(root string) int {
 				l.Rel, ferr))
 			continue
 		}
+		// The group is the POPULATION a sample belongs to, because the gate asks whether the
+		// classes are separable without reading content — a question that only means anything
+		// inside one population. Harvested samples are their own: they are real configuration
+		// files collected from public repositories, and pooling them with the handful we wrote
+		// ourselves would report `file:.claude/settings.json` as leakage when all it says is
+		// that only the harvest contains settings files.
 		group := "hand-pinned"
-		if l.Origin.DerivedFrom != nil && l.Origin.DerivedFrom.Entry != "" {
+		switch {
+		case l.Origin.DerivedFrom != nil && l.Origin.DerivedFrom.Entry != "":
 			group = l.Origin.DerivedFrom.Entry
+		case l.Origin.Type == "harvested":
+			group = "harvested"
 		}
 		samples = append(samples, leakage.Sample{
 			ID: l.ID, Class: string(l.Class), Files: files, Group: group,
@@ -156,6 +175,10 @@ func cmdValidate(root string) int {
 
 	fmt.Printf("labels      %d\n", len(labels))
 	fmt.Printf("techniques  %d across %d dimensions\n", len(tax.Techniques), len(tax.Dimensions))
+	// Said out loud including when it is zero, so "no hash failures" can never be mistaken
+	// for "the hashes were checked".
+	fmt.Printf("sha256      %d of %d label(s) carry a hash, and those %d were verified against "+
+		"the vendored bytes\n", verified, len(labels), verified)
 	fmt.Println("rule ids")
 	for _, line := range ruleLines {
 		fmt.Println(line)
@@ -257,10 +280,16 @@ func cmdStats(root string) int {
 
 	for _, l := range labels {
 		byClass[string(l.Class)]++
-		if bySurface[l.Surface] == nil {
-			bySurface[l.Surface] = map[string]int{}
+		// A multi-surface artifact is counted once under each load path it sits on. The
+		// columns therefore do not sum to the sample count, and the report says so — the
+		// alternative, picking one surface per artifact, is what made the permission surface
+		// mean "settings files with no hooks".
+		for _, sf := range l.Surface {
+			if bySurface[sf] == nil {
+				bySurface[sf] = map[string]int{}
+			}
+			bySurface[sf][string(l.Class)]++
 		}
-		bySurface[l.Surface][string(l.Class)]++
 		byOrigin[l.Origin.Type]++
 		switch l.Origin.Type {
 		case "derived":
@@ -271,7 +300,17 @@ func cmdStats(root string) int {
 				}
 			}
 		case "harvested":
-			harvested++
+			// `harvested` describes where the ARTIFACT came from; this report is about where
+			// the COORDINATES came from, and the two come apart. A real config collected from
+			// a public repository and then read by hand into a hard negative — with
+			// `resembles` and `differs_by` that no rule could produce — belongs in the
+			// hand-pinned tier, because that is the claim a reader is weighing. Keying this
+			// on origin.type alone would have understated the corpus's own best evidence.
+			if l.Truth.HandWritten() {
+				selfPinned++
+			} else {
+				harvested++
+			}
 		default:
 			selfPinned++
 		}
@@ -327,7 +366,8 @@ func cmdStats(root string) int {
 
 	reportSources(labels)
 
-	fmt.Println("  by surface")
+	fmt.Println("  by surface — an artifact on two load paths is counted under both, so these")
+	fmt.Println("    do not sum to the sample count above")
 	for _, s := range sortedKeys(bySurface) {
 		m := bySurface[s]
 		fmt.Printf("    %-14s mal %-4d ben %-4d hard-neg %d\n", s, m["malicious"], m["benign"], m["hard-negative"])
@@ -763,8 +803,16 @@ func checkLayout(corpusDir, labelPath string, l *label.Label) error {
 		return fmt.Errorf("%s: label says class %q but it is filed under %q",
 			labelPath, l.Class, parts[0])
 	}
-	if parts[1] != l.Surface {
-		return fmt.Errorf("%s: label says surface %q but it is filed under %q",
+	// A sample spanning two load paths still lives at one path: its FIRST surface owns the
+	// directory. Copying the tree into both would put identical bytes in two samples, and a
+	// scanner scored on both would be scored twice on one artifact.
+	if parts[1] != l.Surface.Primary() {
+		if l.Surface.Has(parts[1]) {
+			return fmt.Errorf("%s: label lists surfaces %s and is filed under %q, which is one "+
+				"of them but not the first — put the owning surface first so the path is predictable",
+				labelPath, l.Surface, parts[1])
+		}
+		return fmt.Errorf("%s: label says surface %s but it is filed under %q",
 			labelPath, l.Surface, parts[1])
 	}
 	return nil

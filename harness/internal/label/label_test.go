@@ -49,7 +49,7 @@ func goodOrigin() Origin {
 
 func malicious() *Label {
 	return &Label{
-		ID: "mal-x", Class: Malicious, Surface: "skills", Kind: "skill", Entry: ".",
+		ID: "mal-x", Class: Malicious, Surface: Surfaces{"skills"}, Kind: "skill", Entry: ".",
 		Origin: goodOrigin(),
 		Truth:  Truth{Techniques: []string{"reverse-shell"}, Severity: "high", Tier: "plain"},
 		Expect: map[string]*ToolExpect{"aguard": {Rules: []string{"BD-003"}, MinSeverity: "high"}},
@@ -58,7 +58,7 @@ func malicious() *Label {
 
 func hardNegative() *Label {
 	return &Label{
-		ID: "hn-x", Class: HardNegative, Surface: "skills", Kind: "skill", Entry: ".",
+		ID: "hn-x", Class: HardNegative, Surface: Surfaces{"skills"}, Kind: "skill", Entry: ".",
 		Origin:    goodOrigin(),
 		Truth:     Truth{Resembles: []string{"reverse-shell"}, DiffersBy: "no fd redirection", Tier: "plain"},
 		Expect:    map[string]*ToolExpect{"aguard": {Quiet: []string{"BD-003"}, MaxSeverity: "low"}},
@@ -237,7 +237,7 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name:    "surface must be a real surface",
-			mutate:  func(l *Label) { l.Surface = "widgets" },
+			mutate:  func(l *Label) { l.Surface = Surfaces{"widgets"} },
 			wantErr: "surface \"widgets\" is not one of",
 		},
 	}

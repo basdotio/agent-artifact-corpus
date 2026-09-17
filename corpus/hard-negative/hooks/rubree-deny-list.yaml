@@ -1,0 +1,49 @@
+id: hn-hook-rubree-deny-list
+class: hard-negative
+# Both, and this is the sample that made the schema change necessary: one file carries a
+# populated `hooks` block and a populated `permissions` block, and filing it under one of them
+# would have hidden half of what it tests.
+surface: [hooks, permission]
+kind: settings
+entry: .
+
+origin:
+  # The artifact is real and was collected, not written — red line 1 applies to hard negatives
+  # for the same reason it applies to benign samples: a near-miss that someone wrote while
+  # knowing the rules is a near-miss by construction. The COORDINATES below are hand-pinned,
+  # because `resembles` and `differs_by` are judgements no derivation rule can produce.
+  type: harvested
+  source: "https://github.com/aim2bpg/rubree/blob/a5a1a1a9ae80297e452f8ac2509eca51d495051f/.claude/settings.json"
+  license: MIT
+  note: >-
+    A working project configuration from a public Ruby repository, vendored unchanged. It was
+    found by scripts/harvest-claude-config.py as an ordinary benign config and promoted by
+    hand after reading it: it is the densest concentration of reverse-shell and
+    pipe-to-shell literals in the whole harvest, and every one of them sits in a refusal.
+  added: 2026-09-17
+  labeled_before_run: true
+  sha256: ee719ded5e6e6eda6e4ec1fd35e072bc3f08a1c5a6e846fb6826a548010a66ee
+
+truth:
+  resembles: [reverse-shell]
+  tier: plain
+  differs_by: >-
+    Every string a reverse-shell rule looks for is present — `Bash(nc *)`, `Bash(ncat *)`,
+    `Bash(socat *)`, `Bash(curl * | sh*)`, `Bash(wget * | bash*)` — and every one of them is
+    an entry in `permissions.deny`, which is the instruction NOT to run it. Nothing is
+    executed: there is no socket, no file descriptor redirection, no interpreter spawn. The
+    `hooks.PreToolUse` block is the same inversion: it reads the proposed command from stdin
+    and emits `"permissionDecision": "deny"`, so the shell text it contains is a pattern being
+    matched against rather than a command being run. This is use versus mention, on a load
+    path where a scanner has to read structure to tell the difference.
+
+# Cross-surface, and that is a weakness worth naming rather than hiding. The twin performs a
+# reverse shell as a skill; this sample refuses one as a settings file. A scanner that simply
+# does not read `.claude/settings.json` will be quiet here, and that silence is not evidence
+# of discrimination — it is absence of coverage. The pair becomes fully load-bearing only when
+# the hooks surface has a malicious sample of its own, which no public corpus supplies today.
+pairs_with: mal-skill-revshell-python-dup2
+
+# No `expect` block on purpose. No scanner has been run against this sample, and predicting
+# which rule ids ought to stay quiet would be a guess dressed as a measurement — the `truth`
+# block above is enough to score any scanner, which is the whole point of splitting the two.

@@ -54,7 +54,7 @@ rule-level expectations. `truth` is the contract.
 ```yaml
 id: mal-skill-revshell-python-dup2    # unique, stable, never reused
 class: malicious                      # malicious | benign | hard-negative
-surface: skills                       # skills | hooks | permission | mcp | connector | instruction
+surface: skills                       # one, or a list: [hooks, permission] — see below
 kind: skill                           # the artifact kind in the agent ecosystem, not in any scanner
 entry: .                              # what the scanner is pointed at
 
@@ -65,6 +65,7 @@ origin:
   note: "minimal sample rebuilt from the described shape, not the original payload"
   added: 2026-09-16
   labeled_before_run: true            # REQUIRED true — see below
+  sha256: ""                          # optional; if set it IS checked against the bytes
 
 truth:                                # tool-neutral. Nothing here names a scanner.
   techniques: [reverse-shell]         # what it actually does, from taxonomy/techniques.yaml
@@ -105,6 +106,52 @@ pairs_with: mal-skill-revshell-python-dup2   # REQUIRED for hard-negative
 ```
 
 ---
+
+## `surface` is a list, because one file is two load paths
+
+A real `.claude/settings.json` normally carries both a `hooks` block and a `permissions`
+block. Three of the first five real files harvested had both.
+
+With a single surface, such a file has to be filed under one of them, and the consequence is
+not cosmetic: the `permission` surface comes to mean *settings files that happen to have no
+hooks*, a subpopulation invented by the schema rather than found in the world. Since the whole
+point of the surface axis is to say **where** a scanner fails, a category that the schema
+fabricated is worse than none.
+
+So `surface` accepts either form:
+
+```yaml
+surface: skills                 # the normal case, and it stays a scalar
+surface: [hooks, permission]    # one file that really is on both load paths
+```
+
+Three consequences worth knowing:
+
+- **The artifact is vendored once.** Copying the tree into two surfaces would put identical
+  bytes in two samples and let a scanner be scored twice for one file — the same leakage the
+  corpus rejects elsewhere.
+- **The first surface owns the directory.** A multi-surface sample lives at
+  `corpus/<class>/<first-surface>/<id>/`, and the validator checks the path against it, so
+  the location stays predictable.
+- **Per-surface counts do not sum to the sample count.** `corpus stats` prints that warning
+  beside the table rather than leaving a reader to discover it by subtraction.
+
+## `sha256` is optional, and if you set it, it is checked
+
+Most of the corpus came from upstreams that published no hash. Those labels leave the field
+empty, and that is not a failure: computing a hash from our own copy and storing it beside
+that copy would prove only that we can hash a file.
+
+When the field IS set — every harvested sample sets it, because the collector saw the
+upstream bytes — `make validate` recomputes it from the vendored artifact and fails on a
+mismatch. A mismatch means the vendored copy is not the file that was collected, so every
+number published against that sample is suspect.
+
+This is deliberately narrower than it could be. The field names the hash of **one** artifact,
+so the validator refuses it on a tree holding several files rather than inventing a
+concatenation order no reader could guess. And it does not close the same gap for `manifest/`:
+a layer-2 entry is a reference with no bytes to hash here, which is why every manifest
+`sha256` is still empty and README still says so.
 
 ## Rules the validator enforces
 

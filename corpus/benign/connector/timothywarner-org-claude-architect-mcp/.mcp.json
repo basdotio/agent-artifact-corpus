@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json.schemastore.org/mcp.json",
+  "_comment": "Project-level MCP server configuration for Claude Architect Foundations. Demo anchor for COURSE-FLOW.md Segment 2. Three transports shown: stdio (local subprocess), HTTP (remote with API key), SSE (remote with bearer token). Env-var expansion via ${VAR} works in command, args, env values, url, and headers.",
+  "mcpServers": {
+    "filesystem": {
+      "_comment": "stdio transport. Local subprocess launched via npx. No auth needed because the server runs as your user with your file-system permissions. Scope the allowed paths in args, never expose the whole drive.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${PROJECT_ROOT}"
+      ],
+      "env": {
+        "PROJECT_ROOT": "${PROJECT_ROOT}"
+      }
+    },
+    "github": {
+      "_comment": "stdio transport with secret. GITHUB_TOKEN expands from environment. The token never lands in git because the value lives in your shell env, not in this file.",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "context7": {
+      "_comment": "HTTP transport. Remote MCP server. Header-based auth with API key. Use HTTP for stateless request-response servers; use SSE for streaming.",
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
+      }
+    },
+    "internal-knowledge-base": {
+      "_comment": "SSE transport. Remote server with streaming responses. Bearer-token auth. Swap the URL for your team's internal MCP server in production.",
+      "type": "sse",
+      "url": "https://mcp.example.com/sse",
+      "headers": {
+        "Authorization": "Bearer ${INTERNAL_KB_TOKEN}"
+      }
+    },
+    "oreilly-cca-mcp": {
+      "_comment": "stdio transport. The course's own FastMCP demo server (examples/mcp_cli/mcp_server.py), the same DocumentMCP you run under `mcp dev` with the Inspector. Exposes all three MCP primitives: tools (read_doc_contents, edit_document), resources (docs://documents plus the templated docs://documents/{doc_id}), and a prompt (format). `uv run --directory` makes uv resolve the examples/mcp_cli/ project and its .venv, then runs the script, whose __main__ guard calls mcp.run(transport='stdio'). The path is absolute via ${PROJECT_ROOT} so the server starts the same way whether Claude Code launches from the repo root or a subdirectory. No auth: it runs as your user, in-process docs, no network.",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${PROJECT_ROOT}/examples/mcp_cli",
+        "mcp_server.py"
+      ]
+    },
+    "cca-study-mcp": {
+      "_comment": "stdio transport. The CCA Cert Buddy app's own MCP server (cca-cert-buddy/mcp-server/index.ts), a TypeScript counterpart to the Python oreilly-cca-mcp above. It exposes all three MCP primitives - tools (score_answer, validate_question, lookup_domain_ref), resources (cca://domains, cca://progress, cca://bank/{domain}, cca://domain-ref/{id}), and prompts (/quiz, /exam, /explain-domain). `cwd` is set to cca-cert-buddy/ so `node --import tsx` resolves the tsx package from that project's node_modules; tsx then runs the .ts entry directly. No auth: it runs as your user against the local question bank. Run `npm install` in cca-cert-buddy/ once before first use.",
+      "command": "node",
+      "args": ["--import", "tsx", "mcp-server/index.ts"],
+      "cwd": "${PROJECT_ROOT}/cca-cert-buddy"
+    }
+  }
+}

@@ -76,12 +76,18 @@ into a `SKILL.md` — which is where confirmed false positives actually come fro
 yourself, you unconsciously avoid the shapes you know will fire, so the measured rate is
 biased low by an unknowable margin.
 
-The one exception is `corpus/benign/hooks/` and `corpus/benign/permission/`: nobody collects
-normal hook and permission configs, because almost nobody scans them. That cell has to be
-built, **and it is exactly where a good-looking number is easiest to manufacture**, so the
-sampling rule is fixed: **harvest from real machines only** (our own, colleagues', public
-dotfiles repos). **Never hand-written.** A hand-written benign hook and a hand-written benign
-skill are the same mistake.
+The hardest place for this rule was `corpus/benign/{hooks,permission,connector}/`: nobody
+collects normal hook, permission and connector configs, because almost nobody scans them.
+That cell has to be built, **and it is exactly where a good-looking number is easiest to
+manufacture**, so the sampling rule is fixed: **collect, never write**. A hand-written benign
+hook and a hand-written benign skill are the same mistake.
+
+Those three cells are now built, by `scripts/harvest-claude-config.py`: real
+`.claude/settings.json` and `.mcp.json` files collected from public repositories, assigned to
+a surface by their CONTENT rather than their filename, restricted to real load paths (a
+`.template` or `.bak` is documentation, not something an agent loads), and restricted to
+licences that permit redistribution — that last one being an exclusion, so both figures are
+printed on every run.
 
 **② No denominator may carry an exclusion.**
 
@@ -153,22 +159,35 @@ measures.
 
 - **No CI.** Nothing runs `make validate` automatically, so the regression gate described
   above is a design, not a mechanism.
-- **`sha256` is never verified.** Every manifest entry carries an empty `sha256`, and the
-  fetcher checks the pinned commit only. Integrity rests on git, not on the hash.
+- **`sha256` is verified in layer 1 and still empty in layer 2.** The 393 harvested samples
+  each carry the hash of the bytes as collected, and `make validate` recomputes all 393 from
+  the vendored artifact and fails on a mismatch. Every *manifest* entry still carries an empty
+  `sha256` and the fetcher checks the pinned commit only: a reference has no bytes here to
+  hash, so for layer 2 integrity still rests on git.
 - **The table-shaped upstreams are not reproducible from `make fetch` alone.**
   `automatelab-mcp-tools` and `SkillMD-138K` ship parquet tables, not sample trees, so each
   needs a script under `scripts/` between the fetch and the derive. The scripts are pinned and
   seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
   entries in one command.
-- **The benign side is a sample; the malicious side is a census.** 2,850 benign samples are
+- **The benign side is a sample; the malicious side is a census.** 3,241 benign samples are
   drawn from stated populations under stated designs, while all 237 malicious samples are
   everything the upstreams had. A recall figure and a false-positive figure from this corpus
   therefore rest on different kinds of denominator, and cannot be combined into one score.
 - **One tool wired up.** `taxonomy/tools.yaml` has a single entry.
 - **`NOTICE` is not cross-checked** against label licenses by `make validate`.
 - **One harness package has no tests**: `fetch`.
-- **7 of 32 dimension × tier cells have no sample**, and three surfaces — hooks, permission,
-  connector — have none at all, because no public corpus covers them. `make stats` names them.
+- **7 of 32 dimension × tier cells have no sample.** `make stats` names them.
+- **Three surfaces have a benign side and no malicious side.** hooks, permission and connector
+  now hold 391 real harvested configs and 2 hand-read hard negatives, but zero malicious
+  samples, because no public corpus contains a weaponised hook or permission grant as an
+  artifact. So on those surfaces this corpus can measure over-alerting and cannot measure
+  recall at all. The two hard negatives there also pair with twins on the *skills* surface —
+  stated in their labels — which means a scanner that never parses a settings file goes quiet
+  for lack of coverage rather than by discriminating.
+- **The config harvest is not reproducible from its script.** GitHub code search ranks by
+  relevance and returns a different hundred each day, so `scripts/harvest-claude-config.py`
+  accumulates into `manifest/pins/claude-config.json` and `--from-pins` rebuilds exactly that
+  recorded set. A published figure is reproducible from the pins file, never from a re-search.
 
 ## License
 

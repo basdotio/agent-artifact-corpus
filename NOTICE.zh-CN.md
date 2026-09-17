@@ -83,6 +83,22 @@
     上游提供的是 parquet 表格而不是文件。每篇的来源信息放在 cache 里紧邻样本树的
     sidecar 文件中，绝不放进样本树内部，以免被当作样本内容读进去。
 
+  采集来的 agent 配置 —— 来自 389 个不同的仓库
+    MIT 292、Apache-2.0 93、BSD-3-Clause 6、CC0-1.0 1、CC-BY-4.0 1。
+    391 个样本位于 corpus/benign/{hooks,permission,connector}/，另有 2 个被提升到
+    corpus/hard-negative/。每一个都是从公开仓库原样 vendoring 的真实
+    `.claude/settings.json` 或 `.mcp.json`。
+
+    这一条没法做成表格。这些 artifact 来自 389 个不同的作者，因此各许可证要求的署名是
+    **逐样本**记录的：每个标签的 origin.source 都是一个点名了仓库、commit 和路径的
+    永久链接，每个标签还带着 sha256，`make validate` 会拿它和 vendoring 的字节核对。
+    完整清单在 manifest/pins/claude-config.json，由 scripts/harvest-claude-config.py
+    生成，要看全量列表就读它。
+
+    注意这项义务的形状：MIT 和 Apache-2.0 要求许可证文本和版权声明随材料一起传播，而面对
+    389 个上游，这意味着要逐个履行而不是笼统履行。这里采用的办法就是逐标签的永久链接；
+    如果你把这份语料再往下分发，那些永久链接和 pins 文件也是你必须一起带上的东西。
+
 关于强制执行的说明：标签与 NOTICE 的一致性校验**尚未实现**。今天 `make validate` 只检查 `origin.license` 是否属于第 1 层允许的宽松许可之一，它不读这个文件。在那项检查落地之前，让此表与标签保持同步是一项人工义务。这一点写在这里而不是略去，因为署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，因此是许可证义务，不是记账。
 
 ---

@@ -46,11 +46,24 @@ const (
 )
 
 type Label struct {
-	ID      string `yaml:"id"`
-	Class   Class  `yaml:"class"`
-	Surface string `yaml:"surface"`
-	Kind    string `yaml:"kind"`
-	Entry   string `yaml:"entry"`
+	ID    string `yaml:"id"`
+	Class Class  `yaml:"class"`
+
+	// Surface is a LIST because one artifact can sit on two load paths at once, and reading
+	// real machines is what forced this: a `.claude/settings.json` normally carries a `hooks`
+	// block AND a `permissions` block. Three of the first five real files sampled had both.
+	//
+	// With a single surface such a file has to be filed under one of them, which makes the
+	// permission surface mean "settings files that happen to have no hooks" — a biased
+	// subpopulation invented by the schema rather than found in the world. A list keeps the
+	// distinction the corpus exists to provide (which KIND of rule does a scanner fail on)
+	// without duplicating the artifact into two samples, which would be leakage.
+	//
+	// The cost, and it is a real one: per-surface counts no longer sum to the sample count.
+	// `corpus stats` says so where it prints them.
+	Surface Surfaces `yaml:"surface"`
+	Kind    string   `yaml:"kind"`
+	Entry   string   `yaml:"entry"`
 
 	Origin Origin `yaml:"origin"`
 
@@ -102,6 +115,15 @@ type Origin struct {
 	// DerivedFrom.
 	LabeledBeforeRun bool `yaml:"labeled_before_run"`
 
+	// Sha256 is the hash of the artifact as it was collected upstream, and unlike the empty
+	// `sha256` on every manifest entry this one is actually CHECKED — see validateSha256.
+	// It is verifiable here and not there for a plain reason: layer 1 holds the bytes, so the
+	// claim and its evidence sit side by side.
+	//
+	// It is only meaningful for a single-file sample, which is why validate refuses it on a
+	// tree with several files rather than inventing a concatenation order nobody would guess.
+	Sha256 string `yaml:"sha256"`
+
 	// DerivedFrom is required when Type is `derived` and forbidden otherwise. A derived
 	// sample's coordinates were produced by a rule rather than pinned by a person, so the
 	// label is only trustworthy if you can re-run that rule against the named upstream and
@@ -122,6 +144,17 @@ type DerivedFrom struct {
 }
 
 // Truth is what the sample is. Nothing in here names a scanner, a rule, or a score.
+// HandWritten reports whether a person put coordinates in this truth block.
+//
+// `Dimensions` is deliberately NOT counted: it is the field a derivation rule fills when the
+// upstream only knew a category, so treating it as hand-written would promote three thousand
+// mechanically derived coordinates into the tier reserved for judgements we made ourselves.
+// `Techniques`, `Resembles` and `DiffersBy` are the opposite — no rule in this repository can
+// produce any of them.
+func (t Truth) HandWritten() bool {
+	return len(t.Techniques) > 0 || len(t.Resembles) > 0 || t.DiffersBy != ""
+}
+
 type Truth struct {
 	// Techniques is what a malicious sample actually does, drawn from
 	// taxonomy/techniques.yaml. It is also the recall axis: classification.md requires
@@ -246,9 +279,7 @@ func (l *Label) Validate(tax *taxonomy.Set) []error {
 	default:
 		bad("class %q is not malicious, benign or hard-negative", l.Class)
 	}
-	if !oneOf(l.Surface, validSurfaces) {
-		bad("surface %q is not one of %s", l.Surface, strings.Join(validSurfaces, ", "))
-	}
+	l.Surface.validate(bad)
 	if l.Entry == "" {
 		bad("entry is empty — it must say what the scanner is pointed at")
 	}

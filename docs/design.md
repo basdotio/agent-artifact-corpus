@@ -36,6 +36,27 @@ language-native form.
 
 **Classes**: `benign`, `malicious`, `hard-negative`.
 **Surfaces**: `skills`, `hooks`, `permission`, `mcp`, `connector`, `instruction`.
+
+A surface is a **load path**: the place an agent reads an artifact from, which decides what
+the artifact can do. Listing the six without defining them is why `connector` stayed empty
+for as long as it did — nobody could say what artifact belonged there, so nothing did.
+
+| Surface | The artifact | What makes it this surface |
+|---|---|---|
+| `skills` | a skill directory (`SKILL.md` plus whatever it ships) | the agent reads it as instructions it may follow |
+| `hooks` | a settings file with a populated `hooks` block | it runs a command on an agent event, without being asked at the time |
+| `permission` | a settings file with a populated `permissions` block | it decides what the agent may do without asking |
+| `mcp` | a server's tool declarations (names, descriptions, input schemas) | the agent reads it to learn what a tool is for |
+| `connector` | a config that wires in something outside the agent, reaching a remote endpoint (`url` with an http/sse transport, an OAuth scope grant, a `.mcpb`/`.dxt` manifest) | it grants access, rather than describing a tool |
+| `instruction` | free prose an agent is told to treat as guidance | it carries no load path of its own; it arrives as content |
+
+`surface` is a **list**, because one file is often two load paths. A real
+`.claude/settings.json` normally carries both a `hooks` block and a `permissions` block —
+three of the first five real files sampled had both. Filing such a file under one surface
+would make `permission` mean "settings files that happen to have no hooks", a subpopulation
+invented by the schema rather than found in the world. The artifact is vendored once, its
+first surface owns the directory, and per-surface counts therefore do not sum to the sample
+count. `corpus stats` says so where it prints them.
 **Techniques**: from [`taxonomy/techniques.yaml`](../taxonomy/techniques.yaml), and they are
 the part of a label that belongs to nobody. A label's `truth` block is written in them and is
 enough on its own to score any scanner; `expect.<tool>` adds one named scanner's rule IDs on

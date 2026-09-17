@@ -52,7 +52,7 @@ corpus/malicious/skills/revshell-python-dup2/        <- 扫描器被指向的那
 ```yaml
 id: mal-skill-revshell-python-dup2    # 唯一、稳定、永不复用
 class: malicious                      # malicious | benign | hard-negative
-surface: skills                       # skills | hooks | permission | mcp | connector | instruction
+surface: skills                       # 单个，或一个列表：[hooks, permission] —— 见下
 kind: skill                           # 在 agent 生态里的制品类型，而不是任何扫描器里的类型
 entry: .                              # 扫描器被指向的对象
 
@@ -63,6 +63,7 @@ origin:
   note: "minimal sample rebuilt from the described shape, not the original payload"
   added: 2026-09-16
   labeled_before_run: true            # 必须为 true —— 见下文
+  sha256: ""                          # 可选；一旦写了，就会真的拿字节去校验
 
 truth:                                # 工具中立。这里没有任何东西指名某个扫描器。
   techniques: [reverse-shell]         # 它实际干了什么，取自 taxonomy/techniques.yaml
@@ -103,6 +104,33 @@ pairs_with: mal-skill-revshell-python-dup2   # hard-negative 必填
 ```
 
 ---
+
+## `surface` 是列表，因为一个文件就是两个加载路径
+
+真实的 `.claude/settings.json` 通常同时带着 `hooks` 块和 `permissions` 块。采集到的头五个真实文件里有三个如此。
+
+在单值 surface 下，这种文件只能归到其中一个，而后果不是外观问题：`permission` 这个作用面会变成*恰好没有 hook 的设置文件*——一个由 schema 臆造、而非在真实世界里找到的子总体。既然作用面这根轴的全部意义就是说清扫描器**在哪里**失败，那么一个由 schema 编出来的类别比没有类别更糟。
+
+所以 `surface` 两种写法都接受：
+
+```yaml
+surface: skills                 # 常见情况，保持标量
+surface: [hooks, permission]    # 确实同时位于两个加载路径上的那种文件
+```
+
+三个需要知道的后果：
+
+- **artifact 只 vendoring 一次。** 把树复制到两个作用面下，会让相同的字节出现在两个样本里，使一个扫描器为同一个文件被打两次分——这正是本语料在别处拒绝的那种泄漏。
+- **第一个作用面拥有目录。** 多作用面样本存放在 `corpus/<class>/<第一个作用面>/<id>/`，校验器会拿路径与它核对，位置因此保持可预测。
+- **各作用面计数之和不等于样本总数。** `corpus stats` 会把这句警告打在表格旁边，而不是留给读者自己做减法发现。
+
+## `sha256` 是可选的；一旦你写了，它就会被校验
+
+本语料的大部分来自没有公布哈希的上游。那些标签把这个字段留空，这不是缺陷：从我们自己的副本算出一个哈希、再存在这个副本旁边，只能证明我们会算哈希。
+
+当这个字段**确实**被写了——每个采集来的样本都会写，因为采集器见过上游的字节——`make validate` 会从 vendoring 的 artifact 重新计算它，不一致就失败。不一致意味着 vendoring 的副本不是当初采集的那个文件，于是针对这个样本发布过的每一个数字都可疑。
+
+这个设计故意比它能做到的更窄。这个字段指的是**一个** artifact 的哈希，所以对于装着多个文件的树，校验器会拒绝这个字段，而不是臆造一个没有读者猜得到的拼接顺序。它也没有为 `manifest/` 关掉同一个缺口：第 2 层的条目是一个引用，本地没有字节可供哈希，这正是每条 manifest 的 `sha256` 仍然为空、README 里仍然写着这件事的原因。
 
 ## 验证器强制执行的规则
 

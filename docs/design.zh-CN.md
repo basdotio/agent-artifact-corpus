@@ -28,6 +28,19 @@
 
 **类别**：`benign`、`malicious`、`hard-negative`。
 **作用面**：`skills`、`hooks`、`permission`、`mcp`、`connector`、`instruction`。
+
+作用面指的是**加载路径**：agent 从哪里读到这个 artifact，而这决定了它能做什么。只列举六个却不定义它们，正是 `connector` 长期空着的原因——没人能说清什么样的 artifact 该归到那里，于是什么都没归进去。
+
+| 作用面 | artifact 是什么 | 凭什么算这个作用面 |
+|---|---|---|
+| `skills` | 一个 skill 目录（`SKILL.md` 以及它附带的东西） | agent 把它当作可以遵循的指令来读 |
+| `hooks` | 带有非空 `hooks` 块的设置文件 | 它会在 agent 的某个事件上执行命令，且当时无需征求同意 |
+| `permission` | 带有非空 `permissions` 块的设置文件 | 它决定 agent 可以不问就做哪些事 |
+| `mcp` | 一个服务器的工具声明（名称、描述、输入 schema） | agent 读它来了解某个工具是干什么的 |
+| `connector` | 把 agent 之外的东西接进来的配置：指向远端端点（带 http/sse 传输的 `url`）、OAuth 授权范围、`.mcpb`/`.dxt` 清单 | 它授予的是访问权，而不是描述一个工具 |
+| `instruction` | 被要求当作指引来对待的自由文本 | 它自己没有加载路径；它是以内容的形式到达的 |
+
+`surface` 是一个**列表**，因为一个文件经常同时是两个加载路径。真实的 `.claude/settings.json` 通常同时带着 `hooks` 块和 `permissions` 块——抽查的头五个真实文件里有三个如此。把这种文件归到其中一个作用面下，会让 `permission` 变成"恰好没有 hook 的设置文件"，这是一个由 schema 臆造出来、而非在真实世界里找到的子总体。artifact 只 vendoring 一次，由它的第一个作用面拥有目录，因此各作用面的计数之和不等于样本总数。`corpus stats` 在打印它们的地方会写明这一点。
 **技术**：来自 [`taxonomy/techniques.yaml`](../taxonomy/techniques.yaml)，它们是标签中**不属于任何人**的那部分。一个标签的 `truth` 块用这套技术写成，单凭它自己就足以给任何扫描器打分；`expect.<tool>` 在其之上追加某一个具名扫描器的规则 ID，是可选的。这正是第 1 层能被"给一个不是我们写的工具跑基准"的人使用的原因，也是验证器必须在没有 check out 任何扫描器的情况下也能运行的原因。
 
 `hard-negative` 是一个独立类别，而不是 benign 的一种口味，因为它背负一项额外义务：**每一个硬负样本都与一个必须仍然触发的恶意样本配对。** 一次抑制和"规则仍然有效"的证明要么一起落地，要么都不落地。没有这个配对，"降低假阳性"就退化成"删掉规则"，而且没有任何东西能抓住这种退化。
