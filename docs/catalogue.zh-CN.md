@@ -23,7 +23,7 @@
 | **召回率是多少** | `datadog-ai-skills`（在野，**须先去重**）加 `skillsgoat`（盲测） | 跨重叠语料的合并数。**按维度报，不要报聚合值** |
 | **抓的是规避还是话题** | `trailofbits-overt`（4 个样本，4 种机制）、`nvidia-skillspector-fixtures`（成对孪生） | 按规模选的语料。这个问题由结构回答，不由 n 回答 |
 | **会不会对安全内容过度告警** | `fevzi-injection-corpus`、`guarddog-benign`、`mcp-guardbench`、`skillsgoat` 的 10 个诱饵 | — |
-| **hook / 权限 / MCP 配置** | `skillcraft-audit`（hook 武器化、权限绕过）、`cisco-mcp-scanner-evals`（MCP）—— **只有恶意侧** | 拿 cisco 的 4 个良性样本当 MCP 误报分母 |
+| **hook / 权限 / MCP 配置** | `skillcraft-audit`（hook 武器化、权限绕过）、`cisco-mcp-scanner-evals`（MCP）—— **只有恶意侧** | 拿 cisco 的 3 个良性样本当 MCP 误报分母 |
 | **工具说明投毒** | `automatelab-mcp-tools`（9,922 条真实工具说明）做良性侧 | — |
 | **防御性文字被误判成攻击** | `skilltrustbench` 的 `injected_d8` 子集 —— **全世界唯一标注了这一类的** | over-refusal 基准（OR-Bench、XSTest、FalseReject）。它们测的是**模型**过度拒绝，不是**扫描器**过度告警，而且全是 prompt 串不是 artifact |
 
@@ -68,7 +68,7 @@ Glama 的 `qualityScore`（**付费位**）、各种信誉分，全是流行度�
 
 ---
 
-## 已钉住可直接拉取的 13 份
+## 已钉住可直接拉取的 14 份
 
 每一份都在 manifest 里钉到了 commit，用 `make fetch E="<id>"` 取。
 
@@ -95,13 +95,13 @@ Glama 的 `qualityScore`（**付费位**）、各种信誉分，全是流行度�
 
 **`skillcraft-audit`** —— hook 与权限。
 `https://github.com/Clay-HHK/skillcraft-audit` @ `0b9c36f28e05`，**MIT**，可 vendoring。
-150 恶意 / 0 良性。**全世界唯一覆盖 hook 武器化和权限绕过的公开语料。**
+51 恶意（42 个单体 skill + 9 条链）/ 0 良性。**全世界唯一覆盖 hook 武器化和权限绕过的公开语料。**
 *风险*：单一作者，形态在风格上相关；而且作为唯一来源，**没有第二份可以对照校验**。
 
 **`cisco-mcp-scanner-evals`** —— MCP 面。
 `https://github.com/cisco-ai-defense/mcp-scanner` @ `be87b90d88bc`，子集 `evals`，
-**Apache-2.0**，可 vendoring。154 恶意 / 4 良性。
-*风险*：4 个良性样本远不足以当 MCP 的误报分母；**目录名即标签**，能读路径的 harness 可以作弊。
+**Apache-2.0**，可 vendoring。142 恶意 / 3 良性（141 个行为用例 + 1 个远端 server；已 vendoring 121 个）。
+*风险*：3 个良性样本远不足以当 MCP 的误报分母；**目录名即标签**，能读路径的 harness 可以作弊。
 
 **`trailofbits-overt`** —— 逃逸试金石。
 `https://github.com/trailofbits/overtly-malicious-skills` @ `4ffbf9461ef0`，
@@ -145,7 +145,7 @@ Glama 的 `qualityScore`（**付费位**）、各种信誉分，全是流行度�
 
 **`automatelab-mcp-tools`** —— 真实工具说明。
 `https://huggingface.co/datasets/automatelab/mcp-servers-tool-catalog` @ `a413afb7b02a`，
-**CC-BY-4.0**，可 vendoring。**9,922 个工具，横跨 359 个 server。**
+**CC-BY-4.0**，可 vendoring。**9,922 条工具声明，横跨 357 个 package**（285 个不同的 server 名）。
 真实说明里合法地写着 `IMPORTANT:`、`<placeholder>`、token 和 URL —— 正是工具投毒规则要找的形状。
 *风险*：数据本身无已知风险。风险在你这边：这通常比你的工具说明规则**此前验证过的规模大两个数量级**，
 可能一次性冒出大量误报。

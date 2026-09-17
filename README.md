@@ -27,7 +27,8 @@ What is deliberately *not* checked is described in
 [`neutrality.go`](harness/cmd/corpus/neutrality.go): a pass that strips every `expect` block
 and revalidates was built and then deleted, because nothing in the validator requires an
 expect block, so it could only ever pass. `truth`'s self-sufficiency is already enforced per
-class — a malicious sample must name a technique and a severity, a hard negative must name
+class — a malicious sample must name a severity and either a technique or a dimension, a hard
+negative must name
 `resembles` and `differs_by` — and those checks fail loudly.
 
 Every sample states what it *is*, in a vocabulary no
@@ -82,7 +83,7 @@ is what lets `make validate` run with no build of any scanner present.
 
 | Tool | Rule-level expectations | Note |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on all 6 layer-1 samples | the only one so far — see *Known gaps* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 3,489 layer-1 samples | the only one so far — see *Known gaps* |
 
 No second scanner has been wired up yet. Until one is, the tool-neutral claims above are a
 property of the schema rather than a demonstrated result, and that distinction is the reason

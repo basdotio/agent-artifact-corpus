@@ -210,6 +210,47 @@ func CIDependsOnAScanner(repoRoot string, tax *taxonomy.Set) []string {
 	return problems
 }
 
+// ToolNamesInBuildFiles covers the entry points the Go AST check cannot see: the Makefile and
+// the scripts that build the corpus. An audit found the printed summary claiming no scanner
+// appeared "in the harness code or in CI" while nothing had looked at either file — the claim
+// was wider than the check, which is the same defect as a check that cannot fail.
+//
+// Comment lines are stripped, for the same reason they are exempt in Go: the reasoning in this
+// repository lives in its comments, and some of it has to name the scanner that caused a rule.
+func ToolNamesInBuildFiles(repoRoot string, tax *taxonomy.Set) []string {
+	ids := toolIDs(tax)
+	if len(ids) == 0 {
+		return nil
+	}
+	files := []string{filepath.Join(repoRoot, "Makefile")}
+	scripts, _ := filepath.Glob(filepath.Join(repoRoot, "scripts", "*.py"))
+	files = append(files, scripts...)
+
+	var problems []string
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			code := line
+			if h := strings.Index(code, "#"); h >= 0 {
+				code = code[:h]
+			}
+			for _, id := range ids {
+				if containsFold(code, id) {
+					problems = append(problems, fmt.Sprintf(
+						"%s:%d names the scanner %q outside a comment. The build must treat every "+
+							"entry in taxonomy/tools.yaml identically; naming one here makes its "+
+							"presence part of how everybody else's samples are produced",
+						rel(repoRoot, f), i+1, id))
+				}
+			}
+		}
+	}
+	return problems
+}
+
 func toolIDs(tax *taxonomy.Set) []string {
 	ids := make([]string, 0, len(tax.Tools))
 	for id := range tax.Tools {

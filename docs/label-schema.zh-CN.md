@@ -57,7 +57,7 @@ kind: skill                           # 在 agent 生态里的制品类型，而
 entry: .                              # 扫描器被指向的对象
 
 origin:
-  type: reconstruction                # real-world | promoted | reconstruction | synthetic
+  type: reconstruction                # real-world | promoted | reconstruction | synthetic | harvested | derived
   source: "https://…"                 # 文章或仓库 url+commit
   license: MIT                        # 样本自身的许可证；若是 vendored（随仓库分发）则必须与 NOTICE 一致
   note: "minimal sample rebuilt from the described shape, not the original payload"
@@ -136,7 +136,7 @@ surface: [hooks, permission]    # 确实同时位于两个加载路径上的那�
 
 ### 关于 `truth`
 
-**恶意样本需要 `techniques` 和 `severity`。** 没有技术，样本就不落在任何召回轴上，
+**恶意样本需要 `severity`，以及 `techniques` 或 `dimensions` 二者之一。** `techniques` 是细粒度的那根轴，只有人能指派；`dimensions` 是粗粒度的、派生规则能从上游类别产出的那根，237 个恶意样本里有 229 个用的是它。两者都没有，样本就不落在任何召回轴上，
 也就没有任何断言能用来衡量除我们之外的扫描器。没有严重度，就没有关于它有多糟的工具中立陈述，
 于是一个在这里没有 `expect` 块的扫描器根本无法被打分。
 

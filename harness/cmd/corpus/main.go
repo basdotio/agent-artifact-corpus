@@ -73,7 +73,7 @@ func cmdValidate(root string) int {
 	for _, e := range tax.Validate() {
 		problems = append(problems, fmt.Sprintf("taxonomy: %v", e))
 	}
-	verified := 0
+	verified, carried := 0, 0
 	for _, l := range labels {
 		for _, e := range l.Validate(tax) {
 			problems = append(problems, fmt.Sprintf("%s: %v", l.Rel, e))
@@ -86,6 +86,12 @@ func cmdValidate(root string) int {
 			}
 		} else if l.Origin.Sha256 != "" {
 			verified++
+		}
+		if l.Origin.Sha256 != "" {
+			// Counted whether or not it verified. Incrementing only on success made the summary
+			// line say "392 of 3489 carry a hash" when 393 do — understating the claim being
+			// made while a failure was printed separately. The sentence has to stay true.
+			carried++
 		}
 	}
 
@@ -130,8 +136,17 @@ func cmdValidate(root string) int {
 
 	// Neutrality. Not behind a flag: a check nobody remembers to run proves the thing on the
 	// days it does not matter. See neutrality.go, including what was deliberately NOT built.
+	// A count corrected in the manifest and left stale in the five documents that quote it was
+	// 47 of the ~355 wrong numbers an audit found. Fixing them again would fix nothing.
+	classTotals := map[string]int{}
+	for _, l := range labels {
+		classTotals[string(l.Class)]++
+	}
+	problems = append(problems, ManifestClaimsInProse(root, classTotals)...)
+
 	neutralProblems := ToolNamesInNeutralHalf(labels, tax)
 	neutralProblems = append(neutralProblems, ToolNamesInHarnessCode(root, tax)...)
+	neutralProblems = append(neutralProblems, ToolNamesInBuildFiles(root, tax)...)
 	neutralProblems = append(neutralProblems, CIDependsOnAScanner(root, tax)...)
 	problems = append(problems, neutralProblems...)
 
@@ -197,13 +212,13 @@ func cmdValidate(root string) int {
 	fmt.Printf("techniques  %d across %d dimensions\n", len(tax.Techniques), len(tax.Dimensions))
 	// Said out loud including when it is zero, so "no hash failures" can never be mistaken
 	// for "the hashes were checked".
-	fmt.Printf("sha256      %d of %d label(s) carry a hash, and those %d were verified against "+
-		"the vendored bytes\n", verified, len(labels), verified)
+	fmt.Printf("sha256      %d of %d label(s) carry a hash; %d verified against the vendored "+
+		"bytes\n", carried, len(labels), verified)
 	// Named even when clean, because the point of these three is that they were each added
 	// after the property they guard had already silently broken.
 	if len(neutralProblems) == 0 {
-		fmt.Printf("neutral     %d scanner(s) registered, and none of them appears in any truth "+
-			"block, in the vocabulary, in the harness code or in CI\n", len(tax.Tools))
+		fmt.Printf("neutral     %d scanner(s) registered, and none appears in any truth block, in the "+
+			"vocabulary, in the harness code, in the build files or in CI\n", len(tax.Tools))
 	} else {
 		fmt.Printf("neutral     FAILED — %d place(s) where one scanner has become part of the "+
 			"shared half\n", len(neutralProblems))
@@ -239,6 +254,38 @@ func cmdValidate(root string) int {
 				"threshold\n", g, leakage.MaxPurity*100)
 		}
 	}
+
+	// `entry` says what a scanner is pointed at, and until an audit probed it nothing ever
+	// resolved it: `entry: no/such/file.md` validated cleanly, and so did a sample tree holding
+	// no files at all. Both make a sample that cannot be scored while looking scoreable.
+	for _, l := range labels {
+		if l.Path == "" {
+			continue
+		}
+		files, ferr := treeFiles(l.Path)
+		if ferr != nil {
+			continue // reported by the leakage pass below
+		}
+		if len(files) == 0 {
+			problems = append(problems, fmt.Sprintf(
+				"%s: the sample tree holds no files. There is nothing for a scanner to read, so "+
+					"this sample cannot be passed or failed — it can only be counted, which is "+
+					"worse than not existing", l.Rel))
+			continue
+		}
+		if l.Entry == "" || l.Entry == "." {
+			continue // the whole tree, which exists by the check above
+		}
+		if _, err := os.Stat(filepath.Join(l.Path, l.Entry)); err != nil {
+			problems = append(problems, fmt.Sprintf(
+				"%s: entry %q does not exist in the sample tree. It is the one field that says "+
+					"what to point a scanner at, so an entry naming nothing makes the sample "+
+					"unusable by the protocol this corpus publishes", l.Rel, l.Entry))
+		}
+	}
+
+	// Duplicates: cross-class is an error, same-class is named and counted.
+	problems = append(problems, reportDuplicates(DuplicateTrees(labels))...)
 
 	// A pair that guards nothing passes every structural check. It is reported, named and
 	// counted rather than rejected, because the twin's known_gap is an honest declaration

@@ -41,7 +41,7 @@
     https://github.com/shenyimings/skillet @ b778fe53f456，benchmark/wild
     483 个样本树，位于 corpus/benign/skills/sk-*，原样拷贝。它们是真实的公开 skill，
     由 skillet 钉在各自的原始仓库和 commit 上；每个标签在 origin.source 里记录那个
-    原始仓库，因为假阳性率必须按来源报告，而把来自 178 个仓库的 483 个样本报成一个
+    原始仓库，因为假阳性率必须按来源报告，而把来自 131 个仓库的 483 个样本报成一个
     数字，正是本仓库明令禁止的汇总数字。
 
   cisco-ai-defense/mcp-scanner —— Apache-2.0

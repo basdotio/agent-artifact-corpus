@@ -119,7 +119,7 @@ and publish aggregate figures, all outside the reach of their distribution terms
 | **`DataDog/.../samples/ai-skills`** | Apache-2.0 | 204 | **Primary.** Only in-the-wild, manually triaged, cleanly licensed skill set | **40% carry one vendor's name**, ~40 near-duplicates; ~26 (13%) are other scanners' synthetic tests, not in-the-wild. **Dedupe by author or canonical hash before counting.** |
 | `optimuslabs-io/skillsgoat` | MIT | 66 + 35 chains | Capability probe; blind, answers outside the tree, an error counts as a miss | Includes 10 FP decoys — intentional, do not "fix" |
 | `Clay-HHK/skillcraft-audit` | MIT | 150 | **Only public coverage of hook weaponisation and permission bypass** | Single author |
-| `cisco-ai-defense/mcp-scanner` `evals/` | Apache-2.0 | 154 | MCP surface; directory is the label | Only 4 benign |
+| `cisco-ai-defense/mcp-scanner` `evals/` | Apache-2.0 | 142 | MCP surface; directory is the label | Only 3 benign |
 | `trailofbits/overtly-malicious-skills` | **none** | 4 | **Touchstone.** Each defeats line-by-line rules by a different mechanism | Zero grant — never vendor. Also contained in DataDog above and SkillTrustBench below |
 | `Agent-Threat-Rule/atr-skill-benchmark` | MIT | 466 | Includes `evasive-stub`, explicitly built for FP testing | Subset of MaliciousSkillBench |
 | `cuhk-zhuque/SkillTrustBench` | **CC-BY-NC-SA** | 2,863 + 1,014 | **Best structure available**, and the only corpus anywhere labelling defensive-prose FPs (`injected_d8`, 119 samples, 118 `normal`) | NC + ShareAlike. Local measurement only, forever |
@@ -143,7 +143,7 @@ and publish aggregate figures, all outside the reach of their distribution terms
 
 | Corpus | License | Size | Why it is hard |
 |---|---|---:|---|
-| **`automatelab/mcp-servers-tool-catalog`** | CC-BY-4.0 | **9,922 tools / 359 servers** | Real tool descriptions legitimately contain `IMPORTANT:`, `<placeholder>`, tokens, URLs. **Our `MCP-001..004` have been validated against 44 tools.** This is the 225× expansion |
+| **`automatelab/mcp-servers-tool-catalog`** | CC-BY-4.0 | **9,922 tools / 357 packages** | Real tool descriptions legitimately contain `IMPORTANT:`, `<placeholder>`, tokens, URLs. **Our `MCP-001..004` have been validated against 44 tools.** This is the 225× expansion |
 | `NVIDIA/SkillSpector` `tests/fixtures/` | Apache-2.0 | ~6 pairs | **Paired twins**: each malicious fixture has a near-identical clean version. The only structure that tests whether a hit is on the *difference* rather than on the topic |
 | `DataDog/guarddog` `tests/.../benign/` | Apache-2.0 | 25 | Each benign file carries a comment naming the real false positive it fixed |
 | `ossf/package-analysis` `detections/*_test.go` | Apache-2.0 | ~191 | **Go, table-driven, same language and style.** URL fixtures inline-annotate their own misjudgements, including hex escapes and IDN — the confusable surface that has already produced a real defect in a scanner measured here |

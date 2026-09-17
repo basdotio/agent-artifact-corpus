@@ -79,7 +79,7 @@ Git 不携带目录权限位，而 BSD `tar` 无法复现 `0111`（实测）。�
 | **`DataDog/.../samples/ai-skills`** | Apache-2.0 | 204 | **主力。** 唯一一个来自真实世界、人工分诊过、许可证干净的 skill 集合 | **40% 带同一家厂商的名字**，约 40 个近重复；约 26 个（13%）是其它扫描器的合成测试，并非来自真实世界。**计数前先按作者或规范化哈希去重。** |
 | `optimuslabs-io/skillsgoat` | MIT | 66 + 35 条链 | 能力探针；盲测，答案在样本树之外，一次报错就算一次漏报 | 含 10 个假阳性诱饵——这是有意为之，不要去"修" |
 | `Clay-HHK/skillcraft-audit` | MIT | 150 | **唯一公开覆盖 hook 武器化与权限绕过的语料** | 单一作者 |
-| `cisco-ai-defense/mcp-scanner` `evals/` | Apache-2.0 | 154 | MCP 作用面；目录名即标签 | 只有 4 个良性样本 |
+| `cisco-ai-defense/mcp-scanner` `evals/` | Apache-2.0 | 142 | MCP 作用面；目录名即标签 | 只有 3 个良性样本 |
 | `trailofbits/overtly-malicious-skills` | **无** | 4 | **试金石。** 每一个都用不同的机制击败逐行匹配的规则 | 零授权——绝不 vendor。同时也被上面的 DataDog 和下面的 SkillTrustBench 收录 |
 | `Agent-Threat-Rule/atr-skill-benchmark` | MIT | 466 | 含 `evasive-stub`，专为假阳性测试而建 | 是 MaliciousSkillBench 的子集 |
 | `cuhk-zhuque/SkillTrustBench` | **CC-BY-NC-SA** | 2,863 + 1,014 | **现有最好的结构**，也是全世界唯一标注了防御性散文假阳性的语料库（`injected_d8`，119 个样本，其中 118 个标为 `normal`） | NC + ShareAlike。永远只能本地测量 |
@@ -103,7 +103,7 @@ Git 不携带目录权限位，而 BSD `tar` 无法复现 `0111`（实测）。�
 
 | 语料库 | 许可证 | 规模 | 为什么它难 |
 |---|---|---:|---|
-| **`automatelab/mcp-servers-tool-catalog`** | CC-BY-4.0 | **9,922 个工具 / 359 个服务器** | 真实的工具描述里合法地含有 `IMPORTANT:`、`<placeholder>`、token、URL。**我们的 `MCP-001..004` 已针对 44 个工具验证过。** 这就是那 225× 的扩充 |
+| **`automatelab/mcp-servers-tool-catalog`** | CC-BY-4.0 | **9,922 个工具 / 357 个 package** | 真实的工具描述里合法地含有 `IMPORTANT:`、`<placeholder>`、token、URL。**我们的 `MCP-001..004` 已针对 44 个工具验证过。** 这就是那 225× 的扩充 |
 | `NVIDIA/SkillSpector` `tests/fixtures/` | Apache-2.0 | 约 6 对 | **成对孪生**：每个恶意 fixture 都有一个近乎相同的干净版本。这是唯一一种能检验命中究竟落在*差异*上、还是落在主题上的结构 |
 | `DataDog/guarddog` `tests/.../benign/` | Apache-2.0 | 25 | 每个良性文件都带一条注释，指名它修掉的那个真实假阳性 |
 | `ossf/package-analysis` `detections/*_test.go` | Apache-2.0 | 约 191 | **Go 语言、表驱动、同样的语言和风格。** URL fixture 会就地注解自己的误判，包括十六进制转义和 IDN——正是已经在这里被测量的某个扫描器身上造成过真实缺陷的那片易混淆作用面 |

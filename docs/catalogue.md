@@ -24,7 +24,7 @@ Do not pick by size. Pick by question, then check the hazards.
 | **What is the recall?** | `datadog-ai-skills` (in-the-wild, deduplicated) plus `skillsgoat` (blind probe) | A pooled figure across overlapping corpora. Report per dimension, not aggregate |
 | **Does it catch evasion, or just topics?** | `trailofbits-overt` (4 samples, 4 different mechanisms), `nvidia-skillspector-fixtures` (paired twins) | Size-based corpora. This question is answered by structure, not by n |
 | **Does it over-alert on security content?** | `fevzi-injection-corpus`, `guarddog-benign`, `mcp-guardbench`, `skillsgoat`'s 10 decoys | — |
-| **Hooks, permissions, MCP config?** | `skillcraft-audit` (hooks, permission bypass), `cisco-mcp-scanner-evals` (MCP) — malicious side only | Cisco's 4 benign samples as an MCP false-positive denominator |
+| **Hooks, permissions, MCP config?** | `skillcraft-audit` (hooks, permission bypass), `cisco-mcp-scanner-evals` (MCP) — malicious side only | Cisco's 3 benign samples as an MCP false-positive denominator |
 | **Tool-description poisoning?** | `automatelab-mcp-tools` (9,922 real tool descriptions) as the benign side | — |
 | **Defensive prose misjudged as attack?** | `skilltrustbench`'s `injected_d8` subset — the only public labelling of this anywhere | Over-refusal benchmarks (OR-Bench, XSTest, FalseReject). They measure *model* over-refusal, not *scanner* over-alerting, and they are prompt strings, not artifacts |
 
@@ -76,7 +76,7 @@ popularity or vendor curation, none of them a security review.
 
 ---
 
-## Pinned and fetchable (13)
+## Pinned and fetchable (14)
 
 Each is pinned to a commit in the manifest and fetched with
 `make fetch E="<id>"`.
@@ -109,15 +109,15 @@ version corrupted its own measurements.
 
 **`skillcraft-audit`** — hooks and permissions.
 `https://github.com/Clay-HHK/skillcraft-audit` @ `0b9c36f28e05`, **MIT**, vendorable.
-150 malicious, 0 benign. **The only public corpus covering hook weaponisation and permission
+51 malicious (42 single skills + 9 chains), 0 benign. **The only public corpus covering hook weaponisation and permission
 bypass at all.**
 *Hazards*: single author, so shapes are stylistically correlated; and being the only source,
 there is no second opinion to check it against.
 
 **`cisco-mcp-scanner-evals`** — the MCP surface.
 `https://github.com/cisco-ai-defense/mcp-scanner` @ `be87b90d88bc`, subset `evals`,
-**Apache-2.0**, vendorable. 154 malicious, 4 benign.
-*Hazards*: 4 benign samples is far too few to serve as an MCP false-positive denominator;
+**Apache-2.0**, vendorable. 142 malicious, 3 benign (141 behavioural cases + 1 remote server; 121 vendored).
+*Hazards*: 3 benign samples is far too few to serve as an MCP false-positive denominator;
 the directory name is the label, so a path-aware harness can cheat.
 
 **`trailofbits-overt`** — the evasion touchstone.
@@ -171,7 +171,7 @@ non-circular source.
 
 **`automatelab-mcp-tools`** — real tool descriptions.
 `https://huggingface.co/datasets/automatelab/mcp-servers-tool-catalog` @ `a413afb7b02a`,
-**CC-BY-4.0**, vendorable. **9,922 tools across 359 servers.**
+**CC-BY-4.0**, vendorable. **9,922 tool declarations across 357 packages** (285 distinct server names).
 Real descriptions legitimately contain `IMPORTANT:`, `<placeholder>`, tokens and URLs — all
 the shapes a tool-poisoning rule looks for.
 *Hazards*: none known for the data itself. The hazard is on your side: this is typically a
@@ -180,7 +180,9 @@ against, and may surface many false positives at once.
 
 **`nvidia-skillspector-fixtures`** — paired twins.
 `https://github.com/NVIDIA/SkillSpector` @ `2e9ae8d1cfa6`, **Apache-2.0**, vendorable.
-About 6 pairs, each a malicious fixture beside a near-identical clean version.
+24 fixtures, of which 7 are clean. Only the `ssd` group has twin structure, and even there
+the pairs are NOT near-identical — the entry's own hazards in `manifest/corpora.yaml` say so
+explicitly. Do not read this corpus as a paired-twin set.
 **The only structure that tests whether a hit lands on the difference rather than on the
 topic.**
 *Hazards*: tiny. Its value is the structure, not the count.

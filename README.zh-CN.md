@@ -14,7 +14,7 @@
 
 另外校验器里有一条规则：工具的 `rules_source.path` 不许走出本仓库。它曾经走出去过，后果是 `make validate` 在作者机器上报「73 个规则 ID 已校验」，在所有别人的机器上报「not checked」——这份语料自己的结果取决于某一个人的目录布局。
 
-**故意不做**的检查写在 [`neutrality.go`](harness/cmd/corpus/neutrality.go) 里：一个"剥掉所有 `expect` 块再重新校验"的 pass 写完之后被删了，因为校验器里没有任何检查**要求** expect 块存在，所以那个 pass 只可能通过、永远不可能失败。`truth` 的自足性早已按类别强制：恶性样本必须写明 technique 和 severity，硬负样本必须写明 `resembles` 和 `differs_by`——这些检查是会响的。
+**故意不做**的检查写在 [`neutrality.go`](harness/cmd/corpus/neutrality.go) 里：一个"剥掉所有 `expect` 块再重新校验"的 pass 写完之后被删了，因为校验器里没有任何检查**要求** expect 块存在，所以那个 pass 只可能通过、永远不可能失败。`truth` 的自足性早已按类别强制：恶性样本必须写明 severity，以及 technique 或 dimension 二者之一，硬负样本必须写明 `resembles` 和 `differs_by`——这些检查是会响的。
 
 每个样本陈述它**是什么**，用的是不属于任何扫描器的词汇（[`taxonomy/techniques.yaml`](taxonomy/techniques.yaml)），所以任何扫描器都可以拿它来测量，多个扫描器可以在同一批样本上做对比。点名某个扫描器自己的规则 ID 是叠加在上面的可选精度，从来不是断言本身。见[两个半部分](docs/label-schema.zh-CN.md#两个半部分)。
 
@@ -48,7 +48,7 @@
 
 | 工具 | 规则级期望 | 备注 |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | 有，覆盖全部 6 个第 1 层样本 | 目前唯一一个 —— 见*已知缺口* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | 有，覆盖 3,489 个第 1 层样本中的 6 个 | 目前唯一一个 —— 见*已知缺口* |
 
 还没有接入第二个扫描器。在接入之前，上面那些工具中立的说法是 schema 的性质，而不是已被证明的结果，把这个区别说出来正是这一节存在的理由。
 

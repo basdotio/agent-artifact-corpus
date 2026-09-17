@@ -161,9 +161,9 @@ string literals and misses every language-native reverse shell.
   blind, answers held outside the tree, an error counts as a miss. Its 10 deliberate
   false-positive decoys are not part of that figure and are not recall material: firing on
   them is the failure, not the fix.
-- **Hook and permission weaponisation**: `skillcraft-audit` (150, MIT) — the only public
+- **Hook and permission weaponisation**: `skillcraft-audit` (51, MIT) — the only public
   corpus covering these at all.
-- **MCP**: `cisco-ai-defense/mcp-scanner` evals (154, Apache-2.0).
+- **MCP**: `cisco-ai-defense/mcp-scanner` evals (142, Apache-2.0).
 - **Touchstone, never vendored**: `trailofbits/overtly-malicious-skills` (4, no license) —
   each of the four defeats line-by-line rules by a different mechanism.
 
