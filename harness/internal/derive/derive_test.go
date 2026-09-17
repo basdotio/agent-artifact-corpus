@@ -16,7 +16,7 @@ import (
 // token, a couple of dimensions and evasions.
 func testTax() *taxonomy.Set {
 	return &taxonomy.Set{
-		Dimensions: []string{"backdoor", "exfiltration", "supply-chain"},
+		Dimensions: []string{"backdoor", "exfiltration", "supply-chain", "filesystem"},
 		TierOrder:  []string{"plain", "evasive", "structural"},
 		Tiers: map[string]taxonomy.Tier{
 			"plain":      {ID: "plain", Rank: 0, MapsTo: "skillsgoat / cisco 000", Calibration: true},
@@ -198,7 +198,7 @@ severity: high
 categories: [dispersion-splitting]
 `)
 	e := entry(map[string]manifest.Targets{"dispersion-splitting": {"evasion:base64-wrapper"}})
-	e.Derive.DimensionOverrides = map[string]string{"200-split": "exfiltration"}
+	e.Derive.DimensionOverrides = map[string]manifest.Targets{"200-split": {"exfiltration"}}
 
 	res, errs := Derive(e, root, testTax())
 	if len(errs) != 0 {
@@ -225,11 +225,44 @@ severity: high
 categories: [persistence-backdoor]
 `)
 	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
-	e.Derive.DimensionOverrides = map[string]string{"200-x": "exfiltration"}
+	// Stale means the override says what the RULE already says. The earlier definition was
+	// "the rule produced anything at all", which made the mechanism able to fill a gap and
+	// unable to correct an error — and correcting errors is most of what a hand-read dimension
+	// turned out to be for.
+	e.Derive.DimensionOverrides = map[string]manifest.Targets{"200-x": {"backdoor"}}
 
 	_, errs := Derive(e, root, testTax())
 	if !containsErr(errs, "it is stale") {
 		t.Fatalf("a redundant override must be reported, got:\n%v", errs)
+	}
+}
+
+// The case the old semantics could not express: a category that is right for most of its
+// members and wrong for this one. A census of 253 samples found 86 of these; refusing them
+// would have meant deleting categories that are mostly correct.
+func TestOverrideCorrectsTheCategoryMap(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSample(t, root, "x", "200-x", `
+id: 200-x
+verdict: malicious
+severity: high
+categories: [persistence-backdoor]
+`)
+	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
+	e.Derive.DimensionOverrides = map[string]manifest.Targets{"200-x": {"exfiltration", "filesystem"}}
+
+	res, errs := Derive(e, root, testTax())
+	if len(errs) != 0 {
+		t.Fatalf("an override correcting the map must be accepted, got:\n%v", errs)
+	}
+	got := res.Coords[0].Dimensions
+	if len(got) != 2 || got[0] != "exfiltration" || got[1] != "filesystem" {
+		t.Errorf("dimensions = %v, want [exfiltration filesystem] — the override REPLACES the "+
+			"map's value; appending would leave the rejected one beside it", got)
+	}
+	if !res.Coords[0].HandReadDimension {
+		t.Errorf("a corrected dimension must be marked hand-read, or stats will report it as mechanical")
 	}
 }
 
@@ -243,10 +276,10 @@ severity: high
 categories: [persistence-backdoor]
 `)
 	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
-	e.Derive.DimensionOverrides = map[string]string{"200-other": "telepathy"}
+	e.Derive.DimensionOverrides = map[string]manifest.Targets{"200-other": {"telepathy"}}
 
 	_, errs := Derive(e, root, testTax())
-	if !containsErr(errs, `is "telepathy", which is not a dimension`) {
+	if !containsErr(errs, `names "telepathy", which is not a dimension`) {
 		t.Fatalf("an override outside the vocabulary must fail, got:\n%v", errs)
 	}
 }
