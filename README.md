@@ -6,7 +6,31 @@ A labelled test corpus and benchmark for **static security scanners of AI agent
 environments** — the skills, hooks, permission configs, MCP servers, connectors and
 instruction files an agent loads.
 
-It is **tool-neutral by construction**. Every sample states what it *is*, in a vocabulary no
+It is **tool-neutral by construction, and `make validate` enforces it.** Claiming neutrality
+in a README is not the same as having it, and this repository has lost it twice without
+noticing — both times with a green build, because coupling of this kind is invisible unless
+something looks for it. Three checks now run on every validate, and each was written after
+the property it guards had already silently broken:
+
+| Checked | Why |
+|---|---|
+| No registered scanner's id appears in any `truth` block or in `taxonomy/techniques.yaml` | The moment a sample's truth explains what some scanner misses, that scanner's model *is* the ground truth, and the next tool is scored on a description of its competitor |
+| No scanner's id appears in the harness's own code (string literals and identifiers; comments exempt) | Code that names one tool makes that tool's presence part of how everybody else's samples are validated. This caught a CI step that pinned the literal `"aguard"` |
+| No workflow sets a scanner's `rules_source.env` | The shared gate would verify one project's rule ids and no other project's |
+
+Plus one rule in the validator: a tool's `rules_source.path` may not leave the repository.
+It used to, and the consequence was that `make validate` reported 73 verified rule ids on the
+author's machine and "not checked" on everyone else's — the corpus's own result depending on
+one person's directory layout.
+
+What is deliberately *not* checked is described in
+[`neutrality.go`](harness/cmd/corpus/neutrality.go): a pass that strips every `expect` block
+and revalidates was built and then deleted, because nothing in the validator requires an
+expect block, so it could only ever pass. `truth`'s self-sufficiency is already enforced per
+class — a malicious sample must name a technique and a severity, a hard negative must name
+`resembles` and `differs_by` — and those checks fail loudly.
+
+Every sample states what it *is*, in a vocabulary no
 scanner owns ([`taxonomy/techniques.yaml`](taxonomy/techniques.yaml)), so any scanner can be
 measured against it and several can be compared on the same samples. Naming a scanner's own
 rule IDs is optional precision layered on top, never the assertion itself. See

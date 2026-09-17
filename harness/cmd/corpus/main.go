@@ -128,6 +128,13 @@ func cmdValidate(root string) int {
 		problems = append(problems, e.Error())
 	}
 
+	// Neutrality. Not behind a flag: a check nobody remembers to run proves the thing on the
+	// days it does not matter. See neutrality.go, including what was deliberately NOT built.
+	neutralProblems := ToolNamesInNeutralHalf(labels, tax)
+	neutralProblems = append(neutralProblems, ToolNamesInHarnessCode(root, tax)...)
+	neutralProblems = append(neutralProblems, CIDependsOnAScanner(root, tax)...)
+	problems = append(problems, neutralProblems...)
+
 	// Layer 2
 	manifests, _ := filepath.Glob(filepath.Join(root, "manifest", "*.yaml"))
 	for _, mp := range manifests {
@@ -179,6 +186,15 @@ func cmdValidate(root string) int {
 	// for "the hashes were checked".
 	fmt.Printf("sha256      %d of %d label(s) carry a hash, and those %d were verified against "+
 		"the vendored bytes\n", verified, len(labels), verified)
+	// Named even when clean, because the point of these three is that they were each added
+	// after the property they guard had already silently broken.
+	if len(neutralProblems) == 0 {
+		fmt.Printf("neutral     %d scanner(s) registered, and none of them appears in any truth "+
+			"block, in the vocabulary, in the harness code or in CI\n", len(tax.Tools))
+	} else {
+		fmt.Printf("neutral     FAILED — %d place(s) where one scanner has become part of the "+
+			"shared half\n", len(neutralProblems))
+	}
 	fmt.Println("rule ids")
 	for _, line := range ruleLines {
 		fmt.Println(line)
