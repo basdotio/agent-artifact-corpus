@@ -1,0 +1,571 @@
+{
+  "package": "notebooklm-mcp",
+  "tools": [
+    {
+      "name": "ask_question",
+      "description": "# Conversational Research Partner (NotebookLM • Gemini 2.5 • Session RAG)\n\n## No Active Notebook\n- Visit https://notebooklm.google to create a notebook and get a share link\n- Use **add_notebook** to add it to your library (explains how to get the link)\n- Use **list_notebooks** to show available sources\n- Use **select_notebook** to set one active\n\n> Auth tip: If login is required, use the prompt 'notebooklm.auth-setup' and then verify with the 'get_health' tool. If authentication later fails (e.g., expired cookies), use the prompt 'notebooklm.auth-repair'.\n\nTip: Tell the user you can manage NotebookLM library and ask which notebook to use for the current task.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The question to ask NotebookLM. Plain natural language; can be multi-line. Gemini responds grounded on the notebook's sources."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Reuse an existing browser session for follow-up questions. Pass back the `session_id` returned in a prior `ask_question` response — NotebookLM keeps the prior conversation in context, so follow-ups get sharper. Omit for a fresh session. `list_sessions` enumerates live sessions."
+          },
+          "notebook_id": {
+            "type": "string",
+            "description": "Library notebook id (from `list_notebooks` / `search_notebooks`). Defaults to the active notebook (see `select_notebook`) when omitted."
+          },
+          "notebook_url": {
+            "type": "string",
+            "description": "Direct NotebookLM URL — overrides `notebook_id`. Use for ad-hoc queries against notebooks not yet in your library. Format: `https://notebooklm.google.com/notebook/<uuid>`."
+          },
+          "source_format": {
+            "type": "string",
+            "enum": [
+              "none",
+              "inline",
+              "footnotes",
+              "json"
+            ],
+            "description": "How citations are returned alongside the answer:\n  • `none` (default) — raw answer, no citation extraction (fastest)\n  • `footnotes` — answer plus a `Sources:` block, e.g. `[1] DocName — \"excerpt…\"`\n  • `inline` — `[N]` markers in the answer are replaced with `[N] (DocName: \"excerpt…\")`\n  • `json` — answer text untouched; structured `sources` array on the response\n\nUse `none` for snappy chat. Use `json` when downstream code needs to process citations programmatically. Use `footnotes`/`inline` when showing the answer to a human reader."
+          },
+          "show_browser": {
+            "type": "boolean",
+            "description": "Show browser window for debugging (simple version). For advanced control (typing speed, stealth, etc.), use browser_options instead."
+          },
+          "browser_options": {
+            "type": "object",
+            "description": "Optional browser behavior settings. Claude can control everything: visibility, typing speed, stealth mode, timeouts. Useful for debugging or fine-tuning.",
+            "properties": {
+              "show": {
+                "type": "boolean",
+                "description": "Show browser window (default: from ENV or false)"
+              },
+              "headless": {
+                "type": "boolean",
+                "description": "Run browser in headless mode (default: true)"
+              },
+              "timeout_ms": {
+                "type": "number",
+                "description": "Browser operation timeout in milliseconds (default: 30000)"
+              },
+              "stealth": {
+                "type": "object",
+                "description": "Human-like behavior settings to avoid detection",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Master switch for all stealth features (default: true)"
+                  },
+                  "random_delays": {
+                    "type": "boolean",
+                    "description": "Random delays between actions (default: true)"
+                  },
+                  "human_typing": {
+                    "type": "boolean",
+                    "description": "Human-like typing patterns (default: true)"
+                  },
+                  "mouse_movements": {
+                    "type": "boolean",
+                    "description": "Realistic mouse movements (default: true)"
+                  },
+                  "typing_wpm_min": {
+                    "type": "number",
+                    "description": "Minimum typing speed in WPM (default: 160)"
+                  },
+                  "typing_wpm_max": {
+                    "type": "number",
+                    "description": "Maximum typing speed in WPM (default: 240)"
+                  },
+                  "delay_min_ms": {
+                    "type": "number",
+                    "description": "Minimum delay between actions in ms (default: 100)"
+                  },
+                  "delay_max_ms": {
+                    "type": "number",
+                    "description": "Maximum delay between actions in ms (default: 400)"
+                  }
+                }
+              },
+              "viewport": {
+                "type": "object",
+                "description": "Browser viewport size",
+                "properties": {
+                  "width": {
+                    "type": "number",
+                    "description": "Viewport width in pixels (default: 1920)"
+                  },
+                  "height": {
+                    "type": "number",
+                    "description": "Viewport height in pixels (default: 1080)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "question"
+        ]
+      }
+    },
+    {
+      "name": "add_notebook",
+      "description": "Register a NotebookLM notebook in the local library so it can be queried with `ask_question`, ingested into with `add_source`, etc.\n\n## Required URL\nThe user must supply a NotebookLM share-link. To produce one:\n  1. Open https://notebooklm.google\n  2. Open the notebook → click \"Share\" (top right)\n  3. Set \"Anyone with the link\" → \"Copy link\"\n\n## Permission workflow\nDo NOT call this tool unprompted. The expected dialogue is:\n  1. Ask for the URL\n  2. Ask what knowledge it contains (1–2 sentences) → `description`\n  3. Ask which topics it covers (3–5) → `topics`\n  4. Ask when it should be consulted → `use_cases`\n  5. Propose a `name` and the metadata back to the user\n  6. Only after explicit confirmation, call `add_notebook`.\n\nFree-tier limits: 100 notebooks · 50 sources each · 50 queries/day. Google AI Pro/Ultra raises these 5×.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "NotebookLM share URL. Format: `https://notebooklm.google.com/notebook/<uuid>` (with optional `?authuser=N` suffix)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name (e.g. 'n8n Documentation')."
+          },
+          "description": {
+            "type": "string",
+            "description": "1–2 sentence summary of what the notebook contains."
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "3–5 topics covered. Used by `search_notebooks`."
+          },
+          "content_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Content classification, e.g. ['documentation', 'examples', 'best practices']."
+          },
+          "use_cases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "When the LLM should consult this notebook, e.g. ['Implementing n8n workflows']."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional free-form tags for organisation."
+          }
+        },
+        "required": [
+          "url",
+          "name",
+          "description",
+          "topics"
+        ]
+      }
+    },
+    {
+      "name": "list_notebooks",
+      "description": "List every notebook in the local library with its metadata (`id`, `name`, `description`, `topics`, `tags`, `url`, `use_count`, etc.). Use the returned `id` for `select_notebook`, `update_notebook`, `get_notebook`, `remove_notebook`, or as `notebook_id` on `ask_question` / `add_source` / audio tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_notebook",
+      "description": "Fetch full metadata for one notebook by id. Use to verify what's currently stored before calling `update_notebook`, or to show the user the exact `description`/`topics`/`use_cases` Claude has for it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Notebook id, as returned by `list_notebooks`/`search_notebooks`."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "select_notebook",
+      "description": "Mark a notebook as the active default. After this, `ask_question`, `add_source`, and the audio tools resolve to that notebook when the caller omits `notebook_id` / `notebook_url`.\n\nWhen to call:\n  • The user explicitly switches context (e.g. \"Let's work on React now\")\n  • Task obviously needs a different notebook than the current one — announce the switch (\"Switching to the React notebook…\") before calling.\n  • If the right notebook is ambiguous, ask the user first instead of guessing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Notebook id to activate (from `list_notebooks`)."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "update_notebook",
+      "description": "Patch metadata fields on an existing notebook. Pass `id` plus any subset of `name`, `description`, `topics`, `content_types`, `use_cases`, `tags`, `url` — only supplied fields change.\n\nWorkflow: identify the target notebook → propose the exact change back to the user → call only after explicit confirmation. Multiple fields can be updated in one call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Notebook id to update (from `list_notebooks`)."
+          },
+          "name": {
+            "type": "string",
+            "description": "New display name."
+          },
+          "description": {
+            "type": "string",
+            "description": "New 1–2 sentence summary."
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replacement topics list (full replacement, not append)."
+          },
+          "content_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replacement content classification."
+          },
+          "use_cases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replacement use-cases."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replacement tags."
+          },
+          "url": {
+            "type": "string",
+            "description": "New NotebookLM share URL (rarely needed)."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "remove_notebook",
+      "description": "Remove a notebook from the local library. **Does NOT delete the actual NotebookLM notebook on Google's side** — only the local metadata entry. Active sessions on this notebook are closed.\n\nConfirmation workflow: look up the notebook by id, ask the user \"Remove '[name]' from your library?\" — only call after a clear yes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Notebook id to remove (from `list_notebooks`)."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "search_notebooks",
+      "description": "Search the library by free-text query — matches against `name`, `description`, `topics`, and `tags`. Returns notebook objects with their `id` so you can chain into `select_notebook` etc.\n\nUse this when the user references a notebook by topic (\"the React one\") instead of by exact name. If multiple notebooks match, propose the top 1–2 and let the user choose.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search keywords (case-insensitive)."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "get_library_stats",
+      "description": "Aggregate statistics about the local notebook library: `total_notebooks`, `active_notebook` (id), `most_used_notebook`, `total_queries`, `last_modified`. Useful as a quick health check or when the user asks \"what notebooks do I have?\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_sessions",
+      "description": "List all active browser sessions for this server. Each entry includes `id`, `created_at`, `last_activity`, `age_seconds`, `inactive_seconds`, `message_count`, and `notebook_url`. Useful before `reset_session` / `close_session` or to recover a `session_id` you can pass back into `ask_question` to continue an existing conversation. Sessions older than `session_timeout` (see `get_health`) are auto-closed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "close_session",
+      "description": "Permanently close a session and discard its browser tab. Use the `id` returned by `list_sessions` (or the `session_id` from a prior `ask_question` response). Closed sessions cannot be resumed — start a new one with `ask_question` (no `session_id`) or pick another from `list_sessions`. Ask the user before closing if the session might still be needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session id to close. Obtain from `list_sessions` or from any prior `ask_question` response (`result.session_id`)."
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    {
+      "name": "reset_session",
+      "description": "Clear a session's chat history while keeping the same session id. Use this when the task changes mid-conversation and you want a fresh context without losing the underlying browser tab. Ask the user before resetting if they might still need the prior history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session id to reset. Obtain from `list_sessions` or from a prior `ask_question` response (`result.session_id`)."
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    {
+      "name": "get_health",
+      "description": "Inspect server state. Returns:\n  • `authenticated` — whether saved Google cookies are still valid\n  • `notebook_url`, `active_notebook_id`, `active_notebook_name` —\n    the currently selected library notebook (or null)\n  • `total_notebooks` — library size\n  • `active_sessions`, `max_sessions`, `session_timeout` — runtime\n    session stats (timeout in seconds; sessions auto-close after this)\n  • `headless`, `auto_login_enabled`, `stealth_enabled` — config\nUse this first thing in a new conversation. If `authenticated=false`, run `setup_auth` (or `re_auth` to switch accounts).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "setup_auth",
+      "description": "Open a browser window for first-time Google login. Returns immediately after spawning the browser; the user has up to 10 minutes to complete sign-in, then cookies are persisted for future runs.\n\nWhen to use:\n  • `get_health` reports `authenticated=false` for the first time\n  • Auto-login credentials are not configured\n  • `re_auth` is the right call when you want to *switch* accounts or recover from a daily-quota lockout\n\nAfter login finishes, call `get_health` to verify success.\n\nIf the browser session feels broken (auth keeps failing, stale cookies), run `cleanup_data(confirm=true, preserve_library=true)` first, then retry `setup_auth`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "show_browser": {
+            "type": "boolean",
+            "description": "Show the browser window. Default: true (must be visible so the user can interact). For advanced control use `browser_options`."
+          },
+          "browser_options": {
+            "type": "object",
+            "description": "Advanced browser settings. Override visibility, timeout, or headless mode (default: visible, 30 s).",
+            "properties": {
+              "show": {
+                "type": "boolean"
+              },
+              "headless": {
+                "type": "boolean"
+              },
+              "timeout_ms": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "re_auth",
+      "description": "Switch to a different Google account or recover from broken auth. Closes all active sessions, deletes saved cookies and Chrome profile, and opens a fresh login browser.\n\nCommon triggers:\n  • NotebookLM's 50 queries/day free-tier limit is reached and the user wants to rotate to another Google account\n  • `setup_auth` failed and a clean slate is needed\n\nAfter login, call `get_health` to verify. For very stuck states, run `cleanup_data(confirm=true, preserve_library=true)` before `re_auth`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "show_browser": {
+            "type": "boolean",
+            "description": "Show the browser window. Default: true."
+          },
+          "browser_options": {
+            "type": "object",
+            "properties": {
+              "show": {
+                "type": "boolean"
+              },
+              "headless": {
+                "type": "boolean"
+              },
+              "timeout_ms": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cleanup_data",
+      "description": "Two-phase deep cleanup of all server data on disk (auth state, browser profiles, caches, MCP logs, temp backups). Cross-platform (Linux/macOS/Windows). Always close all Chrome/Chromium instances first — open browsers can lock files.\n\nPhase 1 (preview): call with `confirm: false`. Returns a categorised list of paths and total size. **No deletion happens.**\nPhase 2 (delete): after the user reviews the preview and approves, call with `confirm: true`.\n\nSet `preserve_library: true` to keep the notebook library file (library.json) while wiping everything else — recommended when troubleshooting auth.\n\nTypical recovery flow:\n  1. cleanup_data(confirm=false, preserve_library=true)  // preview\n  2. cleanup_data(confirm=true, preserve_library=true)   // execute\n  3. setup_auth (or re_auth)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "description": "false = preview only (default). true = actually delete after user reviewed the preview."
+          },
+          "preserve_library": {
+            "type": "boolean",
+            "description": "Keep notebook library.json while deleting everything else. Default: false. Set true when only auth/browser state is broken.",
+            "default": false
+          }
+        },
+        "required": [
+          "confirm"
+        ]
+      }
+    },
+    {
+      "name": "add_source",
+      "description": "Ingest a source into a NotebookLM notebook. Supports two source types in v2.0:\n  • `url` — NotebookLM crawls and indexes a website\n  • `text` — paste raw text (treated as a copied document)\n\nFile / YouTube / Google-Drive uploads are not yet implemented.\n\nReturns `sourceCountBefore`/`sourceCountAfter` so the caller can verify the new source landed. Call once per source — multiple sources require multiple calls. NotebookLM finishes indexing within 5–30 seconds; subsequent `ask_question` calls then have the new source in context. Free notebooks cap at 50 sources.\n\nKnown quirk: pasted-text uploads occasionally redirect to a freshly created \"Untitled notebook\" on Google's side. The tool detects this and returns a clear error so you can re-try against the correct URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "url",
+              "text"
+            ],
+            "description": "`url` crawls the supplied website; `text` ingests `content` verbatim as a copied document."
+          },
+          "content": {
+            "type": "string",
+            "description": "When `type=url`: a fully-qualified URL (https://…). When `type=text`: the raw text body (any length up to NotebookLM's per-source word limit, ~500 k for free tier)."
+          },
+          "title": {
+            "type": "string",
+            "description": "Display title shown in the source list. Optional — NotebookLM picks a sensible default (page title for URLs, first line for text). For text sources, supplying a title is recommended for later identification."
+          },
+          "show_browser": {
+            "type": "boolean",
+            "description": "Show the browser window for debugging. Default: false."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Reuse an existing browser session by id. Recommended when you have already called `ask_question` against the same notebook — saves the 10–15 s page-load time. Obtain from `list_sessions` or any prior `ask_question` response (`result.session_id`)."
+          },
+          "notebook_id": {
+            "type": "string",
+            "description": "Library notebook id (from `list_notebooks` / `search_notebooks`). Defaults to the active notebook (see `select_notebook`) when omitted."
+          },
+          "notebook_url": {
+            "type": "string",
+            "description": "Direct NotebookLM URL — overrides `notebook_id`. Use for ad-hoc notebooks not yet in your library. Format: `https://notebooklm.google.com/notebook/<uuid>`."
+          }
+        },
+        "required": [
+          "type",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "generate_audio",
+      "description": "Trigger podcast-style Audio Overview generation for a notebook.\n\n**Async by default** — returns immediately with one of:\n  • `status: \"started\"` — generation just kicked off\n  • `status: \"in_progress\"` — a generation was already running; this call attached to it\n  • `status: \"ready\"` (with `alreadyExisted: true`) — an Audio Overview already existed; nothing was triggered\n\nGeneration typically takes 2–10 minutes. **Workflow:**\n  1. `generate_audio` → returns immediately\n  2. Poll `get_audio_status` every ~30 s\n  3. When status is `ready`, call `download_audio`\n\nPass `wait_for_completion: true` for legacy synchronous behaviour (blocks for up to `timeout_ms`). Audio Overview is the only Studio output exposed in v2.0 (Video / Mindmap / Quiz / Infographic / Datatable / Presentation are NotebookLM features but not yet wrapped).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "custom_prompt": {
+            "type": "string",
+            "description": "Optional focus prompt for the Audio Overview, e.g. \"Focus on the API authentication flow and skip pricing\". Passed into the NotebookLM \"Customize\" sub-dialog before generation starts."
+          },
+          "wait_for_completion": {
+            "type": "boolean",
+            "description": "If true, block until the audio tile is ready (up to `timeout_ms`). Default false — return immediately and let the caller poll `get_audio_status`."
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "Only relevant when `wait_for_completion=true`. Maximum wait for the audio tile to appear. Default 600 000 (10 min)."
+          },
+          "show_browser": {
+            "type": "boolean",
+            "description": "Show the browser window for debugging. Default: false."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Reuse an existing browser session by id. Recommended when you have already called `ask_question` against the same notebook — saves the 10–15 s page-load time. Obtain from `list_sessions` or any prior `ask_question` response (`result.session_id`)."
+          },
+          "notebook_id": {
+            "type": "string",
+            "description": "Library notebook id (from `list_notebooks` / `search_notebooks`). Defaults to the active notebook (see `select_notebook`) when omitted."
+          },
+          "notebook_url": {
+            "type": "string",
+            "description": "Direct NotebookLM URL — overrides `notebook_id`. Use for ad-hoc notebooks not yet in your library. Format: `https://notebooklm.google.com/notebook/<uuid>`."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_audio_status",
+      "description": "Non-blocking probe for the current Audio Overview state of a notebook.\n\nReturned `status` values:\n  • `ready` — Audio Overview is generated and ready to download\n  • `in_progress` — generation is currently running\n  • `not_started` — no Audio Overview exists yet for this notebook\n\nSafe to poll every ~30 s while waiting for `generate_audio` to finish. When status flips to `ready`, call `download_audio` with a destination directory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "show_browser": {
+            "type": "boolean",
+            "description": "Show the browser window for debugging. Default: false."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Reuse an existing browser session by id. Recommended when you have already called `ask_question` against the same notebook — saves the 10–15 s page-load time. Obtain from `list_sessions` or any prior `ask_question` response (`result.session_id`)."
+          },
+          "notebook_id": {
+            "type": "string",
+            "description": "Library notebook id (from `list_notebooks` / `search_notebooks`). Defaults to the active notebook (see `select_notebook`) when omitted."
+          },
+          "notebook_url": {
+            "type": "string",
+            "description": "Direct NotebookLM URL — overrides `notebook_id`. Use for ad-hoc notebooks not yet in your library. Format: `https://notebooklm.google.com/notebook/<uuid>`."
+          }
+        }
+      }
+    },
+    {
+      "name": "download_audio",
+      "description": "Save the completed Audio Overview to disk as a `.m4a` file. **Pre-condition:** `get_audio_status` must report `status: \"ready\"`. Calling this before generation completes returns an error message explaining what to do.\n\nThe file lands in `destination_dir` with NotebookLM's suggested filename (sanitised — usually the audio's title with underscores). The full saved path is returned in `result.filePath`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "destination_dir": {
+            "type": "string",
+            "description": "Absolute directory path where the file is saved (created if missing). Example: `/Users/jane/Downloads/notebooklm` or `/tmp/audio`. Relative paths are NOT recommended — the server may run from a different working directory than the caller."
+          },
+          "show_browser": {
+            "type": "boolean",
+            "description": "Show the browser window for debugging. Default: false."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Reuse an existing browser session by id. Recommended when you have already called `ask_question` against the same notebook — saves the 10–15 s page-load time. Obtain from `list_sessions` or any prior `ask_question` response (`result.session_id`)."
+          },
+          "notebook_id": {
+            "type": "string",
+            "description": "Library notebook id (from `list_notebooks` / `search_notebooks`). Defaults to the active notebook (see `select_notebook`) when omitted."
+          },
+          "notebook_url": {
+            "type": "string",
+            "description": "Direct NotebookLM URL — overrides `notebook_id`. Use for ad-hoc notebooks not yet in your library. Format: `https://notebooklm.google.com/notebook/<uuid>`."
+          }
+        },
+        "required": [
+          "destination_dir"
+        ]
+      }
+    }
+  ]
+}

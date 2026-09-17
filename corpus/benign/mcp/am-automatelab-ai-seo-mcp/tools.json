@@ -1,0 +1,576 @@
+{
+  "package": "@automatelab/ai-seo-mcp",
+  "tools": [
+    {
+      "name": "audit_page",
+      "description": "Full AI-SEO audit of a single URL: returns categorized findings (info/warning/error) with severity, fix instructions, and a 0-100 composite score plus per-dimension subscores.\n\nRead-only. Fetches the URL once and runs every sub-audit (schema, robots, technical, sitemap, AI-Overview eligibility) against the response. No writes, no third-party APIs, no auth required, no rate limits beyond polite per-host throttling.\n\nDeterministic, rule-based scoring; no LLM calls. Same URL + same input flags returns the same score.\n\nSupports `render: \"static\" | \"headless\"`. Default `static` (fast, raw HTML only). Use `headless` for React/Vue/Angular SPAs — adds 3-10s and requires the optional `playwright-core` peer dep plus a one-time `npx playwright install chromium`.\n\nWhen to use: the default entry point for `audit any page`. Use this instead of calling check_technical / audit_schema / check_robots / check_sitemap / score_ai_overview_eligibility individually unless you specifically need only one dimension - this tool composes all of them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL to audit. Must be a fully-qualified http(s) URL that returns HTTP 200 (redirects are followed). The tool fetches this URL once and runs every sub-audit (schema, robots, technical, sitemap, AI-Overview eligibility) against the response."
+          },
+          "include_raw_html": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, return the full raw HTML in the response under `raw_html`. Default false. Set true only when you need to inspect markup that wasn't captured by the structured findings; the payload can be large."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), the tool checks robots.txt before fetching and skips disallowed paths, returning a robots_blocked finding instead. Set to false ONLY for auditing your own site where you've intentionally blocked crawlers and need the audit to bypass that block."
+          },
+          "generate_report": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, return a standalone HTML scorecard in the `report_html` field. The HTML is self-contained (no external dependencies) and can be saved as a .html file or pasted to Gist/CodePen. Default false to keep audits cheap."
+          },
+          "render": {
+            "type": "string",
+            "enum": [
+              "static",
+              "headless"
+            ],
+            "default": "static",
+            "description": "Rendering mode. `static` (default) fetches raw HTML via HTTP — fast (<1s) but misses JS-rendered content typical of SPAs (React/Vue/Angular landing pages). `headless` spins up Playwright Chromium, waits for networkidle, and audits the rendered DOM — adds 3-10s per audit and requires `playwright-core` installed plus a one-time `npx playwright install chromium`. Use `headless` when the static audit shows `content_quality: \"spa_empty\"` or you know the target is JS-rendered."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "audit_schema",
+      "description": "Validate JSON-LD structured data against Schema.org rules and AI-citation best practices. Accepts either a URL (fetched) or a raw JSON string (parsed directly).\n\nRead-only when given `url` (one HTTP GET). Zero network when given `schema_json`. No writes.\n\nDeterministic, rule-based; no LLM. Validates required/recommended properties, @context correctness, sameAs links, and AI-search-friendly patterns.\n\nWhen to use: focused JSON-LD audits, or to validate a schema block you're about to ship. For a full page audit that includes schema + everything else, use `audit_page` instead.\n\nEither `url` or `schema_json` must be provided (not both). If both are provided, `schema_json` wins and no fetch happens.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL to fetch and audit. Either this OR `schema_json` is required. Read-only HTTP GET."
+          },
+          "schema_json": {
+            "type": "string",
+            "description": "Raw JSON-LD as a string (the contents of a `<script type=\"application/ld+json\">` block). Use this to validate a schema block offline without fetching a URL. Either this OR `url` is required."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt before fetching `url`. Ignored when `schema_json` is used."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "audit_canonical",
+      "description": "Audit a page's canonical link integrity: presence, self-reference, cross-domain mismatches, trailing-slash hygiene, and og:url consistency.\n\nRead-only. One HTTP GET to fetch the HEAD section.\n\nDeterministic, rule-based; no LLM.\n\nWhen to use: a focused canonical-only audit (e.g. debugging a duplicate-content issue). For a full HEAD audit including OpenGraph, hreflang, noindex, title, use `check_technical`. For everything-on-a-page, use `audit_page`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL whose canonical link tag and og:url consistency you want to audit. Must be a fully-qualified http(s) URL. The tool fetches the URL (following redirects) and inspects only the <head> section; the body is not parsed."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt before fetching. Set false only for auditing your own site where you've intentionally blocked crawlers."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_robots",
+      "description": "Fetch and parse a domain's robots.txt; report per-crawler allow/disallow posture for every known AI training crawler (GPTBot, CCBot, Anthropic-AI, Google-Extended, etc.), AI search crawlers (ChatGPT-User, PerplexityBot, OAI-SearchBot), and user-triggered fetchers.\n\nRead-only. One HTTP GET to /robots.txt. No auth, no rate limits applied.\n\nDeterministic, rule-based; no LLM. Returns structured findings with per-crawler status.\n\nWhen to use: figuring out which AI crawlers a site blocks vs allows. Combine with `check_sitemap` for a full pre-crawl audit. Distinct from `audit_page` which evaluates a single URL; this evaluates a whole-domain policy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 3,
+            "description": "Hostname or origin to inspect. Examples: `example.com`, `https://example.com`, `https://example.com/`. The tool fetches `https://<domain>/robots.txt` and reports per-crawler allow/disallow posture for all known AI training crawlers (GPTBot, CCBot, etc.), AI search crawlers (ChatGPT-User, PerplexityBot), and user-triggered fetchers. Read-only HTTP GET to /robots.txt only."
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_sitemap",
+      "description": "Validate a domain's XML sitemap: presence, accessibility, URL count, lastmod freshness, sitemap-index handling, and image/video sitemap extensions.\n\nRead-only. Issues N+1 HTTP GETs: one for robots.txt + sitemap, then up to `max_urls_to_check` HEADs against sampled URLs.\n\nDeterministic, rule-based; no LLM.\n\nWhen to use: site-wide indexing audits. Pair with `check_robots` for a full pre-crawl picture. For per-page checks, use `audit_page` or `check_technical` instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 3,
+            "description": "Hostname or origin to inspect. Examples: `example.com`, `https://example.com`. The tool tries `/sitemap.xml` then the sitemap URL declared in robots.txt; follows sitemap index files one level deep. Read-only HTTP GETs against the domain only."
+          },
+          "max_urls_to_check": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 100,
+            "description": "Cap on how many URLs from the sitemap to sample for lastmod, image/video extension, and structural checks. Default 100. Increase up to 500 for large sites where you want a more representative sample; each extra URL is one HTTP HEAD."
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_technical",
+      "description": "Audit a page's HEAD section for technical signals relevant to AI crawlers: HTTPS, canonical, OpenGraph, Twitter Card, hreflang, noindex, and title-vs-H1 hygiene.\n\nRead-only. One HTTP GET, inspects HEAD only (body is not parsed).\n\nDeterministic, rule-based; no LLM.\n\nWhen to use: when you specifically need HEAD-tag audit findings. For the full page including schema and AI-Overview scoring, use `audit_page`. For canonical-only, use `audit_canonical`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL to audit. The tool fetches the URL once and inspects HEAD-section signals: HTTPS, canonical, OpenGraph, Twitter Card, hreflang, noindex, title length and overlap with H1. Body content is not parsed. Read-only HTTP GET."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt before fetching. Set false only for auditing your own site where you've intentionally blocked crawlers."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "score_ai_overview_eligibility",
+      "description": "Score a page's probability of appearing in Google AI Overviews. Returns an overall 0-100 score plus six factor subscores: semantic completeness, structured data, E-E-A-T signals, entity density, freshness, and technical hygiene.\n\nRead-only. One HTTP GET.\n\nDeterministic, rule-based scoring derived from published 2025-2026 AI-Overview correlation studies. No LLM calls. Same URL returns the same score on repeated runs.\n\nWhen to use: AI-Overview-specific prioritization. For a multi-dimensional audit that includes this scoring plus everything else, use `audit_page`. For citation-worthiness of a specific text passage (rather than a URL ranking probability), use `score_citation_worthiness`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL to score. The tool fetches the URL once and runs deterministic, rule-based scoring across six factors (semantic completeness, structured data, E-E-A-T signals, entity density, freshness, technical hygiene) using published 2025-2026 correlation studies. No LLM calls. Read-only HTTP GET."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt before fetching. Set false only for auditing your own site where you've intentionally blocked crawlers."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "generate_llms_txt",
+      "description": "Generate a spec-compliant llms.txt (and optionally llms-full.txt) for a domain by reading its sitemap, sampling up to `max_pages` pages, and synthesizing a grouped, sectioned summary.\n\nRead-only. Issues one HTTP GET for the sitemap then one per sampled page.\n\nDeterministic; no LLM. Output is the file content as a string - this tool does NOT write to disk or upload anywhere. The caller is responsible for hosting the resulting file at `https://<domain>/llms.txt`.\n\nWhen to use: bootstrapping llms.txt for a site you own. To check an existing llms.txt, use `validate_llms_txt` instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 3,
+            "description": "Hostname or origin to generate llms.txt for. Examples: `example.com`, `https://example.com`. The tool reads the domain's sitemap, fetches up to `max_pages` of them, and synthesizes a spec-compliant llms.txt grouped by section. Issues N+1 HTTP GETs: one for the sitemap, then one per sampled page. Read-only."
+          },
+          "max_pages": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 30,
+            "description": "How many pages to sample from the sitemap when building section groupings. Default 30. Each page is fetched (one HTTP GET per page) - keep this low for large sites or rate-limited hosts."
+          },
+          "include_full": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, also generate llms-full.txt (the expanded variant containing full page text, not just URLs and titles). Default false. The llms-full.txt output can be large; only enable when you actually plan to host both files."
+          },
+          "site_name": {
+            "type": "string",
+            "description": "Override the site name used in the generated llms.txt header. If omitted, inferred from the homepage's <title> tag."
+          },
+          "site_description": {
+            "type": "string",
+            "description": "Override the site description used in the generated llms.txt header. If omitted, inferred from the homepage's meta description."
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "validate_llms_txt",
+      "description": "Validate an existing llms.txt or llms-full.txt against the spec: structure, section ordering, link format, and (optionally) broken-link detection.\n\nRead-only. One HTTP GET when given `url`; zero network when given `content`. Optional link-check issues HEAD requests against each link if `check_links` is true.\n\nDeterministic; no LLM.\n\nWhen to use: auditing an llms.txt you already have. To generate one from scratch, use `generate_llms_txt`.\n\nEither `url` or `content` must be provided.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL of an existing llms.txt or llms-full.txt to validate (e.g. `https://example.com/llms.txt`). Either this OR `content` is required."
+          },
+          "content": {
+            "type": "string",
+            "description": "Raw llms.txt content as a string. Use this to validate a file offline without fetching. Either this OR `url` is required."
+          },
+          "check_links": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), HEAD each linked URL to detect broken links. Set false to skip link checks for faster, network-light validation of just the structural rules."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "score_citation_worthiness",
+      "description": "Score how citable a page or text block is for AI engines (ChatGPT, Claude, Perplexity, Google AI Overviews). Evaluates BLUF (bottom-line-up-front) opening, FAQ patterns, statistic density, entity clarity, and answer-shape fit for the optional `target_query`.\n\nRead-only when given `url` (one HTTP GET). Zero network when given `text`. No writes.\n\nDeterministic, rule-based; no LLM calls. Returns reproducible scores.\n\nWhen to use: pre-publish content QA, or to triage which existing pages are worth optimizing for AI citation first. Distinct from `score_ai_overview_eligibility` which scores Google-AI-Overview ranking probability for a URL; this scores the inherent citability of a text passage regardless of host.\n\nEither `url` or `text` must be provided.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL to fetch and score. Either this OR `text` is required."
+          },
+          "text": {
+            "type": "string",
+            "description": "Raw text/markdown/HTML to score directly without fetching. Either this OR `url` is required."
+          },
+          "target_query": {
+            "type": "string",
+            "description": "Optional target search query the content is supposed to answer (e.g. `how to fix CORS errors in Next.js`). When provided, scoring weights answer-shape fit and query-term coverage. Omit if you want a query-agnostic citability score."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt when fetching `url`. Ignored when `text` is used."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "rewrite_for_aeo",
+      "description": "Rewrite a content block for Answer Engine Optimization. Adds a BLUF opening, FAQ structure, schema additions, and concise question-shaped headings tuned for ChatGPT / Perplexity / Google AI Overviews.\n\nRead-only when given `url` (one HTTP GET). Zero network when given `text`. The tool does NOT write back to the URL - it only returns the rewritten content as a string. No side effects on the source.\n\nThis tool delegates the actual rewrite to the calling LLM via MCP sampling - it does not call any external API itself. The MCP host's model produces the rewrite. Same input may produce different output across runs (model-dependent).\n\nWhen to use: optimizing content for direct-answer surfaces (definitions, how-tos, FAQs). For Generative Engine Optimization (entity-rich, comparison-ready synthesis), use `rewrite_for_geo` instead.\n\nEither `url` or `text` must be provided. `target_query` is required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL whose content should be fetched and rewritten. Either this OR `text` is required."
+          },
+          "text": {
+            "type": "string",
+            "description": "Raw content (markdown or HTML) to rewrite directly. Either this OR `url` is required."
+          },
+          "target_query": {
+            "type": "string",
+            "description": "The user query the rewrite should answer (e.g. `what is RAG`, `how to deploy Ghost to Docker`). Required - drives heading shape and BLUF wording."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "article",
+              "faq",
+              "howto",
+              "comparison"
+            ],
+            "default": "article",
+            "description": "Output shape. `article` for prose-with-headings. `faq` for Q&A list. `howto` for numbered-step procedural content with HowTo schema hints. `comparison` for X-vs-Y tables. Default `article`."
+          },
+          "max_words": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 5000,
+            "default": 1500,
+            "description": "Soft word budget for the rewrite. Default 1500. Range 100-5000. The rewrite tries to stay under this; very small budgets may force truncation."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt when fetching `url`. Ignored when `text` is used."
+          }
+        },
+        "required": [
+          "target_query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "rewrite_for_geo",
+      "description": "Rewrite a content block for Generative Engine Optimization: entity-rich, comparison-ready, synthesis-friendly. Tuned for surfaces that summarize across sources (Perplexity, Google AI Mode, Claude search).\n\nRead-only on input. Does NOT write back to the source URL - returns the rewritten content as a string.\n\nThis tool delegates the actual rewrite to the calling LLM via MCP sampling - it does not call any external API itself. The MCP host's model produces the rewrite. Output may vary across runs (model-dependent).\n\nWhen to use: optimizing for synthesis-style answers across multiple sources. For direct-answer (BLUF + FAQ) optimization on a single page, use `rewrite_for_aeo` instead.\n\nEither `url` or `text` must be provided. `target_query` is required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL whose content should be fetched and rewritten. Either this OR `text` is required."
+          },
+          "text": {
+            "type": "string",
+            "description": "Raw content to rewrite directly. Either this OR `url` is required."
+          },
+          "target_query": {
+            "type": "string",
+            "description": "The user query the rewrite should answer. Required - drives entity selection and comparison framing."
+          },
+          "add_comparison_table": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, inject an explicit X-vs-Y comparison table into the rewrite (useful for `X vs Y` queries). Default false."
+          },
+          "max_words": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 5000,
+            "default": 1500,
+            "description": "Soft word budget. Default 1500. Range 100-5000."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt when fetching `url`. Ignored when `text` is used."
+          }
+        },
+        "required": [
+          "target_query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "extract_entities",
+      "description": "Extract named entities, linked concepts, and sameAs graph nodes from a page's content and structured data. Combines body-text NER with JSON-LD `@type` / `sameAs` walking.\n\nRead-only when given `url` (one HTTP GET). Zero network when given `text`.\n\nPrimary path: MCP sampling - the host LLM does the NER and returns typed entities with sameAs URIs. Fallback path: deterministic regex-based extractor when sampling is unavailable. The result includes `mode: \"sampling\" | \"regex_fallback\"` so callers can tell which path ran.\n\nWhen to use: building an entity map for schema generation, or auditing whether a page's entities match its target topic. To validate the JSON-LD itself, use `audit_schema`.\n\nEither `url` or `text` must be provided.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL to fetch and analyze. Either this OR `text` is required."
+          },
+          "text": {
+            "type": "string",
+            "description": "Raw text/HTML to analyze directly. Either this OR `url` is required."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt when fetching `url`. Ignored when `text` is used."
+          },
+          "render": {
+            "type": "string",
+            "enum": [
+              "static",
+              "headless"
+            ],
+            "default": "static",
+            "description": "Rendering mode for `url`. `static` (default) reads raw HTML. `headless` runs Playwright Chromium to capture JS-rendered content (adds 3-10s; requires `playwright-core` + `npx playwright install chromium`). Ignored when `text` is used."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "test_citation",
+      "description": "Simulate `would an AI engine cite this page for this query?`. The host LLM role-plays the chosen engine (chatgpt / claude / perplexity / google_ai_overviews / any), reads the page content, and returns a cite/no-cite verdict with the verbatim excerpt it would surface plus ranked improvements.\n\nRead-only when given `url` (one HTTP GET). Zero network when given `text`.\n\nPrimary path uses MCP sampling. If the host doesn't support sampling, falls back to a deterministic heuristic derived from `score_citation_worthiness` (overall_score + per-engine subscore must both clear thresholds). The result includes `mode: \"sampling\" | \"static_heuristic\"` so callers can tell which path ran.\n\nWhen to use: pre-publish gut-check for a specific query, or auditing whether existing content earns citation surface. Distinct from `score_citation_worthiness` (deterministic 0-100 score) and `audit_page` (whole-page rubric); this returns a binary cite/no-cite verdict tied to one query.\n\nEither `url` or `text` must be provided. `target_query` is required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL to fetch and test. Either this OR `text` is required."
+          },
+          "text": {
+            "type": "string",
+            "description": "Raw text/HTML to test directly. Either this OR `url` is required."
+          },
+          "target_query": {
+            "type": "string",
+            "minLength": 3,
+            "description": "The user query the engine is answering. Required. Example: `how to add JSON-LD to a Next.js app`."
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "chatgpt",
+              "claude",
+              "perplexity",
+              "google_ai_overviews",
+              "any"
+            ],
+            "default": "any",
+            "description": "Which engine to simulate. `any` (default) uses a generic AI-search persona. Specific engines tune the cite criteria (e.g. perplexity favors statistic-dense excerpts; google_ai_overviews favors schema + freshness)."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt when fetching `url`. Ignored when `text` is used."
+          }
+        },
+        "required": [
+          "target_query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "diff_pages",
+      "description": "Compare two URLs for AI citation-worthiness and return a structured breakdown of which page is more likely to be cited and why. Typical use: your page (url_a) vs a competitor's page (url_b).\n\nRead-only. Runs audit_page on both URLs in parallel (2 HTTP fetches per URL), then diffs dimension_scores and findings. No new fetch logic beyond what audit_page already does.\n\nDeterministic, rule-based; no LLM calls. Same two URLs return the same comparison on repeated runs.\n\nWhen to use: competitive gap analysis - understand exactly which dimensions (schema, structure, robots, entity density, freshness, technical, authority, sitemap) put a competitor ahead, and get prioritized fix_recommendations_for_a to close the gap. For a single-URL audit, use audit_page. For overall scoring of one page, use score_citation_worthiness.\n\nCapped at 2 URLs per call. Heuristic verdict - does not claim to know what AI assistants actually cite; verdict matches audit_page's existing rubric.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url_a": {
+            "type": "string",
+            "format": "uri",
+            "description": "First URL to compare - typically your own page. Must be a fully-qualified http(s) URL that returns HTTP 200 (redirects are followed)."
+          },
+          "url_b": {
+            "type": "string",
+            "format": "uri",
+            "description": "Second URL to compare - typically a competitor's page. Must be a fully-qualified http(s) URL that returns HTTP 200 (redirects are followed)."
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional target search query both pages are competing for (e.g. 'how to connect Zapier to Notion'). When provided, it is surfaced in fix_recommendations_for_a as context. Does not alter the scoring algorithm - scoring is based on audit_page's existing rubric."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt before fetching each URL. Set false only when auditing your own sites where you have intentionally blocked crawlers."
+          }
+        },
+        "required": [
+          "url_a",
+          "url_b"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "audit_site",
+      "description": "Single-call site sweep: runs audit_page (homepage), check_robots, check_sitemap, and audit_schema in parallel and returns an overall grade plus top-5 fixes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 3
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "audit_sitemap",
+      "description": "Site-wide content audit: discovers the sitemap, samples N URLs by deterministic uniform stride, runs audit_page on each, and returns score distribution + worst pages + most-common findings.\n\nRead-only. One HTTP GET for sitemap discovery, optionally a few more for sitemap-index children, then `sample_size` × audit_page calls (each one HTTP GET + parsing). Polite throttling is enforced per host.\n\nDeterministic — same domain + same sample_size returns the same set of URLs (uniform-stride sampling). Per-page scoring is rule-based; no LLM.\n\nWhen to use: portfolio-level health check across a site (\"how does our content score on average?\"). Distinct from `audit_site` (homepage-only composite) and `check_sitemap` (validates sitemap.xml structure, not page content).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 3,
+            "description": "Hostname or origin to audit. Examples: `example.com`, `https://example.com`. The tool discovers the sitemap, samples N URLs by uniform stride, and runs audit_page on each."
+          },
+          "sample_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "Number of URLs to sample from the sitemap. Default 10. Max 50 (sampling caps to avoid runaway audits — each sample is one full audit_page call, ~1-3s with polite throttling). Sampling is deterministic uniform-stride: if the sitemap has 1000 URLs and sample_size=10, every 100th URL is picked."
+          },
+          "respect_robots": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true (default), respect robots.txt for each sampled URL. Set false only for self-audits where you've intentionally blocked crawlers."
+          },
+          "concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 2,
+            "description": "Parallel audit_page calls. Default 2 (gentle). Max 5. The shared politeFetch host-delay is still enforced, so this is per-batch dispatch concurrency, not bypass."
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "save_audit_report",
+      "description": "Render an audit_page or audit_site result as a Markdown report and write it to a file under MCP_WORKSPACE_ROOT (defaults to cwd).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "audit_result": {
+            "description": "The return value of audit_page or audit_site"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Target file path. May be relative to MCP_WORKSPACE_ROOT (or cwd)."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

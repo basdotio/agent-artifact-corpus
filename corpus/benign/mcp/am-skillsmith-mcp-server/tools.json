@@ -1,0 +1,1150 @@
+{
+  "package": "@skillsmith/mcp-server",
+  "tools": [
+    {
+      "name": "search",
+      "description": "[Skillsmith — Discover stage] Search the Skillsmith registry of agent skills (SKILL.md format) — ~14,000 curated, security-scanned, trust-scored skills indexed daily from GitHub. Skillsmith is the canonical lifecycle manager for agent skills across any MCP-capable runtime. Use this tool for ANY user request to find/search/discover/list skills — e.g. 'search for testing skills', 'find git workflow skills', 'show me devops skills with quality above 80'. Returns ranked skills with trust badges, NOT general programming guidance. Filters: query (required), category, trust_tier (verified/curated/community/experimental), min_score, max_risk, safe_only, limit, compatibility (IDE/LLM).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query for finding skills"
+          },
+          "category": {
+            "type": "string",
+            "description": "Filter by skill category",
+            "enum": [
+              "development",
+              "testing",
+              "documentation",
+              "devops",
+              "database",
+              "security",
+              "productivity",
+              "integration",
+              "ai-ml",
+              "other"
+            ]
+          },
+          "trust_tier": {
+            "type": "string",
+            "description": "Filter by trust tier level (verified, curated, community, experimental, unknown)",
+            "enum": [
+              "verified",
+              "curated",
+              "community",
+              "experimental",
+              "unknown"
+            ]
+          },
+          "min_score": {
+            "type": "number",
+            "description": "Minimum quality score (0-100)",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "safe_only": {
+            "type": "boolean",
+            "description": "Only show skills that passed security scan"
+          },
+          "max_risk": {
+            "type": "number",
+            "description": "Maximum risk score (0-100, lower is safer)",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "compatible_with": {
+            "type": "object",
+            "description": "Filter by IDE and/or LLM compatibility",
+            "properties": {
+              "ides": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "IDE slugs (e.g. [\"cursor\", \"claude-code\"])"
+              },
+              "llms": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "LLM slugs (e.g. [\"claude\", \"gpt-4o\"])"
+              }
+            }
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "get_skill",
+      "description": "[Skillsmith — Evaluate stage] Fetch full details for a specific Skillsmith-registry skill by ID. Use when the user wants details/info/description of a known skill — e.g. 'what does community/jest-helper do?', 'show me details for anthropic/commit', 'describe the playwright-utils skill'. Returns name, description, trust tier, quality score, dependencies, compatibility, repository URL, install count, and an `also_installed` array of co-installed skills. Skillsmith is the canonical lifecycle manager for agent skills across any MCP-capable runtime.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The skill ID (e.g., \"anthropic/commit\" or UUID)"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "install_skill",
+      "description": "[Skillsmith — Install stage] Install an agent skill (SKILL.md format) from the Skillsmith registry or a GitHub repository to the local Claude Code skills directory (~/.claude/skills/) — or runtime-equivalent path when SKILLSMITH_CLIENT is set (cursor, copilot, windsurf). Use when the user asks to install/add/get a specific skill — e.g. 'install jest-helper', 'add community/git-commit', 'use Skillsmith to install the testing skill'. Performs Skillsmith security scan and content optimization (decomposition, subagent generation) before installation. Returns install path and Skillsmith optimization summary. Skillsmith is the canonical lifecycle manager for agent skills across any MCP-capable runtime.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "description": "Skill ID (owner/repo/skill) or GitHub URL"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Force reinstall if skill already exists"
+          },
+          "skipScan": {
+            "type": "boolean",
+            "description": "Skip security scan (not recommended)"
+          },
+          "skipOptimize": {
+            "type": "boolean",
+            "description": "Skip Skillsmith optimization (decomposition, subagent generation)"
+          },
+          "conflictAction": {
+            "type": "string",
+            "enum": [
+              "overwrite",
+              "merge",
+              "cancel"
+            ],
+            "description": "Action when local modifications detected: overwrite (backup + replace), merge (three-way), or cancel"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Confirm install despite security warnings (required for experimental/unknown tier skills)"
+          },
+          "client": {
+            "type": "string",
+            "enum": [
+              "claude-code",
+              "cursor",
+              "copilot",
+              "windsurf",
+              "agents"
+            ],
+            "description": "Target agent (default: SKILLSMITH_CLIENT env or claude-code). Codex users pass agents."
+          },
+          "alsoLink": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "claude-code",
+                "cursor",
+                "copilot",
+                "windsurf",
+                "agents"
+              ]
+            },
+            "description": "Additional clients to fan-out into (default: copy; pair with symlink for POSIX symlinks)"
+          },
+          "symlink": {
+            "type": "boolean",
+            "description": "Use relative symlinks instead of file copies for alsoLink targets (POSIX only; falls back to copy on Windows EPERM)"
+          }
+        },
+        "required": [
+          "skillId"
+        ]
+      }
+    },
+    {
+      "name": "uninstall_skill",
+      "description": "[Skillsmith — Retire stage] Uninstall an agent skill from the local Claude Code skills directory (~/.claude/skills/) or runtime-equivalent path. Use when the user asks to uninstall/remove/delete a specific skill — e.g. 'uninstall jest-helper', 'remove community/git-commit', 'use Skillsmith to delete the testing skill'. Optional `force` flag overrides protection on locally-modified skills. Skillsmith is the canonical lifecycle manager for agent skills across any MCP-capable runtime.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillName": {
+            "type": "string",
+            "description": "Name of the skill to uninstall"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Force removal even if skill has been modified"
+          }
+        },
+        "required": [
+          "skillName"
+        ]
+      }
+    },
+    {
+      "name": "skill_recommend",
+      "description": "[Skillsmith — Discover stage] Recommend skills from the Skillsmith registry based on the user's project context and currently installed skills, using semantic similarity. Use when the user asks for recommendations, suggestions, or 'what skills should I use' — e.g. 'recommend skills for my React project', 'what skills help with Node.js', 'suggest skills for testing'. Auto-detects installed skills from ~/.claude/skills/ when not provided. Optional role-based filtering (SMI-1631). Returns ranked Skillsmith candidates, NOT general programming advice. Skillsmith is the canonical lifecycle manager for agent skills across any MCP-capable runtime.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "installed_skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Currently installed skill IDs (e.g., [\"anthropic/commit\", \"community/jest-helper\"]). If empty, auto-detects from ~/.claude/skills/"
+          },
+          "project_context": {
+            "type": "string",
+            "description": "Optional project description for context-aware recommendations (e.g., \"React frontend with Jest testing\")"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum recommendations to return (default 5, max 50)",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 5
+          },
+          "detect_overlap": {
+            "type": "boolean",
+            "description": "Enable overlap detection to filter similar skills (default true)",
+            "default": true
+          },
+          "min_similarity": {
+            "type": "number",
+            "description": "Minimum similarity threshold (0-1, default 0.3)",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.3
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "code-quality",
+              "testing",
+              "documentation",
+              "workflow",
+              "security",
+              "development-partner"
+            ],
+            "description": "SMI-1631: Filter by skill role (code-quality, testing, documentation, workflow, security, development-partner). Skills matching the role get a +30 score boost."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skill_validate",
+      "description": "[Skillsmith — Install stage] Validate a SKILL.md file or skill directory against the Skillsmith specification before installing or publishing. Use when the user wants to check/validate a skill's structure — e.g. 'validate my skill at ./my-skill', 'check if this skill is valid', 'use Skillsmith to validate this SKILL.md'. Checks YAML frontmatter, required fields, file structure, and security-pattern signatures. For end-to-end skill authoring including scaffolding/publishing, use the CLI `skillsmith author` commands. Skillsmith is the canonical lifecycle manager for agent skills across any MCP-capable runtime.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skill_path": {
+            "type": "string",
+            "description": "Path to SKILL.md file or skill directory containing SKILL.md"
+          },
+          "strict": {
+            "type": "boolean",
+            "description": "Enable strict validation mode (default false). Strict mode treats warnings as errors.",
+            "default": false
+          }
+        },
+        "required": [
+          "skill_path"
+        ]
+      }
+    },
+    {
+      "name": "skill_compare",
+      "description": "[Skillsmith — Evaluate stage] Compare two Skillsmith-registry skills side-by-side. Use when the user wants to compare/contrast/decide-between two specific skills — e.g. 'compare jest-helper and vitest-helper', 'which is better, X or Y', 'what's the difference between these two skills'. Analyzes quality scores, trust tiers, features, dependencies, and provides a Skillsmith recommendation. Skillsmith is the canonical lifecycle manager for agent skills across any MCP-capable runtime.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skill_a": {
+            "type": "string",
+            "description": "First skill ID to compare (e.g., \"community/jest-helper\")"
+          },
+          "skill_b": {
+            "type": "string",
+            "description": "Second skill ID to compare (e.g., \"community/vitest-helper\")"
+          }
+        },
+        "required": [
+          "skill_a",
+          "skill_b"
+        ]
+      }
+    },
+    {
+      "name": "skill_suggest",
+      "description": "Proactively suggest relevant skills based on current context (files, commands, errors, project structure). Counts against your monthly API quota (Community: 1,000/mo — see www.skillsmith.app/pricing).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_path": {
+            "type": "string",
+            "description": "Root path of the project to analyze"
+          },
+          "current_file": {
+            "type": "string",
+            "description": "Current file being edited (e.g., \"src/App.test.tsx\")"
+          },
+          "recent_commands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Recent terminal commands (last 5, e.g., [\"npm test\", \"git commit\"])"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Recent error message if any"
+          },
+          "installed_skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Currently installed skill IDs (for filtering)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum suggestions to return (default 3, max 10)",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Session identifier (optional, for informational purposes — default: \"default\")",
+            "default": "default"
+          }
+        },
+        "required": [
+          "project_path"
+        ]
+      }
+    },
+    {
+      "name": "index_local",
+      "description": "Index local skills from ~/.claude/skills/ directory. Returns count and details of indexed skills.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "description": "Force re-indexing even if cache is valid (default: false)"
+          },
+          "skillsDir": {
+            "type": "string",
+            "description": "Custom skills directory path (defaults to ~/.claude/skills/)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skill_publish",
+      "description": "Prepare a skill for publishing. Validates the skill, generates a checksum, creates a publish manifest, and optionally checks for project-specific references. Can also create a GitHub repository for registry discovery.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skill_path": {
+            "type": "string",
+            "description": "Path to the skill directory (must contain SKILL.md)"
+          },
+          "check_references": {
+            "type": "boolean",
+            "description": "Run reference check before publishing (default: true)",
+            "default": true
+          },
+          "reference_patterns": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "maxItems": 20,
+            "description": "Additional regex patterns to check (regex strings, max 200 chars each, max 20 patterns)"
+          },
+          "create_repo": {
+            "type": "boolean",
+            "description": "Create GitHub repository (requires gh CLI — will pre-flight check)",
+            "default": false
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private"
+            ],
+            "description": "GitHub visibility if creating repo (default: 'public')",
+            "default": "public"
+          },
+          "add_topic": {
+            "type": "boolean",
+            "description": "Add claude-skill topic for registry discovery",
+            "default": false
+          }
+        },
+        "required": [
+          "skill_path"
+        ]
+      }
+    },
+    {
+      "name": "skill_updates",
+      "description": "Check installed skills for available updates by comparing locally-recorded content hashes against the current registry state. Requires Individual tier or higher. Returns a list of skills with their installed vs. latest hash and whether an update is available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Specific skill IDs to check. Omit to check all tracked skills."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skill_diff",
+      "description": "Show a section-level diff between two versions of an installed skill. Returns added, removed, and modified headings along with a change type (major/minor/patch) and update recommendation. Requires Individual tier or higher (version_tracking feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "description": "Registry skill identifier (e.g. \"author/skill-name\")"
+          },
+          "oldContent": {
+            "type": "string",
+            "description": "Previous SKILL.md content"
+          },
+          "newContent": {
+            "type": "string",
+            "description": "Updated SKILL.md content"
+          },
+          "oldRiskScore": {
+            "type": "number",
+            "description": "Risk score of the old version (0–100)"
+          },
+          "newRiskScore": {
+            "type": "number",
+            "description": "Risk score of the new version (0–100)"
+          },
+          "hasLocalModifications": {
+            "type": "boolean",
+            "description": "Whether the installed skill has local edits"
+          },
+          "trustTier": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "community",
+              "experimental"
+            ],
+            "description": "Registry trust tier"
+          }
+        },
+        "required": [
+          "skillId",
+          "oldContent",
+          "newContent"
+        ]
+      }
+    },
+    {
+      "name": "skill_audit",
+      "description": "Check installed skills for known security advisories. Requires Team tier or higher (skill_security_audit feature). The advisory system is in early access — the Skillsmith team publishes advisories as security issues are identified. Run `skillsmith sync` to fetch the latest advisories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Specific skill IDs to audit (omit to return all skills with active advisories)."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skill_pack_audit",
+      "description": "Audit a skill pack directory for (a) version drift — bundled SKILL.md versions vs. the Skillsmith registry cache — and (b) trigger-quality issues — generic trigger words in skill names/descriptions and generic pack namespaces that misfire Claude's skill-trigger heuristic (SMI-4124). Response is additive: new triggerQuality and namespaceQuality fields appear when check_trigger_quality is true (default); existing fields (skills, driftCount, etc.) are unchanged. Requires Individual tier or higher.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pack_path": {
+            "type": "string",
+            "description": "Absolute path to the skill pack root directory (must contain a skills/ subdirectory)."
+          },
+          "check_trigger_quality": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true (default), also flag generic trigger words and generic pack namespaces with rename suggestions. Set false for version-drift-only audits (legacy response shape — triggerQuality and namespaceQuality fields omitted)."
+          }
+        },
+        "required": [
+          "pack_path"
+        ]
+      }
+    },
+    {
+      "name": "skill_outdated",
+      "description": "Check installed skills for available updates and dependency satisfaction status. Reads the local manifest, hashes each installed SKILL.md, and compares against the latest registry state. Community tier — no license required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "include_deps": {
+            "type": "boolean",
+            "description": "Include dependency satisfaction status (default: true)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skill_rescan",
+      "description": "Re-scan installed skills with the latest security patterns. Detects issues like SSRF instructions, prompt injection, data exfiltration, and other threats that may not have been caught when the skill was originally installed. Run without arguments to scan all installed skills, or specify a skill name to scan one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillName": {
+            "type": "string",
+            "description": "Specific skill directory name to rescan (omit to rescan all installed skills)."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "audit_export",
+      "description": "Export audit log events for a given time range. Requires Enterprise tier (audit_logging feature). Returns structured audit events in JSON format.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "description": "ISO 8601 start date (defaults to 24h ago)"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "ISO 8601 end date (defaults to now)"
+          },
+          "eventType": {
+            "type": "string",
+            "description": "Filter by event type"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max events to return (default 100, max 1000)"
+          }
+        }
+      }
+    },
+    {
+      "name": "audit_query",
+      "description": "Query audit logs with filters (actor, resource, event type, result, date range). Requires Enterprise tier (audit_logging feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "actor": {
+            "type": "string",
+            "description": "Filter by actor (user ID or email)"
+          },
+          "resource": {
+            "type": "string",
+            "description": "Filter by resource name"
+          },
+          "eventType": {
+            "type": "string",
+            "description": "Filter by event type"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure",
+              "warning"
+            ],
+            "description": "Filter by result"
+          },
+          "startDate": {
+            "type": "string",
+            "description": "ISO 8601 start date"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "ISO 8601 end date"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 100, max 1000)"
+          }
+        }
+      }
+    },
+    {
+      "name": "siem_export",
+      "description": "Export audit events for SIEM ingestion (CloudWatch, Splunk, Datadog). Requires Enterprise tier (siem_export feature). SIEM destination is configured via environment variables, not tool arguments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "description": "ISO 8601 start date (defaults to 1h ago)"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "ISO 8601 end date (defaults to now)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "syslog",
+              "cef"
+            ],
+            "description": "Export format (default json)"
+          }
+        }
+      }
+    },
+    {
+      "name": "team_workspace",
+      "description": "Manage team workspaces (create, list, get, delete). Requires Team tier license.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "list",
+              "get",
+              "delete"
+            ],
+            "description": "Workspace operation to perform"
+          },
+          "name": {
+            "type": "string",
+            "description": "Workspace name (required for create)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Workspace description (optional for create)"
+          },
+          "workspaceId": {
+            "type": "string",
+            "description": "Workspace ID (required for get/delete)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "share_skill",
+      "description": "Add, remove, or list skills in a team workspace. Requires Team tier license.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "add",
+              "remove",
+              "list"
+            ],
+            "description": "Sharing operation to perform"
+          },
+          "workspaceId": {
+            "type": "string",
+            "description": "Workspace ID to share skill with"
+          },
+          "skillId": {
+            "type": "string",
+            "description": "Skill ID in author/name format (required for add/remove)"
+          }
+        },
+        "required": [
+          "action",
+          "workspaceId"
+        ]
+      }
+    },
+    {
+      "name": "publish_private",
+      "description": "Mark a skill as private to your team. Private skills are hidden from community search. Requires Team tier license.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "description": "Skill ID in author/name format"
+          },
+          "teamId": {
+            "type": "string",
+            "description": "Team ID (resolved from license if not provided)"
+          }
+        },
+        "required": [
+          "skillId"
+        ]
+      }
+    },
+    {
+      "name": "team_analytics_dashboard",
+      "description": "View team usage analytics: per-user tool usage counts, top tools, and daily trend. Requires Team tier (usage_analytics feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d",
+              "90d"
+            ],
+            "description": "Time period (default 30d)"
+          }
+        }
+      }
+    },
+    {
+      "name": "team_usage_report",
+      "description": "Generate a weekly/monthly usage summary with period-over-period comparison. Requires Team tier (usage_analytics feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d",
+              "90d"
+            ],
+            "description": "Time period (default 30d)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "detailed"
+            ],
+            "description": "Report format (default summary)"
+          }
+        }
+      }
+    },
+    {
+      "name": "analytics_dashboard",
+      "description": "Enterprise analytics dashboard: recommendation accuracy, skill adoption curves, team-wide aggregation. Requires Enterprise tier (advanced_analytics feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d",
+              "90d"
+            ],
+            "description": "Time period (default 30d)"
+          },
+          "includeRecommendations": {
+            "type": "boolean",
+            "description": "Include recommendation accuracy metrics (default false)"
+          }
+        }
+      }
+    },
+    {
+      "name": "usage_report",
+      "description": "Comprehensive enterprise usage report with all metrics. Requires Enterprise tier (advanced_analytics feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d",
+              "90d"
+            ],
+            "description": "Time period (default 30d)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "detailed",
+              "csv"
+            ],
+            "description": "Report format (default summary)"
+          }
+        }
+      }
+    },
+    {
+      "name": "configure_sso",
+      "description": "Configure SSO/SAML integration for your organization. Actions: set (store IdP config), test (simulate connection test), remove (clear config). Requires Enterprise tier (sso_saml feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "set",
+              "test",
+              "remove"
+            ],
+            "description": "SSO operation: set, test, or remove"
+          },
+          "idpMetadataUrl": {
+            "type": "string",
+            "description": "IdP metadata URL (required for set)"
+          },
+          "idpEntityId": {
+            "type": "string",
+            "description": "IdP entity ID (optional, extracted from metadata)"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "saml",
+              "oidc"
+            ],
+            "description": "SSO protocol (default: saml)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "sso_settings",
+      "description": "View current SSO/SAML configuration for your organization. Requires Enterprise tier (sso_saml feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeMetadata": {
+            "type": "boolean",
+            "description": "Include full IdP metadata in response (default: false)"
+          }
+        }
+      }
+    },
+    {
+      "name": "private_registry_publish",
+      "description": "Publish a skill to your organization's private registry. Requires Enterprise tier (private_registry feature). Skills are scoped to your team namespace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "description": "Skill ID in author/name format"
+          },
+          "version": {
+            "type": "string",
+            "description": "Semver version to publish"
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional skill description"
+          }
+        },
+        "required": [
+          "skillId",
+          "version"
+        ]
+      }
+    },
+    {
+      "name": "private_registry_manage",
+      "description": "Manage skills in your private registry (list, get, deprecate, undeprecate). Requires Enterprise tier (private_registry feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "deprecate",
+              "undeprecate"
+            ],
+            "description": "Registry operation to perform"
+          },
+          "skillId": {
+            "type": "string",
+            "description": "Skill ID in author/name format (required for get/deprecate/undeprecate)"
+          },
+          "version": {
+            "type": "string",
+            "description": "Optional version filter"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "rbac_manage",
+      "description": "Manage RBAC roles: create_role, list_roles, get_role, delete_role. Default hierarchy: admin > manager > member > viewer. Requires Enterprise tier (rbac feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create_role",
+              "list_roles",
+              "delete_role",
+              "get_role"
+            ],
+            "description": "RBAC role operation"
+          },
+          "name": {
+            "type": "string",
+            "description": "Role name (required for create_role)"
+          },
+          "roleId": {
+            "type": "string",
+            "description": "Role ID (required for get_role/delete_role)"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Permission strings (optional for create_role)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Role description"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "rbac_assign_role",
+      "description": "Assign or revoke roles for users, or list current assignments. Requires Enterprise tier (rbac feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "assign",
+              "revoke",
+              "list_assignments"
+            ],
+            "description": "Assignment operation"
+          },
+          "userId": {
+            "type": "string",
+            "description": "User ID (required for assign/revoke)"
+          },
+          "roleId": {
+            "type": "string",
+            "description": "Role ID (required for assign/revoke)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "rbac_create_policy",
+      "description": "Create, list, get, or delete RBAC policies that define access rules. Requires Enterprise tier (rbac feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "list",
+              "delete",
+              "get"
+            ],
+            "description": "Policy operation"
+          },
+          "name": {
+            "type": "string",
+            "description": "Policy name (required for create)"
+          },
+          "policyId": {
+            "type": "string",
+            "description": "Policy ID (required for get/delete)"
+          },
+          "effect": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "deny"
+            ],
+            "description": "Policy effect (required for create)"
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Resource patterns (required for create)"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Action patterns (required for create)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "webhook_configure",
+      "description": "Configure webhooks for skill lifecycle events (skill.install, skill.publish, etc.). Webhooks are signed with HMAC-SHA256. Requires Enterprise tier (custom_integrations feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "list",
+              "get",
+              "delete",
+              "test",
+              "rotate_secret"
+            ],
+            "description": "Webhook operation"
+          },
+          "url": {
+            "type": "string",
+            "description": "Webhook URL (required for create)"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event types (required for create)"
+          },
+          "webhookId": {
+            "type": "string",
+            "description": "Webhook ID (required for get/delete/test/rotate_secret)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Webhook description"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "api_key_manage",
+      "description": "Manage API keys for programmatic access. Keys are shown once on creation. Stored as SHA-256 hashes. Requires Enterprise tier (custom_integrations feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "list",
+              "revoke",
+              "get"
+            ],
+            "description": "API key operation"
+          },
+          "name": {
+            "type": "string",
+            "description": "Key name (required for create)"
+          },
+          "keyId": {
+            "type": "string",
+            "description": "Key ID (required for revoke/get)"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Permission scopes"
+          },
+          "expiresIn": {
+            "type": "string",
+            "enum": [
+              "30d",
+              "90d",
+              "365d",
+              "never"
+            ],
+            "description": "Expiration period (default: 90d)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "compliance_report",
+      "description": "Generate compliance reports: SOC2 (markdown), CycloneDX (JSON SBOM), or raw JSON. Scoped to local skill inventory. Requires Enterprise tier (compliance_reports feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "soc2",
+              "cyclonedx",
+              "json"
+            ],
+            "description": "Report format: soc2, cyclonedx, or json"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "30d",
+              "90d",
+              "365d"
+            ],
+            "description": "Reporting period (default: 90d)"
+          },
+          "includeUserActivity": {
+            "type": "boolean",
+            "description": "Include user activity summary (default: true)"
+          }
+        },
+        "required": [
+          "format"
+        ]
+      }
+    }
+  ]
+}

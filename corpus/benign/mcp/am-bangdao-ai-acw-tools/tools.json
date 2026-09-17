@@ -1,0 +1,290 @@
+{
+  "package": "@bangdao-ai/acw-tools",
+  "tools": [
+    {
+      "name": "check_acw_connection",
+      "description": "检测本 MCP 进程与 ACW 云端的连通性及 ACW_TOKEN 是否有效。当用户问「acw-tools 连上没有」「MCP 是否正常」「Token 对不对」「安装后不能用」时应优先调用；不要用读本地 mcp.json 代替本工具判断云端状态。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "acw_mcp_status",
+      "description": "一键返回本 MCP 进程的运行时结构化状态，用于用户自检与问题上报。适用场景：用户反馈「MCP 不工作 / 对话没抓到 / 数据没上报 / 上报失败 / 后台看不到我的数据 / 帮我看下 MCP 状态」时，优先调用本工具，不要靠翻日志文件拼接。返回 JSON 包含：版本、PID、启动时长、主/从实例、token 是否有效、chatGrab 依赖四元组、dbEngine、上报统计（成功数/失败数/上次成功时间/上次失败时间/最近错误）、失败队列长度、Cursor CLI、Claude Code 与 Codex 子链路统计。不暴露 TOKEN 本身。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "download_rule",
+      "description": "仅用于下载 ACW 规则（Rule）到项目 .cursor/rules/ 目录。注意：本工具不能下载技能（Skill），如果用户要下载的是\"技能/Skill\"，必须使用 download_skill 工具。\n\n适用场景（仅当用户明确提到\"规则\"二字时）：\n- \"下载 XX 规则\"、\"获取 XX 规则\"、\"拉取 XX 规则\"、\"导入 XX 规则\"\n- \"下载最新 XX 规则\"、\"更新规则\"\n\n不适用（必须改用其他工具）：\n- 用户说\"下载技能\"、\"安装技能\"、\"获取 XX 技能\" → 使用 download_skill\n- 用户说\"搜索技能\"、\"有哪些技能\" → 使用 search_skill\n\n输入方式：\n1. 完整规则名称（推荐）：如\"瀚云公司级规则1.1\" - 精确匹配\n2. 规则编号：如\"GS_JG_Z1_1\" - 精确匹配\n3. 包含\"最新\"/\"latest\"关键词时自动获取最新版本\n4. 部分名称：模糊匹配，多结果时提示用户明确",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ruleIdentifier": {
+            "type": "string",
+            "description": "规则标识符，支持以下格式：\n1. 完整规则名称（最优）：如\"瀚云公司级规则1.1\"、\"AI测试工坊\" - 精确匹配，秒级响应\n2. 规则编号（精确）：如\"GS_JG_Z1_1\" - 全大写+下划线格式\n3. 最新版本查询（推荐）：如\"最新公司级规则\"、\"公司级规则最新版本\"、\"latest company rule\" - 自动查找最新版本\n4. 自然语言（智能）：如\"请帮我下载邦道的公司级规则1.1版本\" - AI会自动提取关键词\n5. 部分名称（模糊）：如\"公司级规则\"、\"测试工坊\" - 可能返回多个结果\n\n特别说明：\n- 包含\"最新\"、\"latest\"、\"newest\"等关键词时，系统会自动查找该规则的最新版本\n- 例如：\"帮我下载最新的公司级规则\"会自动匹配到\"公司级规则1.2\"（假设1.2是最新版）\n\nTips：当返回多个匹配时，请使用返回列表中的完整规则名称重新调用此工具。"
+          },
+          "targetDirectory": {
+            "type": "string",
+            "description": "目标目录的绝对路径。**强烈建议明确指定此参数**，使用 Cursor 当前打开的工作区路径（可从 workspace_path 获取）。如果不提供，将尝试使用环境变量 PWD 或进程的当前工作目录，但可能导致下载到错误的位置（如用户家目录）。"
+          }
+        },
+        "required": [
+          "ruleIdentifier"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "download_skill",
+      "description": "仅用于下载并安装 Cursor Agent 技能（Skill）到 .cursor/skills/ 目录。注意：本工具不能下载规则（Rule），如果用户要下载的是\"规则/Rule\"，必须使用 download_rule 工具。\n\n这是获取技能的首选方式。当用户提到\"技能\"或\"skill\"并表达下载/安装/获取意图时，必须优先调用此工具。\n\n适用场景：\n- \"下载 xxx 技能\"、\"获取 xxx 技能\"、\"安装 xxx 技能\"\n- \"帮我下载/安装 xxx\"（当 xxx 是技能名称时）\n- \"把 xxx 技能拉下来\"、\"同步技能到本地\"\n\n不适用（必须改用其他工具）：\n- 用户说\"下载规则\"、\"获取 XX 规则\" → 使用 download_rule\n- 用户说\"搜索技能\"、\"有哪些技能\" → 使用 search_skill\n- 用户说\"检查技能更新\" → 使用 check_skill\n\n重要规则：\n- 从 ACW Skills 广场下载到本地，不是从网络搜索\n- 全量覆盖：下载后本地目录与平台完全一致，多余的本地文件会被自动清理\n- 默认安装到项目级别 .cursor/skills/ 目录",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillIdentifier": {
+            "type": "string",
+            "description": "技能标识符，支持以下格式：\n1. 技能名称（推荐）：如\"code-review\"、\"pdf-processing\" - 精确匹配（名称是全局唯一的）\n2. 部分名称：如\"code\" - 模糊匹配，可能返回多个结果"
+          },
+          "targetDirectory": {
+            "type": "string",
+            "description": "目标工作区目录的绝对路径。**强烈建议明确指定此参数**，使用 Cursor 当前打开的工作区路径（可从 workspace_path 获取）。技能将下载到 {targetDirectory}/.cursor/skills/ 目录。如果不提供，将尝试使用环境变量获取工作区，但可能导致下载到错误的位置。"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "user"
+            ],
+            "description": "安装范围（可选）：\n- \"project\"（默认）：安装到项目级别 {工作区}/.cursor/skills/\n- \"user\"：安装到用户级别 ~/.cursor/skills/\n如果不指定，默认为 project。当指定 scope 为 user 时，targetDirectory 参数会被忽略。"
+          }
+        },
+        "required": [
+          "skillIdentifier"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "upload_skill",
+      "description": "上传/发布本地技能到 ACW Skills 广场（技能共享平台）。\n\n触发场景（当用户说以下任意一种时，必须调用此工具）：\n- \"上传技能\"、\"上传 xxx 技能\"、\"上传技能到 acw\"\n- \"发布技能\"、\"发布 skill\"、\"发布到广场\"\n- \"同步技能到广场\"、\"把技能传上去\"、\"推送技能\"\n- \"帮我上传下技能\"、\"帮我发布一下 xxx\"\n- 任何包含\"上传/发布/推送\" + \"技能/skill\"的请求\n\n重要规则：\n- 全量覆盖：上传后平台仓库将与本地完全一致，平台上多余的文件会被自动清理\n- 自动检索本地技能目录：优先项目目录，找不到再搜索用户目录\n- 技能不存在时自动创建，已存在时需 forceOverwrite=true 确认覆盖\n- 技能目录必须包含 SKILL.md 文件\n- 指定 smartGroupIds 或 smartGroupNames 时，技能会设置为智能小组可见\n- 名称规范：小写字母、数字、连字符，1-64 字符",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillName": {
+            "type": "string",
+            "description": "技能名称（必填）。必须符合 agentskills 规范：\n- 1-64 个字符\n- 只能包含小写字母、数字和连字符\n- 不能以连字符开头或结尾\n- 不能有连续连字符\n例如: \"code-review\"、\"api-test-helper\"、\"my-skill\""
+          },
+          "skillDirectory": {
+            "type": "string",
+            "description": "技能目录的绝对路径（可选）。如果不提供，将自动检索：优先搜索项目目录，找不到再搜索用户目录。"
+          },
+          "workspacePath": {
+            "type": "string",
+            "description": "工作区路径（可选）。用于在项目目录中检索技能。建议使用 Cursor 当前打开的工作区路径。"
+          },
+          "description": {
+            "type": "string",
+            "description": "技能描述（可选）。如果不提供，将从 SKILL.md 中读取。"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "技能标签（可选）。"
+          },
+          "smartGroupIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "智能小组 UUID 列表（可选）。传入后技能会设置为智能小组可见。"
+          },
+          "smartGroupNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "智能小组名称列表（可选）。会按当前 ACW_TOKEN 可访问的小组解析为 UUID，名称匹配多个时会要求改用 UUID。"
+          },
+          "forceOverwrite": {
+            "type": "boolean",
+            "description": "是否强制覆盖已存在的技能（可选，默认 false）。如果技能已存在且此参数为 false，将返回确认提示。"
+          }
+        },
+        "required": [
+          "skillName"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_skill",
+      "description": "在 ACW Skills 广场中搜索可用的技能。当用户想了解有哪些技能、查找特定功能的技能时调用。\n\n触发场景：\n- \"有哪些技能\"、\"看看都有什么技能\"、\"技能列表\"\n- \"搜索 xxx 相关的技能\"、\"找一下 xxx 技能\"\n- \"有没有 xxx 方面的技能\"、\"谁做了什么技能\"\n- 用户不确定技能名称想先搜索再决定下载时\n\n特性：支持关键字模糊搜索、按标签筛选、按创建者筛选",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "搜索关键字，支持技能名称和描述的模糊匹配"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "按标签筛选"
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "按创建者筛选"
+          },
+          "page": {
+            "type": "number",
+            "description": "页码（从 1 开始，默认 1）"
+          },
+          "limit": {
+            "type": "number",
+            "description": "每页数量（默认 20，最大 100）"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_skill",
+      "description": "检查本地技能是否需要更新。当用户说\"检查技能更新\"、\"技能需要更新吗\"、\"有没有新版本\"时，应该调用此工具。\n\n原理：下载远程技能包到系统临时目录，解压后逐文件与本地文件做内容对比，返回详细的文件差异（新增、修改、删除）。\n检查完成后临时文件会自动清理。如果有差异，你必须先向用户展示差异详情并询问是否覆盖更新，得到用户确认后再使用 download_skill 工具执行更新。\n\n特性：\n- 支持检查单个技能\n- 支持检查工作空间下所有技能\n- 支持检查用户目录下所有技能\n- 支持检查所有技能（工作空间 + 用户目录）\n- 通过文件内容二进制对比，精确检测差异\n\n使用场景：\n- \"检查 code-review 技能有没有更新\"\n- \"看看工作空间的技能需要更新吗\"\n- \"检查所有技能的更新状态\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "single",
+              "workspace",
+              "user",
+              "all"
+            ],
+            "description": "检查范围：\n- \"single\": 检查单个技能（需要指定 skillName）\n- \"workspace\": 检查当前工作空间下所有技能\n- \"user\": 检查用户目录下所有技能\n- \"all\": 检查所有技能（工作空间 + 用户目录）"
+          },
+          "skillName": {
+            "type": "string",
+            "description": "当 scope 为 single 时，指定要检查的技能名称"
+          },
+          "workspacePath": {
+            "type": "string",
+            "description": "工作空间路径（可选）。用于查找工作空间下的技能。建议使用 Cursor 当前打开的工作区路径。"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "upload_knowledge",
+      "description": "将本地文档上传为个人知识库，上传后可通过 search_knowledge 语义检索。\n\n当用户提到以下意图时应调用此工具：\n- \"帮我上传知识\"、\"把文档传到知识库\"、\"上传知识库\" → 用当前工作区目录，knowledgeName 从项目名推断\n- \"把 xxx 目录上传到知识库\" → sourcePath 指向该目录\n- \"更新知识库\" → mode 用 overwrite\n- \"追加文件到知识库\" → mode 用 incremental\n\n参数推断规则：\n- sourcePath 不传时默认使用当前工作区根目录\n- knowledgeName 不传时自动从 sourcePath 的目录名生成（转小写、空格转连字符）\n- displayName 不传时使用目录名作为显示名\n\n支持的文件格式：.md .txt .pdf .docx .pptx .html .json .yaml .csv .xml .rst .rtf .epub .ipynb\n限制：单次上传总大小不超过 20MB。自动跳过 node_modules、隐藏目录。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "knowledgeName": {
+            "type": "string",
+            "description": "知识库唯一标识（小写字母、数字、连字符）。不传时自动从目录名推断，如目录名 'My Project' → 'my-project'"
+          },
+          "sourcePath": {
+            "type": "string",
+            "description": "文档所在目录路径。不传时默认使用当前工作区根目录"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "知识库的显示名称。不传时使用目录名"
+          },
+          "description": {
+            "type": "string",
+            "description": "知识库用途描述，帮助后续识别和管理"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "overwrite",
+              "incremental"
+            ],
+            "description": "上传模式：overwrite = 全量覆盖（默认），incremental = 追加新文件不影响已有内容"
+          },
+          "storageType": {
+            "type": "string",
+            "enum": [
+              "OSS",
+              "GITLAB"
+            ],
+            "description": "知识库存储类型：OSS = 兼容旧上传链路（默认），GITLAB = 提交到 GitLab 仓库并发布索引"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_knowledge",
+      "description": "从用户的私有知识库中语义检索技术文档、框架用法、内部规范等内容。这些知识不在你的训练数据中，只有通过此工具才能获取。\n\n触发条件（满足任一必须调用，不可跳过）：\n\n1. 用户提示词中包含 \"acw\"、\"use acw\"、\"ACW\" → 必须在执行任何操作前先调用此工具检索\n2. 用户要你实现功能、写代码、集成组件、使用某个技术 → 必须先检索再编码\n3. 用户提到任何专有名词、术语、缩写，且你无法 100% 确定其在当前项目中的具体用法 → 必须先检索\n4. 用户问如何使用、怎么做、最佳实践 → 必须先检索\n\n仅以下场景不需要检索：纯闲聊、问候、与编码完全无关的对话。\n\n检索范围：不指定 knowledgeName 时自动检索所有可访问的知识库，指定时仅检索该知识库。\n\n重要：检索是零成本的，宁可检索后发现没有相关结果，也不要跳过检索直接回答。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "knowledgeName": {
+            "type": "string",
+            "description": "指定检索某个知识库的标识名。不传则检索所有可访问的知识库"
+          },
+          "query": {
+            "type": "string",
+            "description": "用自然语言描述你想查找的内容，如 '用户认证的流程是什么'"
+          },
+          "topK": {
+            "type": "number",
+            "description": "返回结果数量（默认 5，最大 20）。结果较少时可适当增大"
+          },
+          "similarityThreshold": {
+            "type": "number",
+            "description": "相关度阈值 0-1（默认 0.3）。调高可过滤掉不太相关的结果"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "download_knowledge",
+      "description": "将知识库的原始文档下载到本地工作区目录。以知识库名称命名文件夹，保留原始目录结构。\n\n当用户提到以下意图时应调用此工具：\n- \"下载知识库\"、\"把知识库拉到本地\"、\"导出知识库\"\n- \"下载 xxx 知识库到本地\"\n- \"把知识库下载到工作区\"\n\n下载目录规则：\n- 在 targetDirectory 下创建以知识库名称命名的文件夹\n- 保留知识库中的原始目录结构\n- 已存在同名文件会被覆盖\n\n如果不确定有哪些知识库可以下载，先不传 knowledgeName，工具会返回可下载的知识库列表。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "knowledgeName": {
+            "type": "string",
+            "description": "知识库标识名。不传则返回可下载的知识库列表，由用户选择后再次调用"
+          },
+          "targetDirectory": {
+            "type": "string",
+            "description": "目标目录的绝对路径。**强烈建议明确指定此参数**，使用 Cursor 当前打开的工作区路径。知识库将下载到 {targetDirectory}/{knowledgeName}/ 目录。如果不提供，将尝试使用环境变量获取工作区路径"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

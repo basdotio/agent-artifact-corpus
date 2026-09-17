@@ -1,0 +1,645 @@
+{
+  "package": "@iris-eval/mcp-server",
+  "tools": [
+    {
+      "name": "log_trace",
+      "description": "Persist a single agent execution trace (input, output, spans, tool calls, cost, latency, token usage).\n\nSibling tools — evaluate_output runs heuristic scoring on the trace; evaluate_with_llm_judge runs semantic LLM-based scoring; verify_citations checks citation grounding; get_traces queries stored traces; delete_trace removes a single trace; list_rules / deploy_rule / delete_rule manage custom evaluation rules. log_trace is the WRITE path that records executions; everything else reads, scores, or manages around it.\n\nBehavior. Writes one row to Iris storage (SQLite by default; Postgres in Cloud tier). When IRIS_OTEL_ENDPOINT is set, ALSO fires a best-effort async export to the configured OTLP/HTTP collector (Jaeger, Tempo, Datadog OTLP, OTEL Collector). The OTel export is fire-and-forget — its success does not affect the tool response; failures are logged but the trace is still stored locally. No authentication in stdio mode; HTTP mode requires Bearer token. Rate-limited to 20 req/min on HTTP MCP, unlimited on stdio. Not idempotent: each call mints a fresh trace_id, so resubmitting the same payload creates a duplicate trace.\n\nOutput shape. Returns a JSON string: `{ \"trace_id\": \"<32-hex>\", \"status\": \"stored\" }`. The trace_id is the key you pass to evaluate_output or get_traces afterwards.\n\nUse when you want to record an agent execution for later evaluation, analysis, or audit. Call it AFTER the agent has produced output; call evaluate_output afterwards to score it; call get_traces to query historical traces. Store rich context: spans (span tree), tool_calls (which tools were invoked with latency/errors), token_usage, cost_usd, metadata (arbitrary key-value). All optional except agent_name.\n\nDon't use when you only need a transient log (use console logging). Don't use to update an existing trace — there is no update path in v0.4 (traces are immutable once stored).\n\nParameters. agent_name is required; everything else is optional. token_usage and cost_usd are summary fields — if you ALSO pass spans with per-tool-call costs, the summary fields are treated as authoritative (no auto-aggregation). spans without an explicit start_time fall back to the trace timestamp; spans with an end_time get a duration_ms derived. metadata is opaque key-value (queryable in the dashboard, not via get_traces filters). tool_calls record per-tool latency + errors; missing latency_ms means \"not reported,\" not \"zero.\" Defaults: span.kind=\"INTERNAL\", span.status_code=\"UNSET\", timestamp=now() if omitted.\n\nError modes. Throws on missing agent_name. Throws on malformed span or tool_call objects (Zod rejects). Returns 500 on storage failure (disk full, DB locked). Never blocks on the agent — returns within ~50ms for typical payloads.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_name": {
+            "type": "string",
+            "description": "Agent name — used for filtering in get_traces (e.g., \"customer-support-bot\")"
+          },
+          "framework": {
+            "type": "string",
+            "description": "Agent framework identifier (e.g., langchain, autogen, custom)"
+          },
+          "input": {
+            "type": "string",
+            "description": "Agent input text — the user prompt or upstream input that produced this output"
+          },
+          "output": {
+            "type": "string",
+            "description": "Agent output text — what the agent produced (pass to evaluate_output for scoring)"
+          },
+          "tool_calls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool_name": {
+                  "type": "string"
+                },
+                "input": {},
+                "output": {},
+                "latency_ms": {
+                  "type": "number"
+                },
+                "error": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_name"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Tool calls made during execution (per-call latency, errors, input/output)"
+          },
+          "latency_ms": {
+            "type": "number",
+            "description": "Total execution time in milliseconds (end-to-end agent latency)"
+          },
+          "token_usage": {
+            "type": "object",
+            "properties": {
+              "prompt_tokens": {
+                "type": "number"
+              },
+              "completion_tokens": {
+                "type": "number"
+              },
+              "total_tokens": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Token usage breakdown (prompt/completion/total — used for cost analysis)"
+          },
+          "cost_usd": {
+            "type": "number",
+            "description": "Total cost in USD — overrides per-span aggregation when provided (treated as authoritative)"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Opaque key-value tags (e.g. {requestId, userId, env}) — queryable in dashboard, not via get_traces filters"
+          },
+          "spans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "span_id": {
+                  "type": "string"
+                },
+                "parent_span_id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "INTERNAL",
+                    "SERVER",
+                    "CLIENT",
+                    "PRODUCER",
+                    "CONSUMER",
+                    "LLM",
+                    "TOOL"
+                  ],
+                  "default": "INTERNAL"
+                },
+                "status_code": {
+                  "type": "string",
+                  "enum": [
+                    "UNSET",
+                    "OK",
+                    "ERROR"
+                  ],
+                  "default": "UNSET"
+                },
+                "status_message": {
+                  "type": "string"
+                },
+                "start_time": {
+                  "type": "string"
+                },
+                "end_time": {
+                  "type": "string"
+                },
+                "attributes": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "events": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "timestamp": {
+                        "type": "string"
+                      },
+                      "attributes": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "timestamp"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "start_time"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Detailed execution spans (hierarchical span tree with timings, attributes, events)"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "Trace timestamp (ISO 8601); defaults to now() when omitted"
+          }
+        },
+        "required": [
+          "agent_name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "evaluate_output",
+      "description": "Score agent output against configurable eval rules and return a 0..1 score + per-rule breakdown.\n\nSibling tools — evaluate_with_llm_judge runs semantic LLM-based scoring (slower, costs money; this tool is heuristic, free, deterministic), verify_citations checks citation grounding specifically, log_trace records executions, get_traces queries them, list_rules / deploy_rule / delete_rule manage the custom-rule lifecycle. evaluate_output is the FAST PATH for length / keyword / PII / injection / cost-threshold checks where rules are sufficient.\n\nBehavior. Deterministic, in-process scoring — same inputs always produce the same result. Writes one eval_result row to Iris storage (linked to trace_id if provided; unlinked otherwise). No external network calls in heuristic mode (v0.4 adds an llm_as_judge eval_type that DOES call LLM APIs; see the separate evaluate_with_llm_judge tool for that). Rate-limited to 20 req/min on HTTP MCP, unlimited on stdio. Runs in ~5-50ms for rule-based evaluation.\n\nOutput shape. Returns JSON: `{ \"id\": \"<uuid>\", \"score\": 0..1, \"passed\": boolean, \"rule_results\": [{ \"ruleName\", \"passed\", \"score\", \"message\", \"skipped?\" }], \"suggestions\": string[], \"rules_evaluated\": number, \"rules_skipped\": number, \"insufficient_data\": boolean }`. `insufficient_data=true` means no applicable rules fired (e.g., safety eval with only cost data).\n\nUse when you want a quality score on a specific output — typically after log_trace records the execution. Pass `eval_type` to route to the right rule bundle: `completeness` (length, sentence count, relevance to input), `relevance` (keyword overlap, topic consistency), `safety` (PII leak, prompt injection, hallucination markers, stub-output detection), `cost` (budget threshold), or `custom` (bring your own rules via `custom_rules`).\n\nDon't use when the output is empty or has no applicable rules — the eval_type decides which rules apply, and invalid combinations return score=0 + insufficient_data=true (not an error, but not actionable). Don't use to VALIDATE JSON schemas directly (use your language's JSON Schema validator — Iris's `json_schema` custom rule type is for output-shape assertions, not arbitrary validation).\n\nParameters. expected is REQUIRED when eval_type=\"relevance\" (used as the comparison target for keyword overlap + topic consistency); ignored for other eval_types. cost_usd + token_usage are ONLY consulted when eval_type=\"cost\" (ignored otherwise). custom_rules ALWAYS fires regardless of eval_type — pass eval_type=\"custom\" if you want ONLY your rules to run (otherwise both your rules AND the eval_type bundle run together). trace_id is optional but recommended (linking the eval to its trace surfaces it in the dashboard's drill-through). input adds context to keyword-overlap relevance checks; ignored otherwise. Defaults: eval_type=\"completeness\".\n\nError modes. Throws on malformed custom_rules (Zod rejects). Returns 400 on regex patterns that fail safe-regex2 ReDoS check or exceed 1000-char limit. Returns 429 when HTTP rate limit exceeded. Storage failures propagate as 500. The eval itself never throws — failing rules report `passed: false` with a message, they don't bubble exceptions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "string",
+            "description": "The output text to evaluate (the agent's response that gets scored against rules)"
+          },
+          "eval_type": {
+            "type": "string",
+            "enum": [
+              "completeness",
+              "relevance",
+              "safety",
+              "cost",
+              "custom"
+            ],
+            "default": "completeness",
+            "description": "Rule bundle to apply: completeness | relevance | safety | cost | custom — picks which built-in rules fire"
+          },
+          "expected": {
+            "type": "string",
+            "description": "Expected output for comparison — REQUIRED when eval_type=\"relevance\" (used as keyword-overlap target)"
+          },
+          "input": {
+            "type": "string",
+            "description": "Original input for context — improves relevance scoring (keyword overlap vs input)"
+          },
+          "trace_id": {
+            "type": "string",
+            "description": "Link evaluation to a trace — surfaces this eval in the dashboard's trace drill-through"
+          },
+          "custom_rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "regex_match",
+                    "regex_no_match",
+                    "min_length",
+                    "max_length",
+                    "contains_keywords",
+                    "excludes_keywords",
+                    "json_schema",
+                    "cost_threshold"
+                  ]
+                },
+                "config": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "weight": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "type",
+                "config"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Custom evaluation rules — fires REGARDLESS of eval_type; pass eval_type=\"custom\" if you want ONLY these"
+          },
+          "cost_usd": {
+            "type": "number",
+            "description": "Cost in USD — only consulted when eval_type=\"cost\" (compared against cost_threshold rules)"
+          },
+          "token_usage": {
+            "type": "object",
+            "properties": {
+              "prompt_tokens": {
+                "type": "number"
+              },
+              "completion_tokens": {
+                "type": "number"
+              },
+              "total_tokens": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Token usage breakdown — only consulted when eval_type=\"cost\" (used for token-budget rules)"
+          }
+        },
+        "required": [
+          "output"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_traces",
+      "description": "Query stored agent-execution traces with filters, pagination, and optional dashboard summary.\n\nSibling tools — log_trace creates traces, delete_trace removes a single trace, evaluate_output / evaluate_with_llm_judge / verify_citations score them, list_rules / deploy_rule / delete_rule manage the custom-rule lifecycle. get_traces is the READ path for historical agent executions — never mutates anything.\n\nBehavior. Read-only: never mutates storage, never calls external services. Idempotent: repeated calls with the same args return consistent results (new traces logged after the call obviously show up on subsequent calls). Tenant-scoped: queries only the caller's tenant rows (LOCAL_TENANT in OSS). Paginates results (default limit 50, max 1000). Rate-limited to 20 req/min on HTTP MCP, unlimited on stdio.\n\nOutput shape. Returns JSON: `{ \"traces\": [{...traceRow}], \"total\": number, \"limit\": number, \"offset\": number, \"summary\"?: { total_traces, avg_latency_ms, total_cost_usd, error_rate, eval_pass_rate, traces_per_hour, top_agents } }`. Each trace row includes trace_id, agent_name, framework, input, output, tool_calls, latency_ms, token_usage, cost_usd, metadata, timestamp. `summary` only included when `include_summary: true`.\n\nUse when you need historical data: investigating a past failure, computing quality trends, comparing agents, or feeding an analytics job. Set `agent_name` / `framework` / `since` / `until` to narrow the query. Set `min_score` / `max_score` to surface outliers. Set `sort_by: \"cost_usd\"` + `sort_order: \"desc\"` to find the most expensive traces. Set `include_summary: true` when you want dashboard-style aggregates in one round-trip.\n\nDon't use to score a trace (use evaluate_output). Don't use to create a trace (use log_trace). Don't use as a live event stream — it's a query, not a subscription; poll with exponential backoff or use the dashboard's SSE endpoint for real-time.\n\nParameters. limit defaults to 50, max 1000 (anything higher returns 400). offset is zero-based pagination. min_score / max_score filter on the LATEST eval per trace, not all evals (so a trace with one failing + one passing eval may or may not match depending on which landed last). Combining since + sort_by=\"latency_ms\" + sort_order=\"desc\" is the canonical \"find slow recent traces\" query. include_summary returns dashboard-style aggregates in the SAME response (saves a round-trip; use true for dashboard ingest, false for analytics queries that don't need them). agent_name and framework are exact-match (no wildcards in v0.4). Defaults: limit=50, offset=0, sort_by=\"timestamp\", sort_order=\"desc\", include_summary=false.\n\nError modes. Returns 400 on invalid sort_by / sort_order (Zod enum). Returns 400 if limit > 1000. Returns 429 when HTTP rate limit exceeded. Storage failures propagate as 500. Empty result with `total: 0` on no matches (not an error).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_name": {
+            "type": "string",
+            "description": "Filter by agent name — exact match (no wildcards in v0.4)"
+          },
+          "framework": {
+            "type": "string",
+            "description": "Filter by agent framework — exact match (e.g., langchain, autogen)"
+          },
+          "since": {
+            "type": "string",
+            "description": "ISO timestamp lower bound — return traces with timestamp >= this"
+          },
+          "until": {
+            "type": "string",
+            "description": "ISO timestamp upper bound — return traces with timestamp < this"
+          },
+          "min_score": {
+            "type": "number",
+            "description": "Minimum eval score filter (0..1) — applied to LATEST eval per trace, not all evals"
+          },
+          "max_score": {
+            "type": "number",
+            "description": "Maximum eval score filter (0..1) — applied to LATEST eval per trace"
+          },
+          "limit": {
+            "type": "number",
+            "default": 50,
+            "description": "Results per page (default 50, max 1000 — values >1000 return 400)"
+          },
+          "offset": {
+            "type": "number",
+            "default": 0,
+            "description": "Zero-based pagination offset — skip first N results"
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": [
+              "timestamp",
+              "latency_ms",
+              "cost_usd"
+            ],
+            "default": "timestamp",
+            "description": "Sort by timestamp | latency_ms | cost_usd (default timestamp)"
+          },
+          "sort_order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "default": "desc",
+            "description": "Sort order: asc | desc (default desc — most recent / highest first)"
+          },
+          "include_summary": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include dashboard summary stats in same response — saves a round-trip when ingesting for dashboards"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_rules",
+      "description": "Enumerate deployed custom evaluation rules from the local rule store.\n\nSibling tools — deploy_rule adds custom rules, delete_rule removes them, evaluate_output runs them against agent output. log_trace / get_traces / delete_trace handle the trace lifecycle separately. list_rules is the READ path for the custom-rule store; nothing else exposes the inventory.\n\nBehavior. Pure read of ~/.iris/custom-rules.json (in-memory cached; no disk read per call after server boot). No mutation, no external network. Tenant-scoped in Cloud tier; OSS returns all rules for the single local tenant. Rate-limited to 20 req/min on HTTP MCP, unlimited on stdio. Returns in <5ms.\n\nOutput shape. Returns JSON: `{ \"rules\": [{ \"id\": \"rule-XXXX\", \"name\", \"description?\", \"evalType\", \"severity\", \"definition\": { type, config, weight? }, \"enabled\": boolean, \"deployedAt\": ISO timestamp, \"sourceMomentId?\": string }], \"total\": number, \"enabled_count\": number }`. Empty array + total=0 when no rules deployed.\n\nUse when you need to know what custom rules are currently live (before calling evaluate_output, before deploying a similar rule to avoid duplicates, or when building a dashboard view). Filter with `eval_type` to scope to a specific category, or `enabled_only: true` to exclude disabled rules. Use get_traces to see trace data; use evaluate_output to run scoring; use list_rules only when you need the RULE INVENTORY.\n\nDon't use to count traces or evals (that's get_traces). Don't use to inspect built-in (non-custom) rules — those ship with the iris binary and are listed in docs/api-reference.md, not in the rule store. Don't use to deploy a rule (use deploy_rule); don't use to remove one (use delete_rule).\n\nParameters. eval_type filter is exact-match against each rule's evalType field (no wildcards). enabled_only excludes rules that are deployed-but-disabled (toggled via the dashboard's rule-list affordance — there's no MCP toggle tool in v0.4). Both filters are AND-combined when both are set. Both are optional; with no filter, all rules return. Defaults: eval_type=undefined (no filter), enabled_only=false (returns all rules including disabled).\n\nError modes. Returns empty list if the rule store file doesn't exist (first run). Returns 429 if HTTP rate limit exceeded. Never throws on valid input.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eval_type": {
+            "type": "string",
+            "enum": [
+              "completeness",
+              "relevance",
+              "safety",
+              "cost",
+              "custom"
+            ],
+            "description": "Filter to rules of a specific eval category"
+          },
+          "enabled_only": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return only enabled rules (excludes disabled ones)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_rule",
+      "description": "Deploy a new custom evaluation rule that will fire on every future evaluate_output call of its eval category.\n\nSibling tools — list_rules enumerates deployed rules, delete_rule removes them, evaluate_output runs them. log_trace / get_traces / delete_trace handle the trace lifecycle separately; evaluate_with_llm_judge / verify_citations run semantic scoring (not heuristic-rule-driven). deploy_rule is the WRITE path that grows the custom-rule library.\n\nBehavior. Writes a row to ~/.iris/custom-rules.json (atomic write via temp file + rename) and appends a `rule.deploy` entry to the audit log (~/.iris/audit.log). The rule activates immediately for the running process and persists across restarts. Each call mints a fresh rule_id; not idempotent (deploying twice creates two rules). Tenant-scoped in Cloud tier; OSS rules are owned by LOCAL_TENANT. Rate-limited to 20 req/min on HTTP MCP.\n\nOutput shape. Returns JSON: `{ \"rule\": { \"id\": \"rule-XXXX\", \"name\", \"description\", \"evalType\", \"severity\", \"definition\", \"enabled\": true, \"createdAt\", \"updatedAt\", \"version\": 1, \"sourceMomentId?\" } }`. The returned rule is the canonical persisted form; save the `id` if you plan to update or delete later.\n\nUse when an agent observes a recurring failure pattern and decides to enforce it as a standing rule. The `sourceMomentId` field preserves provenance — downstream audit can trace the rule back to the moment that inspired it. Combine with evaluate_output + get_traces: 1) evaluate_output surfaces failures; 2) get_traces filters to the failure set; 3) analyze the pattern; 4) deploy_rule bakes it into the default eval path.\n\nDon't use to VALIDATE a rule before committing — deploy writes immediately. Use the dashboard's preview endpoint (POST /api/v1/rules/custom/preview) for dry-run validation against sample output. Don't use to EDIT an existing rule — this call only creates; edits require a dedicated flow (coming in v0.5). To update a rule today: delete_rule then deploy_rule with the new definition.\n\nParameters. name is 1-120 chars (Zod-enforced min/max); appears in eval_result rule_results so make it human-readable. description is optional, max 500 chars (used in dashboard tooltips). evalType determines WHEN the rule fires (must match the eval_type your evaluate_output calls use; e.g., a \"completeness\" rule fires on every evaluate_output where eval_type=\"completeness\" OR eval_type=\"custom\"). severity affects dashboard sort + audit log signal but does NOT affect scoring (scoring uses the rule's weight). definition.type and definition.config must match (e.g., regex_match needs config.pattern; cost_threshold needs config.max_usd; min_length needs config.min). sourceMomentId is optional but recommended (preserves workflow-inversion provenance from Make-This-A-Rule composer). Defaults: severity=\"medium\".\n\nError modes. Throws 400 on invalid definition (Zod rejects — e.g., regex that fails safe-regex2 ReDoS check, or length > 1000 chars). Throws 400 on empty `name`. Throws 400 if the eval category mismatches the definition type. Returns 429 when HTTP rate limit exceeded. File-write failures (disk full, read-only fs) propagate as 500; the audit log is best-effort and does not block deploy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Human-readable rule name (used in eval results)"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "What this rule checks for and why it matters"
+          },
+          "evalType": {
+            "type": "string",
+            "enum": [
+              "completeness",
+              "relevance",
+              "safety",
+              "cost",
+              "custom"
+            ],
+            "description": "Eval category this rule belongs to; determines when it fires"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "default": "medium",
+            "description": "Severity used for dashboard sort + audit alerts"
+          },
+          "definition": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "regex_match",
+                  "regex_no_match",
+                  "min_length",
+                  "max_length",
+                  "contains_keywords",
+                  "excludes_keywords",
+                  "json_schema",
+                  "cost_threshold"
+                ]
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "weight": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "type",
+              "config"
+            ],
+            "additionalProperties": false,
+            "description": "Check definition (regex, length, keyword, cost, or schema)"
+          },
+          "sourceMomentId": {
+            "type": "string",
+            "description": "Optional Decision Moment ID the rule was derived from (preserves workflow-inversion provenance)"
+          }
+        },
+        "required": [
+          "name",
+          "evalType",
+          "definition"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_rule",
+      "description": "Remove a deployed custom evaluation rule. The rule stops firing on future evaluate_output calls; past eval_results that referenced it are preserved.\n\nSibling tools — deploy_rule adds custom rules, list_rules enumerates them, evaluate_output runs them. delete_trace handles trace deletion (separate concern); log_trace / get_traces handle trace I/O. delete_rule is the DESTRUCTIVE remove path for the custom-rule store; it does NOT touch traces, eval_results, or built-in (non-custom) rules.\n\nBehavior. DESTRUCTIVE — rewrites ~/.iris/custom-rules.json without the deleted row and appends a `rule.delete` entry to the audit log (~/.iris/audit.log). Not idempotent: deleting an already-deleted rule returns `deleted: false` rather than re-emitting the audit row. The rule stops firing immediately on the live process. Historical eval_results that reference this rule_id stay in the database — drift analytics + audit trail remain valid. Tenant-scoped in Cloud tier; OSS operates on LOCAL_TENANT. Rate-limited to 20 req/min on HTTP MCP.\n\nOutput shape. Returns JSON: `{ \"deleted\": boolean, \"rule_id\": string }`. `deleted=true` if a row was removed; `deleted=false` if no rule with that id existed.\n\nUse when a custom rule is obsolete (behavior changed, false positives unacceptable, replaced by a better rule). Typical flow: list_rules → identify the stale one → delete_rule(id). Combine with deploy_rule to replace: delete_rule(oldId) + deploy_rule(newDefinition). To temporarily disable a rule WITHOUT deletion, use the dashboard's toggle affordance instead — delete is permanent in intent (rule is gone; re-adding requires a new id).\n\nDon't use to pause a rule (toggle in the dashboard preserves history better). Don't use on built-in (non-custom) rules — the rule_id format checks for `rule-<hex>` custom ids; built-ins aren't in the store. Don't use to delete a trace or eval result (use delete_trace for traces; eval_results deletion is not exposed in v0.4 — they fall under data retention).\n\nParameters. rule_id is the only parameter; must match `rule-<lowercase-hex>` format (Zod regex). Format mismatch fails Zod with 400 BEFORE the store is touched. Cross-tenant rule_ids return `deleted: false` silently — they're invisible to the caller's tenant rather than producing a not-found error (prevents enumeration attacks). The rule_id you pass is exactly what list_rules returned in `id` or what deploy_rule returned in `rule.id`.\n\nError modes. Throws 400 on malformed rule_id (wrong prefix). Returns `{deleted: false}` if rule_id doesn't match any deployed rule (not an error — idempotent-ish). Returns 429 on HTTP rate limit. File-write failures propagate as 500.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "pattern": "^rule-[a-z0-9]+$",
+            "description": "Rule id to delete (format: rule-<hex>); obtained from list_rules or deploy_rule response"
+          }
+        },
+        "required": [
+          "rule_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_trace",
+      "description": "Remove a single trace by id. Cascades to spans; eval_results keep the score history with trace_id NULLed.\n\nSibling tools — log_trace creates traces, get_traces queries them, evaluate_output / evaluate_with_llm_judge / verify_citations score them. delete_rule handles custom-rule deletion (separate concern); list_rules / deploy_rule manage the custom-rule lifecycle. delete_trace is the DESTRUCTIVE single-row remove for traces; it does NOT touch eval_results (preserved for audit + drift analytics), spans cascade automatically.\n\nBehavior. DESTRUCTIVE — SQL DELETE scoped to the caller's tenant_id. Cascades: spans belonging to this trace are deleted (FK ON DELETE CASCADE); eval_results that referenced this trace have their trace_id set to NULL (FK ON DELETE SET NULL) so aggregate dashboards + historical scores remain valid even after the trace is gone. Not idempotent: deleting an already-deleted trace returns `deleted: false`. Does not emit an audit log entry in v0.4 — traces are user-scope data, not policy changes. Rate-limited to 20 req/min on HTTP MCP.\n\nOutput shape. Returns JSON: `{ \"deleted\": boolean, \"trace_id\": string }`. `deleted=true` if a row was removed; `deleted=false` if no trace with that id existed (or it belonged to a different tenant — cross-tenant deletes silently fail).\n\nUse when a trace was captured in error, contains sensitive data that must be removed for compliance (e.g., a customer exercises GDPR right-to-erasure), or when cleaning up test data. Combine with get_traces to find candidates: query with filters → review → delete_trace(id) per target. For bulk time-window deletion, use `deleteTracesOlderThan` via the CLI / retention config — delete_trace is the single-row surgical path.\n\nDon't use to clean up OLD data in bulk (use retention config with --retention-days). Don't use to PAUSE a trace — traces are immutable once stored; there's nothing to pause. Don't use to delete eval_results — eval_results survive their trace's deletion intentionally (for audit + drift analysis); they're pruned only by retention.\n\nParameters. trace_id is the only parameter; must match 32-char lowercase hex (Zod regex). The trace_id you pass is exactly what log_trace returned in its response, or what get_traces returned per row. Format mismatch fails Zod with 400 BEFORE the storage layer is touched. Cross-tenant trace_ids return `deleted: false` silently — they're invisible to the caller's tenant (prevents enumeration attacks; matches delete_rule's tenant-isolation contract).\n\nError modes. Throws 400 on malformed trace_id (wrong format: not 32-char lowercase hex). Returns `{deleted: false}` when the id doesn't exist in the caller's tenant (not an error — the trace may simply have been deleted already). Returns 429 on HTTP rate limit. Storage failures propagate as 500.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trace_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$",
+            "description": "Trace id to delete (32-hex lowercase; obtained from log_trace response or get_traces)"
+          }
+        },
+        "required": [
+          "trace_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "evaluate_with_llm_judge",
+      "description": "Score agent output using an LLM as the judge (Anthropic or OpenAI). Returns a calibrated 0..1 score with rationale, per-dimension breakdown, and exact cost.\n\nSibling tools — evaluate_output runs heuristic rules (free, deterministic, ~ms latency, no API key needed); this tool runs LLM-based semantic scoring (paid, 1-10s latency, requires API key). verify_citations is a SPECIALIZED form of LLM judging that focuses on citation grounding only. log_trace / get_traces handle trace I/O; list_rules / deploy_rule / delete_rule manage heuristic-rule lifecycle. evaluate_with_llm_judge is the GENERAL semantic-scoring path.\n\nBehavior. Calls an external LLM API (Anthropic or OpenAI) — costs money per call, takes 1-10 seconds, respects an IRIS_LLM_JUDGE_MAX_COST_USD_PER_EVAL cap. Non-deterministic at temperature > 0; default temperature=0 gives near-deterministic scores. Writes one eval_result row to Iris storage (linked to trace_id if provided) plus captures provider response id + latency + token counts + cost in the rule_results payload. Rate-limited to 20 req/min on HTTP MCP; your LLM provider also enforces its own rate limits (we transparently retry once on 429).\n\nOutput shape. Returns JSON: `{ \"id\": \"<uuid>\", \"score\": 0..1, \"passed\": boolean, \"rationale\": string, \"dimensions\": {...}, \"model\": string, \"provider\": \"anthropic\"|\"openai\", \"template\": string, \"input_tokens\": number, \"output_tokens\": number, \"cost_usd\": number, \"latency_ms\": number }`. `dimensions` has per-dimension sub-scores (e.g., accuracy template returns `{factual_claims, citations, internal_consistency}`).\n\nUse when heuristic rules (via evaluate_output) are too coarse for the quality signal you need — semantic correctness, factual accuracy vs a reference, RAG faithfulness to sources, nuanced safety/helpfulness. Pick the template that matches: `accuracy` (hallucination detection), `helpfulness` (does it address the ask), `safety` (harm potential beyond regex PII), `correctness` (vs reference answer — pass `expected`), `faithfulness` (RAG grounding — pass `source_material`).\n\nDon't use for simple regex/length/keyword checks (use evaluate_output with heuristic rules — they're free, deterministic, 1000x faster). Don't use without an API key set (IRIS_ANTHROPIC_API_KEY or IRIS_OPENAI_API_KEY). Don't use on very large outputs (>8K tokens) without raising max_cost_usd — the pre-check will refuse the call.\n\nParameters. model is required (no default — pick consciously since cost varies 100x across models). provider is auto-detected from the model name; override only for ambiguous IDs. expected is REQUIRED when template=\"correctness\" (the reference answer to compare against); ignored for other templates. source_material is REQUIRED when template=\"faithfulness\" (the RAG sources to ground against); ignored otherwise. input is optional but improves scoring on helpfulness/safety templates (gives the judge the user prompt that produced the output). max_cost_usd defaults to env var IRIS_LLM_JUDGE_MAX_COST_USD_PER_EVAL or $0.25 — the worst-case cost is computed BEFORE the call (input_tokens × prompt_price + max_output_tokens × completion_price); call refused upfront if it would exceed. max_output_tokens caps the judge response (default 512, max 4096); higher = more rationale detail + more cost. temperature default 0 (deterministic). timeout_ms default 60000. trace_id optional but recommended (links eval to trace in dashboard). Defaults: temperature=0, max_output_tokens=512, max_cost_usd=$0.25, timeout_ms=60000.\n\nError modes. Throws when the required API key env var is missing. Throws when the estimated worst-case cost exceeds max_cost_usd (raise the cap or trim prompts). Throws LLMJudgeError on provider errors — kind=`auth` on 401/403, `rate_limit` on 429 (auto-retried once), `server_error` on 5xx, `timeout` on abort, `malformed_response` when the judge fails to emit valid JSON on both attempts. Throws \"Unknown model\" for unsupported model IDs — update src/eval/llm-judge/pricing.ts first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The agent output text to evaluate"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "accuracy",
+              "helpfulness",
+              "safety",
+              "correctness",
+              "faithfulness"
+            ],
+            "description": "Judge dimension: accuracy (factual correctness), helpfulness (does it address the ask), safety (harm potential), correctness (vs reference answer — requires `expected`), faithfulness (RAG grounding — requires `source_material`)."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model ID. Supported: anthropic = claude-opus-4-7 | claude-sonnet-4-6 | claude-haiku-4-5 | claude-haiku-4-5-20251001; openai = gpt-4o | gpt-4o-mini | o1-mini."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai"
+            ],
+            "description": "Auto-detected from model when omitted"
+          },
+          "input": {
+            "type": "string",
+            "description": "User question / prompt that produced the output (improves accuracy for helpfulness/safety)"
+          },
+          "expected": {
+            "type": "string",
+            "description": "Reference answer (required for correctness template)"
+          },
+          "source_material": {
+            "type": "string",
+            "description": "Provided RAG sources (required for faithfulness template)"
+          },
+          "trace_id": {
+            "type": "string",
+            "description": "Link this evaluation to a trace"
+          },
+          "max_cost_usd": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Cost cap in USD; defaults to IRIS_LLM_JUDGE_MAX_COST_USD_PER_EVAL or 0.25"
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 4096,
+            "description": "Judge output token cap; default 512"
+          },
+          "temperature": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Sampling temperature; default 0 (deterministic)"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Per-request timeout; default 60_000"
+          }
+        },
+        "required": [
+          "output",
+          "template",
+          "model"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_citations",
+      "description": "Extract citations from agent output, fetch the cited sources, and use an LLM judge to check whether each source supports the claim in context. Returns per-citation verdicts + an overall support ratio.\n\nSibling tools — evaluate_with_llm_judge runs general semantic scoring (accuracy, helpfulness, correctness, faithfulness); this tool is specifically for citation grounding (does the cited source actually support the claim). evaluate_output's no_hallucination_markers heuristic detects FABRICATED-looking citations cheaply (free, no fetch); this tool resolves and verifies them (paid, opt-in fetch, SSRF-guarded). log_trace / get_traces handle trace I/O. verify_citations is the GROUNDING-CHECK path — narrowest in scope, deepest in rigor.\n\nBehavior. Three-phase pipeline: (1) regex extraction of [N] numbered refs, (Author, Year) parentheticals, bare URLs, and DOIs (in-process, no network); (2) SSRF-guarded fetch of URL + DOI citations, with scheme allowlist, private/link-local/cloud-metadata IP blocking, optional domain allowlist (IRIS_CITATION_DOMAINS), 10s timeout, 5MB body cap, manual redirect chase (max 3, re-checked), in-process LRU cache; (3) per-citation LLM judge call asking \"does this source support this claim?\" with a 256-token verdict. Opt-in via allow_fetch=true or IRIS_CITATION_ALLOW_FETCH=1 — Iris refuses outbound HTTP by default. Cost-capped across the entire call by max_cost_usd_total (default $1.00) — the pipeline stops when the cap would be exceeded. Rate-limited to 20 req/min on HTTP MCP. Writes one eval_result row tagged with per-citation provenance.\n\nOutput shape. Returns JSON: `{ \"id\": \"<uuid>\", \"overall_score\": 0..1|null, \"passed\": boolean, \"total_citations_found\": number, \"total_resolved\": number, \"total_supported\": number, \"total_cost_usd\": number, \"citations\": [{ \"citation\": { \"raw\", \"kind\", \"identifier\", \"offset_start\", \"offset_end\" }, \"resolve_status\": \"ok\"|\"skipped\"|\"error\", \"resolve_error\"?, \"source\"?: { \"url\", \"status\", \"content_type\", \"bytes_fetched\", \"truncated\" }, \"judge\"?: { \"supported\", \"confidence\", \"rationale\", \"cost_usd\", \"latency_ms\", \"input_tokens\", \"output_tokens\" } }] }`. `overall_score = supported / resolved`; `null` when nothing resolvable was found.\n\nUse when the output makes factual claims backed by [1]-style references, DOIs, or URLs and you want to separate \"cited correctly\" from \"cited and wrong\" from \"cited but unresolvable\". Particularly useful for research/legal/medical agents where fabricated citations are the dominant failure mode.\n\nDon't use when the agent output has no citations at all (overall_score will be null; the tool degrades gracefully but a heuristic rule is cheaper). Don't use without allow_fetch=true or IRIS_CITATION_ALLOW_FETCH=1 — the tool refuses outbound HTTP unless explicitly enabled. Don't use with an open allowlist + untrusted output on the public internet; you are effectively running a user-directed fetcher. For stricter safety set IRIS_CITATION_DOMAINS to a curated list.\n\nParameters. model is required; provider auto-detected from model name (override only for ambiguous IDs). allow_fetch=false by default — outbound HTTP is REFUSED unless explicitly true OR IRIS_CITATION_ALLOW_FETCH=1 env. domain_allowlist suffix-matches hostnames (e.g., \"wikipedia.org\" allows en.wikipedia.org); merged with IRIS_CITATION_DOMAINS env (UNION — either source permits). max_citations defaults 20, hard cap 50 (extras are skipped silently, NOT errored — check total_citations_found in the response if precise). max_cost_usd_total defaults $1.00 — the pipeline stops mid-citation when the next judge call would exceed the cap (returns partial verdicts). per_source_timeout_ms defaults 10000 (10s); per_source_max_bytes defaults 5MB (truncates at boundary, judges still run on truncated content). trace_id optional but recommended. Defaults: max_citations=20, max_cost_usd_total=$1.00, per_source_timeout_ms=10000, per_source_max_bytes=5242880, allow_fetch=false.\n\nError modes. Throws when the API key env var is missing. Throws \"Unknown model\" on unsupported model IDs. Per-citation errors are collected (resolve_error.kind = bad_scheme / ssrf / not_allowed_domain / timeout / too_large / bad_status / redirect_loop / not_text / fetch_disabled / malformed_judge_response / cost_cap_reached / unresolvable_kind) and returned in the response rather than thrown. An empty output or output with zero extractable citations returns overall_score=null + passed=true (nothing to fail).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The agent output containing citations to verify"
+          },
+          "model": {
+            "type": "string",
+            "description": "Judge model for per-citation verification. Supported: anthropic = claude-opus-4-7 | claude-sonnet-4-6 | claude-haiku-4-5-20251001; openai = gpt-4o | gpt-4o-mini | o1-mini."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai"
+            ],
+            "description": "Auto-detected from model when omitted"
+          },
+          "allow_fetch": {
+            "type": "boolean",
+            "description": "Permit outbound HTTP to resolve URLs/DOIs. Defaults to IRIS_CITATION_ALLOW_FETCH=1; false otherwise. SSRF-guarded regardless."
+          },
+          "domain_allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Restrict fetches to hostnames in this list (suffix match allowed). Merged with IRIS_CITATION_DOMAINS env."
+          },
+          "max_cost_usd_total": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Cap TOTAL judge cost across all citations in this call; default $1.00"
+          },
+          "max_citations": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50,
+            "description": "Max citations to verify (extras skipped); default 20"
+          },
+          "per_source_timeout_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Per-URL fetch timeout; default 10_000"
+          },
+          "per_source_max_bytes": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Per-URL body cap; default 5MB"
+          },
+          "trace_id": {
+            "type": "string",
+            "description": "Link verification result to a trace"
+          }
+        },
+        "required": [
+          "output",
+          "model"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

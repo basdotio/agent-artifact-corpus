@@ -1,0 +1,4730 @@
+{
+  "package": "@respira/wordpress-mcp-server",
+  "tools": [
+    {
+      "name": "respira_get_site_context",
+      "description": "Get WordPress site context. By default this returns a compact summary to reduce token use; set detail=\"full\" only when you need the full plugin/theme inventory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "Response detail level: \"basic\" (default) or \"full\".",
+            "enum": [
+              "basic",
+              "full"
+            ]
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_list_sites",
+      "description": "List every site available in the current Respira multi-site configuration and show which one is active.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "respira_get_active_site",
+      "description": "Return the currently active site in the Respira multi-site configuration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "respira_get_theme_docs",
+      "description": "Get theme documentation and available template files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_builder_info",
+      "description": "Detect which page builder is active on the site and get its version, support level (Full Intelligence / Smart Defaults / Basic), available modules/widgets, and capabilities. Call this first before working with builder content to understand what format to use. Pass debug=true to bypass the cache and include per-builder detection_signals (constants, classes, active plugin slugs, plugin headers, theme) — use this when a builder is installed but reports detected=false.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "debug": {
+            "type": "boolean",
+            "description": "When true, bypass the 1-hour detection cache and include detection_signals for each builder that exposes them. Use to diagnose false negatives."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_list_pages",
+      "description": "List all pages with optional filtering.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Filter by status (publish, draft, pending)"
+          },
+          "search": {
+            "type": "string",
+            "description": "Search term"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number for pagination"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Number of items per page"
+          },
+          "include": {
+            "type": "string",
+            "description": "Optional v2 include CSV (basic, content.rendered, builder.payload, snapshot.current, etc.)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_read_page",
+      "description": "Get full content of a specific page including meta data and builder information.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Page ID"
+          },
+          "include": {
+            "type": "string",
+            "description": "Optional v2 include CSV"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_create_page_duplicate",
+      "description": "Create a duplicate of an existing page for safe editing. IMPORTANT: Always use this before making changes to an original page. After creating a duplicate, edit the duplicate using wordpress_update_page. The user must then approve the duplicate in WordPress admin (Respira → Page Approvals) to replace the original page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "original_id": {
+            "type": "number",
+            "description": "ID of the original page to duplicate"
+          },
+          "suffix": {
+            "type": "string",
+            "description": "Optional suffix for the duplicated page title"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "original_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_page",
+      "description": "Update PAGE-LEVEL fields (title, status, slug, full HTML content replacement, custom CSS). For editing SPECIFIC elements WITHIN a page (text widgets, images, buttons, headings), use respira_update_element instead — it is element-aware, builder-aware, snapshot-safe, and works across all 12 page builders. Use respira_update_page only when you need to replace the entire content body, change the page title/slug/status, or set page-level metadata. When direct editing is enabled and you target an original page, Respira returns a confirmation_required preflight by default so you can choose live/original or duplicate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Page ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "New page title"
+          },
+          "content": {
+            "type": "string",
+            "description": "New page content (HTML)"
+          },
+          "status": {
+            "type": "string",
+            "description": "Page status (publish, draft, pending)"
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug (post_name). Example: \"about-us\" produces /about-us/."
+          },
+          "custom_css": {
+            "type": "string",
+            "description": "Custom CSS for the page. Auto-detects builder: Divi → _et_pb_custom_css, Elementor → _elementor_page_settings.custom_css."
+          },
+          "meta": {
+            "type": "object",
+            "description": "Post meta data"
+          },
+          "edit_target": {
+            "type": "string",
+            "description": "Choose ask, live, or duplicate when the target is an original page.",
+            "enum": [
+              "ask",
+              "live",
+              "duplicate"
+            ]
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Backward-compatible alias for explicit live editing when direct editing is enabled."
+          },
+          "skip_security_check": {
+            "type": "boolean",
+            "description": "Advanced: bypass Respira content security checks and sanitization for this update. Use only with trusted content."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_page",
+      "description": "Delete a page. IMPORTANT: By default, this only works on Respira-created duplicates. The force parameter only works if \"Allow Direct Editing\" is enabled in Respira settings (disabled by default for safety).\n\nApproval flow (added v6.14.2): the first call returns `code: respira_approval_required` with `data.approval_request.approval_token`. Pass that token back via the `approval_token` param on the next call to complete the delete. Pre-v6.14.2 the schema did not expose `approval_token` so agents could see the token in the response but had no way to pass it back — leaving every agent-driven cleanup of its own duplicates stuck.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Page ID"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Force delete even if not a duplicate"
+          },
+          "approval_token": {
+            "type": "string",
+            "description": "Single-use approval token from a prior respira_approval_required response. The plugin returns a fresh token on every blocked call (data.approval_request.approval_token); pass that exact string here on the retry to complete the delete."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_posts",
+      "description": "List all blog posts with optional filtering.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Filter by status"
+          },
+          "search": {
+            "type": "string",
+            "description": "Search term"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Items per page"
+          },
+          "include": {
+            "type": "string",
+            "description": "Optional v2 include CSV"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_read_post",
+      "description": "Get full content of a specific post. Response includes author object ({id, login, display_name}), taxonomies map ({category, post_tag, ...} each with term {id, name, slug}), and featured_media ({id, url}) alongside title/content/slug/status/date/url/meta.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Post ID"
+          },
+          "include": {
+            "type": "string",
+            "description": "Optional v2 include CSV"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_create_post_duplicate",
+      "description": "Create a duplicate of an existing post for safe editing. IMPORTANT: Always use this before making changes to an original post. After creating a duplicate, edit the duplicate using wordpress_update_post. The user must then approve the duplicate in WordPress admin (Respira → Page Approvals) to replace the original post.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "original_id": {
+            "type": "number",
+            "description": "Original post ID"
+          },
+          "suffix": {
+            "type": "string",
+            "description": "Optional suffix"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "original_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_post",
+      "description": "Update a post. Supports author reassignment, taxonomy terms (categories/tags/custom), and featured media. When direct editing is enabled and you target an original post, Respira returns a confirmation_required preflight by default so you can choose live/original or duplicate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Post ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "New post title"
+          },
+          "content": {
+            "type": "string",
+            "description": "New post content (HTML)"
+          },
+          "status": {
+            "type": "string",
+            "description": "Post status (publish, draft, pending)"
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug (post_name). Example: \"my-post\" produces /my-post/."
+          },
+          "author": {
+            "description": "Author (user id or user login). Requires edit_others_posts capability when different from the acting user.",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "categories": {
+            "type": "array",
+            "description": "Shorthand for the built-in \"category\" taxonomy. Accepts term ids (number) or slugs/names (string). Replaces existing categories unless append_terms=true.",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "tags": {
+            "type": "array",
+            "description": "Shorthand for the built-in \"post_tag\" taxonomy. Accepts term ids (number) or slugs/names (string).",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "taxonomies": {
+            "type": "object",
+            "description": "Generic map of taxonomy slug to array of term ids/slugs for custom taxonomies (e.g. product_cat). Example: { \"product_cat\": [12, \"featured\"] }."
+          },
+          "featured_media": {
+            "type": "number",
+            "description": "Attachment ID to set as the featured image. Pass 0 to clear."
+          },
+          "create_missing_terms": {
+            "type": "boolean",
+            "description": "When true, auto-create taxonomy terms that do not exist by name. Default false (strict: unknown slug returns 400)."
+          },
+          "append_terms": {
+            "type": "boolean",
+            "description": "When true, append to existing taxonomy terms instead of replacing. Default false (replace)."
+          },
+          "custom_css": {
+            "type": "string",
+            "description": "Custom CSS for the post. Auto-detects builder: Divi → _et_pb_custom_css, Elementor → _elementor_page_settings.custom_css."
+          },
+          "meta": {
+            "type": "object",
+            "description": "Post meta data"
+          },
+          "edit_target": {
+            "type": "string",
+            "description": "Choose ask, live, or duplicate when the target is an original post.",
+            "enum": [
+              "ask",
+              "live",
+              "duplicate"
+            ]
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Backward-compatible alias for explicit live editing when direct editing is enabled."
+          },
+          "skip_security_check": {
+            "type": "boolean",
+            "description": "Advanced: bypass Respira content security checks and sanitization for this update. Use only with trusted content."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_post",
+      "description": "Delete a post. IMPORTANT: By default, this only works on Respira-created duplicates. The force parameter only works if \"Allow Direct Editing\" is enabled in Respira settings (disabled by default for safety).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Post ID"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Force delete even if not a duplicate"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_media",
+      "description": "List all media files (images, videos, etc.).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "Search term"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Items per page"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_upload_media",
+      "description": "Upload a media file (image, document, video) to WordPress. Supports base64 encoded files, file URLs, file paths, or raw SVG markup strings (starting with <svg or <?xml). Fails fast with a clear error if the file exceeds 50MB (override via RESPIRA_MAX_UPLOAD_MB) or the upload does not complete within 120 seconds (override via RESPIRA_UPLOAD_TIMEOUT_MS).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File content as base64 string, file URL to download, or file path"
+          },
+          "filename": {
+            "type": "string",
+            "description": "Filename for the uploaded file"
+          },
+          "mime_type": {
+            "type": "string",
+            "description": "MIME type of the file (e.g., image/jpeg, image/png, application/pdf)"
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional title for the media item"
+          },
+          "alt": {
+            "type": "string",
+            "description": "Optional alt text for images"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Optional caption for the media item"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "file",
+          "filename"
+        ]
+      }
+    },
+    {
+      "name": "respira_extract_builder_content",
+      "description": "Extract the full structured content from a page as builder-native JSON. Use this to see the complete page layout with all sections, columns, and widgets. For targeted searches, prefer find_element (faster). For a lightweight overview, prefer find_builder_targets. Returns the raw builder data structure that can be modified and passed back to inject_builder_content. Works on any post type (pages, posts, custom post types). The `builder` arg is optional — if omitted, the active site builder is auto-detected via get_builder_info.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "builder": {
+            "type": "string",
+            "description": "Optional. Builder name. Use exactly: gutenberg, divi, elementor, bricks, beaver, oxygen, breakdance, brizy, thrive, visual-composer, wpbakery. Omit to auto-detect the active site builder."
+          },
+          "page_id": {
+            "type": "number",
+            "description": "Page or post ID (works with any post type, including custom post types)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_find_builder_targets",
+      "description": "List all editable builder modules/blocks on a page with their types, labels, and text content — without returning the full builder JSON. Use this for a quick overview of what is on a page. For finding a specific element by text or class, use find_element instead. Returns `total_matches` (true total independent of limit), `offset`, `has_more`, and `next_offset` for pagination. WPBakery / Uncode targets now surface a populated `label` / `admin_label` / `text` so you do not have to grep the raw shortcode preview.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "builder": {
+            "type": "string",
+            "description": "Builder name. Use exactly: gutenberg, divi, elementor, bricks, beaver, oxygen, breakdance, brizy, thrive, visual-composer, wpbakery. Use get_builder_info to discover the active builder first."
+          },
+          "page_id": {
+            "type": "number",
+            "description": "Page or post ID"
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional search term. If omitted, the first compact targets are returned."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of matches to return per page (default 10). The full match count is always returned as `total_matches` independent of this limit."
+          },
+          "offset": {
+            "type": "number",
+            "description": "Skip the first N matches before slicing the page. Defaults to 0. Paginate by passing the previous response's `next_offset` value."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "builder",
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_page_outline",
+      "description": "Row-level outline of a builder page. Lighter than extract_builder_content; one entry per top-level row with { index, type, kind, primary_heading, child_count, child_types } so you can answer \"what is the structure of this page\" without walking the full tree client-side. Works on every supported builder; adapters with a dedicated outline implementation (WPBakery + Uncode today) return a richer per-row child-type histogram.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "builder": {
+            "type": "string",
+            "description": "Builder name. Optional — auto-detected from the active site builder when omitted."
+          },
+          "page_id": {
+            "type": "number",
+            "description": "Page or post ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_builder_inline_schemas",
+      "description": "Per-shortcode / per-block inline attribute schemas for the requested builder. Currently populated for WPBakery + Uncode + TagDiv via vc_map() at runtime (cached as a transient for 1h). Other builders return `schemas: {}` + `supported: false` + a structured hint. Use this to discover what attributes a specific `vc_*` / `uncode_*` shortcode accepts before writing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "builder": {
+            "type": "string",
+            "description": "Builder name. Optional — auto-detected from the active site builder when omitted. Pass \"wpbakery\" explicitly for non-WPBakery sites that want to inspect the catalog anyway."
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional filter — only return schemas for these shortcode types (e.g. [\"vc_custom_heading\", \"vc_button\"]). Omit to return all registered schemas."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "respira_inject_builder_content",
+      "description": "REPLACE (or append to) the entire page builder layout. WARNING: By default this REPLACES all existing content — use mode:\"append\" to add content without destroying existing elements. For editing a single module, use wordpress_update_module instead. Use exactly: gutenberg, divi, elementor, bricks, beaver, oxygen, breakdance, brizy, thrive, visual-composer, wpbakery. For Divi, divi_version is required (\"4\" or \"5\"). Starting in plugin v7.0.16, calling this against a page that already has content with mode=\"replace\" (the default) without also passing confirm_replace=true returns a 409 respira_replace_confirmation_required — pass mode=\"append\" to add to existing content, pass mode=\"replace\" AND confirm_replace=true to overwrite, or pass edit_target=\"live\" to overwrite the live page directly (plugin v7.0.22+ accepts an authorized live edit as the confirmation). The gate prevents silent data loss.\n\nNested Divi 5 content shape — canonical: `content: [{ type: \"section\", settings: {...}, children: [{ type: \"row\", children: [{ type: \"column\", children: [{ type: \"heading\", settings: {...} }, ...] }] }] }]`. Plugin v7.0.32 also accepts `rows / cols / columns / modules / elements / innerBlocks` as aliases for `children` on Divi (Divi-vocabulary; soft warning surfaces in response.warnings). Plugin v7.0.32 hard-errors with `respira_children_dropped` (HTTP 500) if any container payload declares children but the emit produced fewer innerBlocks — silent data-loss is no longer possible.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "builder": {
+            "type": "string",
+            "description": "Builder identifier. Use exactly: gutenberg, divi, elementor, bricks, beaver, oxygen, breakdance, brizy, thrive, visual-composer, wpbakery."
+          },
+          "page_id": {
+            "type": "number",
+            "description": "Page ID"
+          },
+          "content": {
+            "type": "object",
+            "description": "Structured content to inject in simplified format. In \"replace\" mode (default), this REPLACES all existing content. In \"append\" mode, this is added after existing content. For Gutenberg: array of blocks [{type: \"core/heading\", attrs: {level: 2}, content: \"Hello\"}, {type: \"core/paragraph\", attrs: {}, content: \"Text here\"}]. For Beaver Builder: {rows: [{cols: [{modules: [{type: \"rich-text\", settings: {text: \"...\"}}]}]}]}. For Elementor: array of widget objects. For Divi: Divi shortcode or block structure. Use extract_builder_content to see the format for any builder."
+          },
+          "mode": {
+            "type": "string",
+            "description": "replace (default): OVERWRITES all existing page content. append: adds new content after existing elements, preserving the current layout. As of plugin v7.0.16, replace against a page with existing content requires confirm_replace=true.",
+            "enum": [
+              "replace",
+              "append"
+            ]
+          },
+          "confirm_replace": {
+            "type": "boolean",
+            "description": "Required when mode=\"replace\" (or unset, since replace is the default) AND the page already has content. Pass true only when you genuinely want to overwrite the existing structure. Without it, the plugin returns 409 respira_replace_confirmation_required so the agent can decide between mode=\"append\" (preserve) and mode=\"replace\"+confirm_replace=true (overwrite)."
+          },
+          "edit_target": {
+            "type": "string",
+            "description": "When editing an original, choose ask, live, or duplicate. Defaults to ask when direct editing is enabled.",
+            "enum": [
+              "ask",
+              "live",
+              "duplicate"
+            ]
+          },
+          "divi_version": {
+            "type": "string",
+            "description": "Divi generation hint (\"4\" for shortcode format, \"5\" for block format). Required for all Divi inject calls.",
+            "enum": [
+              "4",
+              "5"
+            ]
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "builder",
+          "page_id",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_module",
+      "description": "Update a specific module within a page builder page. Supports finding modules by admin_label, path, or type. Only updates the specified module while preserving all other content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "builder": {
+            "type": "string",
+            "description": "Builder name. Use exactly: gutenberg, divi, elementor, bricks, beaver, oxygen, breakdance, brizy, thrive, visual-composer, wpbakery."
+          },
+          "page_id": {
+            "type": "number",
+            "description": "Page ID"
+          },
+          "module_identifier": {
+            "type": "object",
+            "description": "Module identifier - use one of: admin_label, path, or type. For Elementor: prefer id or path (dot notation like \"0.0.1\"). admin_label maps to Navigator label or CSS ID. For Divi: admin_label maps to Admin Label field.",
+            "properties": {
+              "admin_label": {
+                "type": "string",
+                "description": "Find module by admin_label. Divi: Admin Label field. Elementor: Navigator label (_title) or CSS ID (_element_id)."
+              },
+              "id": {
+                "type": "string",
+                "description": "Find module by element ID (Elementor element ID like \"a85a3a7\", or builder-specific ID)"
+              },
+              "path": {
+                "type": "string",
+                "description": "Find module by path. Accepts dot notation (\"0.0.1\") or bracket notation (\"sections[0].rows[0].modules[2]\")."
+              },
+              "type": {
+                "type": "string",
+                "description": "Find module by type (e.g., \"heading\", \"et_pb_code\")"
+              },
+              "match_content": {
+                "type": "string",
+                "description": "Optional content to match when using type identifier"
+              }
+            }
+          },
+          "updates": {
+            "type": "object",
+            "description": "Updates to apply to the module",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "New content for the module"
+              },
+              "attributes": {
+                "type": "object",
+                "description": "Attributes to update (merged with existing)"
+              }
+            }
+          },
+          "edit_target": {
+            "type": "string",
+            "description": "When editing an original, choose ask, live, or duplicate. Defaults to ask when direct editing is enabled.",
+            "enum": [
+              "ask",
+              "live",
+              "duplicate"
+            ]
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "builder",
+          "page_id",
+          "module_identifier",
+          "updates"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_snapshots",
+      "description": "List Respira v2 snapshots with optional filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Optional post ID filter"
+          },
+          "post_type": {
+            "type": "string",
+            "description": "Optional post type filter"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional snapshot kind filter"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Limit number of snapshots returned"
+          },
+          "cursor": {
+            "type": "number",
+            "description": "Cursor for pagination"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_snapshot",
+      "description": "Get one Respira v2 snapshot by UUID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "snapshot_uuid": {
+            "type": "string",
+            "description": "Snapshot UUID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "snapshot_uuid"
+        ]
+      }
+    },
+    {
+      "name": "respira_diff_snapshots",
+      "description": "Diff two Respira v2 snapshots and return structured fidelity deltas.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "snapshot_uuid_a": {
+            "type": "string",
+            "description": "Snapshot UUID A"
+          },
+          "snapshot_uuid_b": {
+            "type": "string",
+            "description": "Snapshot UUID B"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "snapshot_uuid_a",
+          "snapshot_uuid_b"
+        ]
+      }
+    },
+    {
+      "name": "respira_restore_snapshot",
+      "description": "Restore content and allowlisted meta from a Respira v2 snapshot UUID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "snapshot_uuid": {
+            "type": "string",
+            "description": "Snapshot UUID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "snapshot_uuid"
+        ]
+      }
+    },
+    {
+      "name": "respira_apply_builder_patch",
+      "description": "Apply Respira v2 builder patch operations (identifier by id/path/type+match_content).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "builder": {
+            "type": "string",
+            "description": "Builder slug"
+          },
+          "post_id": {
+            "type": "number",
+            "description": "Post ID"
+          },
+          "include": {
+            "type": "string",
+            "description": "Optional v2 include CSV for response payload"
+          },
+          "operations": {
+            "type": "array",
+            "description": "Patch operations[]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "edit_target": {
+            "type": "string",
+            "description": "When editing an original, choose ask, live, or duplicate. Defaults to ask when direct editing is enabled.",
+            "enum": [
+              "ask",
+              "live",
+              "duplicate"
+            ]
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "builder",
+          "post_id",
+          "operations"
+        ]
+      }
+    },
+    {
+      "name": "respira_validate_security",
+      "description": "Validate content for security issues before saving.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Content to validate"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "respira_switch_site",
+      "description": "Switch to a different WordPress site in the active Respira multi-site configuration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Site ID from configuration"
+          }
+        },
+        "required": [
+          "site_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_diagnose_connection",
+      "description": "Run a connection-fingerprint diagnostic for the active site. Combines the plugin's server-side report (route registration, php/wp/plugin versions, edge plugin presence) with outside-in probes from the MCP server (REST root reachability, content-type sanity check on Respira routes, edge-layer headers). Use when a tool returns \"html instead of json\", an opaque 5xx, or when a connection that worked yesterday silently breaks. Returns a structured object including detected edge layers (Cloudflare, Wordfence, Sucuri) and concrete remediation recommendations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Optional target post ID for a more specific probe."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_redeem_token",
+      "description": "Redeem a one-time Respira install token to provision the local config file. The user obtains the token by clicking \"Open in Cowork\" on respira.press/dashboard/mcp, which mints a 5-minute token and opens a new Cowork session with a pre-filled prompt containing it. Calling this tool exchanges the token for the user's site list and API keys, writes ~/.respira/config.json, and reports back the number of sites connected. After redemption the token is invalidated. Use whenever the user pastes a Respira setup token (typical shape: a long base64-looking string starting with a few url-safe characters) and asks to be connected. Returns { sites_count, sites: [{ name, url }], message } on success.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The one-time setup token from respira.press. Required.",
+            "minLength": 16
+          }
+        },
+        "required": [
+          "token"
+        ]
+      }
+    },
+    {
+      "name": "respira_analyze_performance",
+      "description": "Analyze page performance metrics including load time, image optimization, CSS/JS optimization, caching, and plugin performance impact.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "number",
+            "description": "Page ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_core_web_vitals",
+      "description": "Get Core Web Vitals metrics (LCP, FID, CLS) for a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "number",
+            "description": "Page ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_analyze_images",
+      "description": "Analyze image optimization opportunities including missing alt text, large files, and unoptimized formats.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "number",
+            "description": "Page ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_analyze_seo",
+      "description": "Comprehensive SEO analysis including meta tags, heading structure, image alt text, internal linking, content quality, and schema markup.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "number",
+            "description": "Page ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_check_seo_issues",
+      "description": "Check for common SEO issues and get quick recommendations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "number",
+            "description": "Page ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_analyze_readability",
+      "description": "Analyze content readability including Flesch Reading Ease score, sentence length, and paragraph structure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "number",
+            "description": "Page ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_analyze_rankmath",
+      "description": "Analyze a page against Rank Math SEO scoring. Returns detailed checks, current score, and ready-to-apply meta_updates. To apply fixes: use respira_update_page with the seo_title, seo_description, and focus_keyword fields from the meta_updates response.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post or page ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_analyze_aeo",
+      "description": "Analyze content for AI Engine Optimization (optimizing for AI search engines like Perplexity, ChatGPT). Checks structured data, content clarity, semantic HTML, entities, content depth, and FAQ opportunities.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "number",
+            "description": "Page ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_check_structured_data",
+      "description": "Check schema markup and structured data (JSON-LD, microdata) for AI parsing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "number",
+            "description": "Page ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_accessibility_scans",
+      "description": "List previous accessibility scans with scores and violation counts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_accessibility_scan",
+      "description": "Get detailed results of a specific accessibility scan including all violations, scores, and AI fix prompts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scan_id": {
+            "type": "number",
+            "description": "Scan ID to retrieve"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "scan_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_scan_page_accessibility",
+      "description": "Run a WCAG accessibility scan on a page. Returns violations grouped by severity (critical, serious, moderate, minor) with auto-fix suggestions. Supports standards: wcag2a, wcag2aa, wcag21a, wcag21aa, wcag22aa, section508.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "number",
+            "description": "Page ID to scan"
+          },
+          "standard": {
+            "type": "string",
+            "description": "WCAG standard to test against (default: wcag2aa)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_apply_accessibility_fixes",
+      "description": "Auto-apply accessibility fixes for a scan. Fixes supported: image-alt, color-contrast, label, heading-order, document-title, html-lang-valid.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scan_id": {
+            "type": "number",
+            "description": "Scan ID to fix"
+          },
+          "rule_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Specific rule IDs to fix (omit for all auto-fixable)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "scan_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_plugins",
+      "description": "EXPERIMENTAL: List all installed plugins with their status, version, and update availability. Requires plugin management to be enabled in Respira settings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_install_plugin",
+      "description": "EXPERIMENTAL: Install a plugin from WordPress.org or a ZIP URL. Requires plugin management to be enabled in Respira settings. Approval-gated: first call returns `respira_approval_required` with an `approval_token`; call again with that token to complete the install. Use with caution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug_or_url": {
+            "type": "string",
+            "description": "Plugin slug (from WordPress.org) or ZIP file URL"
+          },
+          "source": {
+            "type": "string",
+            "description": "Source type: \"wordpress.org\" or \"url\"",
+            "enum": [
+              "wordpress.org",
+              "url"
+            ]
+          },
+          "approval_token": {
+            "type": "string",
+            "description": "Second-step approval token returned by the first call. Echo it back unchanged to complete the install."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "slug_or_url"
+        ]
+      }
+    },
+    {
+      "name": "respira_activate_plugin",
+      "description": "EXPERIMENTAL: Activate a plugin. Requires plugin management to be enabled in Respira settings. Approval-gated: first call returns `respira_approval_required` with an `approval_token`; call again with the same `slug` plus that token to complete activation. Monitor the site after activation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Plugin slug"
+          },
+          "approval_token": {
+            "type": "string",
+            "description": "Second-step approval token returned by the first call. Echo it back unchanged with the same slug to complete activation."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "respira_deactivate_plugin",
+      "description": "EXPERIMENTAL: Deactivate a plugin. Requires plugin management to be enabled in Respira settings. Approval-gated: first call returns `respira_approval_required` with an `approval_token`; call again with the same `slug` plus that token to complete deactivation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Plugin slug"
+          },
+          "approval_token": {
+            "type": "string",
+            "description": "Second-step approval token returned by the first call. Echo it back unchanged with the same slug to complete deactivation."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_plugin",
+      "description": "EXPERIMENTAL: Update a plugin to the latest version. Requires plugin management to be enabled in Respira settings. Approval-gated: first call returns `respira_approval_required` with an `approval_token`; call again with the same `slug` plus that token to complete the update. Make sure you have backups before updating.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Plugin slug"
+          },
+          "approval_token": {
+            "type": "string",
+            "description": "Second-step approval token returned by the first call. Echo it back unchanged with the same slug to complete the update."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_plugin",
+      "description": "EXPERIMENTAL: Permanently delete a plugin. Requires plugin management to be enabled in Respira settings. The plugin must be deactivated first. Approval-gated: first call returns `respira_approval_required` with an `approval_token`; call again with the same `slug` plus that token to confirm deletion.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Plugin slug"
+          },
+          "approval_token": {
+            "type": "string",
+            "description": "Second-step approval token returned by the first call. Echo it back unchanged with the same slug to confirm deletion."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_users",
+      "description": "List all users with optional filtering by search term.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "Search term"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Items per page"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_user",
+      "description": "Get user details by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "User ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_create_user",
+      "description": "Create a new user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "Username"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address"
+          },
+          "password": {
+            "type": "string",
+            "description": "Password"
+          },
+          "role": {
+            "type": "string",
+            "description": "User role (default: subscriber)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "username",
+          "email",
+          "password"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_user",
+      "description": "Update user information.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "User ID"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address"
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name"
+          },
+          "password": {
+            "type": "string",
+            "description": "Password"
+          },
+          "role": {
+            "type": "string",
+            "description": "User role"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_user",
+      "description": "Delete a user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "User ID"
+          },
+          "reassign": {
+            "type": "number",
+            "description": "User ID to reassign posts to (optional)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_comments",
+      "description": "List all comments with optional filtering.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Comment status (approve, hold, spam, trash)"
+          },
+          "post_id": {
+            "type": "number",
+            "description": "Filter by post ID"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Items per page"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_comment",
+      "description": "Get comment details by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Comment ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_create_comment",
+      "description": "Create a new comment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID"
+          },
+          "author": {
+            "type": "string",
+            "description": "Author name"
+          },
+          "author_email": {
+            "type": "string",
+            "description": "Author email"
+          },
+          "content": {
+            "type": "string",
+            "description": "Comment content"
+          },
+          "parent": {
+            "type": "number",
+            "description": "Parent comment ID (for replies)"
+          },
+          "status": {
+            "type": "number",
+            "description": "Comment status (1=approved, 0=hold)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "author",
+          "author_email",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_comment",
+      "description": "Update a comment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Comment ID"
+          },
+          "content": {
+            "type": "string",
+            "description": "Comment content"
+          },
+          "status": {
+            "type": "number",
+            "description": "Comment status"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_comment",
+      "description": "Delete a comment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Comment ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_taxonomies",
+      "description": "List all registered taxonomies.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_taxonomy",
+      "description": "Get taxonomy details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taxonomy": {
+            "type": "string",
+            "description": "Taxonomy name"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "taxonomy"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_terms",
+      "description": "List terms in a taxonomy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taxonomy": {
+            "type": "string",
+            "description": "Taxonomy name"
+          },
+          "search": {
+            "type": "string",
+            "description": "Search term"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Items per page"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "taxonomy"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_term",
+      "description": "Get term details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taxonomy": {
+            "type": "string",
+            "description": "Taxonomy name"
+          },
+          "id": {
+            "type": "number",
+            "description": "Term ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "taxonomy",
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_create_term",
+      "description": "Create a new term.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taxonomy": {
+            "type": "string",
+            "description": "Taxonomy name"
+          },
+          "name": {
+            "type": "string",
+            "description": "Term name"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Term slug"
+          },
+          "description": {
+            "type": "string",
+            "description": "Term description"
+          },
+          "parent": {
+            "type": "number",
+            "description": "Parent term ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "taxonomy",
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_term",
+      "description": "Update a term.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taxonomy": {
+            "type": "string",
+            "description": "Taxonomy name"
+          },
+          "id": {
+            "type": "number",
+            "description": "Term ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Term name"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Term slug"
+          },
+          "description": {
+            "type": "string",
+            "description": "Term description"
+          },
+          "parent": {
+            "type": "number",
+            "description": "Parent term ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "taxonomy",
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_term",
+      "description": "Delete a term.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taxonomy": {
+            "type": "string",
+            "description": "Taxonomy name"
+          },
+          "id": {
+            "type": "number",
+            "description": "Term ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "taxonomy",
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_post_types",
+      "description": "List all registered post types.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_post_type",
+      "description": "Get post type details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Post type name"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_custom_posts",
+      "description": "List posts of a custom post type. Each row includes author ({id, login, display_name}), taxonomies map, and featured_media alongside id/title/slug/status/date/url.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Post type name"
+          },
+          "status": {
+            "type": "string",
+            "description": "Post status"
+          },
+          "search": {
+            "type": "string",
+            "description": "Search term"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Items per page"
+          },
+          "include": {
+            "type": "string",
+            "description": "Optional v2 include CSV"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_custom_post",
+      "description": "Get custom post details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Post type name"
+          },
+          "id": {
+            "type": "number",
+            "description": "Post ID"
+          },
+          "include": {
+            "type": "string",
+            "description": "Optional v2 include CSV"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_create_custom_post",
+      "description": "Create a new post. Supports author, taxonomy terms (categories/tags/custom), and featured media inline so the full \"same category and author as X\" pattern works in a single call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Post type name (e.g. \"post\", \"page\", \"product\")"
+          },
+          "title": {
+            "type": "string",
+            "description": "Post title"
+          },
+          "content": {
+            "type": "string",
+            "description": "Post content"
+          },
+          "status": {
+            "type": "string",
+            "description": "Post status (default: draft)"
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug (post_name). Example: \"my-post\" produces /my-post/."
+          },
+          "excerpt": {
+            "type": "string",
+            "description": "Optional post excerpt."
+          },
+          "date": {
+            "type": "string",
+            "description": "Optional publish date in YYYY-MM-DD HH:MM:SS (server local time) for backdating."
+          },
+          "author": {
+            "description": "Author (user id or user login). Requires edit_others_posts capability when different from the acting user.",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "categories": {
+            "type": "array",
+            "description": "Shorthand for the built-in \"category\" taxonomy. Accepts term ids (number) or slugs/names (string).",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "tags": {
+            "type": "array",
+            "description": "Shorthand for the built-in \"post_tag\" taxonomy. Accepts term ids (number) or slugs/names (string).",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "taxonomies": {
+            "type": "object",
+            "description": "Generic map of taxonomy slug to array of term ids/slugs for custom taxonomies (e.g. product_cat). Example: { \"product_cat\": [12, \"featured\"] }."
+          },
+          "featured_media": {
+            "type": "number",
+            "description": "Attachment ID to set as the featured image."
+          },
+          "create_missing_terms": {
+            "type": "boolean",
+            "description": "When true, auto-create taxonomy terms that do not exist by name. Default false (strict: unknown slug returns 400 and the post is rolled back)."
+          },
+          "meta": {
+            "type": "object",
+            "description": "Post meta data (map of meta key to value)."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "type",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_custom_post",
+      "description": "Update a custom post. Supports author reassignment, taxonomy terms (categories/tags/custom), and featured media. When direct editing is enabled and you target an original item, Respira returns a confirmation_required preflight by default so you can choose live/original or duplicate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Post type name"
+          },
+          "id": {
+            "type": "number",
+            "description": "Post ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "Post title"
+          },
+          "content": {
+            "type": "string",
+            "description": "Post content"
+          },
+          "status": {
+            "type": "string",
+            "description": "Post status"
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug (post_name)."
+          },
+          "author": {
+            "description": "Author (user id or user login). Requires edit_others_posts capability when different from the acting user.",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "categories": {
+            "type": "array",
+            "description": "Shorthand for the built-in \"category\" taxonomy. Accepts term ids (number) or slugs/names (string).",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "tags": {
+            "type": "array",
+            "description": "Shorthand for the built-in \"post_tag\" taxonomy. Accepts term ids (number) or slugs/names (string).",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "taxonomies": {
+            "type": "object",
+            "description": "Generic map of taxonomy slug to array of term ids/slugs for custom taxonomies."
+          },
+          "featured_media": {
+            "type": "number",
+            "description": "Attachment ID to set as the featured image. Pass 0 to clear."
+          },
+          "create_missing_terms": {
+            "type": "boolean",
+            "description": "When true, auto-create taxonomy terms that do not exist by name. Default false (strict)."
+          },
+          "append_terms": {
+            "type": "boolean",
+            "description": "When true, append to existing taxonomy terms instead of replacing. Default false (replace)."
+          },
+          "meta": {
+            "type": "object",
+            "description": "Post meta data (e.g., { \"_et_pb_custom_css\": \"/* CSS */\" })"
+          },
+          "custom_css": {
+            "type": "string",
+            "description": "Custom CSS for page builders (Divi/Elementor). Automatically saved to the appropriate meta field based on detected builder."
+          },
+          "edit_target": {
+            "type": "string",
+            "description": "Choose ask, live, or duplicate when the target is an original item.",
+            "enum": [
+              "ask",
+              "live",
+              "duplicate"
+            ]
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_custom_post",
+      "description": "Delete a custom post.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Post type name"
+          },
+          "id": {
+            "type": "number",
+            "description": "Post ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_options",
+      "description": "List WordPress options (with optional search filter).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "Search term to filter option names"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_option",
+      "description": "Get option value by name.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "option": {
+            "type": "string",
+            "description": "Option name"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "option"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_option",
+      "description": "Update an option value.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "option": {
+            "type": "string",
+            "description": "Option name"
+          },
+          "value": {
+            "description": "Option value (string, number, boolean, object, or array). For complex options like theme_mods, pass as object — not JSON string."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "option",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_option",
+      "description": "Delete an option.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "option": {
+            "type": "string",
+            "description": "Option name"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "option"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_media",
+      "description": "Get single media item details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Media ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_media",
+      "description": "Update media metadata (title, alt text, caption).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Media ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "Media title"
+          },
+          "alt": {
+            "type": "string",
+            "description": "Alt text"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Caption"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_media_batch",
+      "description": "Batch update media items (alt text, title, caption). Up to 50 items per call. Useful for fixing missing alt text across multiple images.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number",
+                  "description": "Attachment ID"
+                },
+                "alt": {
+                  "type": "string",
+                  "description": "Alt text"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Title"
+                },
+                "caption": {
+                  "type": "string",
+                  "description": "Caption"
+                }
+              },
+              "required": [
+                "id"
+              ]
+            },
+            "description": "Array of media items to update"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_media",
+      "description": "Delete a media file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Media ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_menus",
+      "description": "List all navigation menus. Includes WPML translation info if available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_menu",
+      "description": "Get a navigation menu with all its items. Includes WPML translation info if available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Menu ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_create_menu",
+      "description": "Create a new navigation menu.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Menu name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Menu description"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_menu",
+      "description": "Update a navigation menu.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Menu ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Menu name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Menu description"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_menu",
+      "description": "Delete a navigation menu.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Menu ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_menu_locations",
+      "description": "List all registered menu locations and their assigned menus.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_assign_menu_location",
+      "description": "Assign a menu to a theme location.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string",
+            "description": "Location slug (e.g., \"primary\", \"footer\")"
+          },
+          "menu_id": {
+            "type": "number",
+            "description": "Menu ID to assign (use 0 to unassign)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "location",
+          "menu_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_menu_items",
+      "description": "List all items in a menu with their hierarchy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "menu_id": {
+            "type": "number",
+            "description": "Menu ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "menu_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_create_menu_item",
+      "description": "Create a new menu item. Can link to pages, posts, custom URLs, or categories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "menu_id": {
+            "type": "number",
+            "description": "Menu ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "Menu item title"
+          },
+          "url": {
+            "type": "string",
+            "description": "Custom URL (for custom links)"
+          },
+          "object_type": {
+            "type": "string",
+            "description": "Object type: \"post\", \"page\", \"category\", \"custom\", etc."
+          },
+          "object_id": {
+            "type": "number",
+            "description": "ID of the linked object (post ID, page ID, etc.)"
+          },
+          "parent": {
+            "type": "number",
+            "description": "Parent menu item ID for nested items"
+          },
+          "position": {
+            "type": "number",
+            "description": "Position in menu (1-based)"
+          },
+          "target": {
+            "type": "string",
+            "description": "Link target (\"_blank\" for new window)"
+          },
+          "classes": {
+            "type": "string",
+            "description": "CSS classes (space-separated)"
+          },
+          "attr_title": {
+            "type": "string",
+            "description": "Title attribute (tooltip)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Item description"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "menu_id",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_menu_item",
+      "description": "Get a single menu item by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "number",
+            "description": "Menu item ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "item_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_menu_item",
+      "description": "Update a menu item.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "number",
+            "description": "Menu item ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "Menu item title"
+          },
+          "url": {
+            "type": "string",
+            "description": "Custom URL (for custom links)"
+          },
+          "parent": {
+            "type": "number",
+            "description": "Parent menu item ID"
+          },
+          "position": {
+            "type": "number",
+            "description": "Position in menu"
+          },
+          "target": {
+            "type": "string",
+            "description": "Link target"
+          },
+          "classes": {
+            "type": "string",
+            "description": "CSS classes"
+          },
+          "attr_title": {
+            "type": "string",
+            "description": "Title attribute"
+          },
+          "description": {
+            "type": "string",
+            "description": "Item description"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "item_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_menu_item",
+      "description": "Delete a menu item.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "number",
+            "description": "Menu item ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "item_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_find_element",
+      "description": "Find an element in a page by ID, type, CSS class, or text content. This is the PRIMARY tool for locating content to edit — use it instead of searching the database or reading PHP files. Works with all 12 page builders. Use identifier_type \"content\" to search by visible text (e.g. find a heading containing \"2025\" to update a year). Returns matching element(s) with their position, settings, and element ID for use with update_element.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID"
+          },
+          "identifier_type": {
+            "type": "string",
+            "description": "How to find the element",
+            "enum": [
+              "id",
+              "type",
+              "class",
+              "content"
+            ]
+          },
+          "identifier_value": {
+            "type": "string",
+            "description": "Value to search for"
+          },
+          "match_content": {
+            "type": "string",
+            "description": "Optional text content to narrow results when searching by type/class"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "identifier_type",
+          "identifier_value"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_element",
+      "description": "Update settings or content on a specific element in a page. This is the PRIMARY tool for making content changes — use it for text edits, style changes, image swaps, link updates, etc. Works with all 12 page builders. First use find_element to locate the element, then pass the same identifier here with the updates object containing the new values. Response includes target_id, original_id, edit_target (\"live\" or \"duplicate\"), is_duplicate, duplicate_created and post_status so the caller can never mistake a duplicate-routed write for a live-page change.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID"
+          },
+          "identifier_type": {
+            "type": "string",
+            "enum": [
+              "id",
+              "type",
+              "class",
+              "content"
+            ]
+          },
+          "identifier_value": {
+            "type": "string",
+            "description": "Value to match"
+          },
+          "updates": {
+            "type": "object",
+            "description": "Key-value pairs of settings to update on the matched element"
+          },
+          "editTarget": {
+            "type": "string",
+            "enum": [
+              "live",
+              "duplicate"
+            ],
+            "description": "Optional. \"duplicate\" (default) routes the write to the Respira duplicate of the post (or auto-creates one) so changes go through the Respira → Changes approval flow before they reach the public page. \"live\" writes straight to the published original — requires Respira → Settings → Allow direct edit, or the post to be a draft / existing Respira duplicate. The response always reports the resolved target so you know exactly which post received the write."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "identifier_type",
+          "identifier_value",
+          "updates"
+        ]
+      }
+    },
+    {
+      "name": "respira_move_element",
+      "description": "Move an element to a different container or position within the page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID"
+          },
+          "element_id": {
+            "type": "string",
+            "description": "Element ID to move"
+          },
+          "target_container_id": {
+            "type": "string",
+            "description": "ID of the container to move into"
+          },
+          "position": {
+            "type": "number",
+            "description": "Position index within the target container (0-based)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "element_id",
+          "target_container_id",
+          "position"
+        ]
+      }
+    },
+    {
+      "name": "respira_duplicate_element",
+      "description": "Duplicate an element in a page. The copy is inserted immediately after the original.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID"
+          },
+          "element_id": {
+            "type": "string",
+            "description": "Element ID to duplicate"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "element_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_remove_element",
+      "description": "Remove an element from a page. Use the same identifier_type/identifier_value pattern as find_element and update_element — first locate the element, then pass the matching identifier to remove it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID"
+          },
+          "identifier_type": {
+            "type": "string",
+            "enum": [
+              "id",
+              "css_class",
+              "text",
+              "widget_type",
+              "global_id"
+            ],
+            "description": "How to locate the element: \"id\" (element ID), \"css_class\" (CSS class name), \"text\" (visible text content), \"widget_type\" (widget/module type), or \"global_id\" (cross-page global element ID)."
+          },
+          "identifier_value": {
+            "type": "string",
+            "description": "Value matching the chosen identifier_type (e.g. the element ID, the class name, the text to match)."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "identifier_type",
+          "identifier_value"
+        ]
+      }
+    },
+    {
+      "name": "respira_batch_update",
+      "description": "Apply multiple element operations to a page in a single atomic transaction. Extracts content once, applies all operations, and injects once.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID"
+          },
+          "operations": {
+            "type": "array",
+            "description": "Array of operations: [{action: \"update\"|\"remove\"|\"move\"|\"duplicate\", ...params}]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "operations"
+        ]
+      }
+    },
+    {
+      "name": "respira_reorder_elements",
+      "description": "Reorder child elements within a container.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID"
+          },
+          "container_id": {
+            "type": "string",
+            "description": "Container element ID"
+          },
+          "new_order": {
+            "type": "array",
+            "description": "Array of element IDs in the desired order",
+            "items": {
+              "type": "string"
+            }
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "container_id",
+          "new_order"
+        ]
+      }
+    },
+    {
+      "name": "respira_build_page",
+      "description": "Create a complete page from a declarative structure. Accepts builder-specific widget definitions and creates the page with all elements in one call. Returns page_id, edit_url, and preview_url.\n\nNested structure shape (Divi 5 / any builder that nests): use `children: [...]` at every container level. As of plugin v7.0.32 the Divi builder also accepts `rows / cols / columns / modules / elements / innerBlocks` as aliases for `children` (Divi-vocabulary; soft warning surfaces in the response trace). Canonical example for a Divi 5 hero:\n\n```\nstructure: [{\n  type: \"section\",\n  settings: { background_color: \"#1f4e7a\", padding: \"120px|0|120px|0\" },\n  children: [{\n    type: \"row\",\n    children: [{\n      type: \"column\",\n      children: [\n        { type: \"heading\", settings: { title: \"Hello\", tag: \"h1\" } },\n        { type: \"text\",    settings: { content: \"<p>Para</p>\" } }\n      ]\n    }]\n  }]\n}]\n```\n\nFlat shape also works — pass leaf modules at the top level and the builder auto-wraps them in section > row > column. Plugin v7.0.32 hard-errors with `respira_children_dropped` (HTTP 500) if any container payload declares children but the emit produced fewer innerBlocks, so silent data-loss is no longer possible.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Page title"
+          },
+          "structure": {
+            "type": "array",
+            "description": "Array of node definitions. Each node is { type, settings?, children? }. `children` recurses; Divi accepts `rows / cols / columns / modules / elements / innerBlocks` as aliases. Example: [{type:\"section\", children:[{type:\"row\", children:[{type:\"column\", children:[{type:\"heading\", settings:{title:\"Hello\"}}]}]}]}]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "status": {
+            "type": "string",
+            "description": "Page status",
+            "enum": [
+              "draft",
+              "publish"
+            ]
+          },
+          "builder": {
+            "type": "string",
+            "description": "Target builder (auto-detected if omitted)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "title",
+          "structure"
+        ]
+      }
+    },
+    {
+      "name": "respira_convert_html_to_builder",
+      "description": "Convert HTML into native page builder content. Extracts CSS styles, maps sections to builder widgets, and creates a page with a fidelity report showing conversion accuracy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "Full HTML string to convert"
+          },
+          "builder": {
+            "type": "string",
+            "description": "Target builder (auto-detected if omitted)"
+          },
+          "options": {
+            "type": "object",
+            "description": "Conversion options: {status, title, preserve_tokens, font_substitution, responsive}"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "html"
+        ]
+      }
+    },
+    {
+      "name": "respira_bulk_pages_operation",
+      "description": "Apply an operation across up to 100 pages. Supports strip_inline_styles, find_and_replace, and custom operations. Each page gets a snapshot for rollback. Rate limited to 3/hr.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page_ids": {
+            "type": "array",
+            "description": "Array of page IDs to process (max 100)",
+            "items": {
+              "type": "number"
+            }
+          },
+          "operation": {
+            "type": "object",
+            "description": "Operation to apply: {type: \"strip_inline_styles\"|\"find_and_replace\"|\"custom\", options: {...}}"
+          },
+          "options": {
+            "type": "object",
+            "description": "Execution options: {dry_run: boolean}"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "page_ids",
+          "operation"
+        ]
+      }
+    },
+    {
+      "name": "respira_search_stock_images",
+      "description": "Search for free stock images via Openverse (Creative Commons). Returns image URLs, titles, authors, and licenses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search keywords"
+          },
+          "license_type": {
+            "type": "string",
+            "description": "License filter",
+            "enum": [
+              "commercial",
+              "modification",
+              "all"
+            ]
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Results per page (max 20)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "respira_sideload_image",
+      "description": "Download a stock image from an allowed domain and add it to the WordPress Media Library. Auto-generates CC attribution caption. Allowed domains: openverse.org, wordpress.org, unsplash.com, pexels.com, pixabay.com.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Image URL (HTTPS only, allowed domains only)"
+          },
+          "title": {
+            "type": "string",
+            "description": "Attachment title"
+          },
+          "alt": {
+            "type": "string",
+            "description": "Alt text"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Caption (auto-generated if omitted)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_server_compatibility",
+      "description": "Check version compatibility between the MCP server and the WordPress plugin. Returns plugin version, supported version range, and available features.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_list_bricks_global_classes",
+      "description": "List all Bricks global CSS classes with their settings (CSS properties). Returns array of {id, name, settings, category}. Use this to discover existing design tokens before creating new ones.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_create_bricks_global_class",
+      "description": "Create a new Bricks global CSS class. Settings use Bricks composite key format (e.g. \"_padding\", \"_margin\", \"_typography\"). Returns the created class with its generated ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "CSS class name (e.g. \"card-shadow\", \"text-accent\")"
+          },
+          "settings": {
+            "type": "object",
+            "description": "CSS properties in Bricks format. Keys like \"_padding\", \"_margin\", \"_backgroundColor\", \"_typography\" (object with font-family, font-size, etc.)"
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional category ID to group the class"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_bricks_global_class",
+      "description": "Update an existing Bricks global class. Merges provided fields into the existing class — omitted fields are preserved. Returns previous and current state for rollback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "class_id": {
+            "type": "string",
+            "description": "ID of the global class to update (from list_bricks_global_classes)"
+          },
+          "name": {
+            "type": "string",
+            "description": "New class name"
+          },
+          "settings": {
+            "type": "object",
+            "description": "Updated CSS properties (merged with existing)"
+          },
+          "category": {
+            "type": "string",
+            "description": "Updated category ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "class_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_delete_bricks_global_class",
+      "description": "Delete a Bricks global class by ID. Returns the deleted class data for rollback. Warning: elements referencing this class will lose its styling.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "class_id": {
+            "type": "string",
+            "description": "ID of the global class to delete"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "class_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_bricks_theme_styles",
+      "description": "Get the Bricks theme styles configuration. Returns an object keyed by style ID, each containing label, settings (with element-type groups like \"heading\", \"text-basic\", \"button\"), and conditions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_update_bricks_theme_styles",
+      "description": "Update Bricks theme styles (full replace). Pass the complete styles object. Returns previous and current values for rollback. Affects site-wide typography, colors, and element defaults.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "styles": {
+            "type": "object",
+            "description": "Complete theme styles object. Keys are style IDs, values have {label, settings: {conditions, heading: {...}, \"text-basic\": {...}, button: {...}}}"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "styles"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_bricks_color_palette",
+      "description": "Get the Bricks color palette. Returns array of palette groups, each with {id, name, colors: [{id, raw, name}]}. Colors use raw hex values or CSS variable references.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_update_bricks_color_palette",
+      "description": "Update the Bricks color palette (full replace). Pass the complete palette array. Returns previous and current values for rollback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "palette": {
+            "type": "array",
+            "description": "Array of palette groups: [{id, name, colors: [{id, raw, name}]}]. Each color needs id (unique string), raw (hex like \"#ff0000\"), and name."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "palette"
+        ]
+      }
+    },
+    {
+      "name": "respira_get_bricks_typography",
+      "description": "Get Bricks global CSS variables and typography scales. Returns {variables: [{id, name, value, category}], categories: [{id, name, scale?}]}. Categories with a \"scale\" property are typography scales.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_update_bricks_typography",
+      "description": "Update Bricks global CSS variables and typography. Pass variables array and optionally categories. Returns previous and current values for rollback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "variables": {
+            "type": "array",
+            "description": "Array of variable objects: [{id, name, value, category}]"
+          },
+          "categories": {
+            "type": "array",
+            "description": "Optional array of category objects: [{id, name, scale?: {prefix}}]. Categories with scale property define typography scales."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "variables"
+        ]
+      }
+    },
+    {
+      "name": "respira_list_bricks_components",
+      "description": "List all Bricks saved templates/components (reusable element groups). Returns array of {id, title, type, modified}. Components are stored as bricks_template custom post type.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_bricks_component",
+      "description": "Get a Bricks component/template by ID. Returns the full element structure ({id, title, type, elements}) that can be inspected or applied to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "component_id": {
+            "type": "number",
+            "description": "Post ID of the bricks_template to retrieve"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "component_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_apply_bricks_component",
+      "description": "Insert a Bricks component/template into a page. Clones the component elements with new IDs and inserts them at the specified position. Creates a snapshot before writing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "component_id": {
+            "type": "number",
+            "description": "Post ID of the bricks_template to apply"
+          },
+          "post_id": {
+            "type": "number",
+            "description": "Target page/post ID to insert the component into"
+          },
+          "position": {
+            "type": "string",
+            "description": "Where to insert: \"start\" (beginning), \"end\" (default, append), or a numeric index string like \"3\" for specific position"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "component_id",
+          "post_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_search_bricks_elements",
+      "description": "Search across ALL pages and templates for Bricks elements by type, global class, or setting value. Finds every instance of a specific element type, class usage, or setting across your entire site.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "element_type": {
+            "type": "string",
+            "description": "Bricks element type to search for (e.g. \"heading\", \"text-basic\", \"image\", \"button\", \"container\")"
+          },
+          "class_name": {
+            "type": "string",
+            "description": "Global class name to find usage of (e.g. \"card-shadow\"). Resolves name to ID automatically."
+          },
+          "setting_key": {
+            "type": "string",
+            "description": "Setting key to search for (e.g. \"tag\", \"link.url\"). Used with setting_value."
+          },
+          "setting_value": {
+            "type": "string",
+            "description": "Setting value to match (used with setting_key)"
+          },
+          "post_type": {
+            "type": "string",
+            "description": "Limit search to post type: \"page\", \"post\", \"bricks_template\", or \"any\" (default)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum results to return (default: 50, max: 200)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_bricks_health_check",
+      "description": "Run a health check on a Bricks page. Detects orphaned elements, duplicate IDs, broken parent/child references, invalid global class references, empty containers, and heading hierarchy issues. Returns issues sorted by severity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page or post ID to check"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_bricks_detect_acss",
+      "description": "Detect if Automatic.css (ACSS) is installed and active. Returns ACSS version, utility class count, color variables, and spacing variables. Use before importing ACSS classes into the Bricks global class registry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_bricks_import_acss",
+      "description": "Import Automatic.css utility classes into the Bricks global class registry. Skips classes that already exist. Imported classes are tagged with an ACSS source marker. Run detect_acss first to preview what will be imported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, returns what would be imported without actually importing (default: false)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_bricks_query_loops",
+      "description": "Find all Bricks elements that use query loops across the site. Filter by object type (post, term, user) or queried post type (product, page, etc.). Essential for auditing dynamic content and WooCommerce product loops.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "object_type": {
+            "type": "string",
+            "description": "Filter by query object type: \"post\", \"term\", \"user\""
+          },
+          "post_type": {
+            "type": "string",
+            "description": "Filter by queried post type: \"product\", \"page\", \"post\", etc."
+          },
+          "post_id": {
+            "type": "number",
+            "description": "Limit search to a single page/post ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_bricks_style_profile",
+      "description": "Analyze a Bricks page and extract its design patterns: colors used (with frequency), spacing values, typography (fonts, sizes, weights), and global class usage. Use this to learn a page's design system before creating new content that matches.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page or post ID to analyze"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_bricks_design_system",
+      "description": "Export the complete Bricks design system in a single call: global classes, color palette, theme styles, typography/variables, components, element types, and Bricks version. Optimized for AI agent context — use this to understand the full design system before building pages.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sections": {
+            "type": "string",
+            "description": "Comma-separated list of sections to include: \"classes,colors,styles,typography,components,element_types\". Default: all sections."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_list_elementor_widgets",
+      "description": "List all registered Elementor widgets with metadata (name, title, icon, categories, keywords). Optionally filter by category. Use this to discover available widgets before building pages or to find the correct widget_type for get_widget_schema.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Filter by Elementor widget category slug (e.g. \"general\", \"pro-elements\", \"theme-elements\"). Omit for all widgets."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_get_elementor_widget_schema",
+      "description": "Get the full JSON Schema for a specific Elementor widget type — every setting/control it accepts, with types, descriptions, defaults, and allowed values. Use this before update_element to know exactly what settings a widget supports. Example: get schema for \"heading\" to learn it accepts title, tag, alignment, etc.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "widget_type": {
+            "type": "string",
+            "description": "Widget type name (e.g. \"heading\", \"button\", \"image\", \"icon-box\"). Use list_elementor_widgets to find available types."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "widget_type"
+        ]
+      }
+    },
+    {
+      "name": "respira_elementor_design_system",
+      "description": "Export the Elementor design system: global colors (system + custom) and typography (system + custom). Single-call context for AI agents — use this to understand the site's visual language before building pages.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sections": {
+            "type": "string",
+            "description": "Comma-separated sections: \"colors\", \"typography\", or \"all\" (default: \"all\")."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        }
+      }
+    },
+    {
+      "name": "respira_update_elementor_global_colors",
+      "description": "Add or update global colors in the Elementor active kit. Merges by _id — existing colors with matching _id are updated, new _ids are appended. Does not delete existing colors.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "colors": {
+            "type": "array",
+            "description": "Array of color objects to add or update.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "_id": {
+                  "type": "string",
+                  "description": "Unique color ID (e.g. \"brand_primary\", \"accent\"). Must be unique across all custom colors."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Display name (e.g. \"Brand Primary\")"
+                },
+                "color": {
+                  "type": "string",
+                  "description": "Color value — hex (#FF5733), rgba, or hsla format."
+                }
+              },
+              "required": [
+                "_id",
+                "title",
+                "color"
+              ]
+            }
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "colors"
+        ]
+      }
+    },
+    {
+      "name": "respira_update_elementor_global_typography",
+      "description": "Add or update global typography styles in the Elementor active kit. Merges by _id — existing entries with matching _id are updated, new _ids are appended.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "typography": {
+            "type": "array",
+            "description": "Array of typography objects to add or update.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "_id": {
+                  "type": "string",
+                  "description": "Unique typography ID (e.g. \"heading_primary\")"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Display name (e.g. \"Heading Primary\")"
+                },
+                "typography_font_family": {
+                  "type": "string",
+                  "description": "Font family name (e.g. \"Inter\", \"Playfair Display\")"
+                },
+                "typography_font_size": {
+                  "type": "object",
+                  "description": "Font size with unit: { size: 24, unit: \"px\" }",
+                  "properties": {
+                    "size": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": [
+                        "px",
+                        "em",
+                        "rem",
+                        "%",
+                        "vw"
+                      ]
+                    }
+                  }
+                },
+                "typography_font_weight": {
+                  "type": "string",
+                  "description": "Font weight: \"100\"-\"900\", \"normal\", or \"bold\""
+                },
+                "typography_line_height": {
+                  "type": "object",
+                  "description": "Line height: { size: 1.5, unit: \"em\" }",
+                  "properties": {
+                    "size": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "typography_letter_spacing": {
+                  "type": "object",
+                  "description": "Letter spacing: { size: 0.5, unit: \"px\" }",
+                  "properties": {
+                    "size": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "required": [
+                "_id",
+                "title"
+              ]
+            }
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "typography"
+        ]
+      }
+    },
+    {
+      "name": "respira_elementor_add_custom_js",
+      "description": "Add custom JavaScript to an Elementor page by inserting an HTML widget containing a <script> tag into a container. Use for analytics, tracking, animations, or custom interactivity. The JS is stripped of any <script> tags (auto-wrapped).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Parent container element ID to insert the script widget into"
+          },
+          "js": {
+            "type": "string",
+            "description": "JavaScript code (WITHOUT <script> tags — they are added automatically)"
+          },
+          "position": {
+            "type": "number",
+            "description": "Insert position within parent (-1 = append at end). Default: -1"
+          },
+          "wrap_dom_ready": {
+            "type": "boolean",
+            "description": "Wrap code in DOMContentLoaded listener for safe DOM access. Default: false"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "parent_id",
+          "js"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_stock_image",
+      "description": "Search for a stock image, download it to the Media Library, and add it as an image widget to a page — all in one call. Builder-agnostic: works with Elementor, Bricks, Beaver Builder, etc. Saves 3 separate tool calls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the image to"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Parent container element ID"
+          },
+          "query": {
+            "type": "string",
+            "description": "Image search keywords (e.g. \"modern office workspace\", \"happy team meeting\")"
+          },
+          "index": {
+            "type": "number",
+            "description": "Which search result to use (0 = best match). Default: 0"
+          },
+          "position": {
+            "type": "number",
+            "description": "Insert position within parent (-1 = append). Default: -1"
+          },
+          "alt_text": {
+            "type": "string",
+            "description": "Alt text for the image (auto-generated from title if omitted)"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Image caption (CC attribution auto-added if omitted)"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "description": "Filter by aspect ratio",
+            "enum": [
+              "wide",
+              "tall",
+              "square"
+            ]
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "parent_id",
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "respira_validate_elementor_json",
+      "description": "Validate Elementor JSON for rendering fidelity. Catches common conversion issues: missing _margin (causes WordPress default margin injection), missing typography_typography:\"custom\" flag (causes Elementor to silently ignore fonts), column width collapsing, boxed-vs-fullwidth confusion, and missing mobile breakpoints. Use this to validate JSON from any pipeline (HTML-to-Elementor, manual builds, or external converters) before injection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "json": {
+            "type": "array",
+            "description": "Elementor content tree (array of elements with type, settings, elements). This is the same format used by inject_builder_content.",
+            "items": {
+              "type": "object"
+            }
+          },
+          "auto_fix": {
+            "type": "boolean",
+            "description": "If true, automatically fix error-severity issues and return the corrected JSON. Default: false (validate only)."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "json"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_heading",
+      "description": "Add a heading widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "title": {
+            "type": "string",
+            "description": "Heading text"
+          },
+          "tag": {
+            "type": "string",
+            "description": "HTML tag (h1-h6)",
+            "enum": [
+              "h1",
+              "h2",
+              "h3",
+              "h4",
+              "h5",
+              "h6"
+            ]
+          },
+          "alignment": {
+            "type": "string",
+            "enum": [
+              "left",
+              "center",
+              "right"
+            ]
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_text",
+      "description": "Add a text/paragraph widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "content": {
+            "type": "string",
+            "description": "Text content (HTML allowed)"
+          },
+          "alignment": {
+            "type": "string",
+            "enum": [
+              "left",
+              "center",
+              "right"
+            ]
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_button",
+      "description": "Add a button widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "text": {
+            "type": "string",
+            "description": "Button label"
+          },
+          "url": {
+            "type": "string",
+            "description": "Link URL"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary"
+            ]
+          },
+          "alignment": {
+            "type": "string",
+            "enum": [
+              "left",
+              "center",
+              "right"
+            ]
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_image",
+      "description": "Add an image widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "src": {
+            "type": "string",
+            "description": "Image URL or media library attachment URL"
+          },
+          "alt": {
+            "type": "string",
+            "description": "Alt text"
+          },
+          "width": {
+            "type": "string",
+            "description": "Image width"
+          },
+          "height": {
+            "type": "string",
+            "description": "Image height"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "src"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_section",
+      "description": "Add a section container to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "background_color": {
+            "type": "string",
+            "description": "Background color (hex)"
+          },
+          "padding": {
+            "type": "string",
+            "description": "CSS padding value"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_video",
+      "description": "Add a video widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "url": {
+            "type": "string",
+            "description": "Video URL (YouTube, Vimeo, or self-hosted)"
+          },
+          "autoplay": {
+            "type": "boolean",
+            "description": "Auto-play video"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_divider",
+      "description": "Add a divider/horizontal rule to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "solid",
+              "dashed",
+              "dotted",
+              "double"
+            ]
+          },
+          "color": {
+            "type": "string",
+            "description": "Divider color (hex)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_spacer",
+      "description": "Add vertical spacing to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "height": {
+            "type": "string",
+            "description": "Spacer height (e.g. \"50px\")"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_icon",
+      "description": "Add an icon widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "icon": {
+            "type": "string",
+            "description": "Icon name (e.g. \"fa fa-star\")"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "sm",
+              "md",
+              "lg",
+              "xl"
+            ]
+          },
+          "color": {
+            "type": "string",
+            "description": "Icon color (hex)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "icon"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_icon_list",
+      "description": "Add an icon list widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "items": {
+            "type": "array",
+            "description": "List items: [{icon: \"fa fa-check\", text: \"Item text\"}]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "items"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_social_icons",
+      "description": "Add social media icons to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "networks": {
+            "type": "array",
+            "description": "Social networks: [{network: \"facebook\", url: \"...\"}]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "networks"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_form",
+      "description": "Add a contact form to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "fields": {
+            "type": "array",
+            "description": "Form fields: [{type: \"text\", label: \"Name\", required: true}]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "submit_text": {
+            "type": "string",
+            "description": "Submit button text"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "fields"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_map",
+      "description": "Add a Google Maps widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "address": {
+            "type": "string",
+            "description": "Address or coordinates"
+          },
+          "zoom": {
+            "type": "number",
+            "description": "Zoom level (1-20)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "address"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_counter",
+      "description": "Add a number counter widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "number": {
+            "type": "number",
+            "description": "Target number to count to"
+          },
+          "title": {
+            "type": "string",
+            "description": "Counter label"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Prefix (e.g. \"$\")"
+          },
+          "suffix": {
+            "type": "string",
+            "description": "Suffix (e.g. \"+\")"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "number"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_progress_bar",
+      "description": "Add a progress bar widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "title": {
+            "type": "string",
+            "description": "Bar label"
+          },
+          "percentage": {
+            "type": "number",
+            "description": "Progress percentage (0-100)"
+          },
+          "color": {
+            "type": "string",
+            "description": "Bar color (hex)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "title",
+          "percentage"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_testimonial",
+      "description": "Add a testimonial widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "content": {
+            "type": "string",
+            "description": "Testimonial text"
+          },
+          "name": {
+            "type": "string",
+            "description": "Author name"
+          },
+          "title": {
+            "type": "string",
+            "description": "Author title/role"
+          },
+          "image": {
+            "type": "string",
+            "description": "Author photo URL"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "content",
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_tabs",
+      "description": "Add a tabbed content widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "tabs": {
+            "type": "array",
+            "description": "Tab definitions: [{title: \"Tab 1\", content: \"Content...\"}]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "tabs"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_accordion",
+      "description": "Add an accordion/FAQ widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "items": {
+            "type": "array",
+            "description": "Accordion items: [{title: \"Question\", content: \"Answer\"}]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "items"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_toggle",
+      "description": "Add a toggle (collapsible content) widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "title": {
+            "type": "string",
+            "description": "Toggle header text"
+          },
+          "content": {
+            "type": "string",
+            "description": "Toggle body content"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "title",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_alert",
+      "description": "Add an alert/notice widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "message": {
+            "type": "string",
+            "description": "Alert message text"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "info",
+              "success",
+              "warning",
+              "danger"
+            ]
+          },
+          "dismissible": {
+            "type": "boolean",
+            "description": "Whether alert can be dismissed"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_html",
+      "description": "Add a raw HTML widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "content": {
+            "type": "string",
+            "description": "Raw HTML content"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_menu",
+      "description": "Add a navigation menu widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "menu_id": {
+            "type": "number",
+            "description": "WordPress menu ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "menu_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_sidebar",
+      "description": "Add a sidebar widget area to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "sidebar_id": {
+            "type": "string",
+            "description": "Sidebar/widget area ID"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "sidebar_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_search",
+      "description": "Add a search form widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "placeholder": {
+            "type": "string",
+            "description": "Placeholder text"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_gallery",
+      "description": "Add an image gallery widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "images": {
+            "type": "array",
+            "description": "Array of image objects: [{url: \"...\", alt: \"...\"}]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "columns": {
+            "type": "number",
+            "description": "Number of columns (1-10)"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "images"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_slider",
+      "description": "Add an image/content slider to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "slides": {
+            "type": "array",
+            "description": "Slide definitions: [{image: \"...\", title: \"...\", description: \"...\"}]",
+            "items": {
+              "type": "object"
+            }
+          },
+          "autoplay": {
+            "type": "boolean",
+            "description": "Auto-advance slides"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "slides"
+        ]
+      }
+    },
+    {
+      "name": "respira_add_pricing_table",
+      "description": "Add a pricing table widget to a page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Page/post ID to add the widget to"
+          },
+          "title": {
+            "type": "string",
+            "description": "Plan name"
+          },
+          "price": {
+            "type": "string",
+            "description": "Price amount (e.g. \"29\")"
+          },
+          "period": {
+            "type": "string",
+            "description": "Billing period (e.g. \"/mo\")"
+          },
+          "features": {
+            "type": "array",
+            "description": "Feature list",
+            "items": {
+              "type": "string"
+            }
+          },
+          "button_text": {
+            "type": "string",
+            "description": "CTA button text"
+          },
+          "button_url": {
+            "type": "string",
+            "description": "CTA button URL"
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Optional. Override the active site for this single call without changing the global current site. Use this when running multiple Cowork chats against different WordPress sites in parallel so each chat can pin its own target site per tool call."
+          }
+        },
+        "required": [
+          "post_id",
+          "title",
+          "price"
+        ]
+      }
+    }
+  ]
+}

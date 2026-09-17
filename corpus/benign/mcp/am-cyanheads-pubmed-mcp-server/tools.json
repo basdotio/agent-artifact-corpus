@@ -1,0 +1,425 @@
+{
+  "package": "@cyanheads/pubmed-mcp-server",
+  "tools": [
+    {
+      "name": "pubmed_search_articles",
+      "description": "Search PubMed with full query syntax, filters, and date ranges. Returns PMIDs and optional brief summaries. Supports field-specific filters (author, journal, MeSH terms), common filters (language, species, free full text), and pagination via offset for paging through large result sets.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "PubMed search query (supports full NCBI syntax)"
+          },
+          "maxResults": {
+            "default": 20,
+            "description": "Maximum results to return",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "offset": {
+            "default": 0,
+            "description": "Result offset for pagination (0-based)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sort": {
+            "default": "relevance",
+            "description": "Sort order: relevance (default), pub_date (newest first), author, or journal",
+            "type": "string",
+            "enum": [
+              "relevance",
+              "pub_date",
+              "author",
+              "journal"
+            ]
+          },
+          "dateRange": {
+            "description": "Filter by date range. The filter is applied only when both `minDate` and `maxDate` are non-empty; either one empty disables the entire date range.",
+            "type": "object",
+            "properties": {
+              "minDate": {
+                "type": "string",
+                "pattern": "^$|^\\d{4}([/\\-.]\\d{1,2}([/\\-.]\\d{1,2})?)?$",
+                "description": "Start date (YYYY/MM/DD, YYYY/MM, or YYYY); empty string disables this bound"
+              },
+              "maxDate": {
+                "type": "string",
+                "pattern": "^$|^\\d{4}([/\\-.]\\d{1,2}([/\\-.]\\d{1,2})?)?$",
+                "description": "End date (YYYY/MM/DD, YYYY/MM, or YYYY); empty string disables this bound"
+              },
+              "dateType": {
+                "default": "pdat",
+                "description": "Date type: pdat (publication), mdat (modification), edat (entrez)",
+                "type": "string",
+                "enum": [
+                  "pdat",
+                  "mdat",
+                  "edat"
+                ]
+              }
+            },
+            "required": [
+              "minDate",
+              "maxDate"
+            ]
+          },
+          "publicationTypes": {
+            "description": "Filter by publication type (e.g. \"Review\", \"Clinical Trial\", \"Meta-Analysis\"). Multiple values are OR'd — any match qualifies.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "author": {
+            "description": "Filter by author name (e.g. \"Smith J\")",
+            "type": "string"
+          },
+          "journal": {
+            "description": "Filter by journal name",
+            "type": "string"
+          },
+          "meshTerms": {
+            "description": "Filter by MeSH terms. Multiple terms are AND'd — all must match.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "language": {
+            "description": "Filter by language (e.g. \"english\")",
+            "type": "string"
+          },
+          "hasAbstract": {
+            "description": "Only include articles with abstracts",
+            "type": "boolean"
+          },
+          "freeFullText": {
+            "description": "Only include free full text articles",
+            "type": "boolean"
+          },
+          "species": {
+            "description": "Filter by species",
+            "type": "string",
+            "enum": [
+              "humans",
+              "animals"
+            ]
+          },
+          "summaryCount": {
+            "default": 0,
+            "description": "Fetch brief summaries for top N results (0 = PMIDs only)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "pubmed_fetch_articles",
+      "description": "Fetch full article metadata by PubMed IDs. Returns detailed article information including abstract, authors, journal, MeSH terms.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "pmids": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            },
+            "description": "PubMed IDs to fetch"
+          },
+          "includeMesh": {
+            "default": true,
+            "description": "Include MeSH terms",
+            "type": "boolean"
+          },
+          "includeGrants": {
+            "default": false,
+            "description": "Include grant information",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pmids"
+        ]
+      }
+    },
+    {
+      "name": "pubmed_fetch_fulltext",
+      "description": "Fetch full-text articles from PubMed Central with structured sections and references. When a PMID has no PMC copy, transparently falls back to publisher-hosted or institutional open-access copies as HTML-as-Markdown or PDF-as-text. Provide exactly one of `pmcids` (PMC IDs directly) or `pmids` (PubMed IDs, auto-resolved) — not both, not neither.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "pmcids": {
+            "description": "PMC IDs to fetch (e.g. [\"PMC9575052\"]). Provide exactly one of `pmcids` or `pmids`.",
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pmids": {
+            "description": "PubMed IDs. Provide exactly one of `pmcids` or `pmids`. Articles in PMC are returned as structured JATS; articles not in PMC are retrieved from Unpaywall when UNPAYWALL_EMAIL is set and a DOI is available.",
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            }
+          },
+          "includeReferences": {
+            "default": false,
+            "description": "Include reference list. Applies to `source=pmc` results only.",
+            "type": "boolean"
+          },
+          "maxSections": {
+            "description": "Maximum top-level body sections. Applies to `source=pmc` results only.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "sections": {
+            "description": "Filter to specific sections by title, case-insensitive (e.g. [\"Introduction\", \"Methods\", \"Results\", \"Discussion\"]). Applies to `source=pmc` results only.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "pubmed_format_citations",
+      "description": "Get formatted citations for PubMed articles in one or more styles (APA, MLA, BibTeX, RIS). Pass a single style as a string or multiple as an array.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "pmids": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            },
+            "description": "PubMed IDs to cite"
+          },
+          "format": {
+            "default": "apa",
+            "description": "Citation format(s) to generate — single style as a string or multiple as an array. Allowed values: apa, mla, bibtex, ris.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "apa",
+                  "mla",
+                  "bibtex",
+                  "ris"
+                ],
+                "description": "Single citation style. One of: apa, mla, bibtex, ris."
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "apa",
+                    "mla",
+                    "bibtex",
+                    "ris"
+                  ]
+                },
+                "description": "Multiple citation styles to generate. Each entry: apa, mla, bibtex, or ris."
+              }
+            ]
+          }
+        },
+        "required": [
+          "pmids"
+        ]
+      }
+    },
+    {
+      "name": "pubmed_find_related",
+      "description": "Find articles related to a source article — similar content, citing articles, or references.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "pmid": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Source PubMed ID"
+          },
+          "relationship": {
+            "default": "similar",
+            "description": "Relationship type: similar (content-based), cited_by (articles citing this one), references (articles this one cites)",
+            "type": "string",
+            "enum": [
+              "similar",
+              "cited_by",
+              "references"
+            ]
+          },
+          "maxResults": {
+            "default": 10,
+            "description": "Maximum related articles",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "pmid"
+        ]
+      }
+    },
+    {
+      "name": "pubmed_spell_check",
+      "description": "Spell-check a query and get NCBI's suggested correction. Useful for refining search queries.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 2,
+            "description": "PubMed search query to spell-check"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "pubmed_lookup_mesh",
+      "description": "Search and explore the MeSH (Medical Subject Headings) controlled vocabulary. Returns descriptor records with tree numbers, scope notes, and entry terms.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "MeSH descriptor name or free-text term to look up"
+          },
+          "maxResults": {
+            "default": 10,
+            "description": "Maximum results",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "includeDetails": {
+            "default": true,
+            "description": "Fetch full MeSH records (scope notes, tree numbers, entry terms)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "pubmed_lookup_citation",
+      "description": "Look up PubMed IDs from partial bibliographic citations. Useful when you have a reference (journal, year, volume, page, author) and need the PMID — deterministic citation matching, more reliable than free-text search for structured references. Each citation must include at least one bibliographic field (journal, year, volume, firstPage, or authorName); more fields = better match accuracy.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "citations": {
+            "minItems": 1,
+            "maxItems": 25,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "journal": {
+                  "description": "Journal title or ISO abbreviation (e.g., \"proc natl acad sci u s a\")",
+                  "type": "string"
+                },
+                "year": {
+                  "description": "Publication year (e.g., \"1991\")",
+                  "type": "string"
+                },
+                "volume": {
+                  "description": "Volume number",
+                  "type": "string"
+                },
+                "firstPage": {
+                  "description": "First page number",
+                  "type": "string"
+                },
+                "authorName": {
+                  "description": "Author name, typically \"lastname initials\" (e.g., \"mann bj\")",
+                  "type": "string"
+                },
+                "key": {
+                  "description": "Arbitrary label to track this citation in results. Auto-assigned if omitted.",
+                  "type": "string"
+                }
+              },
+              "description": "Citation to match against PubMed. Must include at least one bibliographic field (journal, year, volume, firstPage, or authorName)."
+            },
+            "description": "Citations to look up. More fields = better match accuracy."
+          }
+        },
+        "required": [
+          "citations"
+        ]
+      }
+    },
+    {
+      "name": "pubmed_convert_ids",
+      "description": "Convert between article identifiers (DOI, PMID, PMCID). Accepts up to 50 IDs of a single type per request. Only resolves articles indexed in PubMed Central — for articles not in PMC, use pubmed_search_articles instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Article identifiers to convert. All IDs must be the same type. DOIs: \"10.1093/nar/gks1195\", PMIDs: \"23193287\", PMCIDs: \"PMC3531190\"."
+          },
+          "idType": {
+            "type": "string",
+            "enum": [
+              "pmcid",
+              "pmid",
+              "doi"
+            ],
+            "description": "The type of IDs being submitted. Required so the API can unambiguously resolve them."
+          }
+        },
+        "required": [
+          "ids",
+          "idType"
+        ]
+      }
+    }
+  ]
+}

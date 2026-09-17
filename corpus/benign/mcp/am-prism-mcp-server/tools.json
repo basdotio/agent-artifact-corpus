@@ -1,0 +1,1185 @@
+{
+  "package": "prism-mcp-server",
+  "tools": [
+    {
+      "name": "brave_web_search",
+      "description": "Performs a web search using the Brave Search API, ideal for general queries, news, articles, and online content. Use this for broad information gathering, recent events, or when you need diverse web sources. Supports pagination, content filtering, and freshness controls. Maximum 20 results per request, with offset for pagination. ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query (max 400 chars, 50 words)"
+          },
+          "count": {
+            "type": "number",
+            "description": "Number of results (1-20, default 10)",
+            "default": 10
+          },
+          "offset": {
+            "type": "number",
+            "description": "Pagination offset (max 9, default 0)",
+            "default": 0
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "brave_web_search_code_mode",
+      "description": "Performs a web search using the Brave Search API, and then runs a custom JavaScript code string against the RAW API RESPONSE in a secure QuickJS sandbox. This drastically reduces context window usage by only returning the output of your script. Use this for broad information gathering, recent events, or when you need diverse web sources and only need specific parts of the result. Your script should read the 'DATA' global variable (a JSON string of the API response), process it, and use console.log() to print the desired output.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query (max 400 chars, 50 words)"
+          },
+          "count": {
+            "type": "number",
+            "description": "Number of results (1-20, default 10)",
+            "default": 10
+          },
+          "offset": {
+            "type": "number",
+            "description": "Pagination offset (max 9, default 0)",
+            "default": 0
+          },
+          "code": {
+            "type": "string",
+            "description": "JavaScript code to execute against the 'DATA' variable. E.g. `const r = JSON.parse(DATA); console.log(r.web.results.map(x => x.title).join(', '));`"
+          },
+          "language": {
+            "type": "string",
+            "description": "Language of the code. Only 'javascript' is supported.",
+            "default": "javascript"
+          }
+        },
+        "required": [
+          "query",
+          "code"
+        ]
+      }
+    },
+    {
+      "name": "brave_local_search",
+      "description": "Searches for local businesses and places using Brave's Local Search API. Best for queries related to physical locations, businesses, restaurants, services, etc. Returns detailed information including:\n- Business names and addresses\n- Ratings and review counts\n- Phone numbers and opening hours\nUse this when the query implies 'near me' or mentions specific locations. Automatically falls back to web search if no local results are found.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Local search query (e.g. 'pizza near Central Park')"
+          },
+          "count": {
+            "type": "number",
+            "description": "Number of results (1-20, default 5)",
+            "default": 5
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "brave_local_search_code_mode",
+      "description": "Performs a local search using Brave APIs, and then runs a custom JavaScript code string against the RAW API RESPONSE in a secure QuickJS sandbox. This reduces context window usage by only returning the output of your script. Use this for local/business lookups when you only need specific fields from large local payloads. Your script should read the 'DATA' global variable (a JSON string payload) and use console.log() to print the desired output.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Local search query (e.g. 'pizza near Central Park')"
+          },
+          "count": {
+            "type": "number",
+            "description": "Number of results (1-20, default 5)",
+            "default": 5
+          },
+          "code": {
+            "type": "string",
+            "description": "JavaScript code to execute against the 'DATA' variable."
+          },
+          "language": {
+            "type": "string",
+            "description": "Language of the code. Only 'javascript' is supported.",
+            "default": "javascript"
+          }
+        },
+        "required": [
+          "query",
+          "code"
+        ]
+      }
+    },
+    {
+      "name": "code_mode_transform",
+      "description": "A universal code-mode transformer. Takes RAW TEXT or JSON output from ANY MCP tool (GitHub, Firecrawl, chrome-devtools, camoufox, codegraphcontext, videoMcp, arxiv, etc.) and runs a custom JavaScript code string against it in a secure QuickJS sandbox. Use this as a second step after calling any tool that returns large payloads — pass the raw output as 'data' and a JS extraction script as 'code'. Your script reads the 'DATA' global variable (a string of the tool output) and uses console.log() to print only the fields you need. NEW in v2.1: Pass 'template' instead of 'code' for instant extraction. Available templates: github_issues, github_prs, jira_tickets, dom_links, dom_headings, api_endpoints, slack_messages, csv_summary. Example: { data: '<raw JSON>', template: 'github_issues' } — no custom code needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "string",
+            "description": "The raw text or JSON output from another MCP tool to process."
+          },
+          "code": {
+            "type": "string",
+            "description": "JavaScript code to execute. The 'DATA' global variable contains the raw data string. Use console.log() to output your extraction. Optional if using a template."
+          },
+          "template": {
+            "type": "string",
+            "description": "Name of a pre-built extraction template. Use instead of writing custom 'code'. Options: github_issues, github_prs, jira_tickets, dom_links, dom_headings, api_endpoints, slack_messages, csv_summary."
+          },
+          "language": {
+            "type": "string",
+            "description": "Language of the code. Only 'javascript' is supported.",
+            "default": "javascript"
+          },
+          "source_tool": {
+            "type": "string",
+            "description": "Optional. Name of the MCP tool that produced the data (for logging/metrics only)."
+          }
+        },
+        "required": [
+          "data"
+        ]
+      }
+    },
+    {
+      "name": "brave_answers",
+      "description": "Returns direct AI answers grounded in Brave Search using Brave AI Grounding. Uses an OpenAI-compatible chat completions endpoint and is best for concise answer generation with live web grounding.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Question or prompt to answer"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model name for Brave AI Grounding (default: brave)",
+            "default": "brave"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "gemini_research_paper_analysis",
+      "description": "Performs in-depth analysis of research papers using Google's Gemini-2.0-flash model. Ideal for academic research, literature reviews, and deep understanding of scientific papers. Can extract key findings, provide critical evaluation, summarize complex research, and place papers within the broader research landscape. Best for long-form academic content that requires expert analysis.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paperContent": {
+            "type": "string",
+            "description": "The full text of the research paper to analyze"
+          },
+          "analysisType": {
+            "type": "string",
+            "description": "Type of analysis to perform (summary, critique, literature review, key findings, or comprehensive)",
+            "enum": [
+              "summary",
+              "critique",
+              "literature review",
+              "key findings",
+              "comprehensive"
+            ],
+            "default": "comprehensive"
+          },
+          "additionalContext": {
+            "type": "string",
+            "description": "Optional additional context or specific questions to guide the analysis"
+          }
+        },
+        "required": [
+          "paperContent"
+        ]
+      }
+    },
+    {
+      "name": "prism_infer",
+      "description": "Run an inference on a local prism-coder model (Ollama) to save cloud tokens. Picks the largest viable tier — 32B / 14B / 8B / 1.7B — based on free RAM at call time, clamped by `model_ceiling` and what is actually pulled in Ollama. Falls through to the synalux portal cloud cascade (14B → 32B → Claude Opus 4.7) only when local is unviable AND `cloud_fallback=true`. Use this for code generation, summarisation, classification, or any synth task you would otherwise hand to the cloud model — it costs $0 when the local hit succeeds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "The user prompt. Required."
+          },
+          "system": {
+            "type": "string",
+            "description": "Optional system instruction prepended to the prompt."
+          },
+          "max_tokens": {
+            "type": "number",
+            "description": "Max output tokens (default 1024, hard cap 8192).",
+            "default": 1024
+          },
+          "temperature": {
+            "type": "number",
+            "description": "Sampling temperature, 0 = deterministic (default 0).",
+            "default": 0
+          },
+          "model_ceiling": {
+            "type": "string",
+            "enum": [
+              "32b",
+              "14b",
+              "8b",
+              "1b7"
+            ],
+            "description": "Cap the largest tier the picker may select. e.g. '14b' forbids 32B even if RAM allows."
+          },
+          "cloud_fallback": {
+            "type": "boolean",
+            "description": "If true, fall through to synalux portal cascade on local fail. Default false — token-saving mode is the point of this tool.",
+            "default": false
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "Override per-call timeout. Default scales with model size: 32B=120s, 14B=60s, 8B=30s, 1.7B=15s."
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    },
+    {
+      "name": "session_save_ledger",
+      "description": "Save an immutable session log entry to the session ledger. Use this at the END of each work session to record what was accomplished. The ledger is append-only — entries cannot be updated or deleted. This creates a permanent audit trail of all agent work sessions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier (e.g. 'bcba-private', 'my-app'). Used to group and filter sessions."
+          },
+          "conversation_id": {
+            "type": "string",
+            "description": "Unique conversation/session identifier."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Brief summary of what was accomplished in this session."
+          },
+          "todos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional list of open TODO items remaining after this session."
+          },
+          "files_changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional list of files created or modified during this session."
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional list of key decisions made during this session."
+          },
+          "role": {
+            "type": "string",
+            "description": "Optional. Agent role for Hivemind scoping (e.g., 'dev', 'qa', 'pm'). Omit to let the server auto-resolve from dashboard settings."
+          }
+        },
+        "required": [
+          "project",
+          "conversation_id",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "session_save_handoff",
+      "description": "Upsert the latest project handoff state for the next session to consume on boot. This is the 'live context' that gets loaded when a new session starts. Calling this replaces the previous handoff for the same project (upsert on project).\n\n**v5.4 CRDT Merge**: On version conflict, a CRDT OR-Map engine automatically merges your changes with concurrent work (Add-Wins OR-Set for arrays, Last-Writer-Wins for scalars). Pass expected_version to enable concurrency control.\n\n**v0.4.0 OCC**: If you received a version number from session_load_context, /resume_session prompt, or memory resource attachment, you MUST pass it as expected_version to prevent overwriting another session's changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier — must match the project used in session_save_ledger."
+          },
+          "expected_version": {
+            "type": "integer",
+            "description": "v0.4.0: The version number you received when loading context. Pass this to enable optimistic concurrency control. If omitted, version check is skipped (backward compatible)."
+          },
+          "open_todos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Current open TODO items that need attention in the next session."
+          },
+          "active_branch": {
+            "type": "string",
+            "description": "Git branch or context the next session should resume on."
+          },
+          "last_summary": {
+            "type": "string",
+            "description": "Summary of the most recent session — used for quick context recovery."
+          },
+          "key_context": {
+            "type": "string",
+            "description": "Free-form critical context the next session needs to know."
+          },
+          "role": {
+            "type": "string",
+            "description": "Optional. Agent role for Hivemind scoping (e.g., 'dev', 'qa', 'pm'). Omit to let the server auto-resolve from dashboard settings."
+          },
+          "disable_merge": {
+            "type": "boolean",
+            "description": "Set to true to disable automatic CRDT merging and fail strictly on version conflict (original OCC behavior). Default: false."
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "session_load_context",
+      "description": "Load session context for a project using progressive context loading. Use this at the START of a new session to recover previous work state. Three levels available:\n- **quick**: Just the latest project state — keywords and open TODOs (~50 tokens)\n- **standard**: Project state plus recent session summaries and decisions (~200 tokens, recommended)\n- **deep**: Everything — full session history with all files changed, TODOs, and decisions (~1000+ tokens)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier to load context for."
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard",
+              "deep"
+            ],
+            "description": "How much context to load: 'quick' (just TODOs), 'standard' (recommended — includes recent summaries), or 'deep' (full history). Default: standard."
+          },
+          "role": {
+            "type": "string",
+            "description": "Optional. Agent role for Hivemind scoping (e.g., 'dev', 'qa', 'pm'). Omit to let the server auto-resolve from dashboard settings. When set, also injects active_team roster."
+          },
+          "max_tokens": {
+            "type": "integer",
+            "description": "Maximum token budget for context response. Uses 1 token ≈ 4 chars heuristic. When set, the response is truncated to fit within the budget. Default: unlimited."
+          },
+          "toolAction": {
+            "type": "string",
+            "description": "Brief 2-5 word summary of what this tool is doing. Capitalize like a sentence."
+          },
+          "toolSummary": {
+            "type": "string",
+            "description": "Brief 2-5 word noun phrase describing what this tool call is about."
+          }
+        },
+        "required": [
+          "project",
+          "toolAction",
+          "toolSummary"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_search",
+      "description": "Search accumulated knowledge across all sessions by keywords, category, or free text. The knowledge base grows automatically as sessions are saved — keywords are extracted from every ledger and handoff entry. Use this to find related past work, decisions, and context from previous sessions.\n\nCategories available: debugging, architecture, deployment, testing, configuration, api-integration, data-migration, security, performance, documentation, ai-ml, ui-frontend, resume",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Optional project filter. If omitted, searches across all projects."
+          },
+          "query": {
+            "type": "string",
+            "description": "Free-text search query. Searched against session summaries using full-text search."
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional category filter (e.g. 'debugging', 'architecture', 'ai-ml'). Filters results to sessions in this category."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum results to return (default: 10, max: 50).",
+            "default": 10
+          },
+          "enable_trace": {
+            "type": "boolean",
+            "description": "If true, returns a separate MEMORY TRACE content block with search strategy, latency breakdown, and scoring metadata for explainability. Default: false."
+          },
+          "activation": {
+            "type": "object",
+            "description": "Configuration for ACT-R inspired Spreading Activation. Use this to find structurally related memories beyond direct semantic/keyword hits.",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "Enable spreading activation (default: false)."
+              },
+              "iterations": {
+                "type": "integer",
+                "description": "Number of propagation loops (default: 3)."
+              },
+              "spreadFactor": {
+                "type": "number",
+                "description": "Decay multiplier per step (default: 0.8)."
+              },
+              "lateralInhibition": {
+                "type": "integer",
+                "description": "Maximum nodes returned (default: 7)."
+              }
+            }
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_forget",
+      "description": "Selectively forget (delete) accumulated knowledge entries. Like a brain pruning bad memories — remove outdated, incorrect, or irrelevant session entries to keep the knowledge base clean and relevant.\n\nForget modes:\n- **By project**: Clear all knowledge for a specific project\n- **By category**: Remove entries matching a category (e.g. 'debugging')\n- **By age**: Forget entries older than N days\n- **Full reset**: Wipe everything (requires confirm_all=true)\n\n⚠️ This permanently deletes ledger entries. Handoff state is preserved unless explicitly cleared.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project to forget entries for. Required unless using confirm_all."
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional: only forget entries in this category (e.g. 'debugging', 'resume')."
+          },
+          "older_than_days": {
+            "type": "integer",
+            "description": "Optional: only forget entries older than this many days."
+          },
+          "clear_handoff": {
+            "type": "boolean",
+            "description": "Also clear the handoff (live state) for this project. Default: false."
+          },
+          "confirm_all": {
+            "type": "boolean",
+            "description": "Set to true to confirm wiping ALL entries for the project (safety flag)."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, only count what would be deleted without actually deleting. Default: false."
+          }
+        }
+      }
+    },
+    {
+      "name": "session_compact_ledger",
+      "description": "Auto-compact old session ledger entries by rolling them up into AI-generated summaries. This prevents the ledger from growing indefinitely and keeps deep context loading fast.\n\nHow it works:\n1. Finds projects with more entries than the threshold\n2. Summarizes old entries using Gemini (keeps recent entries intact)\n3. Inserts a rollup entry and archives the originals (soft-delete)\n\nUse dry_run=true to preview what would be compacted without executing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Optional: compact a specific project. If omitted, auto-detects all candidates."
+          },
+          "threshold": {
+            "type": "integer",
+            "description": "Minimum entries before compaction triggers (default: 50).",
+            "default": 50
+          },
+          "keep_recent": {
+            "type": "integer",
+            "description": "Number of recent entries to keep intact (default: 10).",
+            "default": 10
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, only preview what would be compacted without executing. Default: false."
+          }
+        }
+      }
+    },
+    {
+      "name": "session_search_memory",
+      "description": "Search session history semantically (by meaning, not just keywords). Uses vector embeddings to find sessions with similar context, even when the exact wording differs. Requires pgvector extension in Supabase.\n\nComplements knowledge_search (keyword-based) — use this when keyword search returns no results or when the query is phrased differently from stored summaries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language search query describing what you're looking for."
+          },
+          "project": {
+            "type": "string",
+            "description": "Optional: limit search to a specific project."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum results to return (default: 5, max: 20).",
+            "default": 5
+          },
+          "similarity_threshold": {
+            "type": "number",
+            "description": "Minimum similarity score 0-1 (default: 0.7). Higher = more relevant, fewer results.",
+            "default": 0.7
+          },
+          "enable_trace": {
+            "type": "boolean",
+            "description": "If true, returns a separate MEMORY TRACE content block with search strategy, latency breakdown (embedding vs storage), and scoring metadata. Default: false."
+          },
+          "context_boost": {
+            "type": "boolean",
+            "description": "If true, appends current project and working context to the search query before embedding generation, naturally biasing results toward contextually relevant memories. Useful when searching within a specific project context. Default: false."
+          },
+          "activation": {
+            "type": "object",
+            "description": "Configuration for ACT-R inspired Spreading Activation. Use this to find structurally related memories beyond direct semantic/keyword hits.",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "Enable spreading activation (default: false)."
+              },
+              "iterations": {
+                "type": "integer",
+                "description": "Number of propagation loops (default: 3)."
+              },
+              "spreadFactor": {
+                "type": "number",
+                "description": "Decay multiplier per step (default: 0.8)."
+              },
+              "lateralInhibition": {
+                "type": "integer",
+                "description": "Maximum nodes returned (default: 7)."
+              }
+            }
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "memory_history",
+      "description": "View the timeline of past memory states for this project. Use this BEFORE memory_checkout to find the correct version to revert to. Shows version numbers, timestamps, and summaries of each saved state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier to view history for."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of history entries to return (default: 10, max: 50).",
+            "default": 10
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "memory_checkout",
+      "description": "Time travel! Restores the project's memory to a specific past version. This overwrites the current handoff state with the historical snapshot, like a Git revert — the version number moves forward (no data is lost). Call memory_history first to find the correct target_version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier to revert."
+          },
+          "target_version": {
+            "type": "number",
+            "description": "The version number to restore from history (get this from memory_history)."
+          }
+        },
+        "required": [
+          "project",
+          "target_version"
+        ]
+      }
+    },
+    {
+      "name": "session_save_image",
+      "description": "Save a local image file into the project's permanent visual memory. Use this to remember UI states, diagrams, architecture graphs, or bug screenshots. The image is copied into Prism's media vault and indexed in the handoff metadata. On the next session_load_context, the agent will see a lightweight index of available images.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier — must match an existing project."
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or relative path to the image file (png, jpg, jpeg, webp, gif, svg)."
+          },
+          "description": {
+            "type": "string",
+            "description": "What does this image show? Used for indexing and context display."
+          }
+        },
+        "required": [
+          "project",
+          "file_path",
+          "description"
+        ]
+      }
+    },
+    {
+      "name": "session_view_image",
+      "description": "Retrieve an image from visual memory using its ID. Returns the image as Base64 inline content for the LLM to analyze. Use session_load_context first to see available image IDs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier."
+          },
+          "image_id": {
+            "type": "string",
+            "description": "The short image ID (e.g., '8f2a1b3c') from the visual memory index."
+          }
+        },
+        "required": [
+          "project",
+          "image_id"
+        ]
+      }
+    },
+    {
+      "name": "session_health_check",
+      "description": "Run integrity checks on the agent's memory (like fsck for filesystems). Scans for missing embeddings, duplicate entries, orphaned handoffs, and stale rollups.\n\nChecks performed:\n1. **Missing embeddings** — entries that can't be found via semantic search\n2. **Duplicate entries** — near-identical summaries wasting context tokens\n3. **Orphaned handoffs** — handoff state with no backing ledger entries\n4. **Stale rollups** — compaction artifacts with no archived originals\n\nUse auto_fix=true to automatically repair missing embeddings and clean up orphans.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "auto_fix": {
+            "type": "boolean",
+            "description": "If true, automatically repair issues (backfill embeddings, remove orphaned handoffs). Default: false."
+          }
+        }
+      }
+    },
+    {
+      "name": "session_forget_memory",
+      "description": "Forget (delete) a specific memory entry by its ID. Supports two modes:\n\n- **Soft delete** (default): Tombstones the entry — it stays in the database for audit trails but is excluded from all search results. Reversible.\n- **Hard delete**: Permanently removes the entry from the database. Irreversible. Use only when GDPR Article 17 requires complete erasure.\n\n⚠️ Soft delete is recommended for most use cases. The entry can be restored in the future if needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "description": "The UUID of the memory (ledger) entry to forget. You can find this ID in search results returned by session_search_memory or knowledge_search."
+          },
+          "hard_delete": {
+            "type": "boolean",
+            "description": "If true, permanently removes the entry (irreversible). If false (default), soft-deletes by setting deleted_at timestamp. Soft-deleted entries are excluded from searches but remain in the database."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional GDPR Article 17 justification for the deletion. Examples: 'User requested', 'Data retention policy', 'Outdated information'. Stored alongside the tombstone for audit trail purposes."
+          }
+        },
+        "required": [
+          "memory_id"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_set_retention",
+      "description": "Set an automatic data retention policy (TTL) for a project's memory. Entries older than ttl_days will be soft-deleted (archived) automatically on every server startup and every 12 hours while running.\n\n**Use cases:**\n- Set `ttl_days: 90` to auto-expire sessions older than 3 months\n- Set `ttl_days: 0` to disable auto-expiry (default)\n\n**Note:** Rollup/compaction entries are never expired — only raw sessions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project to set retention policy for."
+          },
+          "ttl_days": {
+            "type": "integer",
+            "description": "Entries older than this many days are auto-expired. Set to 0 to disable. Minimum: 7 days when enabled.",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "project",
+          "ttl_days"
+        ]
+      }
+    },
+    {
+      "name": "session_save_experience",
+      "description": "Record a typed experience event. Unlike session_save_ledger (flat logs), this captures structured behavioral data for pattern detection.\n\nEvent Types:\n- **correction**: Agent was corrected by user\n- **success**: Task completed successfully\n- **failure**: Task failed\n- **learning**: New knowledge acquired\n- **validation_result**: Verification sandbox passed or failed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier."
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "correction",
+              "success",
+              "failure",
+              "learning",
+              "validation_result"
+            ],
+            "description": "Type of behavioral event."
+          },
+          "context": {
+            "type": "string",
+            "description": "What the agent was doing when the event occurred."
+          },
+          "action": {
+            "type": "string",
+            "description": "What action was tried."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "What happened as a result."
+          },
+          "correction": {
+            "type": "string",
+            "description": "What should have been done instead (for correction type)."
+          },
+          "confidence_score": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Agent's confidence in the outcome (1-100)."
+          },
+          "role": {
+            "type": "string",
+            "description": "Optional. Agent role for Hivemind scoping. Omit to let the server auto-resolve from dashboard settings."
+          }
+        },
+        "required": [
+          "project",
+          "event_type",
+          "context",
+          "action",
+          "outcome"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_upvote",
+      "description": "Upvote a memory entry to increase its importance (graduation). Entries with importance >= 7 become 'graduated' insights that always surface in behavioral warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The UUID of the ledger entry to upvote."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_downvote",
+      "description": "Downvote a memory entry to decrease its importance. Importance cannot go below 0.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The UUID of the ledger entry to downvote."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_sync_rules",
+      "description": "Auto-sync graduated insights (importance >= 7) into your project's IDE rules file (.cursorrules or .clauderules). This bridges behavioral memory with static IDE context — turning dynamic agent learnings into always-on rules.\n\n**How it works:**\n1. Fetches graduated insights from the ledger\n2. Formats them as markdown rules inside sentinel markers\n3. Idempotently writes them into the target file at the project's configured repo_path\n\n**Requirements:** The project must have a repo_path configured in the dashboard.\n\n**Idempotency:** Uses `<!-- PRISM:AUTO-RULES:START -->` / `<!-- PRISM:AUTO-RULES:END -->` sentinel markers. Running this tool multiple times produces the same file. User-maintained content outside the sentinels is never touched.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier. Must have a repo_path configured in the dashboard."
+          },
+          "target_file": {
+            "type": "string",
+            "description": "Target rules filename (default: '.cursorrules'). Common values: '.cursorrules', '.clauderules'."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, returns a preview of the rules block without writing to disk. Default: false."
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "deep_storage_purge",
+      "description": "v5.1 Deep Storage Mode: Purge high-precision float32 embedding vectors for entries that already have TurboQuant compressed blobs, reclaiming ~90% of vector storage. Only affects entries older than the specified threshold (default: 30 days, minimum: 7). Entries without compressed blobs are NEVER touched. Use dry_run=true to preview the impact before executing.\n\n**When to use:** After running TurboQuant backfill (session_backfill_embeddings), call this tool to reclaim disk space from legacy float32 vectors that are no longer needed for search.\n\n**Safety:** Tier-2 search (TurboQuant) maintains 95%+ accuracy with compressed blobs. Tier-3 (FTS5 keyword) search is completely unaffected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Optional project filter. When omitted, purges across all projects."
+          },
+          "older_than_days": {
+            "type": "integer",
+            "description": "Only purge entries older than this many days. Default: 30. Minimum: 7 (enforced). Entries younger than this threshold keep full float32 precision for Tier-1 native vector search."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, reports eligible count and estimated byte savings without purging any data. Default: false."
+          }
+        }
+      }
+    },
+    {
+      "name": "session_export_memory",
+      "description": "Export all of a project's memory to a local file. Fulfills GDPR Article 20 (Right to Data Portability) and the 'local-first' portability promise.\n\n**What is exported:**\n- All session ledger entries (summaries, decisions, TODOs, file changes)\n- Current handoff state (live project context)\n- System settings (API keys are \"**REDACTED**\" for security)\n- Visual memory index (descriptions, captions, timestamps; not the raw files)\n\n**Formats:**\n- `json` — machine-readable, suitable for import into another Prism instance\n- `markdown` — human-readable, ideal for static archiving\n- `vault` — Prism-Port: exports a compressed `.zip` of interrelated Markdown files with proper Obsidian/Logseq YAML frontmatter and `[[Wikilinks]]`\n\n⚠️ Output directory must exist and be writable. Filenames are auto-generated: `prism-export-<project>-<date>.(json|md|zip)`",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project to export. If omitted, exports ALL projects into separate files."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "markdown",
+              "vault",
+              "obsidian",
+              "logseq"
+            ],
+            "description": "Export format: 'json' (single file), 'markdown' (single human doc), 'vault' / 'obsidian' / 'logseq' (zip with wikilinked .md files + YAML frontmatter — drop into your PKM vault). Default: json.",
+            "default": "json"
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "Absolute path to the directory where the export file(s) will be written. Must exist and be writable. Example: '/Users/admin/Desktop'."
+          }
+        },
+        "required": [
+          "output_dir"
+        ]
+      }
+    },
+    {
+      "name": "session_backfill_links",
+      "description": "Retroactively create graph edges (memory links) for all existing entries in a project. This builds the associative memory graph from your existing session history.\n\nThree strategies are run:\n1. **Temporal Chaining**: Links consecutive entries within the same conversation\n2. **Keyword Overlap**: Links entries sharing ≥3 keywords (bidirectional)\n3. **Provenance**: Links rollup summaries to their archived originals\n\nAll strategies use INSERT OR IGNORE — safe to re-run multiple times.\n\n**When to use:** Run once after upgrading to v6.0 to populate the graph for existing memories. New entries are auto-linked on save (no manual action needed).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project to backfill links for. Required."
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "session_synthesize_edges",
+      "description": "Step 3A Edge Synthesis: Scans recent project entries with embeddings, finds high-similarity but currently disconnected entries, and creates inferred links as 'synthesized_from'.\n\n**On-Demand Graph Enrichment**: Use this tool periodically to discover semantic relationships between structurally disconnected memory nodes. It batch processes the newest active entries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier."
+          },
+          "similarity_threshold": {
+            "type": "number",
+            "description": "Minimum cosine similarity score (0.0 to 1.0) to create a link. Default: 0.7."
+          },
+          "max_entries": {
+            "type": "integer",
+            "description": "Maximum number of recent entries to scan as sources. Default: 50. Max cap: 50."
+          },
+          "max_neighbors_per_entry": {
+            "type": "integer",
+            "description": "Maximum number of links to synthesize per source entry. Default: 3. Max cap: 5."
+          },
+          "randomize_selection": {
+            "type": "boolean",
+            "description": "If true, randomly sample active entries instead of taking the newest (default false). Ideal for wide-coverage background sweeps."
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "session_cognitive_route",
+      "description": "Resolve an HDC compositional state into a nearest semantic concept with policy-gated routing. Returns concept, confidence, distance, ambiguity, convergence steps, and route outcome. Use this for explainable cognitive recall decisions in v6.5.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier."
+          },
+          "state": {
+            "type": "string",
+            "description": "Current state concept key (e.g. 'State:ActiveSession')."
+          },
+          "role": {
+            "type": "string",
+            "description": "Role concept key used for transition binding."
+          },
+          "action": {
+            "type": "string",
+            "description": "Action concept key used for transition binding."
+          },
+          "fallback_threshold": {
+            "type": "number",
+            "description": "Optional route fallback threshold override (0 <= fallback < clarify <= 1)."
+          },
+          "clarify_threshold": {
+            "type": "number",
+            "description": "Optional route clarify threshold override (0 <= fallback < clarify <= 1)."
+          },
+          "explain": {
+            "type": "boolean",
+            "description": "If true, include expanded explainability details in the response. Default: true."
+          }
+        },
+        "required": [
+          "project",
+          "state",
+          "role",
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "maintenance_vacuum",
+      "description": "Reclaim disk space after large purge operations by running VACUUM on the local SQLite database.\n\nBest called after `deep_storage_purge` removes many entries — SQLite reclaims page allocations only when explicitly vacuumed, so the file size stays the same until you call this tool.\n\nFor remote (Supabase) backends, returns guidance on triggering maintenance via the dashboard.\n\n**Note:** On large databases this may take up to 60 seconds. The tool runs synchronously so you will know when it is safe to proceed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, reports the current database file size without running VACUUM. Use this to preview how large the database is before committing to a full vacuum."
+          }
+        }
+      }
+    },
+    {
+      "name": "onboarding_wizard",
+      "description": "Interactive setup wizard for new Prism users. Provides a step-by-step guided experience to get productive in under 3 minutes.\n\n**Actions:**\n- `start` — Begin the wizard from step 1\n- `next` — Advance to the next step\n- `status` — Check current wizard progress\n- `skip` — Skip to completion\n\nEach step returns instructions, code snippets, and progress percentage.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "next",
+              "status",
+              "skip"
+            ],
+            "description": "Wizard action to perform."
+          },
+          "project_name": {
+            "type": "string",
+            "description": "Optional project name to use in setup examples."
+          },
+          "ide_client": {
+            "type": "string",
+            "enum": [
+              "claude_desktop",
+              "cursor",
+              "windsurf",
+              "vscode",
+              "other"
+            ],
+            "description": "IDE client for config generation."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "extract_entities",
+      "description": "Extract named entities from raw text using rule-based + optional LLM extraction. Automatically identifies technologies, file paths, decisions, TODOs, people, projects, and configuration values without explicit tagging.\n\n**Entity types:** PERSON, PROJECT, TECH, FILE, DECISION, TODO, CONFIG\n\nUse this to auto-enrich session context with structured metadata from raw conversation text.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Raw text to extract entities from."
+          },
+          "use_llm": {
+            "type": "boolean",
+            "description": "If true, also uses local LLM for higher-quality extraction. Default: false."
+          },
+          "project": {
+            "type": "string",
+            "description": "Optional project to auto-save extracted entities to."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "api_analytics",
+      "description": "View API usage analytics per project or system-wide. Shows call counts, success rates, latency, token usage, top tools, and daily trends.\n\n**Scopes:**\n- `project` — Analytics for a specific project\n- `system` — System-wide aggregate analytics",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "system"
+            ],
+            "description": "Analytics scope: 'project' for per-project, 'system' for global."
+          },
+          "project": {
+            "type": "string",
+            "description": "Project identifier (required when scope='project')."
+          },
+          "days": {
+            "type": "integer",
+            "description": "Number of days to analyze (default: 30)."
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      }
+    },
+    {
+      "name": "backup_database",
+      "description": "Create, list, or restore SQLite database backups.\n\n**Actions:**\n- `create` — Create a new backup now\n- `list` — List available backups with sizes and ages\n- `restore` — Restore from a specific backup file\n- `configure` — Set backup schedule (hourly/daily/weekly)\n\nBackups are stored in ~/.prism/backups/ by default. Automatic retention pruning keeps only the configured maximum.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "list",
+              "restore",
+              "configure"
+            ],
+            "description": "Backup action to perform."
+          },
+          "backup_path": {
+            "type": "string",
+            "description": "Path to backup file (required for 'restore' action)."
+          },
+          "schedule": {
+            "type": "string",
+            "enum": [
+              "hourly",
+              "daily",
+              "weekly",
+              "manual"
+            ],
+            "description": "Backup schedule (for 'configure' action)."
+          },
+          "max_backups": {
+            "type": "integer",
+            "description": "Maximum number of backups to retain (for 'configure' action). Default: 7."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "configure_notifications",
+      "description": "Configure real-time notifications for memory events via webhook, Slack, or email.\n\n**Actions:**\n- `status` — Show current notification configuration\n- `add_channel` — Add a notification channel (webhook/slack/email)\n- `remove_channel` — Remove a channel by URL\n- `test` — Send a test notification to all configured channels\n\n**Events:** health_degradation, compaction_complete, backup_complete, backup_failed, memory_threshold, new_graduated_insight, scheduler_error",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "status",
+              "add_channel",
+              "remove_channel",
+              "test"
+            ],
+            "description": "Configuration action to perform."
+          },
+          "channel_type": {
+            "type": "string",
+            "enum": [
+              "webhook",
+              "slack",
+              "email"
+            ],
+            "description": "Channel type (for add_channel)."
+          },
+          "channel_url": {
+            "type": "string",
+            "description": "Channel URL (webhook endpoint, Slack webhook, or email relay)."
+          },
+          "min_severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ],
+            "description": "Minimum severity to notify. Default: 'warning'."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "query_memory_natural",
+      "description": "Query memories using natural language instead of structured tool syntax. Automatically classifies intent, extracts keywords, and executes the appropriate search strategy.\n\n**Examples:**\n- \"What did we decide about authentication?\"\n- \"What's still open on the billing project?\"\n- \"What files did we change last week?\"\n- \"Show me recent work on the API\"\n\nReturns the parsed intent, search results, and optionally an LLM-synthesized answer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "Natural language question about your memories."
+          },
+          "project": {
+            "type": "string",
+            "description": "Optional project scope for the query."
+          },
+          "synthesize": {
+            "type": "boolean",
+            "description": "If true, use local LLM to synthesize a natural language answer. Default: false."
+          }
+        },
+        "required": [
+          "question"
+        ]
+      }
+    }
+  ]
+}

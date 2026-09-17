@@ -1,0 +1,1231 @@
+{
+  "package": "cogmemai-mcp",
+  "tools": [
+    {
+      "name": "save_memory",
+      "description": "Store a developer memory (fact, preference, decision, architecture detail). Memories persist across all Claude Code sessions and are available in future conversations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 10000,
+            "description": "The fact to remember (complete sentence)"
+          },
+          "memory_type": {
+            "type": "string",
+            "default": "context",
+            "description": "Type: identity, preference, architecture, decision, bug, dependency, pattern, context. Custom types also accepted for non-developer domains."
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 50,
+            "default": "general",
+            "description": "Category: frontend, backend, database, devops, testing, security, performance, tooling, api, general. Custom categories also accepted for non-developer domains."
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 100,
+            "default": "",
+            "description": "What this is about, e.g. \"auth_system\", \"react_version\", \"tab_width\""
+          },
+          "importance": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5,
+            "description": "1-10 (10 = core architecture, 1 = trivial)"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project",
+              "team"
+            ],
+            "default": "project",
+            "description": "global = applies everywhere, project = specific to this codebase, team = shared with team members"
+          },
+          "team_id": {
+            "type": "integer",
+            "description": "Team ID (required when scope is \"team\"). The memory will be shared with all team members."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 30
+            },
+            "maxItems": 5,
+            "description": "Optional tags for grouping/threading memories (max 5 tags, each max 30 chars). E.g., [\"marketing-campaign\", \"feb-2026\"]"
+          },
+          "ttl": {
+            "type": "string",
+            "maxLength": 10,
+            "description": "Set an expiration time. Use for temporary context like current task status. Format: \"24h\", \"7d\", \"30d\". Memory auto-archives after expiry."
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Project identifier override (auto-detected from CLAUDE_PROJECT_DIR or git remote if omitted)"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "save_rule",
+      "description": "Save a mandatory rule that will ALWAYS be followed in every session. Rules bypass scoring and decay — they are injected into every conversation, every time. Use for absolute requirements like \"NEVER do X\" or \"ALWAYS do Y\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 10000,
+            "description": "The rule to enforce (e.g., \"NEVER use -latest model aliases\", \"ALWAYS apply changes to both class-chat.php AND class-maas.php\")"
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 100,
+            "default": "",
+            "description": "Short label for the rule, e.g. \"model_aliases\", \"companions_parity\""
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ],
+            "default": "project",
+            "description": "global = applies to all projects, project = only this codebase"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 50,
+            "default": "general",
+            "description": "Category for organization: frontend, backend, security, general, etc."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 30
+            },
+            "maxItems": 5,
+            "description": "Optional tags for grouping rules"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Project identifier override (auto-detected from CLAUDE_PROJECT_DIR or git remote if omitted)"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_rules",
+      "description": "List all mandatory rules for the current project and/or globally. Rules are always-on memories that surface in every session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "project",
+              "global"
+            ],
+            "default": "all",
+            "description": "Filter: all = project + global, project = this project only, global = global only"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_rule",
+      "description": "Delete a mandatory rule by its memory ID. Use list_rules to find the ID first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "integer",
+            "description": "The memory ID of the rule to delete"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "preflight",
+      "description": "Think Before You Speak. Call this BEFORE making any suggestion, recommendation, or action plan. Sends the topic to a fast keyword search and returns any relevant prior context — previous attempts, decisions, contacts, evaluations. This prevents suggesting things that were already tried, rejected, or completed. Fast and cheap — use liberally.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 1000,
+            "description": "What you are about to suggest or respond about. Be specific — include names, topics, approaches."
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Project ID (auto-detected if omitted)"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "recall_memories",
+      "description": "Search stored memories using semantic search. Returns memories ranked by relevance, importance, and recency. Use this to find relevant context from past sessions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 500,
+            "description": "What to search for (natural language)"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project",
+              "all"
+            ],
+            "default": "all",
+            "description": "Filter by scope"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 10,
+            "description": "Max results"
+          },
+          "memory_type": {
+            "type": "string",
+            "enum": [
+              "identity",
+              "preference",
+              "architecture",
+              "decision",
+              "bug",
+              "dependency",
+              "pattern",
+              "context",
+              "session_summary",
+              "task",
+              "correction",
+              "reminder",
+              "skill",
+              "rule",
+              "principle"
+            ],
+            "description": "Filter by type"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "Filter by category (e.g., \"backend\", \"frontend\", or any custom category)"
+          },
+          "importance_min": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Only return memories with importance >= this value"
+          },
+          "tag": {
+            "type": "string",
+            "maxLength": 30,
+            "description": "Filter by tag (e.g., \"marketing-campaign\")"
+          },
+          "team_id": {
+            "type": "integer",
+            "description": "Optional override. Team memories are automatically included for team/enterprise users."
+          },
+          "context_type": {
+            "type": "string",
+            "enum": [
+              "debugging",
+              "planning",
+              "reviewing"
+            ],
+            "description": "Optional context type that shifts scoring weights. debugging = boost bug/pattern memories, planning = boost architecture/decision, reviewing = boost pattern/preference."
+          },
+          "synthesize": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true and 3+ results are found, returns an AI-synthesized summary combining all memories into a coherent answer."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "extract_memories",
+      "description": "Extract memories from a conversation exchange using AI. Send the developer message and assistant response, and the server identifies facts worth remembering (architecture decisions, preferences, bug fixes, etc.).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "The developer's message"
+          },
+          "assistant_response": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "The assistant's response"
+          },
+          "previous_context": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Previous exchange for context"
+          }
+        },
+        "required": [
+          "user_message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_project_context",
+      "description": "Load top memories for the current project plus relevant global memories. Use at the start of a session to get full context from previous sessions. Optionally pass context to get memories most relevant to your current task.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Project identifier (auto-detected from git remote if omitted)"
+          },
+          "include_global": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include global developer preferences"
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Optional context to improve relevance ranking (e.g., current task or topic)"
+          },
+          "context_type": {
+            "type": "string",
+            "enum": [
+              "debugging",
+              "planning",
+              "reviewing",
+              "general"
+            ],
+            "description": "Optional context type that shifts scoring weights. debugging = boost bug/pattern memories, planning = boost architecture/decision, reviewing = boost pattern/preference."
+          },
+          "compact": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true (default), returns only formatted_context text instead of full JSON arrays. Saves ~60% tokens."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 100,
+            "default": 25,
+            "description": "Max total memories to return (default 25). Lower values save context tokens."
+          },
+          "team_id": {
+            "type": "integer",
+            "description": "Optional override. Team memories are automatically included for team/enterprise users."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_memories",
+      "description": "List stored memories with optional filters by type, category, scope, or project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_type": {
+            "type": "string",
+            "enum": [
+              "identity",
+              "preference",
+              "architecture",
+              "decision",
+              "bug",
+              "dependency",
+              "pattern",
+              "context",
+              "session_summary",
+              "task",
+              "correction",
+              "reminder",
+              "skill",
+              "rule",
+              "principle"
+            ],
+            "description": "Filter by type"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "Filter by category (e.g., \"backend\", \"frontend\", or any custom category)"
+          },
+          "importance_min": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Only return memories with importance >= this value"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project",
+              "all"
+            ],
+            "default": "all",
+            "description": "Filter by scope"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "Results per page"
+          },
+          "tag": {
+            "type": "string",
+            "maxLength": 30,
+            "description": "Filter by tag (e.g., \"marketing-campaign\")"
+          },
+          "offset": {
+            "type": "integer",
+            "default": 0,
+            "description": "Pagination offset"
+          },
+          "untyped": {
+            "type": "boolean",
+            "description": "When true, only return memories with no memory_type set"
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": [
+              "importance",
+              "updated",
+              "created",
+              "referenced",
+              "least_used"
+            ],
+            "default": "importance",
+            "description": "Sort order: importance (default), updated, created, referenced (most used first), least_used"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_memory",
+      "description": "Delete a specific memory by its ID. This is permanent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "integer",
+            "description": "Memory ID to delete"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_memory",
+      "description": "Update an existing memory's content, importance, or scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "integer",
+            "description": "Memory ID to update"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 10000,
+            "description": "New content"
+          },
+          "importance": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "New importance (1-10)"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ],
+            "description": "New scope"
+          },
+          "memory_type": {
+            "type": "string",
+            "enum": [
+              "identity",
+              "preference",
+              "architecture",
+              "decision",
+              "bug",
+              "dependency",
+              "pattern",
+              "context",
+              "session_summary",
+              "task",
+              "correction",
+              "reminder",
+              "skill",
+              "rule",
+              "principle"
+            ],
+            "description": "New memory type"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "New category (e.g., \"backend\", \"frontend\", or any custom category)"
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "New subject (e.g., \"auth_system\", \"react_version\")"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 30
+            },
+            "maxItems": 5,
+            "description": "New tags (replaces existing tags)"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "bulk_delete",
+      "description": "Delete multiple memories at once by their IDs. Maximum 100 IDs per call. This is permanent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "Array of memory IDs to delete (max 100)"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "bulk_update",
+      "description": "Update multiple memories at once. Each item needs a memory_id and fields to update. Maximum 50 items per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "updates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "memory_id": {
+                  "type": "integer",
+                  "description": "Memory ID to update"
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 5,
+                  "maxLength": 10000,
+                  "description": "New content"
+                },
+                "importance": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10,
+                  "description": "New importance"
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "global",
+                    "project"
+                  ],
+                  "description": "New scope"
+                },
+                "memory_type": {
+                  "type": "string",
+                  "enum": [
+                    "identity",
+                    "preference",
+                    "architecture",
+                    "decision",
+                    "bug",
+                    "dependency",
+                    "pattern",
+                    "context",
+                    "session_summary",
+                    "task",
+                    "correction",
+                    "reminder",
+                    "skill",
+                    "rule",
+                    "principle"
+                  ],
+                  "description": "New memory type"
+                },
+                "category": {
+                  "type": "string",
+                  "maxLength": 50,
+                  "description": "New category"
+                },
+                "subject": {
+                  "type": "string",
+                  "maxLength": 100,
+                  "description": "New subject"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 30
+                  },
+                  "maxItems": 5,
+                  "description": "New tags"
+                }
+              },
+              "required": [
+                "memory_id"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Array of update objects (max 50)"
+          }
+        },
+        "required": [
+          "updates"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_usage",
+      "description": "Get current usage statistics — memory count, extractions this month, tier info, projects.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "export_memories",
+      "description": "Export all memories as JSON. Use this to back up memories or transfer them to another project.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "import_memories",
+      "description": "Bulk import memories from a JSON array. Each memory needs at minimum a content field. Deduplication is applied automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memories": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 100000,
+            "description": "JSON string containing an array of memory objects. Each must have \"content\", optionally: memory_type, category, subject, importance, scope."
+          }
+        },
+        "required": [
+          "memories"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ingest_document",
+      "description": "Extract memories from a document by splitting it into chunks and processing each one. Great for onboarding — feed in READMEs, architecture docs, or API specs to quickly build project context.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 50000,
+            "description": "The document text to ingest (up to 50K characters)"
+          },
+          "document_type": {
+            "type": "string",
+            "maxLength": 50,
+            "default": "general",
+            "description": "Type hint for extraction (e.g., readme, api_docs, architecture, changelog)"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "save_session_summary",
+      "description": "Save a summary of the current coding session. Captures what was accomplished, decisions made, and next steps. Stored as a session_summary memory for future reference.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 10000,
+            "description": "Summary of the session — what was done, key decisions, and next steps"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_tags",
+      "description": "List all tags in use across your memories, with counts. Use this to see what threads/groups exist and find related memories by tag.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "link_memories",
+      "description": "Connect two related memories with a named relationship. Use this to build a knowledge graph — e.g., linking a bug fix to the architecture decision that caused it, or connecting a preference to the pattern it led to.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "integer",
+            "description": "The source memory ID"
+          },
+          "related_memory_id": {
+            "type": "integer",
+            "description": "The target memory ID to link to"
+          },
+          "relationship": {
+            "type": "string",
+            "enum": [
+              "led_to",
+              "contradicts",
+              "extends",
+              "related"
+            ],
+            "description": "How the memories relate: led_to (A caused B), contradicts (A conflicts with B), extends (A builds on B), related (general connection)"
+          }
+        },
+        "required": [
+          "memory_id",
+          "related_memory_id",
+          "relationship"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_memory_links",
+      "description": "View all memories linked to a specific memory. Returns the relationship type and full memory details for each connection. Use this to explore the knowledge graph around a memory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "integer",
+            "description": "The memory ID to get links for"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_memory_versions",
+      "description": "View the edit history of a memory. Shows all previous versions with timestamps and what changed. Useful for understanding how a decision or fact evolved over time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "integer",
+            "description": "The memory ID to get version history for"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_analytics",
+      "description": "Get a memory health dashboard with insights: most recalled memories, never-recalled memories, stale memories, growth trends, and breakdowns by type and category. Use this to identify cleanup opportunities and understand memory usage patterns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Filter analytics to a specific project. Omit for current project. Use \"all\" for cross-project analytics."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "promote_memory",
+      "description": "Promote a project-scoped memory to global scope so it applies across all projects. Use this when you discover a preference or pattern that should be universal — e.g., \"user prefers tabs over spaces\" or \"always use Bun instead of npm\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "integer",
+            "description": "The project memory ID to promote to global scope"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "consolidate_memories",
+      "description": "Consolidate related memories into fewer, richer memories. Finds clusters of memories sharing the same subject (3+ memories required), then uses AI to synthesize each cluster into 1-2 comprehensive facts. Originals are archived (not deleted) with full version history. Use dry_run=true to preview without making changes. Great for cleaning up memory clutter after many sessions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Consolidate only memories with this exact subject (e.g., \"auth_system\"). Omit to auto-detect all qualifying clusters."
+          },
+          "memory_type": {
+            "type": "string",
+            "enum": [
+              "identity",
+              "preference",
+              "architecture",
+              "decision",
+              "bug",
+              "dependency",
+              "pattern",
+              "context",
+              "session_summary",
+              "task",
+              "correction",
+              "reminder",
+              "skill",
+              "rule",
+              "principle"
+            ],
+            "description": "Only consolidate memories of this type"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "Only consolidate memories in this category"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, preview consolidation results without making changes. Recommended for first use."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "save_task",
+      "description": "Create a task that persists across sessions. Tasks are tracked with status (pending, in_progress, done, blocked) and priority (high, medium, low). Use this to maintain continuity on multi-session work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 200,
+            "description": "Short task title (e.g., \"Fix auth bug in login flow\")"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "default": "",
+            "description": "Detailed description of what needs to be done"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "default": "medium",
+            "description": "Task priority"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in_progress",
+              "done",
+              "blocked"
+            ],
+            "default": "pending",
+            "description": "Initial task status"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Project identifier override (auto-detected from CLAUDE_PROJECT_DIR or git remote if omitted)"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_tasks",
+      "description": "Get tasks for the current project. Returns tasks filtered by status — defaults to showing pending and in_progress tasks. Use at session start to pick up where you left off.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in_progress",
+              "done",
+              "blocked",
+              "all"
+            ],
+            "default": "all",
+            "description": "Filter by task status. \"all\" returns pending + in_progress + blocked (excludes done)."
+          },
+          "include_done": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, also include completed tasks"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_task",
+      "description": "Update a task's status, title, description, or priority. Use this to mark tasks as in_progress, done, or blocked as you work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "description": "The task memory ID (from get_tasks)"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in_progress",
+              "done",
+              "blocked"
+            ],
+            "description": "New status"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 200,
+            "description": "New title"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "New description"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "New priority"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "save_correction",
+      "description": "Save a correction pattern — what went wrong and what the right approach is. These are surfaced automatically when similar situations arise in future sessions, helping avoid repeated mistakes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wrong_approach": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 300,
+            "description": "What was done incorrectly (e.g., \"Used npm install instead of bun add\")"
+          },
+          "right_approach": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 300,
+            "description": "The correct approach (e.g., \"Always use bun add for this project\")"
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 200,
+            "default": "",
+            "description": "When/where this applies (e.g., \"package management in monorepo\")"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ],
+            "default": "project",
+            "description": "global = applies everywhere, project = specific to this codebase"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Project identifier override (auto-detected from CLAUDE_PROJECT_DIR or git remote if omitted)"
+          }
+        },
+        "required": [
+          "wrong_approach",
+          "right_approach"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_reminder",
+      "description": "Set a reminder that surfaces automatically at the start of your next session. Use for follow-ups, things to check, or deferred work. Reminders auto-archive after being shown.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 300,
+            "description": "What to remind about (e.g., \"Check if PR #42 was merged\")"
+          },
+          "ttl": {
+            "type": "string",
+            "maxLength": 10,
+            "default": "7d",
+            "description": "How long to keep the reminder alive. Format: \"24h\", \"7d\", \"30d\". Default: 7 days."
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_stale_memories",
+      "description": "Find memories that may be outdated based on age and access patterns. Returns memories that haven't been recalled or updated recently, so you can review, update, or delete them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days_threshold": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "default": 30,
+            "description": "Consider memories stale if not accessed in this many days (default: 30)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "Max results to return"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_file_changes",
+      "description": "Show what files changed since your last session. Compares the current git state to a snapshot saved when your previous session ended. Helps you understand what happened between sessions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "feedback_memory",
+      "description": "Signal whether a recalled memory was useful or irrelevant. Helps improve future recall quality over time. Use after recalling memories to indicate which were helpful vs noise.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "integer",
+            "description": "The memory ID to give feedback on"
+          },
+          "signal": {
+            "type": "string",
+            "enum": [
+              "useful",
+              "irrelevant"
+            ],
+            "description": "\"useful\" boosts the memory's ranking, \"irrelevant\" reduces its importance. For skills, \"useful\" boosts confidence, \"irrelevant\" reduces it."
+          }
+        },
+        "required": [
+          "memory_id",
+          "signal"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "generate_skills",
+      "description": "Manually trigger skill generation from your corrections, preferences, and patterns. Skills are behavioral directives that auto-improve how the AI works with you. CogmemAi also generates skills automatically when enough evidence accumulates — this tool lets you trigger it manually or preview candidates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Generate skills for a specific subject. Omit to scan all subjects."
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Project to generate skills for (auto-detected if omitted)"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, preview skill candidates without generating them"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "extract_principles",
+      "description": "Analyze memory clusters and extract underlying factual principles or patterns. Principles are observations about your project — \"this codebase tends to have X\" — not behavioral instructions (those are skills). Use dry_run to preview candidates first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Focus on a specific subject area. Omit to scan all subjects."
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Project to extract principles for (auto-detected if omitted)"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, preview principle candidates without generating them"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "package": "@aegis-scan/mcp-server",
+  "tools": [
+    {
+      "name": "aegis_scan",
+      "description": "Run AEGIS security scan on a project directory. Read-only: reads source files + runs configured scanners + returns the score, grade, and top-20 findings. Caches the full result for subsequent aegis_findings / aegis_fix_suggestion calls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the project directory to scan"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "scan",
+              "audit"
+            ],
+            "description": "scan = fast (security, deps, quality, compliance, i18n); audit = all scanners"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aegis_findings",
+      "description": "Get detailed findings from the last scan, optionally filtered by severity, scanner, or file. Requires a prior aegis_scan call — returns empty findings when no scan has run yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "blocker",
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ],
+            "description": "Filter to a specific severity level"
+          },
+          "scanner": {
+            "type": "string",
+            "description": "Filter to a specific scanner name"
+          },
+          "file": {
+            "type": "string",
+            "description": "Filter to findings in a specific file (suffix-match on relative path, e.g. \"src/api/x.ts\")"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Maximum number of findings to return (default: 100)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aegis_score",
+      "description": "Get the current AEGIS security score (0-1000 with FORTRESS → CRITICAL grade) for a project. Runs a full scan on every call (no caching yet — repeated calls re-scan from scratch).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the project directory"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aegis_compliance",
+      "description": "Check compliance against a specific framework (gdpr / soc2 / iso27001 / pci-dss). Runs a full audit scan and filters to compliance-category findings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the project directory"
+          },
+          "framework": {
+            "type": "string",
+            "enum": [
+              "gdpr",
+              "soc2",
+              "iso27001",
+              "pci-dss"
+            ],
+            "description": "Compliance framework to check against — one of gdpr, soc2, iso27001, pci-dss"
+          }
+        },
+        "required": [
+          "path",
+          "framework"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aegis_fix_suggestion",
+      "description": "Get a fix suggestion for a specific finding from the last scan. Requires a prior aegis_scan call — returns found=false when no scan has run yet OR when the findingId is not present in the cached result.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "findingId": {
+            "type": "string",
+            "description": "The ID of the finding (from aegis_scan or aegis_findings)"
+          }
+        },
+        "required": [
+          "findingId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

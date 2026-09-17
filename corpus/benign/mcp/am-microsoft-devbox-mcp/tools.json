@@ -1,0 +1,387 @@
+{
+  "package": "@microsoft/devbox-mcp",
+  "tools": [
+    {
+      "name": "devbox_action",
+      "description": "Unified tool for DevBox actions (power management, remote connection url, repair)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devCenterName": {
+            "type": "string",
+            "description": "The name of the Dev Center. Provide only the Dev Center's name — do not include the tenant ID, region, or URL.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "locationInUri": {
+            "type": "string",
+            "description": "The Azure region (e.g., 'westus3') where the Dev Center is hosted. Must be passed as a simple region string.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "scope": {
+            "type": "string",
+            "description": "DevBox resource scope pattern for actions. Must specify exact values (no wildcards): \"/projects/projectName/users/userId/devboxes/devBoxName\""
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop",
+              "restart",
+              "repair",
+              "getRemoteConnection"
+            ],
+            "description": "Action to perform on the DevBox: start (start DevBox), stop (stop DevBox), restart (restart DevBox), repair (repair DevBox), get-remote-connection (get RDP connection info)"
+          }
+        },
+        "required": [
+          "devCenterName",
+          "locationInUri",
+          "scope",
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "devbox_entra_id_check",
+      "description": "This tool is the first step of connectivity troubleshooting, to check the Entra Id status of a Dev Box.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devCenterName": {
+            "type": "string",
+            "description": "The name of the Dev Center. Provide only the Dev Center's name — do not include the tenant ID, region, or URL.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "locationInUri": {
+            "type": "string",
+            "description": "The Azure region (e.g., 'westus3') where the Dev Center is hosted. Must be passed as a simple region string.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "projectName": {
+            "type": "string",
+            "description": "The name of the dev center project."
+          },
+          "devBoxName": {
+            "type": "string",
+            "description": "The name of a Dev Box. The name must be unique within the pool."
+          },
+          "deviceName": {
+            "type": "string",
+            "description": "The device name of the DevBox, taken from Windows App and used for Entra Id status check."
+          }
+        },
+        "required": [
+          "devCenterName",
+          "locationInUri",
+          "projectName",
+          "devBoxName"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "devbox_resource",
+      "description": "Unified DevBox resource management tool for discovery and information retrieval.\n    \nUses scope patterns to target specific DevBox resources:\n- \"/projects/*/users/me/devboxes/*\" - List all my DevBoxes across all projects\n- \"/projects/projectName/users/me/devboxes/*\" - List my DevBoxes in specific project\n- \"/projects/projectName/users/me/devboxes/devBoxName\" - Get specific DevBox details\n- \"/projects/*/users/me/devboxes/devBoxName\" - Query DevBox by name across projects\n\nOperations are automatically inferred from scope patterns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devCenterName": {
+            "type": "string",
+            "description": "The name of the Dev Center. Provide only the Dev Center's name — do not include the tenant ID, region, or URL.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "locationInUri": {
+            "type": "string",
+            "description": "The Azure region (e.g., 'westus3') where the Dev Center is hosted. Must be passed as a simple region string.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Dev Box resource scope pattern (e.g., \"/projects/*/users/me/devboxes/*\")"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "read",
+              "create",
+              "delete"
+            ],
+            "description": "Operation to perform: read (list/get/query resources), create (create new resource), delete (delete resource)"
+          },
+          "poolName": {
+            "type": "string",
+            "description": "Pool name for creating a DevBox (required for create operation)"
+          }
+        },
+        "required": [
+          "scope",
+          "operation"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "devbox_think",
+      "description": "Call this tool **before using any Azure Dev Center, Dev Box, or Dev Box-related tools**, including project listing, pool selection, starting/stopping a dev box, or running customization tasks. The tool provides essential context for understanding and performing Dev Box operations.\nThis tool outlines the core Dev Center hierarchy (Dev Center → Projects → Pools → Dev Boxes), available actions, required parameters, and common workflows (e.g., creating, connecting, or customizing a dev box). It helps ensure that all dependent tools are used correctly by grounding the model in the Dev Box domain model.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "connectivity_issue",
+              "general"
+            ],
+            "default": "general",
+            "description": "For connectivity issue, like I cannot connect to DevBox, I can connect to DevBox but have issues with some software, or I can connect to DevBox but have frequent disconnections, or I have high latency with DevBox, or I want to check DevBox outages, use (connectivity_issue). For general issue, use (general)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_operation_status",
+      "description": "Gets the status of a long-running operation, such as start/stop/restore Dev Boxes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devCenterName": {
+            "type": "string",
+            "description": "The name of the Dev Center. Provide only the Dev Center's name — do not include the tenant ID, region, or URL.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "locationInUri": {
+            "type": "string",
+            "description": "The Azure region (e.g., 'westus3') where the Dev Center is hosted. Must be passed as a simple region string.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "projectName": {
+            "type": "string",
+            "description": "The name of the dev center project."
+          },
+          "operationId": {
+            "type": "string",
+            "description": "Unique identifier for the long-running operation (LRO) operation status."
+          }
+        },
+        "required": [
+          "devCenterName",
+          "locationInUri",
+          "projectName",
+          "operationId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pool_resource",
+      "description": "Unified Pool resource management tool for discovery and information retrieval.\n    \nUses scope patterns to target specific Pool resources:\n- \"/projects/projectName/pools/*\" - List pools in specific project\n- \"/projects/projectName/pools/poolName\" - Get specific pool details\n\nNote: Project name must be specific - wildcards are not supported for projects.\nOperations are automatically inferred from scope patterns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devCenterName": {
+            "type": "string",
+            "description": "The name of the Dev Center. Provide only the Dev Center's name — do not include the tenant ID, region, or URL.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "locationInUri": {
+            "type": "string",
+            "description": "The Azure region (e.g., 'westus3') where the Dev Center is hosted. Must be passed as a simple region string.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Pool resource scope pattern (e.g., \"/projects/projectName/pools/*\")"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "read"
+            ],
+            "description": "Operation to perform: read (list/get pools)"
+          }
+        },
+        "required": [
+          "devCenterName",
+          "locationInUri",
+          "scope",
+          "operation"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "project_resource",
+      "description": "Unified Project resource management tool for discovery and information retrieval.\n    \nUses scope patterns to target specific Project resources:\n- \"/projects/*\" - List projects\n- \"/projects/projectName\" - Get specific project details\n\nOperations are automatically inferred from scope patterns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devCenterName": {
+            "type": "string",
+            "description": "The name of the Dev Center. Provide only the Dev Center's name — do not include the tenant ID, region, or URL.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com This can be optional"
+          },
+          "locationInUri": {
+            "type": "string",
+            "description": "The Azure region (e.g., 'westus3') where the Dev Center is hosted. Must be passed as a simple region string.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com This can be optional"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Project resource scope pattern (e.g., \"/projects/*\" or \"/projects/projectName\")"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "read"
+            ],
+            "description": "Operation to perform: read (list/get projects)"
+          }
+        },
+        "required": [
+          "scope",
+          "operation"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "schedule_resource",
+      "description": "Unified tool for the schedule resources for a Dev Box (scheduled shutdown, hibernation, etc.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devCenterName": {
+            "type": "string",
+            "description": "The name of the Dev Center. Provide only the Dev Center's name — do not include the tenant ID, region, or URL.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "locationInUri": {
+            "type": "string",
+            "description": "The Azure region (e.g., 'westus3') where the Dev Center is hosted. Must be passed as a simple region string.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Scope pattern for DevBox schedules. Must specify exact values (no wildcards): \"/projects/projectName/users/userId/devboxes/devBoxName\""
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Date in UTC to delay until. Only needed for delayAll action. If it's over 8 hours from the original scheduled time, then all scheduled actions will be skipped."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "listAll",
+              "delayAll",
+              "skipAll"
+            ],
+            "description": "Action to perform on the DevBox's schedule: listAll (list all schedules), delayAll (delay schedule), skipAll (skip schedule to next day)"
+          }
+        },
+        "required": [
+          "devCenterName",
+          "locationInUri",
+          "scope",
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_doc",
+      "description": "Search official Microsoft/Azure documentation for Dev Box-related information. Find answers to questions about Azure Dev Box setup, configuration, troubleshooting, best practices, features, and operations from authoritative Microsoft Learn and documentation sources.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "task_resource",
+      "description": "Unified Task resource management tool for DevBox task execution and monitoring.\n\nUses scope patterns to target specific Task resources:\n- \"/projects/projectName/users/userId/devboxes/devBoxName\" - Run, validate, or get available tasks for a devbox\n- \"/projects/projectName/users/userId/devboxes/devBoxName/tasks/*\" - List all task executions on a devbox\n- \"/projects/projectName/users/userId/devboxes/devBoxName/tasks/taskId\" - Get specific task execution details/logs\n\nOperations supported: runTasks, validateTasks, getTaskLog, listTasks, getRunnableTasks.\nOperations are automatically inferred from scope patterns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devCenterName": {
+            "type": "string",
+            "description": "The name of the Dev Center. Provide only the Dev Center's name — do not include the tenant ID, region, or URL.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "locationInUri": {
+            "type": "string",
+            "description": "The Azure region (e.g., 'westus3') where the Dev Center is hosted. Must be passed as a simple region string.\n\nUsed to form the service URI as:\n  https://<tenantId>-<devCenterName>.<location>.devcenter.azure.com"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "runTasks",
+              "validateTasks",
+              "getTaskLog",
+              "listTasks",
+              "listTaskDefinitions"
+            ],
+            "description": "Operation to perform on task resources on a devbox"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Customization resource scope pattern (e.g., \"/projects/projectName/users/me/devboxes/devBoxName/tasks/*\" for tasks, or \"/projects/projectName/users/me/devboxes/devBoxName\" for running tasks)"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The name of the customization task."
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "The parameters for the customization task."
+                },
+                "displayName": {
+                  "type": "string",
+                  "description": "A friendly name for the task."
+                },
+                "timeoutInSeconds": {
+                  "type": "number",
+                  "description": "Task timeout in seconds."
+                },
+                "runAs": {
+                  "type": "string",
+                  "enum": [
+                    "System",
+                    "User"
+                  ],
+                  "default": "User",
+                  "description": "Whether to run the task as System or User."
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Tasks for runTasks/validateTasks operations"
+          }
+        },
+        "required": [
+          "devCenterName",
+          "locationInUri",
+          "operation",
+          "scope"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

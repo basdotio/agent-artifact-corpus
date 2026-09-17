@@ -1,0 +1,1382 @@
+{
+  "package": "@cyanheads/git-mcp-server",
+  "tools": [
+    {
+      "name": "git_add",
+      "description": "Stage files for commit. Add file contents to the staging area (index) to prepare for the next commit.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "paths": {
+            "default": [],
+            "description": "Array of file or directory paths to stage (relative to repository root). Use [\".\"] to stage all changes. Can be omitted when all or update is true.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "update": {
+            "default": false,
+            "description": "Stage only modified and deleted files (skip untracked files).",
+            "type": "boolean"
+          },
+          "all": {
+            "default": false,
+            "description": "Include all items (varies by operation).",
+            "type": "boolean"
+          },
+          "force": {
+            "default": false,
+            "description": "Allow adding otherwise ignored files.",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_blame",
+      "description": "Show line-by-line authorship information for a file, displaying who last modified each line and when. For large files, use startLine/endLine to limit output.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "filePath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Path to the file to blame (relative to repository root)."
+          },
+          "startLine": {
+            "description": "Start line number (1-indexed).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "endLine": {
+            "description": "End line number (1-indexed).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "ignoreWhitespace": {
+            "default": false,
+            "description": "Ignore whitespace changes.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "filePath"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_branch",
+      "description": "Manage branches: list all branches, show current branch, create a new branch, delete a branch, or rename a branch.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "mode": {
+            "default": "list",
+            "description": "The branch operation to perform.",
+            "type": "string",
+            "enum": [
+              "list",
+              "create",
+              "delete",
+              "rename",
+              "show-current"
+            ]
+          },
+          "branchName": {
+            "description": "Branch name for create/delete/rename operations.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^~^:?*\\[\\\\]+$"
+          },
+          "newBranchName": {
+            "description": "New branch name for rename operation.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^~^:?*\\[\\\\]+$"
+          },
+          "startPoint": {
+            "description": "Starting point (commit/branch) for new branch creation.",
+            "type": "string",
+            "minLength": 1
+          },
+          "force": {
+            "default": false,
+            "description": "Force the operation, bypassing safety checks.",
+            "type": "boolean"
+          },
+          "all": {
+            "default": false,
+            "description": "For list mode: show both local and remote branches.",
+            "type": "boolean"
+          },
+          "remote": {
+            "default": false,
+            "description": "For list mode: show only remote branches.",
+            "type": "boolean"
+          },
+          "merged": {
+            "description": "For list mode: show only branches merged into HEAD (true) or specified commit (string).",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "description": "Commit reference: full/short hash, branch name, tag name, or relative ref (HEAD~1)."
+              }
+            ]
+          },
+          "noMerged": {
+            "description": "For list mode: show only branches not merged into HEAD (true) or specified commit (string).",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "description": "Commit reference: full/short hash, branch name, tag name, or relative ref (HEAD~1)."
+              }
+            ]
+          },
+          "limit": {
+            "description": "For list mode: cap the number of branches returned (applied at the git command). Use on repos with many branches.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_changelog_analyze",
+      "description": "Gather git history context (commits, tags) and structured review instructions to support LLM-driven changelog analysis. Changelog file should be read separately; this tool provides the supporting git data and analysis framework. Pass one or more review types to control what kind of analysis to perform.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "reviewTypes": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "security",
+                "features",
+                "storyline",
+                "gaps",
+                "breaking_changes",
+                "quality"
+              ]
+            },
+            "description": "Types of changelog review to perform. At least one required. Options: security, features, storyline, gaps, breaking_changes, quality."
+          },
+          "maxCommits": {
+            "default": 200,
+            "description": "Maximum recent commits to fetch for cross-referencing (1-1000).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "maxTags": {
+            "default": 100,
+            "description": "Maximum recent tags to fetch for release context (1-1000). Applied at the git command so large tag catalogs do not bloat the response.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "sinceTag": {
+            "description": "Only include git history since this tag (e.g., \"v1.2.0\"). Narrows the analysis window.",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Branch to analyze (defaults to current branch).",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "reviewTypes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_checkout",
+      "description": "Switch branches or restore working tree files. Can checkout an existing branch, create a new branch, or restore specific files.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "pattern": "^[^~^:?*\\[\\\\]+$",
+                "description": "Branch name (must follow git naming conventions)."
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "description": "Commit reference: full/short hash, branch name, tag name, or relative ref (HEAD~1)."
+              }
+            ],
+            "description": "Branch name, commit hash, or tag to checkout."
+          },
+          "createBranch": {
+            "default": false,
+            "description": "Create a new branch with the specified name.",
+            "type": "boolean"
+          },
+          "force": {
+            "default": false,
+            "description": "Force the operation, bypassing safety checks.",
+            "type": "boolean"
+          },
+          "paths": {
+            "description": "Specific file paths to checkout/restore (relative to repository root).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "track": {
+            "description": "Set up tracking relationship with remote branch when creating new branch.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_cherry_pick",
+      "description": "Cherry-pick commits from other branches. Apply specific commits to the current branch without merging entire branches.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "commits": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Commit reference: full/short hash, branch name, tag name, or relative ref (HEAD~1)."
+            },
+            "description": "Commit hashes to cherry-pick."
+          },
+          "noCommit": {
+            "default": false,
+            "description": "Don't create commit (stage changes only).",
+            "type": "boolean"
+          },
+          "continueOperation": {
+            "default": false,
+            "description": "Continue cherry-pick after resolving conflicts.",
+            "type": "boolean"
+          },
+          "abort": {
+            "default": false,
+            "description": "Abort cherry-pick operation.",
+            "type": "boolean"
+          },
+          "mainline": {
+            "description": "For merge commits, specify which parent to follow (1 for first parent, 2 for second, etc.).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "strategy": {
+            "description": "Merge strategy to use for cherry-pick.",
+            "type": "string",
+            "enum": [
+              "ort",
+              "recursive",
+              "octopus",
+              "ours",
+              "subtree"
+            ]
+          },
+          "signoff": {
+            "default": false,
+            "description": "Add Signed-off-by line to the commit message.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "commits"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_clean",
+      "description": "Remove untracked files from the working directory. Requires force flag for safety. Use dry-run to preview files that would be removed.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "force": {
+            "default": false,
+            "description": "Force the operation, bypassing safety checks.",
+            "type": "boolean"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Preview the operation without executing it.",
+            "type": "boolean"
+          },
+          "directories": {
+            "default": false,
+            "description": "Remove untracked directories in addition to files.",
+            "type": "boolean"
+          },
+          "ignored": {
+            "default": false,
+            "description": "Remove ignored files as well.",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_clear_working_dir",
+      "description": "Clear the session working directory setting. This resets the context without restarting the server. Subsequent git operations will require an explicit path parameter unless git_set_working_dir is called again.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "string",
+            "enum": [
+              "Y",
+              "y",
+              "Yes",
+              "yes"
+            ],
+            "description": "Explicit confirmation required to clear working directory. Accepted values: 'Y', 'y', 'Yes', or 'yes'."
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_clone",
+      "description": "Clone a repository from a remote URL or local path. Accepts HTTP(S), SSH, git://, file://, and bare filesystem paths, with optional shallow cloning.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Source to clone from: HTTP(S) URL, SSH URL (ssh://… or git@host:path), git:// URL, file:// URL, or a bare filesystem path (e.g. /tmp/repo.git)."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Destination path where the repository should be cloned."
+          },
+          "branch": {
+            "description": "Specific branch to clone (defaults to remote HEAD).",
+            "type": "string"
+          },
+          "depth": {
+            "description": "Create a shallow clone with history truncated to N commits.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "bare": {
+            "default": false,
+            "description": "Create a bare repository (no working directory).",
+            "type": "boolean"
+          },
+          "mirror": {
+            "default": false,
+            "description": "Create a mirror clone (implies bare).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url",
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_commit",
+      "description": "Create a new commit with staged changes in the repository. Records a snapshot of the staging area with a commit message.\n\n**Commit Message Format:**\nPass commit messages as JSON string parameters. Multi-line messages are supported using standard JSON string escaping.\n\n**Examples:**\n- Single line: { \"message\": \"feat: add user authentication\" }\n- Multi-line: { \"message\": \"feat: add user authentication\\n\\nImplemented OAuth2 flow with JWT tokens.\\nAdded tests for login and logout.\" }\n\nNote: Do not use bash heredoc syntax. Literal escape sequences (\\n, \\t) in the message string are automatically normalized to their actual characters.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "message": {
+            "description": "Commit message.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "author": {
+            "description": "Override commit author (defaults to git config).",
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Author's name"
+              },
+              "email": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Author's email address (e.g. user@example.com)."
+              }
+            },
+            "required": [
+              "name",
+              "email"
+            ]
+          },
+          "amend": {
+            "default": false,
+            "description": "Amend the previous commit instead of creating a new one. Use with caution.",
+            "type": "boolean"
+          },
+          "allowEmpty": {
+            "default": false,
+            "description": "Allow creating a commit with no changes.",
+            "type": "boolean"
+          },
+          "noVerify": {
+            "default": false,
+            "description": "Bypass pre-commit and commit-msg hooks.",
+            "type": "boolean"
+          },
+          "filesToStage": {
+            "description": "File paths to stage before committing (atomic stage+commit operation).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_diff",
+      "description": "View differences between commits, branches, or working tree. Shows changes in unified diff format.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "target": {
+            "description": "Target commit/branch to compare against. If not specified, shows unstaged changes in working tree.",
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "description": "Source commit/branch to compare from. If target is specified but not source, compares target against working tree.",
+            "type": "string",
+            "minLength": 1
+          },
+          "paths": {
+            "description": "Limit diff to specific file paths (relative to repository root).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "staged": {
+            "default": false,
+            "description": "Show diff of staged changes instead of unstaged.",
+            "type": "boolean"
+          },
+          "includeUntracked": {
+            "default": false,
+            "description": "Include untracked files in the diff. Useful for reviewing all upcoming changes.",
+            "type": "boolean"
+          },
+          "nameOnly": {
+            "default": false,
+            "description": "Show only names of changed files, not the diff content.",
+            "type": "boolean"
+          },
+          "stat": {
+            "default": false,
+            "description": "Show diffstat (summary of changes) instead of full diff content.",
+            "type": "boolean"
+          },
+          "contextLines": {
+            "default": 3,
+            "description": "Number of context lines to show around changes.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "autoExclude": {
+            "default": true,
+            "description": "Automatically exclude lock files and other generated files (e.g., package-lock.json, yarn.lock, bun.lock, poetry.lock, go.sum) from diff output to reduce context bloat. Set to false if you need to inspect these files.",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_fetch",
+      "description": "Fetch updates from a remote repository. Downloads objects and refs without merging them.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "remote": {
+            "description": "Remote name (default: origin).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "prune": {
+            "default": false,
+            "description": "Prune remote-tracking references that no longer exist on remote.",
+            "type": "boolean"
+          },
+          "tags": {
+            "default": false,
+            "description": "Fetch all tags from the remote.",
+            "type": "boolean"
+          },
+          "depth": {
+            "description": "Create a shallow clone with history truncated to N commits.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_init",
+      "description": "Initialize a new Git repository at the specified path. Creates a .git directory and sets up the initial branch.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "initialBranch": {
+            "description": "Name of the initial branch (default: main).",
+            "type": "string"
+          },
+          "bare": {
+            "default": false,
+            "description": "Create a bare repository (no working directory).",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_log",
+      "description": "View commit history with optional filtering by author, date range, file path, or commit message pattern.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "maxCount": {
+            "default": 10,
+            "description": "Maximum number of items to return (1-1000).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "skip": {
+            "description": "Number of items to skip for pagination.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "since": {
+            "description": "Show commits more recent than a specific date (ISO 8601 format).",
+            "type": "string"
+          },
+          "until": {
+            "description": "Show commits older than a specific date (ISO 8601 format).",
+            "type": "string"
+          },
+          "author": {
+            "description": "Filter commits by author name or email pattern.",
+            "type": "string"
+          },
+          "grep": {
+            "description": "Filter commits by message pattern (regex supported).",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Show commits from a specific branch or ref (defaults to current branch).",
+            "type": "string",
+            "minLength": 1
+          },
+          "filePath": {
+            "description": "Show commits that affected a specific file path.",
+            "type": "string"
+          },
+          "oneline": {
+            "default": false,
+            "description": "Abbreviated output: return only hash, shortHash, and subject per commit. Significantly reduces response size.",
+            "type": "boolean"
+          },
+          "stat": {
+            "default": false,
+            "description": "Include file change statistics for each commit.",
+            "type": "boolean"
+          },
+          "patch": {
+            "default": false,
+            "description": "Include the full diff patch for each commit.",
+            "type": "boolean"
+          },
+          "showSignature": {
+            "default": false,
+            "description": "Show GPG signature verification information for each commit.",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_merge",
+      "description": "Merge branches together. Integrates changes from another branch into the current branch with optional merge strategies.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^~^:?*\\[\\\\]+$",
+            "description": "Branch to merge into current branch."
+          },
+          "strategy": {
+            "description": "Merge strategy to use (ort, recursive, octopus, ours, subtree).",
+            "type": "string",
+            "enum": [
+              "ort",
+              "recursive",
+              "octopus",
+              "ours",
+              "subtree"
+            ]
+          },
+          "noFastForward": {
+            "default": false,
+            "description": "Prevent fast-forward merge (create merge commit).",
+            "type": "boolean"
+          },
+          "squash": {
+            "default": false,
+            "description": "Squash all commits from the branch into a single commit.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "Custom merge commit message.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "abort": {
+            "default": false,
+            "description": "Abort an in-progress merge that has conflicts.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "branch"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_pull",
+      "description": "Pull changes from a remote repository. Fetches and integrates changes into the current branch.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "remote": {
+            "description": "Remote name (default: origin).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "branch": {
+            "description": "Branch name (default: current branch).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^~^:?*\\[\\\\]+$"
+          },
+          "rebase": {
+            "default": false,
+            "description": "Use rebase instead of merge when integrating changes.",
+            "type": "boolean"
+          },
+          "fastForwardOnly": {
+            "default": false,
+            "description": "Fail if can't fast-forward (no merge commit).",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_push",
+      "description": "Push changes to a remote repository. Uploads local commits to the remote branch.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "remote": {
+            "description": "Remote name (default: origin).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "branch": {
+            "description": "Branch name (default: current branch).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^~^:?*\\[\\\\]+$"
+          },
+          "force": {
+            "default": false,
+            "description": "Force push (overwrites remote history).",
+            "type": "boolean"
+          },
+          "forceWithLease": {
+            "default": false,
+            "description": "Safer force push - only succeeds if remote branch is at expected state.",
+            "type": "boolean"
+          },
+          "setUpstream": {
+            "default": false,
+            "description": "Set upstream tracking relationship for the branch.",
+            "type": "boolean"
+          },
+          "tags": {
+            "default": false,
+            "description": "Push all tags to the remote.",
+            "type": "boolean"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Preview the operation without executing it.",
+            "type": "boolean"
+          },
+          "delete": {
+            "default": false,
+            "description": "Delete the specified remote branch.",
+            "type": "boolean"
+          },
+          "remoteBranch": {
+            "description": "Remote branch name to push to (if different from local branch name).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^~^:?*\\[\\\\]+$"
+          },
+          "confirmed": {
+            "default": false,
+            "description": "Explicit confirmation required for force push or branch deletion on protected branches (main, master, production, etc.).",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_rebase",
+      "description": "Rebase commits onto another branch. Reapplies commits on top of another base tip for a cleaner history.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "mode": {
+            "default": "start",
+            "description": "Rebase operation mode: 'start', 'continue', 'abort', or 'skip'.",
+            "type": "string",
+            "enum": [
+              "start",
+              "continue",
+              "abort",
+              "skip"
+            ]
+          },
+          "upstream": {
+            "description": "Upstream branch to rebase onto (required for start mode).",
+            "type": "string",
+            "minLength": 1
+          },
+          "branch": {
+            "description": "Branch to rebase (default: current branch).",
+            "type": "string",
+            "minLength": 1
+          },
+          "interactive": {
+            "default": false,
+            "description": "Interactive rebase (not supported in all providers).",
+            "type": "boolean"
+          },
+          "onto": {
+            "description": "Rebase onto different commit than upstream.",
+            "type": "string",
+            "minLength": 1
+          },
+          "preserve": {
+            "default": false,
+            "description": "Preserve merge commits during rebase.",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_reflog",
+      "description": "View the reference logs (reflog) to track when branch tips and other references were updated. Useful for recovering lost commits.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "ref": {
+            "default": "HEAD",
+            "description": "Reference whose reflog to show. Defaults to HEAD.",
+            "type": "string"
+          },
+          "maxCount": {
+            "default": 25,
+            "description": "Maximum number of items to return (1-1000).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_remote",
+      "description": "Manage remote repositories: list remotes, add new remotes, remove remotes, rename remotes, or get/set remote URLs.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "mode": {
+            "default": "list",
+            "description": "The remote operation to perform.",
+            "type": "string",
+            "enum": [
+              "list",
+              "add",
+              "remove",
+              "rename",
+              "get-url",
+              "set-url"
+            ]
+          },
+          "name": {
+            "description": "Remote name for add/remove/rename/get-url/set-url operations.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "url": {
+            "description": "Remote URL for add/set-url operations. Accepts HTTP(S), SSH (ssh://… or git@host:path), git://, or file:// URLs.",
+            "type": "string",
+            "minLength": 1
+          },
+          "newName": {
+            "description": "New remote name for rename operation.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "push": {
+            "default": false,
+            "description": "Set push URL separately (for set-url operation).",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_reset",
+      "description": "Reset current HEAD to specified state. Can be used to unstage files (soft), discard commits (mixed), or discard all changes (hard).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "mode": {
+            "default": "mixed",
+            "description": "Reset mode: soft (keep changes staged), mixed (unstage changes), hard (discard all changes), merge (reset and merge), keep (reset but keep local changes).",
+            "type": "string",
+            "enum": [
+              "soft",
+              "mixed",
+              "hard",
+              "merge",
+              "keep"
+            ]
+          },
+          "target": {
+            "default": "HEAD",
+            "description": "Target commit to reset to. Defaults to HEAD.",
+            "type": "string",
+            "minLength": 1
+          },
+          "paths": {
+            "description": "Specific file paths to reset (leaves HEAD unchanged).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirmed": {
+            "default": false,
+            "description": "Explicit confirmation required for hard, merge, and keep reset modes on protected branches (main, master, production, etc.).",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_set_working_dir",
+      "description": "Set the session working directory for all git operations so subsequent calls can omit the path parameter. Always returns a repository snapshot (status, recent commits, recent tags, remotes) to orient the caller.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the git repository to use as the working directory."
+          },
+          "validateGitRepo": {
+            "default": true,
+            "description": "Validate that the path is a Git repository.",
+            "type": "boolean"
+          },
+          "initializeIfNotPresent": {
+            "default": false,
+            "description": "If not a Git repository, initialize it with 'git init'.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_show",
+      "description": "Show details of a git object (commit, tree, blob, or tag). Displays commit information and the diff of changes introduced.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Git object to show (commit hash, branch, tag, tree, or blob)."
+          },
+          "format": {
+            "description": "Output format for the git object. Use \"raw\" for unprocessed git output.",
+            "type": "string",
+            "enum": [
+              "raw"
+            ]
+          },
+          "stat": {
+            "default": false,
+            "description": "Show diffstat instead of full diff.",
+            "type": "boolean"
+          },
+          "filePath": {
+            "description": "View specific file at a given commit reference. When provided, shows the file content from the specified object.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_stash",
+      "description": "Manage stashes: list stashes, save current changes (push), restore changes (pop/apply), or remove stashes (drop/clear).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "mode": {
+            "default": "push",
+            "description": "The stash operation to perform. Defaults to push (save current changes).",
+            "type": "string",
+            "enum": [
+              "list",
+              "push",
+              "pop",
+              "apply",
+              "drop",
+              "clear"
+            ]
+          },
+          "message": {
+            "description": "Stash message description (for push operation).",
+            "type": "string"
+          },
+          "stashRef": {
+            "description": "Stash reference like stash@{0} (for pop/apply/drop operations).",
+            "type": "string"
+          },
+          "includeUntracked": {
+            "default": false,
+            "description": "Include untracked files in the stash (for push operation).",
+            "type": "boolean"
+          },
+          "keepIndex": {
+            "default": false,
+            "description": "Don't revert staged changes (for push operation).",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "For list mode: cap the number of stash entries returned (applied at the git command).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_status",
+      "description": "Show the working tree status including staged, unstaged, and untracked files.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "includeUntracked": {
+            "default": true,
+            "description": "Include untracked files in the output.",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_tag",
+      "description": "Manage tags: list all tags, create a new tag, delete a tag, or verify a signed tag. Tags are used to mark specific points in history (releases, milestones). Verify runs `git tag -v` and returns a structured result distinguishing unsigned tags, missing trust configuration, bad signatures, and valid signatures.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "mode": {
+            "default": "list",
+            "description": "The tag operation to perform.",
+            "type": "string",
+            "enum": [
+              "list",
+              "create",
+              "delete",
+              "verify"
+            ]
+          },
+          "tagName": {
+            "description": "Tag name for create/delete/verify operations.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^~^:?*\\[\\\\]+$"
+          },
+          "commit": {
+            "description": "Commit to tag (default: HEAD for create operation).",
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "description": "Tag message. Providing a message always produces an annotated tag (git does not support messages on lightweight tags). For release tags, summarize notable changes.",
+            "type": "string"
+          },
+          "annotated": {
+            "default": false,
+            "description": "Create an annotated tag with a default \"Tag <name>\" message. Only effective when no message is provided and signing is disabled — otherwise the tag is always annotated.",
+            "type": "boolean"
+          },
+          "force": {
+            "default": false,
+            "description": "Overwrite an existing tag (create mode only; has no effect on list or delete).",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "For list mode: cap the number of tags returned (applied at the git command via `--count=N`). Use on repos with many tags.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_worktree",
+      "description": "Manage multiple working trees: list worktrees, add new worktrees for parallel work, remove worktrees, or move worktrees to new locations.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Path to the Git repository. Defaults to session working directory set via git_set_working_dir.",
+            "type": "string"
+          },
+          "mode": {
+            "default": "list",
+            "description": "The worktree operation to perform.",
+            "type": "string",
+            "enum": [
+              "list",
+              "add",
+              "remove",
+              "move",
+              "prune"
+            ]
+          },
+          "worktreePath": {
+            "description": "Path for the new worktree (for add/move operations).",
+            "type": "string"
+          },
+          "branch": {
+            "description": "For add operation: create a NEW branch with this name in the new worktree. Fails if the branch already exists — use `commitish` to check out an existing branch instead.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^~^:?*\\[\\\\]+$"
+          },
+          "commitish": {
+            "description": "For add operation: check out this existing branch/commit/tag in the new worktree (no new branch is created).",
+            "type": "string",
+            "minLength": 1
+          },
+          "force": {
+            "default": false,
+            "description": "Force operation (for remove operation with uncommitted changes).",
+            "type": "boolean"
+          },
+          "newPath": {
+            "description": "New path for the worktree (for move operation).",
+            "type": "string"
+          },
+          "detach": {
+            "default": false,
+            "description": "Create worktree with detached HEAD (for add operation).",
+            "type": "boolean"
+          },
+          "verbose": {
+            "default": false,
+            "description": "Provide detailed output for worktree operations.",
+            "type": "boolean"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Preview the operation without executing it (for prune operation).",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "git_wrapup_instructions",
+      "description": "Returns a Git wrap-up protocol: an acceptance-criteria checklist the agent must satisfy before the session is considered shipped. Uses the operator's custom instructions if configured, otherwise emits a generic goals-strict/mechanism-generic default. Enriches the response with a repository snapshot (status, recent commits, recent tags) so the agent has immediate orientation for the commit and release steps.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "acknowledgement": {
+            "type": "string",
+            "enum": [
+              "Y",
+              "y",
+              "Yes",
+              "yes"
+            ],
+            "description": "Acknowledgement to initiate the wrap-up workflow."
+          },
+          "createTag": {
+            "description": "Controls whether the tag criterion appears in the emitted protocol. Omit or set `true` to include the tag step. Set `false` to omit it entirely — e.g., when tagging is deferred to a separate release step.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "acknowledgement"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

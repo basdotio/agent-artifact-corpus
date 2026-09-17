@@ -1,0 +1,878 @@
+{
+  "package": "stock-scanner-mcp",
+  "tools": [
+    {
+      "name": "tradingview_scan",
+      "description": "Scan US stocks with custom filters (price > X, RSI < 30, etc.). Returns up to `limit` rows with the requested columns.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "exchange": {
+            "description": "Exchange filter, e.g. NASDAQ, NYSE, AMEX",
+            "type": "string"
+          },
+          "filters": {
+            "description": "Scanner filters",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "string"
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "greater",
+                    "less",
+                    "equal",
+                    "in_range",
+                    "not_in_range",
+                    "crosses",
+                    "crosses_above",
+                    "crosses_below"
+                  ]
+                },
+                "right": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "left",
+                "operation",
+                "right"
+              ]
+            }
+          },
+          "columns": {
+            "description": "Columns to return (default: all 66)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timeframe": {
+            "description": "Timeframe: 1m, 5m, 15m, 1h, 4h, 1d (default), 1W, 1M",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max rows (default 50)",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "tradingview_compare_stocks",
+      "description": "Returns price, change, market cap, P/E, EPS, revenue, dividend yield, RSI, and analyst recommendation rating (-1 sell to +1 buy) for 2-5 stocks. Revenue growth rate and analyst price targets are not available.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "tickers": {
+            "minItems": 2,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "2-5 stock tickers to compare (e.g. AAPL, MSFT)"
+          }
+        },
+        "required": [
+          "tickers"
+        ]
+      }
+    },
+    {
+      "name": "tradingview_quote",
+      "description": "Get a 15-minute delayed quote for one or more stock tickers (e.g. 'AAPL' or 'NASDAQ:AAPL'). Returns price, change, volume, market cap, and pre-market/after-hours data when available. Data is delayed ~15 minutes during market hours — use finnhub_quote for real-time prices if available. If a ticker returns empty results, retry with the correct exchange prefix (e.g. 'NYSE:CDE', 'AMEX:XYZ').",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "tickers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Stock tickers, e.g. ['AAPL', 'MSFT']"
+          }
+        },
+        "required": [
+          "tickers"
+        ]
+      }
+    },
+    {
+      "name": "tradingview_technicals",
+      "description": "Get technical indicators (RSI, MACD, moving averages, pivot points, etc.) for one or more stock tickers. If a ticker returns empty results, retry with the correct exchange prefix (e.g. 'NYSE:CDE', 'AMEX:XYZ').",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "tickers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Stock tickers, e.g. ['AAPL', 'IBM']"
+          },
+          "timeframe": {
+            "description": "Timeframe (default: 1d)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tickers"
+        ]
+      }
+    },
+    {
+      "name": "tradingview_top_gainers",
+      "description": "Get today's top gaining stocks by percentage change on a given exchange. Defaults to major US exchanges (NYSE, NASDAQ, AMEX) with market cap > $100M. OTC penny stocks excluded by default.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "exchange": {
+            "description": "Exchange (default: all US)",
+            "type": "string"
+          },
+          "include_otc": {
+            "description": "Whether to include OTC penny stocks (default: false)",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Max results (default 20)",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "tradingview_top_losers",
+      "description": "Get today's top losing stocks by percentage change on a given exchange. Defaults to major US exchanges (NYSE, NASDAQ, AMEX) with market cap > $100M. OTC penny stocks excluded by default.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "exchange": {
+            "description": "Exchange (default: all US)",
+            "type": "string"
+          },
+          "include_otc": {
+            "description": "Whether to include OTC penny stocks (default: false)",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Max results (default 20)",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "tradingview_top_volume",
+      "description": "Get stocks with the highest trading volume today. Defaults to major US exchanges.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "exchange": {
+            "description": "Exchange (default: all US)",
+            "type": "string"
+          },
+          "include_otc": {
+            "description": "Whether to include OTC penny stocks (default: false)",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Max results (default 20)",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "tradingview_market_indices",
+      "description": "Get real-time values for major market indices: VIX (volatility), S&P 500, NASDAQ Composite, and Dow Jones. Essential for gauging broad market conditions, risk sentiment, and options pricing context.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "tradingview_sector_performance",
+      "description": "Get performance of S&P 500 sector ETFs (XLK, XLF, XLE, XLV, XLI, XLP, XLU, XLY, XLC, XLRE, XLB). Shows which sectors are leading or lagging today. Essential for sector rotation analysis.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "tradingview_volume_breakout",
+      "description": "Find stocks with unusual volume (current volume significantly above average). Defaults to major exchanges.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "exchange": {
+            "description": "Exchange filter",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max results (default 20)",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "crypto_scan",
+      "description": "Scan cryptocurrency pairs using TradingView filters. Returns price, volume, and technical indicators.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "filters": {
+            "description": "Filter conditions combined with AND",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "string",
+                  "description": "Column name (e.g. 'close', 'RSI', 'volume')"
+                },
+                "operation": {
+                  "type": "string",
+                  "description": "Comparison: 'greater', 'less', 'in_range', 'equal'"
+                },
+                "right": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  ],
+                  "description": "Value to compare against"
+                }
+              },
+              "required": [
+                "left",
+                "operation",
+                "right"
+              ]
+            }
+          },
+          "major_only": {
+            "description": "Only include major exchanges (default: true)",
+            "type": "boolean"
+          },
+          "columns": {
+            "description": "Columns to return (default: all 23)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timeframe": {
+            "description": "Timeframe: '1m','5m','15m','1h','4h','1d','1W','1M'. Default: '1d'",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max results (default: 50, max: 200)",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "crypto_quote",
+      "description": "Get real-time quotes for specific crypto pairs. Supports 'BTCUSDT' (defaults to BINANCE) or 'BINANCE:BTCUSDT'.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Crypto pair symbols (e.g. ['BTCUSDT', 'ETHUSDT'])"
+          }
+        },
+        "required": [
+          "symbols"
+        ]
+      }
+    },
+    {
+      "name": "crypto_technicals",
+      "description": "Get technical analysis for crypto pairs. Supports 'BTCUSDT' or 'BINANCE:BTCUSDT'.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Crypto symbols (e.g. ['BTCUSDT'])"
+          },
+          "timeframe": {
+            "description": "Timeframe. Default: '1d'",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbols"
+        ]
+      }
+    },
+    {
+      "name": "crypto_top_gainers",
+      "description": "Get top gaining cryptocurrency pairs by percentage change. Defaults to major exchanges and volume > $10k.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "exchange": {
+            "description": "Specific exchange (e.g. BINANCE)",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Number of results (default: 20, max: 50)",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "edgar_search",
+      "description": "Search SEC EDGAR filings by keyword. Best for finding mentions of specific trends, technologies, or events across all companies. Returns metadata including accession numbers, form types, and direct sec.gov links.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Keyword or phrase to search for (e.g. 'lithium mining', 'share repurchase program')"
+          },
+          "dateRange": {
+            "description": "Date range as 'YYYY-MM-DD,YYYY-MM-DD'",
+            "type": "string"
+          },
+          "forms": {
+            "description": "Form types to filter (e.g. ['10-K', '10-Q', '8-K'])",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tickers": {
+            "description": "Company tickers to filter (e.g. ['AAPL', 'MSFT'])",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "description": "Max results (default: 20, max: 50)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "edgar_company_filings",
+      "description": "Retrieve the most recent official filings for a specific company. Use this to find a company's latest 10-K (annual), 10-Q (quarterly), or 8-K (current events) reports.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "Stock ticker symbol (e.g. 'AAPL')"
+          },
+          "forms": {
+            "description": "Form types (e.g. ['10-K', '10-Q']). Default: all.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "description": "Max results (default: 10, max: 50)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
+      "name": "edgar_company_facts",
+      "description": "Retrieve high-fidelity financial metrics (Revenue, Net Income, EPS, Assets, Liabilities) directly from SEC XBRL data. This is more reliable than extracting numbers from text filings.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "Stock ticker symbol (e.g. 'AAPL')"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
+      "name": "edgar_insider_trades",
+      "description": "Monitor legal stock trades made by company executives and directors (Forms 3, 4, 5). Returns detailed transaction data including insider names, titles, buy/sell type, share amounts, and prices.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "Stock ticker symbol (e.g. 'AAPL')"
+          },
+          "limit": {
+            "description": "Max results (default: 10)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
+      "name": "edgar_institutional_holdings",
+      "description": "Track 'big money' moves by searching Form 13F filings. Use to find what hedge funds and institutional managers (e.g. 'Berkshire Hathaway') are holding or what firms own a specific ticker.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Stock ticker (e.g. 'AAPL') or institutional manager name (e.g. 'Berkshire Hathaway')"
+          },
+          "limit": {
+            "description": "Max results (default: 10)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "edgar_ownership_filings",
+      "description": "Monitor significant changes in company ownership (5%+ stakes). Use 13D and 13G filings to identify activist investors (e.g. Carl Icahn, Ryan Cohen) entering or exiting a stock.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "Stock ticker symbol (e.g. 'AAPL')"
+          },
+          "limit": {
+            "description": "Max results (default: 10)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker"
+        ]
+      }
+    },
+    {
+      "name": "coingecko_coin",
+      "description": "Get detailed cryptocurrency info from CoinGecko. Use slug IDs (e.g. 'bitcoin', 'ethereum', 'solana'), NOT ticker symbols.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "coinId": {
+            "type": "string",
+            "description": "CoinGecko coin ID / slug (e.g. 'bitcoin', 'ethereum', 'cardano')"
+          }
+        },
+        "required": [
+          "coinId"
+        ]
+      }
+    },
+    {
+      "name": "coingecko_trending",
+      "description": "Get trending cryptocurrencies on CoinGecko (top 7 by search popularity in last 24h).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "coingecko_global",
+      "description": "Get global cryptocurrency market statistics: total market cap, 24h volume, BTC/ETH dominance.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "options_expirations",
+      "description": "Get all available option expiration dates for a stock ticker. Call this first to discover valid dates, then pass one to options_chain or options_max_pain.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10,
+            "description": "Stock ticker symbol (e.g. 'AAPL', 'NYSE:GM')"
+          }
+        },
+        "required": [
+          "symbol"
+        ]
+      }
+    },
+    {
+      "name": "options_chain",
+      "description": "Get the full option chain (calls and puts) with calculated Greeks (Delta, Gamma, Theta, Vega). Use options_expirations first to find valid dates. If expiration is omitted, uses nearest date. By default, returns strikes within ±20% of current price to save tokens. Use strike_min/strike_max for custom range, or all_strikes=true for everything.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10,
+            "description": "Stock ticker symbol (e.g. 'AAPL', 'NYSE:GM')"
+          },
+          "expiration": {
+            "description": "Expiration date as YYYY-MM-DD (e.g. '2026-04-17'). If omitted, uses nearest.",
+            "type": "string"
+          },
+          "side": {
+            "description": "Filter by option type (default: both)",
+            "type": "string",
+            "enum": [
+              "call",
+              "put",
+              "both"
+            ]
+          },
+          "limit": {
+            "description": "Max contracts per side (default: 50, max: 200)",
+            "type": "number"
+          },
+          "strike_min": {
+            "description": "Minimum strike price filter (e.g. 25.0)",
+            "type": "number"
+          },
+          "strike_max": {
+            "description": "Maximum strike price filter (e.g. 35.0)",
+            "type": "number"
+          },
+          "all_strikes": {
+            "description": "Return all strikes instead of centering around ATM (default: false)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "symbol"
+        ]
+      }
+    },
+    {
+      "name": "options_unusual_activity",
+      "description": "Find options contracts with unusually high volume relative to open interest (a common 'smart money' signal). Scans the nearest expiration and flags contracts where volume/OI exceeds a threshold.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10,
+            "description": "Stock ticker symbol (e.g. 'AAPL', 'NYSE:GM')"
+          },
+          "volume_oi_ratio": {
+            "description": "Min volume/OI ratio to flag as unusual (default: 3.0)",
+            "type": "number"
+          },
+          "min_volume": {
+            "description": "Min absolute volume (default: 100)",
+            "type": "number"
+          },
+          "side": {
+            "description": "Filter by option type (default: both)",
+            "type": "string",
+            "enum": [
+              "call",
+              "put",
+              "both"
+            ]
+          }
+        },
+        "required": [
+          "symbol"
+        ]
+      }
+    },
+    {
+      "name": "options_max_pain",
+      "description": "Calculate the max pain strike price — where cumulative option open interest expires worthless. This level often acts as a support/resistance zone near expiration.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10,
+            "description": "Stock ticker symbol (e.g. 'AAPL', 'NYSE:GM')"
+          },
+          "expiration": {
+            "description": "Expiration date as YYYY-MM-DD. If omitted, uses nearest.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol"
+        ]
+      }
+    },
+    {
+      "name": "options_implied_move",
+      "description": "Calculate the expected move implied by options pricing (ATM straddle). Essential for earnings plays — shows how much the market expects the stock to move. Compare implied vs historical moves to assess if premium is cheap or expensive.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10,
+            "description": "Stock ticker symbol (e.g. 'AAPL', 'NYSE:GM')"
+          },
+          "expiration": {
+            "description": "Expiration date as YYYY-MM-DD. If omitted, uses nearest.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol"
+        ]
+      }
+    },
+    {
+      "name": "options_put_call_ratio",
+      "description": "Get historical put/call ratio from CBOE (market-wide sentiment indicator). Ratio > 1.0 = more puts (bearish sentiment), < 0.7 = more calls (bullish/complacent). Types: 'total' (all options), 'equity' (stock options only), 'index' (index options only).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "description": "Ratio type (default: total)",
+            "type": "string",
+            "enum": [
+              "total",
+              "equity",
+              "index"
+            ]
+          },
+          "days": {
+            "description": "Number of recent trading days to return (default: 30, max: 252)",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "sentiment_fear_greed",
+      "description": "Get the CNN Fear & Greed Index for the US stock market. Returns a composite score (0-100) with rating (extreme fear/fear/neutral/greed/extreme greed) and 7 sub-indicators: S&P 500 momentum, stock price strength (52w highs vs lows), stock price breadth (McClellan), put/call ratio, VIX, junk bond demand, safe haven demand. Also includes previous close, 1-week, 1-month, and 1-year scores for trend context. Use this to gauge overall market sentiment before analyzing individual stocks.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "sentiment_crypto_fear_greed",
+      "description": "Get the Crypto Fear & Greed Index from Alternative.me. Returns a score (0-100) with rating (extreme fear/fear/neutral/greed/extreme greed). Based on Bitcoin volatility, market volume, social media, surveys, dominance, and trends. Use this alongside coingecko tools for crypto market context.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "frankfurter_latest",
+      "description": "Get latest forex exchange rates from the European Central Bank. Returns daily reference rates for 31 major currencies. Updated once per business day at ~16:00 CET. These are reference rates, not real-time trading rates.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "base": {
+            "default": "USD",
+            "description": "Base currency",
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "symbols": {
+            "description": "Comma-separated target currencies (e.g. 'EUR,GBP,JPY'). Omit for all 31.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "frankfurter_historical",
+      "description": "Get ECB forex exchange rates for a specific past date. Daily reference rates, not real-time trading rates. If the date is a weekend or holiday, returns the previous business day's rates. Data available from 1999-01-04 (Euro inception).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "Date in YYYY-MM-DD format"
+          },
+          "base": {
+            "default": "USD",
+            "description": "Base currency",
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "symbols": {
+            "description": "Comma-separated target currencies. Omit for all.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date"
+        ]
+      }
+    },
+    {
+      "name": "frankfurter_timeseries",
+      "description": "Get daily ECB forex rate history for a date range (max 90 days). Daily reference rates, not real-time. Use for currency trend analysis. Only business days included (weekends/holidays omitted). Requires symbols filter to control response size.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "description": "Start date (YYYY-MM-DD)"
+          },
+          "end_date": {
+            "description": "End date (YYYY-MM-DD, defaults to today, max 90 days from start)",
+            "type": "string"
+          },
+          "base": {
+            "default": "USD",
+            "description": "Base currency",
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "symbols": {
+            "type": "string",
+            "description": "Required: comma-separated target currencies (e.g. 'EUR,GBP')"
+          }
+        },
+        "required": [
+          "start_date",
+          "symbols"
+        ]
+      }
+    },
+    {
+      "name": "frankfurter_convert",
+      "description": "Convert an amount between two currencies at the latest ECB daily reference rate. Updated once per business day — not suitable for intraday trading rates. Useful for cross-border stock valuation and currency exposure calculations.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "description": "Amount to convert"
+          },
+          "from": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3,
+            "description": "Source currency (e.g. 'USD')"
+          },
+          "to": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3,
+            "description": "Target currency (e.g. 'EUR')"
+          }
+        },
+        "required": [
+          "amount",
+          "from",
+          "to"
+        ]
+      }
+    },
+    {
+      "name": "frankfurter_currencies",
+      "description": "List all 31 currencies supported by the Frankfurter API with their full names. Use to look up valid currency codes before calling other frankfurter tools.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

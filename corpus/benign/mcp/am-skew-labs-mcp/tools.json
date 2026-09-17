@@ -1,0 +1,599 @@
+{
+  "package": "@skew-labs/mcp",
+  "tools": [
+    {
+      "name": "skew_get_capabilities",
+      "description": "Return Skew's supported assets, 11 payoff names, collateral rails, trade lanes, profile counts, and MCP agentGuide. Call this immediately after skew_get_signer_info so the agent chooses Instant RFQ vs Auction RFQ vs secondary vs pre-funded issuance correctly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "skew_get_signer_info",
+      "description": "First tool before any write workflow. Returns the active MCP signer posture: local keypair path/private-key mode, hosted unsigned mode, active profile, visible tool count, and the signer public key when a local write key is configured. Use it to prove which wallet will pay fees and sign transactions; if write_tools_enabled=false, do read-only analysis instead of pretending to trade.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "skew_get_spot",
+      "description": "Get the current spot price for a supported asset from Pyth Network (Hermes REST). Returns USD price and confidence interval.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "underlying": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "SOL",
+              "XRP",
+              "HYPE"
+            ],
+            "description": "Asset to query"
+          }
+        },
+        "required": [
+          "underlying"
+        ]
+      }
+    },
+    {
+      "name": "skew_get_iv_smile",
+      "description": "Get the implied-volatility smile for one expiry — IV across a strike ladder, plus 25-delta risk reversal and butterfly. Useful for spotting skew (puts vs calls relative pricing) before you write or buy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "underlying": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "SOL",
+              "XRP",
+              "HYPE"
+            ],
+            "description": "Asset to query"
+          },
+          "expiry_days": {
+            "type": "number",
+            "description": "Days to expiry (e.g. 7, 14, 30)"
+          }
+        },
+        "required": [
+          "underlying",
+          "expiry_days"
+        ]
+      }
+    },
+    {
+      "name": "skew_get_term_structure",
+      "description": "Get ATM implied volatility across a standard expiry ladder (7d, 14d, 30d, 60d, 90d, 180d). The shape tells you whether the market expects near-term or far-term volatility — flat = stable, downward-sloping = backwardation = market expects calmer future, upward-sloping = contango.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "underlying": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "SOL",
+              "XRP",
+              "HYPE"
+            ],
+            "description": "Asset to query"
+          }
+        },
+        "required": [
+          "underlying"
+        ]
+      }
+    },
+    {
+      "name": "skew_get_volatility_summary",
+      "description": "Get a one-shot volatility view for an asset — current spot, ATM 30-day IV, smile skew (put vs call), term-structure shape, and a generic vol-view label (stable / elevated / compressing). Designed to answer questions like 'how do you see BTC vol next week?' in a single call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "underlying": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "SOL",
+              "XRP",
+              "HYPE"
+            ],
+            "description": "Asset to query"
+          }
+        },
+        "required": [
+          "underlying"
+        ]
+      }
+    },
+    {
+      "name": "skew_get_fair_value",
+      "description": "Get a suggested fair-value premium for an option from the Skew pricing service. Returns price in USD plus delta, gamma, vega, theta, rho. Advisory only — the on-chain program does not read this number.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "underlying": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "SOL",
+              "XRP",
+              "HYPE"
+            ],
+            "description": "Underlying asset"
+          },
+          "payoff": {
+            "type": "string",
+            "enum": [
+              "digital_call",
+              "digital_put",
+              "vanilla_call",
+              "vanilla_put",
+              "capped_call",
+              "capped_put",
+              "range_accrual",
+              "vanilla_inverse_call",
+              "vanilla_inverse_put",
+              "digital_inverse_call",
+              "digital_inverse_put"
+            ]
+          },
+          "strike": {
+            "type": "number",
+            "description": "Strike price in USD"
+          },
+          "expiry": {
+            "type": "string",
+            "description": "Expiry in ISO 8601 UTC format"
+          },
+          "notional": {
+            "type": "number",
+            "description": "Notional in USD"
+          },
+          "upperBound": {
+            "type": "number",
+            "description": "For range_accrual / capped: upper bound in USD"
+          }
+        },
+        "required": [
+          "underlying",
+          "payoff",
+          "strike",
+          "expiry",
+          "notional"
+        ]
+      }
+    },
+    {
+      "name": "skew_get_margin_breakdown",
+      "description": "Compute the off-chain clearing-class portfolio-margin breakdown for a candidate options portfolio via the skew-pricing /margin_breakdown endpoint. Launch PM policy (2026-05-08): conservative ConvexHullIM/floor stack, calendar credit disabled, non-vanilla Greek credit audit-gated, and ICC credit applied once under a capped policy. Pass `tier` as the compatibility value: standard=M0 Segregated, silver=M1 Portfolio, gold=M2 Cross-Asset, platinum=M3 Clearing Prime. The response returns a full class ladder for transparency. Advisory-only — the on-chain calculate_margin handler remains the final risk check.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "legs": {
+            "type": "array",
+            "description": "Vanilla call/put legs. Each entry: { asset (BTC|ETH|SOL|XRP|HYPE), kind (VanillaCall|VanillaPut), strike, spot, t_years, iv, r (optional, default 0), side (Long|Short), qty }.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "asset": {
+                  "type": "string",
+                  "enum": [
+                    "BTC",
+                    "ETH",
+                    "SOL",
+                    "XRP",
+                    "HYPE"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "VanillaCall",
+                    "VanillaPut"
+                  ]
+                },
+                "strike": {
+                  "type": "number"
+                },
+                "spot": {
+                  "type": "number"
+                },
+                "t_years": {
+                  "type": "number"
+                },
+                "iv": {
+                  "type": "number"
+                },
+                "r": {
+                  "type": "number"
+                },
+                "side": {
+                  "type": "string",
+                  "enum": [
+                    "Long",
+                    "Short"
+                  ]
+                },
+                "qty": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "asset",
+                "kind",
+                "strike",
+                "spot",
+                "t_years",
+                "iv",
+                "side",
+                "qty"
+              ]
+            }
+          },
+          "regime": {
+            "type": "string",
+            "enum": [
+              "Calm",
+              "Stress"
+            ],
+            "description": "Regime to drive the per-asset shock and ICC rho matrix. Default Calm. M3 returns both calm and stress IMs side-by-side; lower classes omit regime fields."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "standard",
+              "silver",
+              "gold",
+              "platinum"
+            ],
+            "description": "Clearing-class compatibility value. Default `platinum` maps to M3 Clearing Prime. Lockup schedule: M0 $0, M1 $500K, M2 $2M, M3 $10M (30-day lockup). The full ladder under all 4 classes is returned in `tier_ladder_im_usd` for backward-compatible clients."
+          }
+        },
+        "required": [
+          "legs"
+        ]
+      }
+    },
+    {
+      "name": "skew_estimate_fee",
+      "description": "Compute the launch effective fee for a candidate options trade — VIP volume, clearing-class discount, and optional builder share. Returns effective bps, USD fee, fee-cap state, and the protocol/builder split. Public classes are M0 Segregated, M1 Portfolio, M2 Cross-Asset, and M3 Clearing Prime; compatibility values remain standard/silver/gold/platinum for IDL stability. Builder code share is 25% of effective taker. Spec: docs/fee-schedule-v5.1.md.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "volume_30d_usd": {
+            "type": "number",
+            "description": "Caller's 30-day rolling options notional in USD. Drives VIP volume discount resolution."
+          },
+          "equity_usd": {
+            "type": "number",
+            "description": "Caller's equity in USD. VIP1 entry path is $25K equity (alternative to volume-based entry). Default 0."
+          },
+          "verified_tier": {
+            "type": "string",
+            "enum": [
+              "standard",
+              "silver",
+              "gold",
+              "platinum"
+            ],
+            "description": "Clearing-class compatibility value. Adds 0/10/20/30% taker discount on top of VIP. Maker fee is unaffected by clearing class. Default `standard` = M0."
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "taker",
+              "maker"
+            ],
+            "description": "Trade side. Default `taker`. Only takers benefit from clearing-class discount."
+          },
+          "premium_usd": {
+            "type": "number",
+            "description": "Trade premium in USD. Used to dollarise the fee and check the 12.5%-of-premium fee cap. Default $100 (callers asking for bps only can ignore)."
+          },
+          "has_builder": {
+            "type": "boolean",
+            "description": "True if this trade is routed through a registered builder code. When true, the taker fee is split 75% protocol / 25% builder. Default false."
+          }
+        },
+        "required": [
+          "volume_30d_usd"
+        ]
+      }
+    },
+    {
+      "name": "skew_fetch_collateral_policy",
+      "description": "Read the live CollateralPolicyPda mint allowlist for this deployment. Capabilities show protocol support; this tool shows which USDC/wSOL/jitoSOL/custom mints are actually registered now, so agents can preflight before sending write transactions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "skew_fetch_pm_cache",
+      "description": "Read a CM's on-chain PM cache sidecar and return whether cached margin / cached fill can be used. Reports dirty/stale/registry mismatch blockers explicitly. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cm_authority": {
+            "type": "string",
+            "description": "CM authority wallet. Defaults to the configured MCP write wallet if omitted."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skew_preview_incremental_margin",
+      "description": "Preview the PM cache envelope for a candidate fill. This is read-only and not an execution guarantee; exact post-fill IM is still produced by relay/SDK transaction preflight.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cm_authority": {
+            "type": "string",
+            "description": "CM authority wallet. Defaults to the configured MCP write wallet if omitted."
+          },
+          "estimated_post_im_micro": {
+            "type": "string",
+            "description": "Optional post-fill IM estimate in USDC micro-units. If omitted, the tool returns cache status only."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skew_list_rent_reclaimable",
+      "description": "List owner-first rent reclaim candidates for a wallet. Returns close blockers instead of pretending unsafe accounts can be closed. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "authority": {
+            "type": "string",
+            "description": "Wallet whose reclaim queue should be scanned. Defaults to the configured MCP write wallet if omitted."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skew_list_options",
+      "description": "List options on Skew devnet, decoded from on-chain `OptionAccount` PDAs. Returns each option's pda, creator, holder, type, state, underlying, direction, strike (USD), upper bound (USD), expiry (unix + ISO), payoff (USD), locked collateral (USD), V0 stamp (USD), σ at creation, and spot at creation. Filters and sort run client-side after the discriminator-filtered scan.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Max number of options to return (default 10, max 50)."
+          },
+          "filter_option_pda": {
+            "type": "string",
+            "description": "Fetch a single option PDA directly. Use this for receipt/readback after a known tx instead of scanning the whole market."
+          },
+          "holder": {
+            "type": "string",
+            "description": "Filter by current option holder wallet pubkey."
+          },
+          "creator": {
+            "type": "string",
+            "description": "Filter by option creator / writer wallet pubkey."
+          },
+          "underlying": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "SOL",
+              "XRP",
+              "HYPE"
+            ],
+            "description": "Filter by underlying asset (optional)."
+          },
+          "option_type": {
+            "type": "string",
+            "enum": [
+              "Vanilla",
+              "Digital",
+              "CappedVanilla",
+              "RangeAccrual",
+              "VanillaInverse",
+              "DigitalInverse"
+            ],
+            "description": "Filter by anchor `OptionType` storage variant (optional). User-facing payoff names such as `vanilla_call` and `digital_inverse_put` map onto these storage types plus direction."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "Created",
+              "Funded",
+              "Active",
+              "Expired",
+              "Settled",
+              "Disputed",
+              "ExpiredAbandoned"
+            ],
+            "description": "Filter by lifecycle state (optional). `Active` = collateralised + bought. `Funded` = collateralised but no buyer yet. `Created` = just minted, no collateral locked."
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": [
+              "createdAt",
+              "expiry"
+            ],
+            "description": "Sort order. Default `createdAt` (newest first). `expiry` returns latest expiry first."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skew_fetch_portfolio",
+      "description": "Read a wallet's live Skew portfolio directly from on-chain OptionAccount PDAs. Long side = current holder; short side = creator/writer. Also includes Clearing Member state when registered. Use this after create/buy/transfer to prove the option is visible, not just minted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "Wallet pubkey base58. Defaults to configured MCP write wallet. Required when the MCP server is running read-only without a write keypair."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skew_list_rfq_auctions",
+      "description": "List live Auction RFQs from the same public RFQ tape used by the terminal. This discovers auction PDAs before you know their address by merging the indexer view with a bounded on-chain snapshot. Use this before `skew_fetch_rfq_auction`, quote submission, or finalize workflows.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Max number of RFQs to return (default 25, max 100)."
+          },
+          "buyer": {
+            "type": "string",
+            "description": "Filter by buyer wallet pubkey (optional)."
+          },
+          "underlying": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "SOL",
+              "XRP",
+              "HYPE"
+            ],
+            "description": "Filter by underlying asset (optional)."
+          },
+          "with_quote": {
+            "type": "boolean",
+            "description": "Only return RFQs with a currently live best quote."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "indexer",
+              "onchain"
+            ],
+            "description": "Optional source override. Omit for terminal-equivalent indexer plus on-chain snapshot."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skew_list_secondary_listings",
+      "description": "List the public secondary tape from the same listing endpoint used by the terminal. This is discovery/readback only, not an escrowed orderbook. Payment uses skew_buy_secondary_listing and delivery is complete only after seller-side skew_transfer_option returns readback_ok=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Max number of listings to return (default 25, max 100)."
+          },
+          "underlying": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "SOL",
+              "XRP",
+              "HYPE"
+            ],
+            "description": "Filter by underlying asset (optional)."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Return active listings only. Defaults to true."
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "Return listings that are still pending off-chain settlement/indexer confirmation."
+          },
+          "seller": {
+            "type": "string",
+            "description": "Filter by listing seller wallet pubkey."
+          },
+          "option_pda": {
+            "type": "string",
+            "description": "Filter listings for one option PDA."
+          },
+          "min_qty": {
+            "type": "number",
+            "description": "Minimum token amount filter."
+          },
+          "max_ask_usdc": {
+            "type": "number",
+            "description": "Maximum ask price in USDC."
+          },
+          "exclude_me": {
+            "type": "string",
+            "description": "Exclude listings posted by this seller wallet pubkey."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "skew_fetch_rfq_auction",
+      "description": "Read an RfqAuctionPda — buyer, option_spec, max_premium, open/close slots, best_quote (mm + premium + valid_until_slot), state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "auction": {
+            "type": "string",
+            "description": "Auction PDA base58."
+          }
+        },
+        "required": [
+          "auction"
+        ]
+      }
+    },
+    {
+      "name": "skew_list_rfq_quotes",
+      "description": "Read the full quote-depth tape for one RFQ auction PDA from the public web/indexer API. This is read-only and complements skew_fetch_rfq_auction, which only exposes the on-chain best quote snapshot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "auction": {
+            "type": "string",
+            "description": "RFQ auction PDA base58."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum quotes to return. Defaults to 50."
+          }
+        },
+        "required": [
+          "auction"
+        ]
+      }
+    },
+    {
+      "name": "skew_fetch_clearing_member",
+      "description": "Read a Clearing Member account snapshot — collateral, IF contribution, clearing-class lockup, total_pm_locked, free_collateral, net notional, last_im_micro, class rank, tier_locked_until, under_liquidation flag. Drives risk diagnostics: equity vs IM ratio (liquidation trigger if < 1.10), class upgrade headroom, free capital for new positions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cm_authority": {
+            "type": "string",
+            "description": "CM authority pubkey base58. Default: caller's wallet."
+          }
+        }
+      }
+    }
+  ]
+}

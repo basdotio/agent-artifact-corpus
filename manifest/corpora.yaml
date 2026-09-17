@@ -372,7 +372,37 @@ entries:
     vendorable: true
     hazards:
       - "none known for the data itself"
-      - "our MCP-001..004 have only ever been validated against 44 tools; this is a 225x expansion and may surface many false positives at once"
+      - "MCP tool-description rules in this space are typically validated against a few dozen tools; 9,922 real ones is a two-order-of-magnitude expansion and may surface many false positives at once"
+      - "COUNT CLARIFICATION: 9,922 tools, but they group into 357 PACKAGES and only 285 distinct server_names — 34 different packages all call themselves `mcp-server`. Package is the provenance; server_name is a display label"
+      - "the poisoning-shaped strings a rule looks for occur legitimately at low but non-trivial rates: `IMPORTANT:` in 0.9% of descriptions, angle-bracket placeholders in 1.4%, URLs in 1.1%, token/secret/api-key wording in 3.1%, must/always/never imperatives in 4.5%. That is the whole reason this is a hard negative"
+      - "SHAPE: this is the only upstream in the corpus that ships a TABLE rather than files. It needs the extraction step below before anything can be pointed at it"
+      - "SERIALISATION MISMATCH ON THE MCP SURFACE, and it is the sharpest caveat here. The malicious MCP samples (cisco) are Python server IMPLEMENTATIONS; these benign ones are JSON tool DECLARATIONS. A false-positive rate computed across the two measures how a scanner handles .json versus .py at least as much as it measures over-alerting. Report them separately, or compare only against malicious samples in the same serialisation — of which this corpus has none"
+      - "`file:tools.json` appears in 357 of 357 of these samples and in no malicious sample anywhere, and unlike skillet's LICENSE.txt that filename is an artifact of OUR extraction script rather than a property of the data. The leakage gate reports it as cross-population structure on every run. It cannot be avoided while the two halves of this surface are different artifact forms"
+    prep:
+      - "run scripts/extract-automatelab.py after fetching; it groups the parquet into one tree per package. Same pinned parquet plus that script gives the same trees"
+      - "tool lists are deliberately NOT truncated: capping tools per sample would delete content that could trip a rule, moving a false-positive rate in the flattering direction"
+    # One sample is one package, which is also one source, so per-source reporting is automatic
+    # here and needs no source_from: every source contributes exactly one sample. That is a
+    # better balance than skillet's 483 samples across 178 repositories.
+    derive:
+      layout: "extracted/*"
+      label_file: ""
+      surface: mcp
+      id_prefix: am
+      class_from: "constant:benign"
+      benign_note: >-
+        A real MCP server's complete tool declaration, as published. Its descriptions
+        legitimately contain the shapes a tool-poisoning rule looks for — IMPORTANT:,
+        angle-bracket placeholders, URLs, credential wording — which is what makes it a
+        false-positive probe rather than filler. Nothing here was selected for being
+        difficult; this is simply what real tool catalogues look like.
+      fidelity: >-
+        The most mechanical derivation in the corpus alongside skillet's. Class is a constant
+        and only benign trees exist, so nothing is inferred; benign samples carry no tier,
+        dimension or severity, so there is no lossy axis mapping at all. The one judgement is
+        upstream of the derivation: that a package, not a tool, is the artifact — because a
+        scanner on the MCP surface reads a server's whole declaration, which is the same
+        granularity as the cisco samples already here.
 
   - id: nvidia-skillspector-fixtures
     name: "NVIDIA/SkillSpector tests/fixtures"

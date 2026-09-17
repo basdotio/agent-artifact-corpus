@@ -1,0 +1,920 @@
+{
+  "package": "@zsc-glitch/knowledge-keeper-mcp",
+  "tools": [
+    {
+      "name": "knowledge_save",
+      "description": "保存一条新的知识到知识库。自动检测标题相似的已有知识点并提示。",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "concept",
+              "decision",
+              "todo",
+              "note",
+              "project"
+            ],
+            "description": "知识类型"
+          },
+          "title": {
+            "type": "string",
+            "description": "标题"
+          },
+          "content": {
+            "type": "string",
+            "description": "内容"
+          },
+          "tags": {
+            "description": "标签列表",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_search",
+      "description": "在知识库中搜索知识点",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索关键词"
+          },
+          "type": {
+            "description": "筛选类型",
+            "type": "string",
+            "enum": [
+              "concept",
+              "decision",
+              "todo",
+              "note",
+              "project"
+            ]
+          },
+          "tags": {
+            "description": "筛选标签",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "description": "返回数量限制",
+            "type": "number"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_semantic_search",
+      "description": "使用语义理解搜索知识库，比关键词搜索更智能",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索内容（自然语言）"
+          },
+          "topK": {
+            "description": "返回数量（默认10）",
+            "type": "number"
+          },
+          "threshold": {
+            "description": "相似度阈值（0-1，默认0.3）",
+            "type": "number"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_bm25_search",
+      "description": "使用 BM25 算法进行关键词检索，精准匹配查询词",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索关键词"
+          },
+          "topK": {
+            "description": "返回数量（默认10）",
+            "type": "number"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_bm25_stats",
+      "description": "查看 BM25 索引的统计信息（文档数、词汇表大小、平均长度等）",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      }
+    },
+    {
+      "name": "knowledge_get",
+      "description": "根据 ID 获取单个知识点",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "知识点 ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_update",
+      "description": "更新现有知识点的内容或标签",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "知识点 ID"
+          },
+          "title": {
+            "description": "新标题",
+            "type": "string"
+          },
+          "content": {
+            "description": "新内容",
+            "type": "string"
+          },
+          "tags": {
+            "description": "新标签列表",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "appendTags": {
+            "description": "追加标签",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_delete",
+      "description": "删除指定知识点",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "要删除的知识点 ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_tags",
+      "description": "列出知识库中的所有标签",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      }
+    },
+    {
+      "name": "knowledge_versions",
+      "description": "查询知识点的版本历史记录，支持查看、对比和回滚",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "知识点 ID"
+          },
+          "action": {
+            "default": "list",
+            "description": "操作类型：list=列表, get=获取版本, diff=对比, rollback=回滚",
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "diff",
+              "rollback"
+            ]
+          },
+          "version": {
+            "description": "版本号（get/rollback 时使用）",
+            "type": "number"
+          },
+          "compareWith": {
+            "description": "对比版本号（diff 时使用，与 version 对比）",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_review",
+      "description": "查看近期知识点统计，支持今天/本周/本月/全部",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "period": {
+            "description": "回顾周期（默认week）",
+            "type": "string",
+            "enum": [
+              "today",
+              "week",
+              "month",
+              "all"
+            ]
+          },
+          "type": {
+            "description": "筛选类型",
+            "type": "string",
+            "enum": [
+              "concept",
+              "decision",
+              "todo",
+              "note",
+              "project"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_link",
+      "description": "建立知识点之间的关联关系，支持多种关联类型",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "源知识点ID"
+          },
+          "to": {
+            "type": "string",
+            "description": "目标知识点ID"
+          },
+          "relation": {
+            "default": "related",
+            "description": "关联类型",
+            "type": "string",
+            "enum": [
+              "related",
+              "depends-on",
+              "references",
+              "similar",
+              "contradicts"
+            ]
+          },
+          "bidirectional": {
+            "default": false,
+            "description": "是否双向关联",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_unlink",
+      "description": "删除知识点之间的关联关系",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "源知识点ID"
+          },
+          "to": {
+            "description": "目标知识点ID（可选，不填则删除所有关联）",
+            "type": "string"
+          },
+          "relation": {
+            "description": "关联类型（可选）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_get_linked",
+      "description": "查询知识点关联的所有其他知识点",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "知识点ID"
+          },
+          "relation": {
+            "description": "关联类型筛选（可选）",
+            "type": "string"
+          },
+          "direction": {
+            "default": "both",
+            "description": "关联方向",
+            "type": "string",
+            "enum": [
+              "outgoing",
+              "incoming",
+              "both"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_graph",
+      "description": "返回知识点及其关联的图谱结构，用于可视化展示",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "root": {
+            "description": "根节点知识点ID（可选，不填则返回全部图谱）",
+            "type": "string"
+          },
+          "depth": {
+            "default": 2,
+            "description": "图谱深度",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "minLinks": {
+            "default": 1,
+            "description": "最小关联数（过滤孤立节点）",
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_export",
+      "description": "将知识库导出为JSON/Markdown/CSV格式",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "format": {
+            "default": "json",
+            "description": "导出格式",
+            "type": "string",
+            "enum": [
+              "json",
+              "markdown",
+              "csv"
+            ]
+          },
+          "type": {
+            "description": "知识类型筛选",
+            "type": "string",
+            "enum": [
+              "concept",
+              "decision",
+              "todo",
+              "note",
+              "project"
+            ]
+          },
+          "tags": {
+            "description": "标签筛选",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "default": 100,
+            "description": "导出数量限制",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_import",
+      "description": "从JSON或Markdown格式批量导入知识点",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "format": {
+            "default": "json",
+            "description": "导入格式",
+            "type": "string",
+            "enum": [
+              "json",
+              "markdown"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "description": "导入内容"
+          },
+          "overwrite": {
+            "default": false,
+            "description": "是否覆盖已存在的知识点",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_batch",
+      "description": "批量删除、添加/移除标签、修改类型",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "delete",
+              "add_tags",
+              "remove_tags",
+              "update_type"
+            ],
+            "description": "批量操作类型"
+          },
+          "ids": {
+            "description": "知识点ID列表",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "description": "搜索条件（替代ids）",
+            "type": "string"
+          },
+          "tags": {
+            "description": "标签列表",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "type": {
+            "description": "知识类型",
+            "type": "string",
+            "enum": [
+              "concept",
+              "decision",
+              "todo",
+              "note",
+              "project"
+            ]
+          },
+          "limit": {
+            "default": 50,
+            "description": "批量数量限制",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_sync",
+      "description": "与其他知识库（Obsidian vault）同步",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "action": {
+            "default": "status",
+            "description": "同步操作",
+            "type": "string",
+            "enum": [
+              "status",
+              "pull",
+              "push",
+              "diff"
+            ]
+          },
+          "source": {
+            "description": "同步源路径（Obsidian vault路径）",
+            "type": "string"
+          },
+          "auto": {
+            "default": false,
+            "description": "是否自动同步",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_merge",
+      "description": "合并相似或重复的知识点",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "primary": {
+            "type": "string",
+            "description": "主知识点ID（保留）"
+          },
+          "secondary": {
+            "type": "string",
+            "description": "次要知识点ID（将被合并）"
+          },
+          "mode": {
+            "default": "keep_both",
+            "description": "合并模式",
+            "type": "string",
+            "enum": [
+              "keep_both",
+              "delete_secondary",
+              "link_only"
+            ]
+          }
+        },
+        "required": [
+          "primary",
+          "secondary"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_graph_build",
+      "description": "从知识点中提取实体和关系，构建知识图谱",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "action": {
+            "default": "build",
+            "description": "操作类型",
+            "type": "string",
+            "enum": [
+              "build",
+              "update",
+              "clear"
+            ]
+          },
+          "sourceIds": {
+            "description": "指定知识点范围",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "autoDetect": {
+            "default": true,
+            "description": "自动检测实体",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_graph_query",
+      "description": "查询实体及其关系",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "action": {
+            "default": "entity",
+            "description": "查询类型",
+            "type": "string",
+            "enum": [
+              "entity",
+              "relations",
+              "neighbors",
+              "path"
+            ]
+          },
+          "entityId": {
+            "description": "实体ID",
+            "type": "string"
+          },
+          "entityName": {
+            "description": "实体名称",
+            "type": "string"
+          },
+          "relationType": {
+            "description": "关系类型过滤",
+            "type": "string"
+          },
+          "depth": {
+            "description": "查询深度",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_graph_visualize",
+      "description": "导出知识图谱为可视化格式（Mermaid/GraphViz）",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "format": {
+            "default": "mermaid",
+            "description": "导出格式",
+            "type": "string",
+            "enum": [
+              "mermaid",
+              "json"
+            ]
+          },
+          "entityIds": {
+            "description": "指定实体范围",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxDepth": {
+            "description": "最大深度",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_sync_status",
+      "description": "检查云同步状态（Pro功能）",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      }
+    },
+    {
+      "name": "knowledge_cloud_sync",
+      "description": "执行完整云同步（拉取+推送），端到端加密（Pro功能）",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "direction": {
+            "default": "full",
+            "description": "同步方向：full=双向, push=仅推送, pull=仅拉取",
+            "type": "string",
+            "enum": [
+              "full",
+              "push",
+              "pull"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_license",
+      "description": "查看当前许可证和功能",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      }
+    },
+    {
+      "name": "knowledge_analytics_overview",
+      "description": "获取知识库的整体统计数据：项目数、标签数、链接数、类型分布、健康评分等",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      }
+    },
+    {
+      "name": "knowledge_analytics_insights",
+      "description": "获取知识库质量洞察：孤立项目、未标记项目、过期项目、重复候选、连接性评分等",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      }
+    },
+    {
+      "name": "knowledge_analytics_timeline",
+      "description": "获取知识库的时间线统计：每日/每周/每月创建数量",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "granularity": {
+            "default": "monthly",
+            "description": "时间粒度",
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_hybrid_search",
+      "description": "混合 BM25 关键词 + 语义搜索，使用 RRF 融合排序（R@5=95%）",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索查询"
+          },
+          "limit": {
+            "default": 10,
+            "description": "返回结果数量",
+            "type": "number"
+          },
+          "bm25Weight": {
+            "default": 0.7,
+            "description": "BM25 权重 (0-1)",
+            "type": "number"
+          },
+          "semanticWeight": {
+            "default": 0.3,
+            "description": "语义搜索权重 (0-1)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_recent",
+      "description": "获取最近添加或更新的知识点，按时间倒序排列。用于快速回顾最近的工作内容。",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "limit": {
+            "description": "返回数量限制（默认10，最大50）",
+            "type": "number"
+          },
+          "type": {
+            "description": "筛选类型",
+            "type": "string",
+            "enum": [
+              "concept",
+              "decision",
+              "todo",
+              "note",
+              "project"
+            ]
+          },
+          "days": {
+            "description": "只返回最近N天内更新的知识点（默认不限）",
+            "type": "number"
+          },
+          "sort_by": {
+            "description": "排序字段（默认 updated）",
+            "type": "string",
+            "enum": [
+              "updated",
+              "created"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_duplicates",
+      "description": "检测知识库中标题或内容相似的知识点，帮助清理重复内容。返回相似组及合并建议。",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "threshold": {
+            "default": 0.7,
+            "description": "相似度阈值（默认0.7，越高越严格）",
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 1
+          },
+          "scope": {
+            "default": "both",
+            "description": "检测范围",
+            "type": "string",
+            "enum": [
+              "title",
+              "content",
+              "both"
+            ]
+          },
+          "limit": {
+            "default": 10,
+            "description": "最大返回组数",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_context",
+      "description": "获取某个知识点的完整上下文：包括自身、关联链接、共享标签、标题相似的知识点。帮助AI Agent快速构建领域上下文。",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "目标知识点ID"
+          },
+          "depth": {
+            "default": "standard",
+            "description": "探索深度: quick=仅链接, standard=+同标签, deep=+标题相似",
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard",
+              "deep"
+            ]
+          },
+          "max_results": {
+            "default": 10,
+            "description": "最大返回关联知识点数量",
+            "type": "number",
+            "minimum": 3,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    }
+  ]
+}

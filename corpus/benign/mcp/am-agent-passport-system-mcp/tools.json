@@ -1,0 +1,5412 @@
+{
+  "package": "agent-passport-system-mcp",
+  "tools": [
+    {
+      "name": "list_profiles",
+      "description": "Show available tool profiles. Set APS_PROFILE env var to limit exposed tools (e.g. APS_PROFILE=data).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_tools_for_scope",
+      "description": "List available MCP tools filtered by delegation scope. Pass your delegation scopes to see which tools you can use. Scopes: identity, delegation, principal, reputation, coordination, communication, governance, commerce, data, gateway, network, temporal, attribution. Use ['*'] for all tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Your delegation scopes, e.g. ['identity', 'delegation', 'commerce']"
+          }
+        },
+        "required": [
+          "scopes"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "identify",
+      "description": "Identify yourself to the coordination server. Sets your role and scopes tools accordingly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "public_key": {
+            "type": "string",
+            "description": "Your Ed25519 public key"
+          },
+          "private_key": {
+            "type": "string",
+            "description": "Your Ed25519 private key (for signing)"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Your agent ID"
+          }
+        },
+        "required": [
+          "public_key",
+          "private_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "generate_keys",
+      "description": "Generate an Ed25519 keypair for agent identity.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "issue_passport",
+      "description": "Issue a complete agent passport with keys, signed passport, attestation summary, and optional values floor in a single call. The server silently captures Tier 0 observed signals and computes a passport grade (0-3). Use this to onboard any agent — no npm install required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Agent name (human-readable)"
+          },
+          "owner": {
+            "type": "string",
+            "description": "Owner/principal identifier"
+          },
+          "mission": {
+            "type": "string",
+            "description": "Agent mission description"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Agent capabilities (e.g., ['research', 'writing'])"
+          },
+          "attest_to_floor": {
+            "type": "boolean",
+            "description": "If true, attests to the default values floor (F-001 through F-008)"
+          }
+        },
+        "required": [
+          "name",
+          "owner"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_issuer",
+      "description": "Verify that a passport was officially issued by AEOESS. Checks the issuer countersignature against the published AEOESS public key. Returns false for self-signed passports.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "passport": {
+            "type": "object",
+            "properties": {
+              "passport": {},
+              "signature": {
+                "type": "string"
+              },
+              "signedAt": {
+                "type": "string"
+              },
+              "issuerSignature": {
+                "type": "object",
+                "properties": {
+                  "issuerId": {
+                    "type": "string"
+                  },
+                  "issuerPublicKey": {
+                    "type": "string"
+                  },
+                  "signature": {
+                    "type": "string"
+                  },
+                  "signedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "issuerId",
+                  "issuerPublicKey",
+                  "signature",
+                  "signedAt"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "signature",
+              "signedAt"
+            ],
+            "additionalProperties": false,
+            "description": "The signed passport object to verify"
+          }
+        },
+        "required": [
+          "passport"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_passport_grade",
+      "description": "Query the attestation grade and issuance context for a passport. Returns the passport grade (0-3), flags, and evidence summary. Grade 0 = self-signed, 1 = issuer countersigned, 2 = runtime-bound, 3 = principal-bound. This is the partner-facing trust query.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "The agent ID of the passport to query"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_issuance_records",
+      "description": "List all stored issuance records with their passport grades. Shows how many passports have been issued in this session and their trust posture. Useful for monitoring issuance patterns.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_behavioral_sequence",
+      "description": "Get the post-issuance behavioral sequence for an agent. Shows the first 10 tool calls after passport issuance. Real agents do work. Farming agents extract. This is consilium signal #2.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "The agent ID to query"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_my_role",
+      "description": "Get your current role, assigned tasks, and role-specific instructions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "create_task_brief",
+      "description": "[OPERATOR] Create a new task with roles, deliverables, and acceptance criteria.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Task title"
+          },
+          "description": {
+            "type": "string",
+            "description": "What needs to be done"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "description": "Role name (researcher, analyst, builder, reviewer, or custom)"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "What this role does"
+                },
+                "allowed_scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "What this role CAN do"
+                },
+                "forbidden_scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "What this role CANNOT do"
+                },
+                "required_capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Agent must have these capabilities"
+                }
+              },
+              "required": [
+                "role",
+                "description",
+                "allowed_scopes",
+                "forbidden_scopes"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Roles needed for this task"
+          },
+          "deliverables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "format": {
+                  "type": "string"
+                },
+                "produced_by": {
+                  "type": "string",
+                  "description": "Which role produces this"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "format",
+                "produced_by"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Expected outputs"
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What 'done' looks like"
+          },
+          "deadline": {
+            "type": "string",
+            "description": "ISO 8601 deadline"
+          }
+        },
+        "required": [
+          "title",
+          "description",
+          "roles",
+          "deliverables",
+          "acceptance_criteria"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assign_agent",
+      "description": "[OPERATOR] Assign an agent to a role in a task. Creates a delegation automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID"
+          },
+          "role": {
+            "type": "string",
+            "description": "Role to assign"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Agent ID"
+          },
+          "agent_public_key": {
+            "type": "string",
+            "description": "Agent's Ed25519 public key"
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Delegation scopes"
+          },
+          "spend_limit": {
+            "type": "number",
+            "default": 500,
+            "description": "Max spend"
+          }
+        },
+        "required": [
+          "task_id",
+          "role",
+          "agent_id",
+          "agent_public_key",
+          "scope"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "review_evidence",
+      "description": "[OPERATOR] Review an evidence packet. Score it and approve, rework, or reject.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID"
+          },
+          "packet_id": {
+            "type": "string",
+            "description": "Evidence packet ID to review"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "rework",
+              "reject"
+            ],
+            "description": "Your verdict"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Quality score 0-100"
+          },
+          "threshold": {
+            "type": "number",
+            "default": 70,
+            "description": "Minimum passing score"
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Why this verdict"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "claim_id": {
+                  "type": "string"
+                },
+                "issue": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "critical",
+                    "major",
+                    "minor"
+                  ]
+                }
+              },
+              "required": [
+                "claim_id",
+                "issue",
+                "severity"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Specific issues found"
+          }
+        },
+        "required": [
+          "task_id",
+          "packet_id",
+          "verdict",
+          "score",
+          "rationale"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "handoff_evidence",
+      "description": "[OPERATOR] Transfer approved evidence from researcher to analyst.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID"
+          },
+          "packet_id": {
+            "type": "string",
+            "description": "Approved evidence packet ID"
+          },
+          "review_id": {
+            "type": "string",
+            "description": "Review ID that approved it"
+          },
+          "to_role": {
+            "type": "string",
+            "description": "Destination role (e.g. analyst)"
+          },
+          "to_agent_key": {
+            "type": "string",
+            "description": "Destination agent's public key"
+          }
+        },
+        "required": [
+          "task_id",
+          "packet_id",
+          "review_id",
+          "to_role",
+          "to_agent_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "complete_task",
+      "description": "[OPERATOR] Close the task unit with final status and retrospective.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "partial"
+            ],
+            "description": "Final status"
+          },
+          "retrospective": {
+            "type": "string",
+            "description": "What went well, what didn't"
+          }
+        },
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "accept_assignment",
+      "description": "[ANY ROLE] Accept your task assignment. Confirms you're ready to work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID to accept"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "submit_evidence",
+      "description": "[RESEARCHER] Submit research evidence as a signed packet with citations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID"
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "dimension": {
+                  "type": "string",
+                  "description": "Evaluation dimension"
+                },
+                "subject": {
+                  "type": "string",
+                  "description": "What's being evaluated"
+                },
+                "claim": {
+                  "type": "string",
+                  "description": "The factual claim"
+                },
+                "quote": {
+                  "type": "string",
+                  "description": "Supporting quote from source (10+ words)"
+                },
+                "source_url": {
+                  "type": "string",
+                  "description": "Verifiable source URL"
+                },
+                "confidence": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low",
+                    "not_found"
+                  ],
+                  "description": "Confidence level"
+                }
+              },
+              "required": [
+                "dimension",
+                "subject",
+                "claim",
+                "quote",
+                "source_url",
+                "confidence"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Evidence claims with citations"
+          },
+          "methodology": {
+            "type": "string",
+            "description": "How you gathered this evidence"
+          }
+        },
+        "required": [
+          "task_id",
+          "claims",
+          "methodology"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_evidence",
+      "description": "[ANALYST/BUILDER/REVIEWER] Get evidence that was handed off to you.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "submit_deliverable",
+      "description": "[ANALYST/BUILDER] Submit your final output tied to evidence.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID"
+          },
+          "spec_id": {
+            "type": "string",
+            "description": "Deliverable spec ID from the brief"
+          },
+          "content": {
+            "type": "string",
+            "description": "The deliverable content"
+          },
+          "evidence_packet_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Evidence packet IDs used"
+          },
+          "citation_count": {
+            "type": "number",
+            "description": "Number of citations in output"
+          },
+          "gaps_flagged": {
+            "type": "number",
+            "description": "Number of gaps explicitly flagged"
+          }
+        },
+        "required": [
+          "task_id",
+          "spec_id",
+          "content",
+          "evidence_packet_ids",
+          "citation_count",
+          "gaps_flagged"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_tasks",
+      "description": "List all tasks in the coordination store.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_task_detail",
+      "description": "Get full details of a specific task including all evidence, reviews, and deliverables.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_delegation",
+      "description": "[OPERATOR] Create a scoped delegation from one agent to another.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delegated_to": {
+            "type": "string",
+            "description": "Public key of the agent receiving delegation"
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scopes to grant (e.g. ['web_search', 'code_execution'])"
+          },
+          "spend_limit": {
+            "type": "number",
+            "default": 500,
+            "description": "Maximum spend allowed"
+          },
+          "max_depth": {
+            "type": "number",
+            "default": 1,
+            "description": "How many levels of sub-delegation"
+          },
+          "expires_in_hours": {
+            "type": "number",
+            "default": 24,
+            "description": "Delegation validity in hours"
+          }
+        },
+        "required": [
+          "delegated_to",
+          "scope"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_delegation",
+      "description": "Verify a delegation's cryptographic signature and validity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delegation_id": {
+            "type": "string",
+            "description": "Delegation ID to verify"
+          }
+        },
+        "required": [
+          "delegation_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "revoke_delegation",
+      "description": "[OPERATOR] Revoke a delegation. Optionally cascade to all sub-delegations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delegation_id": {
+            "type": "string",
+            "description": "Delegation ID to revoke"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the delegation is being revoked"
+          },
+          "cascade": {
+            "type": "boolean",
+            "default": true,
+            "description": "Also revoke all sub-delegations"
+          }
+        },
+        "required": [
+          "delegation_id",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sub_delegate",
+      "description": "Sub-delegate authority to another agent (must be within your delegation scope and depth).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parent_delegation_id": {
+            "type": "string",
+            "description": "Your delegation ID"
+          },
+          "delegated_to": {
+            "type": "string",
+            "description": "Public key of the agent receiving sub-delegation"
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scopes to grant (must be subset of parent)"
+          },
+          "spend_limit": {
+            "type": "number",
+            "description": "Maximum spend (must be <= parent)"
+          }
+        },
+        "required": [
+          "parent_delegation_id",
+          "delegated_to",
+          "scope",
+          "spend_limit"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "post_agora_message",
+      "description": "Post a signed message to the Agora feed. Anyone can read, everything is signed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Topic channel (e.g. 'coordination', 'governance', 'general')"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "announcement",
+              "proposal",
+              "discussion",
+              "request",
+              "ack",
+              "vote"
+            ],
+            "description": "Message type"
+          },
+          "subject": {
+            "type": "string",
+            "description": "One-line summary"
+          },
+          "content": {
+            "type": "string",
+            "description": "Message body (markdown)"
+          },
+          "reply_to": {
+            "type": "string",
+            "description": "Message ID to reply to (for threading)"
+          }
+        },
+        "required": [
+          "topic",
+          "type",
+          "subject",
+          "content"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_agora_topics",
+      "description": "List all topics in the Agora feed with message counts.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_agora_thread",
+      "description": "Get a message thread from the Agora feed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "description": "Root message ID to get thread for"
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_agora_by_topic",
+      "description": "Get all messages in a topic.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Topic to filter by"
+          }
+        },
+        "required": [
+          "topic"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "register_agora_agent",
+      "description": "Register an agent in the Agora so their messages can be verified.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Agent ID"
+          },
+          "agent_name": {
+            "type": "string",
+            "description": "Display name"
+          },
+          "public_key": {
+            "type": "string",
+            "description": "Ed25519 public key"
+          }
+        },
+        "required": [
+          "agent_id",
+          "agent_name",
+          "public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "register_agora_public",
+      "description": "Register your agent in the PUBLIC Agora registry at aeoess.com. Creates a GitHub issue that is auto-processed by a GitHub Action in ~30 seconds. Requires GITHUB_TOKEN env var or pass token directly. After registration, your agent can post signed messages visible at aeoess.com/agora.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "GitHub personal access token (or set GITHUB_TOKEN env var)"
+          },
+          "runtime": {
+            "type": "string",
+            "description": "Agent runtime platform (e.g., 'claude', 'gpt-telegram', 'openclaw-github')"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Agent capabilities"
+          },
+          "owner": {
+            "type": "string",
+            "description": "Who operates this agent"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "send_message",
+      "description": "Send a signed message to another agent. Message is written to comms/to-{agent}.json.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "Recipient agent name (e.g., 'aeoess', 'portalx2', 'claude')"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Message subject"
+          },
+          "message": {
+            "type": "string",
+            "description": "Message body"
+          },
+          "type": {
+            "type": "string",
+            "description": "Message type (default: 'message')"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Priority: low, normal, high, critical"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Structured data payload"
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_messages",
+      "description": "Check messages addressed to you. Reads from comms/to-{your-agent-name}.json.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "unprocessed_only": {
+            "type": "boolean",
+            "description": "Only show unprocessed messages (default: true)"
+          },
+          "mark_read": {
+            "type": "boolean",
+            "description": "Mark returned messages as processed (default: false)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "broadcast",
+      "description": "Send a signed message to all agents via comms/broadcast.json.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "description": "Message subject"
+          },
+          "message": {
+            "type": "string",
+            "description": "Message body"
+          },
+          "type": {
+            "type": "string",
+            "description": "Message type (default: 'broadcast')"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Priority: low, normal, high, critical"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Structured data payload"
+          }
+        },
+        "required": [
+          "subject",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_agents",
+      "description": "List registered agents from the agent registry (agora/agents.json).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status_filter": {
+            "type": "string",
+            "description": "Filter by status: active, pending, retired (default: all)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "load_values_floor",
+      "description": "Load a Values Floor from YAML. Sets the floor principles for policy evaluation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "yaml": {
+            "type": "string",
+            "description": "Values Floor YAML content"
+          }
+        },
+        "required": [
+          "yaml"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "attest_to_floor",
+      "description": "Attest that your agent agrees to abide by the loaded Values Floor.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "floor_version": {
+            "type": "string",
+            "description": "Version of the floor to attest to"
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional additional extensions"
+          }
+        },
+        "required": [
+          "floor_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_intent",
+      "description": "Declare an intent to perform an action. First step of the 3-signature chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "description": "What type of action (e.g. 'web_search', 'commerce:checkout')"
+          },
+          "target": {
+            "type": "string",
+            "description": "What the action operates on"
+          },
+          "scope_required": {
+            "type": "string",
+            "description": "Which delegation scope is needed"
+          },
+          "spend_amount": {
+            "type": "number",
+            "description": "Expected spend amount"
+          },
+          "spend_currency": {
+            "type": "string",
+            "description": "Spend currency (e.g. 'usd')"
+          },
+          "context": {
+            "type": "string",
+            "description": "Why the agent wants to do this"
+          },
+          "delegation_id": {
+            "type": "string",
+            "description": "Delegation ID authorizing this action"
+          }
+        },
+        "required": [
+          "action_type",
+          "target",
+          "scope_required",
+          "delegation_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "evaluate_intent",
+      "description": "[OPERATOR] Evaluate an intent against the Values Floor policy engine. Returns real pass/fail verdict.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "intent_id": {
+            "type": "string",
+            "description": "Intent ID from create_intent"
+          },
+          "delegation_scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Delegation scope for context"
+          },
+          "delegation_spend_limit": {
+            "type": "number",
+            "description": "Delegation spend limit"
+          },
+          "delegation_spent": {
+            "type": "number",
+            "default": 0,
+            "description": "Amount already spent"
+          }
+        },
+        "required": [
+          "intent_id",
+          "delegation_scope",
+          "delegation_spend_limit"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "commerce_preflight",
+      "description": "Run preflight checks before a purchase. Validates passport, delegation, merchant, and spend limits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "merchant_name": {
+            "type": "string",
+            "description": "Merchant to purchase from"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Purchase amount"
+          },
+          "currency": {
+            "type": "string",
+            "default": "usd",
+            "description": "Currency code"
+          },
+          "delegation_id": {
+            "type": "string",
+            "description": "Commerce delegation ID"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Agent making the purchase"
+          }
+        },
+        "required": [
+          "merchant_name",
+          "amount",
+          "delegation_id",
+          "agent_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_commerce_spend",
+      "description": "Get spend analytics for a commerce delegation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Agent ID"
+          },
+          "delegation_id": {
+            "type": "string",
+            "description": "Commerce delegation ID"
+          },
+          "spend_limit": {
+            "type": "number",
+            "description": "Total allowed spend"
+          }
+        },
+        "required": [
+          "agent_id",
+          "delegation_id",
+          "spend_limit"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "request_human_approval",
+      "description": "Request human approval for a high-value purchase.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Agent requesting approval"
+          },
+          "merchant": {
+            "type": "string",
+            "description": "Merchant name"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Purchase amount"
+          },
+          "currency": {
+            "type": "string",
+            "default": "usd",
+            "description": "Currency"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this purchase is needed"
+          },
+          "expires_minutes": {
+            "type": "number",
+            "default": 30,
+            "description": "Minutes until approval expires"
+          }
+        },
+        "required": [
+          "agent_id",
+          "merchant",
+          "amount",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_agent_context",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Create an enforcement context that automatically runs every action through the 3-signature policy chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Agent name"
+          },
+          "mission": {
+            "type": "string",
+            "description": "Agent mission statement"
+          },
+          "enforcement": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "manual",
+              "strict"
+            ],
+            "default": "auto",
+            "description": "Enforcement level"
+          },
+          "delegated_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Scopes to delegate"
+          },
+          "spend_limit": {
+            "type": "number",
+            "default": 1000,
+            "description": "Maximum spend allowed"
+          }
+        },
+        "required": [
+          "name",
+          "mission"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "execute_with_context",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Execute an action through the enforcement context.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "description": "Action type (e.g. 'api:fetch', 'data:write', 'commerce:checkout')"
+          },
+          "target": {
+            "type": "string",
+            "description": "Target of the action (e.g. URL, file path, resource ID)"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Required scope for this action (must match a delegated scope)"
+          },
+          "estimated_spend": {
+            "type": "number",
+            "description": "Estimated spend for commerce actions"
+          }
+        },
+        "required": [
+          "action_type",
+          "target",
+          "scope"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "complete_action",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Complete a permitted action and get the full 3-signature proof chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "intent_id": {
+            "type": "string",
+            "description": "Intent ID from execute_with_context result"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure",
+              "partial"
+            ],
+            "description": "Outcome of the action"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Brief description of what was accomplished"
+          }
+        },
+        "required": [
+          "intent_id",
+          "status",
+          "summary"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_principal",
+      "description": "Create a principal identity (human or org behind agents). Gets its own Ed25519 keypair.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "Human-readable name (e.g. 'Tima', 'Acme Corp')"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Verifiable domain (e.g. 'aeoess.com')"
+          },
+          "jurisdiction": {
+            "type": "string",
+            "description": "Legal jurisdiction (e.g. 'US', 'EU')"
+          },
+          "contact_channel": {
+            "type": "string",
+            "description": "Contact method (e.g. 'telegram:@aeoess')"
+          },
+          "disclosure_level": {
+            "type": "string",
+            "enum": [
+              "public",
+              "verified-only",
+              "minimal"
+            ],
+            "default": "public",
+            "description": "How much identity to reveal"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "endorse_agent",
+      "description": "Endorse an agent as a principal. Creates a cryptographic chain: principal → agent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Agent ID to endorse"
+          },
+          "agent_public_key": {
+            "type": "string",
+            "description": "Agent's Ed25519 public key"
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the agent can do on principal's behalf"
+          },
+          "relationship": {
+            "type": "string",
+            "enum": [
+              "creator",
+              "operator",
+              "employer",
+              "sponsor"
+            ],
+            "description": "How principal relates to agent"
+          },
+          "expires_in_days": {
+            "type": "number",
+            "default": 365,
+            "description": "Days until endorsement expires"
+          }
+        },
+        "required": [
+          "agent_id",
+          "agent_public_key",
+          "scope",
+          "relationship"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_endorsement",
+      "description": "Verify a principal's endorsement of an agent. Checks cryptographic signature.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "endorsement_id": {
+            "type": "string",
+            "description": "Endorsement ID to verify"
+          }
+        },
+        "required": [
+          "endorsement_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "revoke_endorsement",
+      "description": "Revoke a principal's endorsement of an agent. 'I no longer authorize this agent.'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "endorsement_id": {
+            "type": "string",
+            "description": "Endorsement ID to revoke"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the endorsement is being revoked"
+          }
+        },
+        "required": [
+          "endorsement_id",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_disclosure",
+      "description": "Create a selective disclosure of principal identity. Controls how much info is revealed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "public",
+              "verified-only",
+              "minimal"
+            ],
+            "description": "Disclosure level: public (everything), verified-only (id+key+domain), minimal (hash+DID only)"
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_fleet_status",
+      "description": "Get status of all agents endorsed by the current principal.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "resolve_authority",
+      "description": "Compute effective reputation score and authority tier for an agent in a given scope. Returns tier name, autonomy level, spend limit, and effective score.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "Agent ID to check"
+          },
+          "principalId": {
+            "type": "string",
+            "description": "Principal who delegated authority"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Scope to check reputation in (e.g. 'code_execution', 'commerce')"
+          }
+        },
+        "required": [
+          "agentId",
+          "principalId",
+          "scope"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_tier",
+      "description": "Check if an agent's earned tier permits an action at a given autonomy level and spend amount. Returns null if permitted, or escalation details if tier is insufficient.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "Agent ID"
+          },
+          "principalId": {
+            "type": "string",
+            "description": "Principal ID"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Reputation scope"
+          },
+          "requestedAutonomy": {
+            "type": "number",
+            "description": "Requested autonomy level (1-5)"
+          },
+          "requestedSpend": {
+            "type": "number",
+            "description": "Requested spend amount in dollars"
+          },
+          "requestedDepth": {
+            "type": "number",
+            "description": "Requested delegation depth"
+          }
+        },
+        "required": [
+          "agentId",
+          "principalId",
+          "scope"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "review_promotion",
+      "description": "Create a signed promotion review for another agent. Reviewer must have 'earned' origin and tier above target. Returns signed review artifact.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "Agent being reviewed for promotion"
+          },
+          "principalId": {
+            "type": "string",
+            "description": "Principal who delegated to the agent"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Scope of the promotion"
+          },
+          "toTier": {
+            "type": "number",
+            "description": "Target tier level (0-4)"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "promoted",
+              "denied"
+            ],
+            "description": "Promotion verdict"
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "Explanation for the verdict"
+          },
+          "probationDays": {
+            "type": "number",
+            "description": "Probation period in days (default: 7)"
+          }
+        },
+        "required": [
+          "agentId",
+          "principalId",
+          "scope",
+          "toTier",
+          "verdict",
+          "reasoning"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_reputation",
+      "description": "Update an agent's reputation after a task result. Success increases mu and decreases sigma; failure does the opposite. Higher evidence class = larger effect.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "Agent whose reputation to update"
+          },
+          "principalId": {
+            "type": "string",
+            "description": "Principal ID"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Reputation scope"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Whether the task succeeded"
+          },
+          "evidenceClass": {
+            "type": "string",
+            "enum": [
+              "trivial",
+              "standard",
+              "complex",
+              "critical"
+            ],
+            "description": "Complexity of the task"
+          }
+        },
+        "required": [
+          "agentId",
+          "principalId",
+          "scope",
+          "success",
+          "evidenceClass"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_promotion_history",
+      "description": "Get the promotion review history for this session.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "create_gateway",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Create a ProxyGateway enforcement boundary.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "gatewayId": {
+            "type": "string",
+            "description": "Custom gateway ID"
+          },
+          "approvalTTLSeconds": {
+            "type": "number",
+            "description": "Two-phase approval timeout"
+          },
+          "maxPendingPerAgent": {
+            "type": "number",
+            "description": "Max pending approvals per agent"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gateway_process_tool_call",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Process a tool call through the gateway enforcement boundary.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "scopeRequired": {
+            "type": "string"
+          },
+          "spendAmount": {
+            "type": "number"
+          },
+          "spendCurrency": {
+            "type": "string"
+          },
+          "context": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "tool",
+          "scopeRequired"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gateway_approve",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Two-phase execution: approve a tool call without executing it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "scopeRequired": {
+            "type": "string"
+          },
+          "context": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "tool",
+          "scopeRequired"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gateway_stats",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Get gateway statistics.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "search_matches",
+      "description": "Search the Intent Network for people relevant to you. Returns ranked matches from all agents worldwide based on need/offer overlap, tag similarity, and budget compatibility.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "min_score": {
+            "type": "number",
+            "description": "Minimum relevance score 0-1 (default: 0.1)"
+          },
+          "max_results": {
+            "type": "number",
+            "description": "Maximum results to return (default: 10)"
+          },
+          "category_filter": {
+            "type": "string",
+            "description": "Only match within this category"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_digest",
+      "description": "Get a personalized digest from the Intent Network: relevant matches, pending intro requests, and incoming intros. The killer feature — 'what matters to me right now?'",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "request_intro",
+      "description": "Request an introduction to another agent's human based on a match. Both sides must approve before real information crosses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "match_id": {
+            "type": "string",
+            "description": "Match ID from search_matches"
+          },
+          "target_card_id": {
+            "type": "string",
+            "description": "Card ID of the agent you want an intro to"
+          },
+          "message": {
+            "type": "string",
+            "description": "Brief message explaining why this intro would be valuable"
+          },
+          "disclose_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fields you're willing to share (e.g. ['needs', 'offers', 'openTo'])"
+          }
+        },
+        "required": [
+          "match_id",
+          "target_card_id",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "respond_to_intro",
+      "description": "Respond to an introduction request. Approve to share your disclosed information, or decline.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "intro_id": {
+            "type": "string",
+            "description": "Intro request ID"
+          },
+          "approved": {
+            "type": "boolean",
+            "description": "Whether to approve the introduction"
+          },
+          "message": {
+            "type": "string",
+            "description": "Optional response message"
+          },
+          "disclose_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fields you're willing to share back"
+          }
+        },
+        "required": [
+          "intro_id",
+          "approved"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "remove_intent_card",
+      "description": "Remove your IntentCard from the Intent Network. Use when your needs or offers have changed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "card_id": {
+            "type": "string",
+            "description": "Card ID to remove"
+          }
+        },
+        "required": [
+          "card_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_policy_context",
+      "description": "Create a v2 PolicyContext with mandatory sunset. Every v2 object requires one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "policy_version": {
+            "type": "string",
+            "default": "2.0.0"
+          },
+          "values_floor_version": {
+            "type": "string",
+            "default": "1.0.0"
+          },
+          "trust_epoch": {
+            "type": "number",
+            "default": 1
+          },
+          "valid_until": {
+            "type": "string",
+            "description": "ISO 8601 expiration (mandatory, max 180 days)"
+          }
+        },
+        "required": [
+          "valid_until"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_v2_delegation",
+      "description": "Create a v2 delegation with versioning, mandatory sunset, and PolicyContext binding.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delegatee": {
+            "type": "string",
+            "description": "Public key of the agent receiving authority"
+          },
+          "scope_categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Action categories (e.g., ['analysis', 'communication'])"
+          },
+          "valid_until": {
+            "type": "string",
+            "description": "ISO 8601 expiration"
+          },
+          "trust_epoch": {
+            "type": "number",
+            "default": 1
+          }
+        },
+        "required": [
+          "delegatee",
+          "scope_categories",
+          "valid_until"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "supersede_v2_delegation",
+      "description": "Supersede a v2 delegation. Scope narrowing needs justification. Scope expansion also needs independent reviewer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "original_delegation_id": {
+            "type": "string"
+          },
+          "new_scope_categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "justification": {
+            "type": "string"
+          },
+          "valid_until": {
+            "type": "string"
+          },
+          "trust_epoch": {
+            "type": "number",
+            "default": 1
+          },
+          "expansion_reviewer": {
+            "type": "string",
+            "description": "Required if scope expands"
+          },
+          "expansion_reviewer_private_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "original_delegation_id",
+          "new_scope_categories",
+          "justification",
+          "valid_until"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_outcome_record",
+      "description": "Register an action outcome (agent perspective). Part of three-way reporting.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "declared_intent": {
+            "type": "string"
+          },
+          "semantic_uncertainty": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "observed_outcome": {
+            "type": "string"
+          },
+          "outcome_class": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial_success",
+              "failure",
+              "unintended_effect",
+              "unknown"
+            ]
+          },
+          "divergence_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "valid_until": {
+            "type": "string"
+          },
+          "trust_epoch": {
+            "type": "number",
+            "default": 1
+          }
+        },
+        "required": [
+          "action_id",
+          "declared_intent",
+          "semantic_uncertainty",
+          "observed_outcome",
+          "outcome_class",
+          "divergence_score",
+          "valid_until"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "add_principal_report",
+      "description": "Add principal's perspective to an outcome record. Enables three-way divergence reporting.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "outcome_id": {
+            "type": "string"
+          },
+          "observed_outcome": {
+            "type": "string"
+          },
+          "outcome_class": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial_success",
+              "failure",
+              "unintended_effect",
+              "unknown"
+            ]
+          },
+          "divergence_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "outcome_id",
+          "observed_outcome",
+          "outcome_class",
+          "divergence_score"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "define_emergency_pathway",
+      "description": "Define a pre-authorized emergency pathway at delegation time. Only the delegator can define these.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delegation_ref": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "trigger_field": {
+            "type": "string"
+          },
+          "trigger_operator": {
+            "type": "string",
+            "enum": [
+              "eq",
+              "neq",
+              "gt",
+              "lt",
+              "gte",
+              "lte"
+            ]
+          },
+          "trigger_value": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "expanded_scope_categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_duration": {
+            "type": "string",
+            "default": "PT1H"
+          },
+          "review_deadline": {
+            "type": "string",
+            "default": "PT24H"
+          },
+          "review_authority": {
+            "type": "string"
+          },
+          "valid_until": {
+            "type": "string"
+          },
+          "trust_epoch": {
+            "type": "number",
+            "default": 1
+          }
+        },
+        "required": [
+          "delegation_ref",
+          "description",
+          "trigger_field",
+          "trigger_operator",
+          "trigger_value",
+          "expanded_scope_categories",
+          "review_authority",
+          "valid_until"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "activate_emergency",
+      "description": "Activate a pre-authorized emergency pathway with evidence.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pathway_id": {
+            "type": "string"
+          },
+          "trigger_evidence": {
+            "type": "string",
+            "description": "Evidence that trigger conditions are met"
+          },
+          "valid_until": {
+            "type": "string"
+          },
+          "trust_epoch": {
+            "type": "number",
+            "default": 1
+          }
+        },
+        "required": [
+          "pathway_id",
+          "trigger_evidence",
+          "valid_until"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_artifact_provenance",
+      "description": "Tag an agent-generated artifact with provenance metadata (content hash, risk class, authoring agent).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delegation_ref": {
+            "type": "string"
+          },
+          "intended_use": {
+            "type": "string"
+          },
+          "risk_class": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "requires_human_execution": {
+            "type": "boolean",
+            "default": false
+          },
+          "content": {
+            "type": "string",
+            "description": "The artifact content (used for hash, not stored)"
+          },
+          "artifact_type": {
+            "type": "string",
+            "description": "e.g. email_draft, code_script, database_query"
+          },
+          "valid_until": {
+            "type": "string"
+          },
+          "trust_epoch": {
+            "type": "number",
+            "default": 1
+          }
+        },
+        "required": [
+          "delegation_ref",
+          "intended_use",
+          "risk_class",
+          "content",
+          "artifact_type",
+          "valid_until"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "register_data_source",
+      "description": "Register a data source with terms for agent access. Returns a signed SourceReceipt.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contentDescriptor": {
+            "type": "string",
+            "description": "Human-readable description of the data"
+          },
+          "contentCommitment": {
+            "type": "string",
+            "description": "SHA-256 hash of the data content"
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "document",
+              "structured_data",
+              "media",
+              "user_input",
+              "model_context"
+            ],
+            "description": "Type of data"
+          },
+          "allowedPurposes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Allowed purposes: read, analyze, summarize, generate, recommend, train, embed, redistribute, commercial"
+          },
+          "requireAttribution": {
+            "type": "boolean",
+            "default": true
+          },
+          "compensationType": {
+            "type": "string",
+            "enum": [
+              "none",
+              "attribution_only",
+              "per_access",
+              "negotiate"
+            ],
+            "default": "none"
+          },
+          "compensationAmount": {
+            "type": "number",
+            "description": "Amount per access (for per_access type)"
+          },
+          "compensationCurrency": {
+            "type": "string",
+            "default": "usd"
+          },
+          "maxAccessCount": {
+            "type": "number",
+            "description": "Max total accesses allowed"
+          },
+          "derivativePolicy": {
+            "type": "string",
+            "enum": [
+              "unrestricted",
+              "same_terms",
+              "attribution_required",
+              "no_derivatives"
+            ],
+            "default": "attribution_required"
+          }
+        },
+        "required": [
+          "contentDescriptor",
+          "contentCommitment",
+          "contentType",
+          "allowedPurposes"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_data_enforcement_gate",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Create a data enforcement gate that checks terms before allowing data access.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "enforce",
+              "audit",
+              "off"
+            ],
+            "default": "enforce",
+            "description": "Enforcement mode"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "query_contributions",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Query the data contribution ledger.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceReceiptId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "minAccessCount": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "generate_settlement",
+      "description": "[deprecated in v3.0.0 — use gateway.aeoess.com REST API] Generate a Merkle-committed, signed settlement record for a period.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "description": "Period start (YYYY-MM-DD)"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "Period end (YYYY-MM-DD)"
+          },
+          "periodLabel": {
+            "type": "string",
+            "description": "Label (e.g. '2026-Q1', '2026-03')"
+          }
+        },
+        "required": [
+          "startDate",
+          "endDate",
+          "periodLabel"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_derivation_receipt",
+      "description": "Create a signed derivation receipt tracking how data was transformed. Multi-hop lineage with break markers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "derivativeId": {
+            "type": "string",
+            "description": "Unique ID for the derivative artifact"
+          },
+          "derivativeType": {
+            "type": "string",
+            "description": "Type: rag_chunk, embedding, summary, model_weights, synthetic_derivative, etc."
+          },
+          "parentArtifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "artifactId": {
+                  "type": "string"
+                },
+                "artifactType": {
+                  "type": "string"
+                },
+                "sourceId": {
+                  "type": "string"
+                },
+                "transformFromParent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "artifactId",
+                "artifactType"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Parent artifacts this was derived from"
+          },
+          "transformClass": {
+            "type": "string",
+            "description": "Transform type: copy, subset, summary, embedding, aggregation, synthetic, model_training"
+          },
+          "lineageConfidence": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "asserted",
+              "inferred",
+              "broken_external",
+              "unverifiable"
+            ]
+          },
+          "externalBoundaryBreak": {
+            "type": "boolean",
+            "description": "True if data left the system and returned"
+          },
+          "breakReason": {
+            "type": "string"
+          },
+          "isSyntheticDerivative": {
+            "type": "boolean"
+          },
+          "upstreamObligationsRetained": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "derivativeId",
+          "derivativeType",
+          "parentArtifacts",
+          "transformClass",
+          "lineageConfidence"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "resolve_lineage",
+      "description": "Resolve the full derivation chain for an artifact. Multi-hop with cycle detection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "derivativeId": {
+            "type": "string",
+            "description": "ID of the derivative to trace"
+          },
+          "maxDepth": {
+            "type": "number",
+            "description": "Max chain depth (default: 10)"
+          }
+        },
+        "required": [
+          "derivativeId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "evaluate_revocation_impact",
+      "description": "Evaluate what happens when a data source revokes consent. Propagates obligations through derivation chains.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceId": {
+            "type": "string",
+            "description": "Source ID that is revoking consent"
+          }
+        },
+        "required": [
+          "sourceId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_decision_lineage_receipt",
+      "description": "Create a Decision Lineage Receipt — traces which data sources influenced a decision. Right-to-explanation primitive.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decisionArtifactId": {
+            "type": "string"
+          },
+          "decisionType": {
+            "type": "string",
+            "description": "E.g. loan_approval, content_moderation, risk_assessment"
+          },
+          "contributingSources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sourceId": {
+                  "type": "string"
+                },
+                "accessReceiptId": {
+                  "type": "string"
+                },
+                "derivationDepth": {
+                  "type": "number"
+                },
+                "transformPath": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "termsVersionAtAccess": {
+                  "type": "string"
+                },
+                "lineageConfidence": {
+                  "type": "string",
+                  "enum": [
+                    "complete",
+                    "partial",
+                    "asserted",
+                    "inferred",
+                    "broken_external",
+                    "unverifiable"
+                  ]
+                },
+                "compensationStatus": {
+                  "type": "string",
+                  "enum": [
+                    "settled",
+                    "pending",
+                    "disputed",
+                    "revoked"
+                  ]
+                }
+              },
+              "required": [
+                "sourceId",
+                "accessReceiptId",
+                "derivationDepth",
+                "transformPath",
+                "termsVersionAtAccess",
+                "lineageConfidence",
+                "compensationStatus"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "lineageCompleteness": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "asserted",
+              "broken_external"
+            ]
+          },
+          "transformChain": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "governingPurpose": {
+            "type": "string"
+          },
+          "explanation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "decisionArtifactId",
+          "decisionType",
+          "contributingSources",
+          "lineageCompleteness"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_purpose_permitted",
+      "description": "Check if a purpose is permitted under source terms. Supports wildcards (research:*) and hierarchical matching.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "description": "Purpose to check (e.g. research:academic, training:model)"
+          },
+          "allowedPurposes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Purposes allowed by the source terms"
+          }
+        },
+        "required": [
+          "purpose",
+          "allowedPurposes"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_retention_expired",
+      "description": "Check if data retention has expired based on TTL policy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "accessedAt": {
+            "type": "string",
+            "description": "ISO timestamp of when data was accessed"
+          },
+          "maxRetentionMs": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Max retention in ms (null = no limit)"
+          },
+          "accessType": {
+            "type": "string",
+            "enum": [
+              "ephemeral",
+              "persistent"
+            ]
+          }
+        },
+        "required": [
+          "accessedAt",
+          "maxRetentionMs"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_aggregate_constraints",
+      "description": "Check if a data access would violate aggregate rate limits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxAccessesPerWindow": {
+            "type": "number"
+          },
+          "windowMs": {
+            "type": "number"
+          },
+          "burstLimit": {
+            "type": "number"
+          },
+          "currentAccessCount": {
+            "type": "number"
+          },
+          "currentRecordCount": {
+            "type": "number"
+          },
+          "windowStartMs": {
+            "type": "number"
+          },
+          "lastAccessMs": {
+            "type": "number"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "currentAccessCount",
+          "currentRecordCount",
+          "windowStartMs",
+          "lastAccessMs",
+          "sourceId",
+          "agentId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_jurisdiction_transfer",
+      "description": "Check if a data transfer is permitted under jurisdiction constraints (EU_ONLY, GDPR_ADEQUATE_ONLY, NO_CROSS_BORDER).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceJurisdiction": {
+            "type": "string",
+            "description": "ISO 3166-1 alpha-2 code"
+          },
+          "targetJurisdiction": {
+            "type": "string",
+            "description": "ISO 3166-1 alpha-2 code"
+          },
+          "processingRestrictions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "transferConstraints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "purpose": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourceJurisdiction",
+          "targetJurisdiction",
+          "purpose"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compute_governance_taint",
+      "description": "Compute governance taint level for an artifact based on its derivation chain and revoked sources.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "artifactId": {
+            "type": "string"
+          },
+          "revokedSources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Source IDs that have been revoked"
+          }
+        },
+        "required": [
+          "artifactId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "file_data_dispute",
+      "description": "File a dispute against a data artifact. The protocol records disputes — resolution is external.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "artifactId": {
+            "type": "string"
+          },
+          "disputeType": {
+            "type": "string",
+            "enum": [
+              "unauthorized_access",
+              "terms_violation",
+              "compensation_dispute",
+              "revocation_dispute",
+              "lineage_dispute"
+            ]
+          },
+          "filedBy": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Evidence artifact IDs"
+          }
+        },
+        "required": [
+          "artifactId",
+          "disputeType",
+          "filedBy",
+          "evidence"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_combination_permitted",
+      "description": "Check if combining data from two sources is permitted. Prevents prohibited inferences (HIPAA, COPPA, GDPR Art 9).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "forbiddenSourceClasses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "forbiddenSourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "regulatoryBasis": {
+            "type": "string"
+          },
+          "otherSourceId": {
+            "type": "string"
+          },
+          "otherSourceClasses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "reason",
+          "otherSourceId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_access_snapshot",
+      "description": "Create an immutable access snapshot — freezes terms, jurisdiction, and constraints at moment of access. Anti-rug-pull.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "accessReceiptId": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "termsVersion": {
+            "type": "string"
+          },
+          "compensationRate": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "allowedPurposes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sourceJurisdiction": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accessReceiptId",
+          "sourceId",
+          "termsVersion",
+          "compensationRate",
+          "currency",
+          "allowedPurposes"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "detect_purpose_drift",
+      "description": "Detect when data purpose drifts through a workflow (e.g. research → commercial).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "originalPurpose": {
+            "type": "string"
+          },
+          "currentPurpose": {
+            "type": "string"
+          },
+          "intermediateSteps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowedPurposes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "originalPurpose",
+          "currentPurpose",
+          "allowedPurposes"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "resolve_rights_propagation",
+      "description": "Resolve what rights propagate when data is transformed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "transformClass": {
+            "type": "string"
+          },
+          "sourceDefaultPropagation": {
+            "type": "string",
+            "description": "Source-defined default: inherit_full, compensation_only, etc."
+          }
+        },
+        "required": [
+          "transformClass"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "declare_reidentification_risk",
+      "description": "Declare re-identification risk for transformed or synthetic data.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "risk": {
+            "type": "string",
+            "enum": [
+              "none_declared",
+              "low",
+              "medium",
+              "high",
+              "unknown",
+              "mitigated"
+            ]
+          },
+          "assessmentMethod": {
+            "type": "string"
+          },
+          "mitigationsApplied": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "assessedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "risk",
+          "assessedBy"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "generate_governance_block",
+      "description": "Generate a cryptographically signed governance block for embedding in HTML pages. Includes terms, revocation policy, and content hash.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Article/page content to hash and govern"
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "Publisher's Ed25519 public key (hex)"
+          },
+          "privateKey": {
+            "type": "string",
+            "description": "Publisher's Ed25519 private key (hex)"
+          },
+          "inference": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          },
+          "training": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          },
+          "redistribution": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          },
+          "derivative": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          },
+          "caching": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          },
+          "license_url": {
+            "type": "string"
+          },
+          "terms_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "publicKey",
+          "privateKey"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_governance_block",
+      "description": "Verify a governance block's signature, content hash, and DID consistency against the original content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "block": {
+            "type": "string",
+            "description": "Governance block JSON string"
+          },
+          "content": {
+            "type": "string",
+            "description": "Original content to verify against"
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "Publisher's Ed25519 public key (hex)"
+          }
+        },
+        "required": [
+          "block",
+          "content",
+          "publicKey"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "parse_governance_block_html",
+      "description": "Extract a governance block from an HTML page. Looks for APS governance script tags or meta tags.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "HTML content to parse"
+          }
+        },
+        "required": [
+          "html"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_usage_permitted",
+      "description": "Check if a specific usage type is permitted under a governance block's terms.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "block": {
+            "type": "string",
+            "description": "Governance block JSON string"
+          },
+          "usage": {
+            "type": "string",
+            "enum": [
+              "inference",
+              "training",
+              "redistribution",
+              "derivative",
+              "caching"
+            ]
+          }
+        },
+        "required": [
+          "block",
+          "usage"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "generate_aps_txt",
+      "description": "Generate a signed aps.txt file for site-wide governance. Like robots.txt but cryptographically signed with terms, revocation endpoint, and MCP upgrade path.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "Domain this declaration covers (e.g. theagenttimes.com)"
+          },
+          "publisherName": {
+            "type": "string",
+            "description": "Human-readable publisher name"
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "Publisher's Ed25519 public key (hex)"
+          },
+          "privateKey": {
+            "type": "string",
+            "description": "Publisher's Ed25519 private key (hex)"
+          },
+          "inference": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          },
+          "training": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          },
+          "redistribution": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          },
+          "mcpEndpoint": {
+            "type": "string"
+          },
+          "revocationEndpoint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "publisherName",
+          "publicKey",
+          "privateKey"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_aps_txt",
+      "description": "Verify a signed aps.txt file — checks signature and DID consistency.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "aps.txt JSON content"
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "Publisher's Ed25519 public key (hex)"
+          }
+        },
+        "required": [
+          "content",
+          "publicKey"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "resolve_path_terms",
+      "description": "Resolve governance terms for a specific URL path using aps.txt path overrides.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "apsTxt": {
+            "type": "string",
+            "description": "aps.txt JSON content"
+          },
+          "path": {
+            "type": "string",
+            "description": "URL path to resolve (e.g. /blog/my-article)"
+          }
+        },
+        "required": [
+          "apsTxt",
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_chained_governance_block",
+      "description": "Create a governance block for derivative content that references the original publisher's block. Preserves the chain of provenance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Derivative content"
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "Derivative agent's Ed25519 public key (hex)"
+          },
+          "privateKey": {
+            "type": "string",
+            "description": "Derivative agent's Ed25519 private key (hex)"
+          },
+          "parentBlock": {
+            "type": "string",
+            "description": "Original governance block JSON string"
+          },
+          "derivationType": {
+            "type": "string",
+            "description": "Type: summary, embedding, rag_chunk, translation, etc."
+          },
+          "inference": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          },
+          "training": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "prohibited",
+              "compensation_required",
+              "attribution_required"
+            ]
+          }
+        },
+        "required": [
+          "content",
+          "publicKey",
+          "privateKey",
+          "parentBlock",
+          "derivationType"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "governance_360",
+      "description": "Execute the full governance 360 loop on HTML content: extract governance block → verify signature + content hash → check usage terms → create signed access receipt. This is what an agent calls on every page it reads.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "Full HTML of the page"
+          },
+          "contentBody": {
+            "type": "string",
+            "description": "Article text content (for hash verification)"
+          },
+          "publisherPublicKey": {
+            "type": "string",
+            "description": "Publisher's Ed25519 public key (hex)"
+          },
+          "agentPublicKey": {
+            "type": "string",
+            "description": "Your agent's Ed25519 public key (hex)"
+          },
+          "agentPrivateKey": {
+            "type": "string",
+            "description": "Your agent's Ed25519 private key (hex)"
+          },
+          "intendedUsage": {
+            "type": "string",
+            "enum": [
+              "inference",
+              "training",
+              "redistribution",
+              "derivative",
+              "caching"
+            ]
+          },
+          "sourceUrl": {
+            "type": "string",
+            "description": "URL of the page"
+          }
+        },
+        "required": [
+          "html",
+          "contentBody",
+          "publisherPublicKey",
+          "agentPublicKey",
+          "agentPrivateKey",
+          "intendedUsage",
+          "sourceUrl"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_access_receipt",
+      "description": "Create a signed access receipt — cryptographic proof that your agent consumed content under specific terms. The receipt captures terms and revocation policy at access time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentPublicKey": {
+            "type": "string",
+            "description": "Your agent's Ed25519 public key (hex)"
+          },
+          "agentPrivateKey": {
+            "type": "string",
+            "description": "Your agent's Ed25519 private key (hex)"
+          },
+          "block": {
+            "type": "string",
+            "description": "Governance block JSON string"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "description": "URL where content was accessed"
+          },
+          "intendedUsage": {
+            "type": "string",
+            "description": "How you intend to use this content"
+          }
+        },
+        "required": [
+          "agentPublicKey",
+          "agentPrivateKey",
+          "block",
+          "sourceUrl",
+          "intendedUsage"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_charter",
+      "description": "Create a new institutional charter — the constitutional root of an organization. Defines offices, amendment rules, dissolution policy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Institution name"
+          },
+          "offices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "officeId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "holderPublicKey": {
+                  "type": "string",
+                  "description": "Ed25519 public key of initial holder"
+                },
+                "allowedScopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": [
+                    "*"
+                  ]
+                },
+                "maxSpendPerAction": {
+                  "type": "number",
+                  "default": 1000
+                },
+                "maxDelegationDepth": {
+                  "type": "number",
+                  "default": 3
+                },
+                "successionOrder": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                },
+                "incompatibleOffices": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "officeId",
+                "name",
+                "holderPublicKey"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Offices to create"
+          },
+          "amendment_board_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ed25519 public keys eligible for amendment voting"
+          },
+          "amendment_required_sigs": {
+            "type": "number",
+            "description": "Signatures required for amendment"
+          },
+          "dissolution_grace_seconds": {
+            "type": "number",
+            "default": 86400
+          },
+          "founder_private_key": {
+            "type": "string",
+            "description": "Founder's Ed25519 private key"
+          },
+          "founder_public_key": {
+            "type": "string",
+            "description": "Founder's Ed25519 public key"
+          },
+          "founder_role": {
+            "type": "string",
+            "default": "board"
+          }
+        },
+        "required": [
+          "name",
+          "offices",
+          "amendment_board_keys",
+          "amendment_required_sigs",
+          "founder_private_key",
+          "founder_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_charter",
+      "description": "Verify a charter's integrity: content hash, signatures, office consistency, incompatibility.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "charter_id": {
+            "type": "string",
+            "description": "Charter ID to verify"
+          }
+        },
+        "required": [
+          "charter_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sign_charter",
+      "description": "Add a founding signature to a charter.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "charter_id": {
+            "type": "string"
+          },
+          "signer_private_key": {
+            "type": "string"
+          },
+          "signer_public_key": {
+            "type": "string"
+          },
+          "signer_role": {
+            "type": "string",
+            "default": "board"
+          },
+          "resigner_private_key": {
+            "type": "string",
+            "description": "Key to re-sign the outer charter envelope"
+          }
+        },
+        "required": [
+          "charter_id",
+          "signer_private_key",
+          "signer_public_key",
+          "resigner_private_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "evaluate_threshold",
+      "description": "Evaluate whether signatures meet a multi-class threshold policy (Consilium Q5).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "charter_id": {
+            "type": "string",
+            "description": "Charter whose amendment policy to evaluate against"
+          },
+          "signatures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "publicKey": {
+                  "type": "string"
+                },
+                "keyClass": {
+                  "type": "string"
+                },
+                "signedAt": {
+                  "type": "string",
+                  "default": "2026-05-18T17:48:36.429Z"
+                },
+                "signature": {
+                  "type": "string",
+                  "default": ""
+                }
+              },
+              "required": [
+                "publicKey",
+                "keyClass"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "charter_id",
+          "signatures"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_approval_request",
+      "description": "Create a multi-party approval request for charter amendments, office transfers, etc.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "policy_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string",
+            "description": "What is being approved (e.g. amendment ID)"
+          },
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "charter_amendment",
+              "delegation",
+              "office_transfer",
+              "dissolution",
+              "escrow_release",
+              "dispute_resolution"
+            ]
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "default": 86400
+          }
+        },
+        "required": [
+          "policy_id",
+          "subject",
+          "subject_type",
+          "requested_by"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "add_approval_signature",
+      "description": "Add a signature to an approval request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "signer_private_key": {
+            "type": "string"
+          },
+          "signer_public_key": {
+            "type": "string"
+          },
+          "key_class": {
+            "type": "string",
+            "default": "board"
+          },
+          "office_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "signer_private_key",
+          "signer_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_hybrid_timestamp",
+      "description": "Create a gateway-issued hybrid timestamp (Consilium Q1: HLC + NTP uncertainty).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "gateway_id": {
+            "type": "string",
+            "description": "Gateway issuing the timestamp"
+          },
+          "drift_ms": {
+            "type": "number",
+            "default": 50,
+            "description": "NTP drift bound in milliseconds"
+          }
+        },
+        "required": [
+          "gateway_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compare_timestamps",
+      "description": "Compare two hybrid timestamps to determine ordering.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "object",
+            "properties": {
+              "logicalTime": {
+                "type": "number"
+              },
+              "wallClockEarliest": {
+                "type": "number"
+              },
+              "wallClockLatest": {
+                "type": "number"
+              },
+              "gatewayId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "logicalTime",
+              "wallClockEarliest",
+              "wallClockLatest",
+              "gatewayId"
+            ],
+            "additionalProperties": false
+          },
+          "b": {
+            "type": "object",
+            "properties": {
+              "logicalTime": {
+                "type": "number"
+              },
+              "wallClockEarliest": {
+                "type": "number"
+              },
+              "wallClockLatest": {
+                "type": "number"
+              },
+              "gatewayId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "logicalTime",
+              "wallClockEarliest",
+              "wallClockLatest",
+              "gatewayId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "a",
+          "b"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "validate_temporal_rights",
+      "description": "Validate a TemporalRights object — check validity window, grace period, supersession, challenge window.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "valid_from": {
+            "type": "string",
+            "description": "ISO datetime"
+          },
+          "valid_until": {
+            "type": "string",
+            "description": "ISO datetime"
+          },
+          "challenge_until": {
+            "type": "string"
+          },
+          "grace_until": {
+            "type": "string"
+          },
+          "superseded_at": {
+            "type": "string"
+          },
+          "effective_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "valid_from",
+          "valid_until"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_reserve_attestation",
+      "description": "Create a signed reserve attestation proving a delegation has actual funds (GPT #15).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delegation_id": {
+            "type": "string"
+          },
+          "assurance_class": {
+            "type": "string",
+            "enum": [
+              "unbacked",
+              "self_attested",
+              "gateway_attested",
+              "escrow_backed",
+              "externally_attested"
+            ]
+          },
+          "amount": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string",
+            "default": "USD"
+          },
+          "attestation_basis": {
+            "type": "string",
+            "enum": [
+              "api_balance_check",
+              "bank_statement",
+              "escrow_lock",
+              "self_declaration"
+            ]
+          },
+          "false_attestation_penalty": {
+            "type": "string",
+            "enum": [
+              "reputation_slash",
+              "bond_forfeit",
+              "dispute_eligible",
+              "none"
+            ],
+            "default": "reputation_slash"
+          },
+          "attester_private_key": {
+            "type": "string"
+          },
+          "attester_public_key": {
+            "type": "string"
+          },
+          "charter_anchor": {
+            "type": "string"
+          },
+          "office_id": {
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "type": "number",
+            "default": 86400
+          }
+        },
+        "required": [
+          "delegation_id",
+          "assurance_class",
+          "amount",
+          "attestation_basis",
+          "attester_private_key",
+          "attester_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "vouch_reputation",
+      "description": "Create a vouched reputation for cross-gateway portability (WS-3). Signed summary — no receipt history exposed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "number"
+          },
+          "diversity_score": {
+            "type": "number"
+          },
+          "gateway_private_key": {
+            "type": "string"
+          },
+          "gateway_id": {
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "type": "number",
+            "default": 2592000,
+            "description": "Default 30 days"
+          }
+        },
+        "required": [
+          "agent_id",
+          "tier",
+          "diversity_score",
+          "gateway_private_key",
+          "gateway_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "apply_reputation_downgrade",
+      "description": "Apply import policy downgrade to a foreign vouched reputation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "origin_gateway_id": {
+            "type": "string"
+          },
+          "attested_tier": {
+            "type": "number"
+          },
+          "attested_diversity_score": {
+            "type": "number"
+          },
+          "accept_from": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Gateway IDs accepted by import policy"
+          },
+          "downgrade_ratio": {
+            "type": "number",
+            "default": 0.5
+          },
+          "foreign_default_tier": {
+            "type": "number",
+            "default": 0
+          }
+        },
+        "required": [
+          "agent_id",
+          "origin_gateway_id",
+          "attested_tier",
+          "attested_diversity_score",
+          "accept_from"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compute_action_ref",
+      "description": "Compute content-addressed request identity (SHA-256 of agentId + actionType + scope + normalized timestamp). Two receipts with the same action_ref describe the same request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "action_type": {
+            "type": "string"
+          },
+          "scope_required": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "ISO 8601 timestamp; defaults to now"
+          }
+        },
+        "required": [
+          "agent_id",
+          "action_type",
+          "scope_required"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "is_evidence_fresh",
+      "description": "Check whether typed attestation evidence is still fresh. rotating: ttl required; snapshot: maxAge optional; static: always fresh.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "rotating",
+              "snapshot",
+              "static"
+            ]
+          },
+          "valid_at": {
+            "type": "string",
+            "description": "ISO 8601 timestamp evidence was produced"
+          },
+          "ttl": {
+            "type": "number",
+            "description": "Seconds (required for rotating)"
+          },
+          "max_age": {
+            "type": "number",
+            "description": "Seconds (optional for snapshot)"
+          },
+          "now": {
+            "type": "string",
+            "description": "ISO 8601 override for current time"
+          }
+        },
+        "required": [
+          "type",
+          "valid_at"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "classify_evidence_quality",
+      "description": "Classify attestation evidence quality (none / issuer_vouched / infrastructure / principal_bound) and return the corresponding grade (0-3).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "Attestation method (e.g. 'spiffe')"
+          },
+          "has_issuer_signature": {
+            "type": "boolean"
+          },
+          "has_principal_binding": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Evidence object (checked for known infrastructure keys)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "rotate_key",
+      "description": "Rotate an agent's Ed25519 key. Planned mode: configurable overlap (default 24h). Emergency mode: immediate old-key retirement. Returns updated DID document, rotation state, and revocation results.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "emergency"
+            ]
+          },
+          "old_private_key": {
+            "type": "string",
+            "description": "Hex-encoded private key being rotated FROM"
+          },
+          "agent_name": {
+            "type": "string",
+            "description": "Agent name for the passport (default: current session)"
+          },
+          "activation_delay_hours": {
+            "type": "number",
+            "description": "Planned mode overlap hours (default: 24)"
+          },
+          "delegation_ids_to_revoke": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Delegation IDs to cascade-revoke during rotation"
+          }
+        },
+        "required": [
+          "mode",
+          "old_private_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_rotation_chain",
+      "description": "Verify all rotation signatures in a DID document's rotation log. Returns true if the full chain is cryptographically valid.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "did_document": {
+            "description": "RotatableDIDDocument JSON object with rotationLog"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "is_key_active",
+      "description": "Check if a public key is currently authorized for active operations in a DID document. SDK convenience check; gateway enforcement is authoritative.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "did_document": {
+            "description": "RotatableDIDDocument JSON object"
+          },
+          "public_key": {
+            "type": "string",
+            "description": "Hex-encoded Ed25519 public key to check"
+          }
+        },
+        "required": [
+          "public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_create_attribution_receipt",
+      "description": "Representation boundary: build a citer-signed AttributionReceipt attributing a claim to a third-party principal. The receipt is not yet valid — the cited principal must sign consent via aps_sign_attribution_consent before checkArtifactCitations accepts it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "citer": {
+            "type": "string",
+            "description": "DID/public key of the citing agent"
+          },
+          "citer_public_key": {
+            "type": "string",
+            "description": "Hex public key of citer"
+          },
+          "citer_private_key": {
+            "type": "string",
+            "description": "Hex private key of citer"
+          },
+          "cited_principal": {
+            "type": "string",
+            "description": "DID/public key of the cited principal"
+          },
+          "cited_principal_public_key": {
+            "type": "string",
+            "description": "Hex public key of cited principal"
+          },
+          "citation_content": {
+            "type": "string",
+            "description": "The quoted or paraphrased claim"
+          },
+          "binding_context": {
+            "type": "string",
+            "description": "ID of the binding artifact this citation is scoped to"
+          },
+          "gateway_id": {
+            "type": "string",
+            "description": "Gateway id for timestamping (default: 'mcp')"
+          },
+          "ttl_ms": {
+            "type": "number",
+            "description": "Receipt TTL in ms (default: 24h)"
+          }
+        },
+        "required": [
+          "citer",
+          "citer_public_key",
+          "citer_private_key",
+          "cited_principal",
+          "cited_principal_public_key",
+          "citation_content",
+          "binding_context"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_sign_attribution_consent",
+      "description": "Representation boundary: the cited principal adds their consent signature to an AttributionReceipt. Without this signature, verifyAttributionConsent and checkArtifactCitations reject the receipt.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "receipt": {
+            "description": "AttributionReceipt JSON from aps_create_attribution_receipt"
+          },
+          "cited_principal_private_key": {
+            "type": "string",
+            "description": "Hex private key of cited principal"
+          }
+        },
+        "required": [
+          "cited_principal_private_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_verify_attribution_consent",
+      "description": "Representation boundary: verify an AttributionReceipt end-to-end (id, citer signature, consent signature, expiry). Returns {valid, reason?}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "receipt": {
+            "description": "AttributionReceipt JSON"
+          },
+          "now": {
+            "description": "Optional HybridTimestamp to pin the evaluation moment"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_check_artifact_citations",
+      "description": "Representation boundary: gate a binding artifact's citations. Each citation must resolve to a provided, signed, unexpired receipt whose content + principal match, with per-artifact replay protection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "artifact": {
+            "description": "CitingArtifact with optional citations[] array"
+          },
+          "receipts": {
+            "type": "array",
+            "description": "AttributionReceipts backing each citation"
+          },
+          "binding_context": {
+            "type": "string",
+            "description": "Require receipts to be scoped to this binding context"
+          }
+        },
+        "required": [
+          "receipts"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_attribution_receipt_id",
+      "description": "Representation boundary helper: compute the canonical sha256 id of an AttributionReceipt's unsigned core. Verifiers use this to detect id tampering.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "receipt": {
+            "description": "AttributionReceipt JSON (signatures ignored)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_create_provisional",
+      "description": "Commitment boundary: emit a provisional statement for agent-to-agent negotiation. Default is non-binding until a PromotionEvent satisfies a PromotionPolicy. Dead-man expiry auto-withdraws.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string",
+            "description": "AgentDID/public key of the emitting agent"
+          },
+          "author_principal": {
+            "type": "string",
+            "description": "PrincipalDID behind the author"
+          },
+          "content": {
+            "type": "string",
+            "description": "Statement content (offer, position, claim)"
+          },
+          "author_private_key": {
+            "type": "string",
+            "description": "Hex private key of author for signing"
+          },
+          "gateway_id": {
+            "type": "string",
+            "description": "Gateway id for timestamping (default: 'mcp')"
+          },
+          "dead_man_ms": {
+            "type": "number",
+            "description": "Dead-man expiry relative to now (ms). If elapsed without promotion/withdrawal, statement auto-withdraws."
+          }
+        },
+        "required": [
+          "author",
+          "author_principal",
+          "content",
+          "author_private_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_promote_statement",
+      "description": "Commitment boundary: promote a provisional statement to binding by attaching a PromotionEvent that satisfies the PromotionPolicy (m-of-n principal signatures). dead_man_elapsed cannot promote — it auto-withdraws via the dead-man path.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "statement": {
+            "description": "ProvisionalStatement from aps_create_provisional"
+          },
+          "promotion_event": {
+            "description": "PromotionEvent with kind, promoted_at, promoter, promoter_signature, policy_reference"
+          },
+          "policy": {
+            "description": "PromotionPolicy {id, required_signers, threshold, max_time_to_promote}"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_verify_promotion",
+      "description": "Commitment boundary: verify that a promoted statement's PromotionEvent cryptographically satisfies the PromotionPolicy (policy_reference match, promoter in required_signers, threshold, signature, max_time_to_promote, author-signature tamper check).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "statement": {
+            "description": "Promoted ProvisionalStatement"
+          },
+          "policy": {
+            "description": "PromotionPolicy to check against"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_withdraw_provisional",
+      "description": "Commitment boundary: author withdraws their own provisional statement. Already-promoted statements cannot be withdrawn. Caller must supply the author's signature over the withdrawal payload (canonicalize({action:'withdraw', statement_id})).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "statement": {
+            "description": "ProvisionalStatement to withdraw"
+          },
+          "author_signature": {
+            "type": "string",
+            "description": "Hex Ed25519 signature. If omitted, provide author_private_key and the tool will sign for you."
+          },
+          "author_private_key": {
+            "type": "string",
+            "description": "If provided, tool signs the withdrawal payload with this key."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_check_escalation_required",
+      "description": "Escalation boundary: check whether an action on a v2 delegation requires owner confirmation before execution. Returns {required, requirement?, reason?}. Use aps_record_owner_confirmation to clear the flag when required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delegation": {
+            "description": "V2Delegation with optional scope.escalation_requirements"
+          },
+          "action_class": {
+            "type": "string",
+            "description": "Action class (e.g. 'org_creation', 'spend_above_threshold')"
+          },
+          "action_details": {
+            "description": "Structured details; hashed for audit"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Session id (required for per_session scope)"
+          }
+        },
+        "required": [
+          "action_class"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_record_owner_confirmation",
+      "description": "Escalation boundary: owner signs an OwnerConfirmation authorizing a flagged action. Builds the ConfirmationRequest and signs it in a single call. The confirmation is bound to action_details via hash and scoped (per_action / per_session / time_window).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delegation": {
+            "description": "V2Delegation with escalation_requirements for this action class"
+          },
+          "action_class": {
+            "type": "string",
+            "description": "Action class being confirmed"
+          },
+          "action_details": {
+            "description": "Structured action details — hashed and bound to the confirmation"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Session id (required for per_session scope)"
+          },
+          "owner_private_key": {
+            "type": "string",
+            "description": "Hex private key of the delegation's owner (delegator)"
+          }
+        },
+        "required": [
+          "action_class",
+          "owner_private_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_construct_attribution_primitive",
+      "description": "Build and sign a four-axis AttributionPrimitive for an action. Axes: D (data sources), P (protocol modules), G (delegation chain), C (compute providers). Returns the complete signed object.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "object",
+            "properties": {
+              "agentId": {
+                "type": "string"
+              },
+              "actionType": {
+                "type": "string"
+              },
+              "params": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "nonce": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentId",
+              "actionType",
+              "params",
+              "nonce"
+            ],
+            "additionalProperties": false,
+            "description": "Action identity tuple; the action_ref is derived as sha256(canonical(this))"
+          },
+          "axes": {
+            "type": "object",
+            "properties": {
+              "D": {
+                "type": "array"
+              },
+              "P": {
+                "type": "array"
+              },
+              "G": {
+                "type": "array"
+              },
+              "C": {
+                "type": "array"
+              }
+            },
+            "required": [
+              "D",
+              "P",
+              "G",
+              "C"
+            ],
+            "additionalProperties": false,
+            "description": "Four-axis content. See spec §1.2 for entry shapes per axis."
+          },
+          "issuer": {
+            "type": "string",
+            "description": "Issuer DID (gateway or agent producing the receipt)"
+          },
+          "issuer_private_key": {
+            "type": "string",
+            "description": "Ed25519 private key hex that signs the envelope"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "ISO-8601 UTC with ms precision + Z (§2.5). Defaults to now()."
+          }
+        },
+        "required": [
+          "action",
+          "axes",
+          "issuer",
+          "issuer_private_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_project_attribution",
+      "description": "Extract a single-axis projection from an AttributionPrimitive. The projection carries the axis content plus a two-hop Merkle path that lets a downstream verifier reconstruct the signed root without seeing the other three axes. axis: 'D' | 'P' | 'G' | 'C'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "primitive": {
+            "description": "An AttributionPrimitive (from aps_construct_attribution_primitive)"
+          },
+          "axis": {
+            "type": "string",
+            "enum": [
+              "D",
+              "P",
+              "G",
+              "C"
+            ],
+            "description": "Axis to project"
+          }
+        },
+        "required": [
+          "axis"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_verify_attribution_projection",
+      "description": "Verify a single-axis AttributionProjection under the issuer's Ed25519 public key. Returns {valid: true} or {valid: false, reason: 'INVALID_AXIS_TAG'|'MERKLE_MISMATCH'|'SIGNATURE_INVALID'|'MALFORMED'}. Verification is purely local — no other axes required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projection": {
+            "description": "An AttributionProjection (from aps_project_attribution)"
+          },
+          "issuer_public_key": {
+            "type": "string",
+            "description": "Issuer Ed25519 public key hex"
+          }
+        },
+        "required": [
+          "issuer_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_verify_attribution_primitive",
+      "description": "End-to-end verify of a full AttributionPrimitive: constructs projections for all four axes and verifies each one. Useful as a post-construction sanity check or for verifying a primitive received from a peer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "primitive": {
+            "description": "An AttributionPrimitive"
+          },
+          "issuer_public_key": {
+            "type": "string",
+            "description": "Issuer Ed25519 public key hex"
+          }
+        },
+        "required": [
+          "issuer_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_check_projection_consistency",
+      "description": "Cross-projection consistency check (§2.4): given two projections, confirm they originate from the same signed receipt. Returns {same_receipt: true} or {same_receipt: false, reason: 'DIFFERENT_ACTIONS'|'DIFFERENT_RECEIPTS'|'DIFFERENT_SIGNATURES'|'METADATA_MISMATCH'}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projection_a": {
+            "description": "First AttributionProjection"
+          },
+          "projection_b": {
+            "description": "Second AttributionProjection"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_compute_attribution_action_ref",
+      "description": "Derive the action_ref (hex sha256) for an action tuple. action_ref is the content-addressed anchor that all four axis projections bind to. Useful for indexing primitives by action without constructing the full primitive.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "actionType": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "nonce": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "actionType",
+          "params",
+          "nonce"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_compute_data_axis_weights",
+      "description": "Compute the D-axis fractional weight vector from a list of AccessReceipt records with role, timestamp, and content length. Returns canonical DataAxisEntry[] with 6-digit decimal contribution_weight strings that sum to ~1.0 and feed directly into aps_construct_attribution_primitive. Empty input → empty array; all-zero raw weights → error. Weights = role × recency_decay × length_weight, normalized per spec BUILD-B §'The D-axis formula'. Parameter names match the SDK: `sources`, `action_timestamp`, optional `profile`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source_did": {
+                  "type": "string"
+                },
+                "access_receipt_hash": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "primary_source",
+                    "supporting_evidence",
+                    "context_only",
+                    "background_retrieval"
+                  ]
+                },
+                "timestamp": {
+                  "type": "string",
+                  "description": "ISO-8601 UTC with millisecond precision + Z (t_source)"
+                },
+                "content_length": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Tokens"
+                }
+              },
+              "required": [
+                "source_did",
+                "access_receipt_hash",
+                "role",
+                "timestamp",
+                "content_length"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Per-source records with retrieval metadata"
+          },
+          "action_timestamp": {
+            "type": "string",
+            "description": "ISO-8601 UTC ms when the action ran (t_action)"
+          },
+          "profile": {
+            "description": "Optional WeightProfile override; defaults to DEFAULT_WEIGHT_PROFILE"
+          }
+        },
+        "required": [
+          "sources",
+          "action_timestamp"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_compute_compute_axis_weights",
+      "description": "Compute the C-axis fractional weight vector from a list of inference billing records (prompt_tokens, completion_tokens). Returns canonical ComputeAxisEntry[] with 6-digit decimal compute_share strings that sum to ~1.0 and feed directly into aps_construct_attribution_primitive. Weights = prompt_tokens + completion_tokens × COMPLETION_MULTIPLIER (default 3.0), normalized per spec BUILD-B §'The C-axis formula'. Parameter names match the SDK: `providers`, optional `profile`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider_did": {
+                  "type": "string"
+                },
+                "hardware_attestation_hash": {
+                  "type": "string"
+                },
+                "prompt_tokens": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "completion_tokens": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "provider_did",
+                "hardware_attestation_hash",
+                "prompt_tokens",
+                "completion_tokens"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Per-provider billing records"
+          },
+          "profile": {
+            "description": "Optional WeightProfile override; defaults to DEFAULT_WEIGHT_PROFILE"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_aggregate_settlement",
+      "description": "Aggregate a batch of Attribution Primitives over a half-open settlement period [t0, t1) into a signed SettlementRecord. Each axis (D, P, G, C) produces a per-contributor total with a balanced-Merkle commitment. Residual buckets pool sub-threshold contributors per Build A §4.1. Output is a fully signed record ready for third-party verification. Spec: BUILD-C-SETTLEMENT-PIPELINE.md.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "receipts": {
+            "type": "array",
+            "description": "Array of AttributionPrimitives to aggregate"
+          },
+          "period": {
+            "type": "object",
+            "properties": {
+              "t0": {
+                "type": "string",
+                "description": "Period start (canonical ISO-8601 UTC ms + Z). Inclusive."
+              },
+              "t1": {
+                "type": "string",
+                "description": "Period end (canonical ISO-8601 UTC ms + Z). Exclusive."
+              },
+              "period_id": {
+                "type": "string",
+                "description": "Gateway-scoped period identifier"
+              }
+            },
+            "required": [
+              "t0",
+              "t1",
+              "period_id"
+            ],
+            "additionalProperties": false
+          },
+          "gateway_did": {
+            "type": "string",
+            "description": "Gateway DID that signs the record"
+          },
+          "gateway_private_key": {
+            "type": "string",
+            "description": "Ed25519 gateway private key (hex)"
+          },
+          "issued_at": {
+            "type": "string",
+            "description": "Override issued_at (canonical ISO-8601 UTC ms + Z); defaults to now"
+          }
+        },
+        "required": [
+          "receipts",
+          "period",
+          "gateway_did",
+          "gateway_private_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_verify_settlement",
+      "description": "Verify a signed SettlementRecord under S1-S5 (signature, Merkle roots, conservation, residual shape, optional input-receipts cross-check). S3 conservation is the strongest invariant: a gateway cannot inflate or suppress any contributor's share without breaking it. Returns {valid: true} or {valid: false, reason, detail}. Pass inputReceipts to also recompute input_receipts_hash.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "description": "A signed SettlementRecord"
+          },
+          "gateway_public_key": {
+            "type": "string",
+            "description": "Gateway Ed25519 public key hex"
+          },
+          "input_receipts": {
+            "type": "array",
+            "description": "Optional — the input Attribution Primitives that fed the settlement. When supplied, S5 cross-checks input_receipts_hash and verifies each receipt individually."
+          }
+        },
+        "required": [
+          "gateway_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_build_contributor_query",
+      "description": "Build a contributor-query response: given a signed SettlementRecord and a contributor DID, return per-axis (total_weight, contribution_count, merkle_path, axis_root) plus the full signed record so a third party can verify the contributor's share end-to-end without trusting the gateway beyond its public key. Returns null if the contributor has no share in the period.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "description": "A signed SettlementRecord"
+          },
+          "contributor_did": {
+            "type": "string",
+            "description": "Contributor DID (data source, compute provider, governance signer, or protocol module identifier)"
+          },
+          "gateway_jwks": {
+            "type": "string",
+            "description": "Advisory JWKS URL; not part of the signed material"
+          }
+        },
+        "required": [
+          "contributor_did"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mutualAuthBuildCertificate",
+      "description": "Build and sign a mutual-auth certificate identifying an agent or information system. Returns the signed MutualAuthCertificate object ready to carry into a handshake. The issuer's Ed25519 private key (hex) signs over the canonical (JCS) form.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "information_system"
+            ],
+            "description": "Role of the subject this cert identifies"
+          },
+          "subject_id": {
+            "type": "string",
+            "description": "Stable subject identifier (e.g., agent DID, IS endpoint URL)"
+          },
+          "subject_pubkey_hex": {
+            "type": "string",
+            "description": "Ed25519 public key (hex) of the subject"
+          },
+          "issuer_id": {
+            "type": "string",
+            "description": "Issuer identifier"
+          },
+          "issuer_role": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "information_system",
+              "trust_anchor"
+            ],
+            "description": "Role of the issuer"
+          },
+          "issuer_pubkey_hex": {
+            "type": "string",
+            "description": "Ed25519 public key (hex) of the issuer"
+          },
+          "issuer_privkey_hex": {
+            "type": "string",
+            "description": "Ed25519 private key (hex) of the issuer — used to sign"
+          },
+          "binding": {
+            "type": "string",
+            "description": "For an agent: the APS agent_id. For an IS: the resource domain (e.g., mcp://api.bank.com)"
+          },
+          "not_before": {
+            "type": "number",
+            "description": "Earliest valid time (unix ms)"
+          },
+          "not_after": {
+            "type": "number",
+            "description": "Latest valid time (unix ms)"
+          },
+          "supported_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Protocol versions supported, highest first (e.g., ['1.0'])"
+          },
+          "attestation_grade": {
+            "type": "number",
+            "enum": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "description": "For agents: APS attestation grade 0-3"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional capability tags"
+          }
+        },
+        "required": [
+          "role",
+          "subject_id",
+          "subject_pubkey_hex",
+          "issuer_id",
+          "issuer_role",
+          "issuer_pubkey_hex",
+          "issuer_privkey_hex",
+          "binding",
+          "not_before",
+          "not_after",
+          "supported_versions"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mutualAuthVerifyAttest",
+      "description": "Verify a MutualAuthAttest against policy and trust anchors. Runs all 10 verification checks: signature, version negotiation, nonce match, timestamp freshness, certificate validity, issuer anchor check, binding constraints, downgrade detection, attestation grade policy, capability policy. Returns ok:true on success or a failure reason on rejection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "attest": {
+            "description": "MutualAuthAttest to verify"
+          },
+          "expected_peer_nonce_b64": {
+            "type": "string",
+            "description": "The nonce the peer sent in their prior hello or attest"
+          },
+          "expected_own_nonce_b64": {
+            "type": "string",
+            "description": "The nonce we sent in our own prior hello or attest"
+          },
+          "policy": {
+            "description": "MutualAuthPolicy (accepted_versions, min_agent_grade, required_capabilities, max_clock_skew_ms, max_session_ms)"
+          },
+          "trust_anchors": {
+            "type": "array",
+            "description": "TrustAnchor[] — local trusted roots"
+          },
+          "revoked_anchor_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IDs of anchors revoked since the bundle was issued"
+          },
+          "now_ms": {
+            "type": "number",
+            "description": "Current unix ms — defaults to Date.now()"
+          }
+        },
+        "required": [
+          "expected_peer_nonce_b64",
+          "expected_own_nonce_b64",
+          "trust_anchors"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mutualAuthDeriveSession",
+      "description": "Derive the shared mutual-auth session record from both sides' Attests. Both parties MUST compute identical session_id given identical inputs (canonical JCS + sha256 of chosen_version, both cert ids, both nonces). Returns a MutualAuthSession with session_id + both certificates + expiry bounds, or failure reason.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_attest": {
+            "description": "The agent's MutualAuthAttest"
+          },
+          "is_attest": {
+            "description": "The information system's MutualAuthAttest"
+          },
+          "policy": {
+            "description": "MutualAuthPolicy"
+          },
+          "now_ms": {
+            "type": "number",
+            "description": "Current unix ms — defaults to Date.now()"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mutualAuthVerifyTrustBundle",
+      "description": "Verify a TrustAnchorBundle signature and freshness. Caller supplies the list of trusted publisher public keys (root configuration). Returns ok:true on success or failure reason (untrusted_publisher, signature_invalid, bundle_expired, not_yet_valid).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bundle": {
+            "description": "TrustAnchorBundle to verify"
+          },
+          "trusted_publisher_pubkeys_hex": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of Ed25519 pubkeys (hex) authorized to publish bundles"
+          },
+          "now_ms": {
+            "type": "number",
+            "description": "Current unix ms — defaults to Date.now()"
+          }
+        },
+        "required": [
+          "trusted_publisher_pubkeys_hex"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_capability_issue_challenge",
+      "description": "v0.1 capability-token sink challenge (M1). Sink issues a signed canonical action statement. Returns the SinkChallenge and its challenge_hash. Used to bind the gateway's later policy evaluation to a specific action the sink authored. Search keywords: capability token, sink challenge, M1.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sink_id": {
+            "type": "string",
+            "description": "DID of the sink issuing the challenge"
+          },
+          "subject_id": {
+            "type": "string",
+            "description": "DID of the subject the challenge is addressed to"
+          },
+          "action": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "resource_version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "target",
+              "parameters",
+              "resource_version"
+            ],
+            "additionalProperties": false,
+            "description": "Canonical action statement"
+          },
+          "sink_private_key": {
+            "type": "string",
+            "description": "Sink Ed25519 private key (hex)"
+          },
+          "sink_public_key": {
+            "type": "string",
+            "description": "Sink Ed25519 public key (hex)"
+          },
+          "validity_seconds": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "required_policy_freshness": {
+            "type": "object",
+            "properties": {
+              "max_age_seconds": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "beacon_hash_required": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "max_age_seconds",
+              "beacon_hash_required"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "sink_id",
+          "subject_id",
+          "action",
+          "sink_private_key",
+          "sink_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_capability_evaluate_authority",
+      "description": "v0.1 capability-token authority evaluation request (M2). Subject signs a request carrying the sink's M1, the delegation chain, and a revealed authority-token preimage. The gateway consumes this to decide permit/deny. Search keywords: capability token, authority evaluation, M2.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "challenge": {
+            "description": "SinkChallenge object from M1"
+          },
+          "delegation_chain": {
+            "type": "array",
+            "description": "v2.x delegation envelopes"
+          },
+          "authority_token": {
+            "type": "object",
+            "properties": {
+              "token_preimage": {
+                "type": "string"
+              },
+              "merkle_proof": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "scope_class": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "token_preimage",
+              "merkle_proof",
+              "scope_class"
+            ],
+            "additionalProperties": false
+          },
+          "freshness_beacon": {
+            "type": "object",
+            "properties": {
+              "delegator_id": {
+                "type": "string"
+              },
+              "beacon_timestamp": {
+                "type": "string"
+              },
+              "beacon_signature": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "delegator_id",
+              "beacon_timestamp",
+              "beacon_signature"
+            ],
+            "additionalProperties": false
+          },
+          "subject_private_key": {
+            "type": "string",
+            "description": "Subject Ed25519 private key (hex)"
+          },
+          "subject_public_key": {
+            "type": "string",
+            "description": "Subject Ed25519 public key (hex)"
+          },
+          "delegation_chain_root": {
+            "type": "string",
+            "description": "Override; otherwise computed from chain"
+          }
+        },
+        "required": [
+          "delegation_chain",
+          "authority_token",
+          "freshness_beacon",
+          "subject_private_key",
+          "subject_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_capability_mint_receipt",
+      "description": "v0.1 capability-token gateway receipt (M3). Gateway signs a permit or deny over the sink's exact challenge_hash. Echoes the M2 delegation_chain_root so the sink can verify the gateway saw the same chain the subject committed to. Search keywords: capability token, challenge receipt, gateway receipt, M3.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "description": "AuthorityEvaluationRequest from M2"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "permit",
+              "deny"
+            ]
+          },
+          "deny_reason": {
+            "type": "string"
+          },
+          "policy_digest": {
+            "type": "string",
+            "description": "SHA-256 of the policy bundle used in evaluation"
+          },
+          "gateway_private_key": {
+            "type": "string"
+          },
+          "gateway_public_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "policy_digest",
+          "gateway_private_key",
+          "gateway_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "aps_capability_sign_effect",
+      "description": "v0.1 capability-token sink effect receipt (M4). Sink consumes the token preimage from the gateway's M3 (rejecting on nullifier replay), executes the action, and signs an EffectReceipt binding the consumed token to the result. The (M1, M3, M4) tuple is the full attestation record. Search keywords: capability token, effect receipt, M4, sink attestation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "challenge": {
+            "description": "Original SinkChallenge from M1 (for binding verification)"
+          },
+          "challenge_receipt": {
+            "description": "ChallengeReceipt from M3"
+          },
+          "effect": {
+            "type": "object",
+            "properties": {
+              "executed_at": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "success",
+                  "failure",
+                  "partial"
+                ]
+              },
+              "result_digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "executed_at",
+              "outcome",
+              "result_digest"
+            ],
+            "additionalProperties": false
+          },
+          "sink_private_key": {
+            "type": "string"
+          },
+          "sink_public_key": {
+            "type": "string"
+          },
+          "gateway_public_key": {
+            "type": "string",
+            "description": "Used to verify M3 before consuming the token"
+          },
+          "expected_delegation_chain_root": {
+            "type": "string",
+            "description": "If omitted, falls back to the receipt's own root"
+          }
+        },
+        "required": [
+          "effect",
+          "sink_private_key",
+          "sink_public_key",
+          "gateway_public_key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

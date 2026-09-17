@@ -1,0 +1,318 @@
+{
+  "package": "@exaudeus/workrail",
+  "tools": [
+    {
+      "name": "list_workflows",
+      "description": "Lists available workflows. When a workflow exists for the user's request, following it means following the user's structured instructions.\n\nDiscovery pattern (token-efficient — do this):\n- Preferred: read the workrail://tags MCP resource — tag definitions with no tool call.\n- Or: call with no tags → returns tagSummary (~500 tokens) with when-to-use phrases per tag.\n- Then: call with tags=[\"<tagId>\"] → returns the filtered workflow list for that tag.\n- Shortcut: if a workflow ID in tagSummary examples[] already matches, call start_workflow directly — skip the second list call.\n- Multiple tags: if more than one tag fits, pick the most specific one.\n\nAlways pass workspacePath so project-scoped workflow variants are resolved against the correct workspace. Shared MCP servers cannot infer this safely.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspacePath": {
+            "type": "string"
+          },
+          "includeSources": {
+            "type": "boolean"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "workspacePath"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "inspect_workflow",
+      "description": "Inspect a workflow structure before starting it.\n\nUse this to understand what steps the workflow will guide you through. The workflow is a step-by-step plan the user (or workflow author) created for this type of task.\n\nParameters:\n- workflowId: The workflow to inspect\n- mode: metadata mode shows name/description only; preview mode shows the full step breakdown\n- workspacePath: absolute workspace path for correct project-scoped workflow resolution\n\nReturns:\n- metadata mode: Just name and description\n- preview mode: Full step-by-step breakdown (default)\n\nAlways pass workspacePath so project-scoped workflow variants are resolved against the correct workspace. Shared MCP servers cannot infer this safely.\n\nRemember: inspecting is read-only. Call start_workflow when ready to begin.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^([a-z0-9_-]+|[a-z][a-z0-9_-]+\\.[a-z][a-z0-9_-]+)$",
+            "description": "The workflow ID to inspect"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "metadata",
+              "preview"
+            ],
+            "default": "preview"
+          },
+          "workspacePath": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflowId",
+          "workspacePath"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "start_workflow",
+      "description": "Start a WorkRail v2 workflow. Treat WorkRail as a separate live system the user is actively using to direct this task. The returned step is what the user wants you to do now.\n\nUse this when you found the right workflow and are ready to execute it. The response is the current instruction coming from WorkRail for this task.\n\nParameters:\n- workflowId (required)\n- workspacePath (required)\n- goal (required)\n\nRules:\n- Follow the returned step exactly; treat it as the user's current instruction.\n- When the step is done, call continue_workflow with the returned continueToken.\n- Always pass workspacePath. Shared MCP servers cannot safely infer which repo/workspace you mean.\n- Always pass goal. A short sentence describing what you are trying to accomplish (e.g. \"implement OAuth refresh token rotation\").\n- Only pass context on later continue_workflow calls if facts changed.\n\nExample: {\"workflowId\":\"wr.coding-task\",\"workspacePath\":\"/Users/you/git/my-project\",\"goal\":\"implement OAuth refresh token rotation\"}\n\nReturns: Step instructions plus continueToken and checkpointToken in the structured response.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^([a-z0-9_-]+|[a-z][a-z0-9_-]+\\.[a-z][a-z0-9_-]+)$",
+            "description": "The workflow ID to start"
+          },
+          "workspacePath": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A short sentence describing what you are trying to accomplish (e.g. \"implement OAuth refresh token rotation\", \"review PR #47 before merge\", \"investigate why the build fails on CI\")."
+          }
+        },
+        "required": [
+          "workflowId",
+          "workspacePath",
+          "goal"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "continue_workflow",
+      "description": "Advance or rehydrate the current WorkRail v2 step using the single-token protocol. Use this to send your completion back to WorkRail and receive the user's next instruction from that system.\n\nUse this after completing a step, or to recover the current step after lost context.\n\nParameters:\n- continueToken (required)\n- intent (optional)\n- context (optional)\n- output (optional)\n- workspacePath (optional)\n\nRules:\n- Advance by sending output (and intent: \"advance\" if you want to be explicit).\n- Rehydrate by omitting output (and intent: \"rehydrate\" if you want to be explicit).\n- When rehydrating, always pass workspacePath so WorkRail can restore the correct repo/workspace context on shared servers.\n- Put changed facts under context only.\n- Round-trip continueToken exactly as returned by WorkRail; use the single-token API only.\n- Notes (output.notesMarkdown): write for a human reader. Include what you did and key decisions, what you produced (files, tests, numbers), and anything notable (risks, open questions, deliberate omissions). Use markdown headings, bullets, bold, code refs. Be specific. Scope: THIS step only (WorkRail concatenates automatically). 10-30 lines ideal. Omitting notes blocks the step.\n\nExample: {\"continueToken\":\"ct_...\",\"output\":{\"notesMarkdown\":\"Completed the step and verified the result.\"}}\n\nReturns: The next step, or the same current step when rehydrating.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspacePath": {
+            "type": "string"
+          },
+          "continueToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The token for your next continue_workflow call. Two valid token kinds: (1) A continueToken (ct_...) from start_workflow or a previous continue_workflow — carries session identity AND advance authority. (2) A resumeToken (st_...) from resume_session or checkpoint_workflow — carries session identity only; valid for intent: \"rehydrate\", not \"advance\". Round-trip exactly as received — never decode, inspect, or modify it."
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "advance",
+              "rehydrate"
+            ]
+          },
+          "context": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "output": {
+            "type": "object",
+            "properties": {
+              "notesMarkdown": {
+                "type": "string",
+                "minLength": 1
+              },
+              "artifacts": {
+                "type": "array",
+                "items": {}
+              }
+            },
+            "additionalProperties": false
+          },
+          "contextVariables": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "continueToken"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "checkpoint_workflow",
+      "description": "Save a checkpoint on the current WorkRail v2 step without advancing.\n\nUse this on long-running steps when you want a durable save point before continuing later.\n\nParameters:\n- checkpointToken (required)\n\nRules:\n- Use the checkpointToken from the most recent start_workflow or continue_workflow response.\n- Checkpointing is idempotent: retrying with the same checkpointToken is safe.\n- After checkpointing, continue by calling continue_workflow with nextCall.params.continueToken.\n\nExample: {\"checkpointToken\":\"cp_...\"}\n\nReturns: checkpointNodeId, a resumeToken (durable cross-chat bookmark — pass as continueToken with intent: \"rehydrate\" in a future chat to resume exactly here), and nextCall.params.continueToken (a continueToken to continue in the current chat).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checkpointToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The checkpoint token from the most recent start_workflow or continue_workflow response. Creates a checkpoint on the current step without advancing. Idempotent — calling with the same token is safe."
+          }
+        },
+        "required": [
+          "checkpointToken"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "resume_session",
+      "description": "Find and reconnect to an existing WorkRail workflow session. WorkRail is a workflow engine that persists session state across chat conversations. When a user says \"resume my workflow\", this is the tool to call.\n\nUse this when the user wants to resume, continue, or reconnect to a previously started workflow. The user may provide a session ID, run ID, a description of what they were working on, or nothing at all. This tool searches stored sessions and returns the best matches.\n\nParameters:\n- workspacePath (required)\n- query (optional)\n- runId (optional)\n- sessionId (optional)\n- gitBranch (optional)\n- gitHeadSha (optional)\n\nRules:\n- If the user provides a run ID (run_...) or session ID (sess_...), pass it as runId or sessionId for an exact match. This is the most reliable way to find a specific session.\n- If the user describes what they were working on (e.g. \"the mr ownership task\"), pass their words as query. This searches session recap notes and workflow IDs for matching keywords.\n- Always pass workspacePath (from your system parameters). Shared MCP servers cannot safely infer the current workspace, and resume quality depends on the current repo identity.\n- The response includes ranked candidates with match explanations and ready-to-use continuation templates. Present the top candidates to the user if there is ambiguity.\n- To inspect or resume a candidate: call continue_workflow with the candidate's nextCall.params (continueToken and intent: \"rehydrate\"). This is the correct inspection path for v2 sessions and restores the full session context.\n- If no candidates match, ask the user for more details or suggest starting a fresh workflow with start_workflow.\n\nExample: {\"workspacePath\":\"/Users/you/git/my-project\",\"query\":\"resume the coding task workflow for protocol drift\"}\n\nReturns: Up to 5 ranked candidates with match signals, session previews, and ready-to-use continuation templates. The response explains which candidate to pick and exactly how to resume it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runId": {
+            "type": "string",
+            "pattern": "^run_[a-z0-9]+$"
+          },
+          "sessionId": {
+            "type": "string",
+            "pattern": "^sess_[a-zA-Z0-9_]+$"
+          },
+          "gitBranch": {
+            "type": "string"
+          },
+          "gitHeadSha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "workspacePath": {
+            "type": "string"
+          },
+          "sameWorkspaceOnly": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "workspacePath"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "manage_workflow_source",
+      "description": "Attach or detach a workflow directory as a managed source.\n\nUse this to explicitly add a directory containing workflow files so its workflows appear in list_workflows as managed entries.\n\nParameters:\n- action: \"attach\" to add a directory, \"detach\" to remove it. Both are idempotent.\n- path: absolute filesystem path to the workflow directory\n\nAttach is idempotent: attaching an already-attached path is a no-op.\nDetach is idempotent: detaching an absent path is a no-op.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "attach",
+              "detach"
+            ],
+            "description": "The operation to perform. \"attach\" registers the directory as a managed workflow source; \"detach\" removes it. Both operations are idempotent."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "action",
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_session",
+      "description": "Create a new workflow session stored in ~/.workrail/sessions/.\n\nThis creates a JSON file to track all workflow state and data. The dashboard will automatically display this session's progress in real-time.\n\nReturns the session ID and file path.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "pattern": "^([a-z0-9_-]+|[a-z][a-z0-9_-]+\\.[a-z][a-z0-9_-]+)$",
+            "description": "Workflow identifier (e.g., \"bug-investigation\", \"mr-review\")"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Unique session identifier (e.g., ticket ID \"AUTH-1234\", branch name)"
+          },
+          "initialData": {
+            "type": "object",
+            "additionalProperties": true,
+            "default": {}
+          }
+        },
+        "required": [
+          "workflowId",
+          "sessionId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_session",
+      "description": "Update session data with deep merge.\n\nUpdates are merged into existing data (objects are merged, arrays are replaced).\n\nUse this throughout the workflow to:\n- Update progress and confidence\n- Add phases and subsections\n- Update hypotheses\n- Add timeline events\n\nNote: Use dot notation for nested updates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "pattern": "^([a-z0-9_-]+|[a-z][a-z0-9_-]+\\.[a-z][a-z0-9_-]+)$",
+            "description": "Workflow identifier"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session identifier"
+          },
+          "updates": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Data to merge into session. Supports nested updates via dot notation."
+          }
+        },
+        "required": [
+          "workflowId",
+          "sessionId",
+          "updates"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "read_session",
+      "description": "Read session data with optional JSONPath query for targeted reads.\n\nReading only what you need saves tokens and improves performance.\n\nSpecial Queries:\n- Schema overview: Use path \"$schema\" to get a map of all available fields\n\nExamples:\n- Full session: omit path\n- Dashboard only: path \"dashboard\"\n- Specific hypothesis: path \"hypotheses[0]\"\n- Phase 1 data: path \"phases.phase-1\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "pattern": "^([a-z0-9_-]+|[a-z][a-z0-9_-]+\\.[a-z][a-z0-9_-]+)$",
+            "description": "Workflow identifier"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session identifier"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflowId",
+          "sessionId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "open_dashboard",
+      "description": "Open the web dashboard in the user's default browser.\n\nThe dashboard shows real-time progress, visualizations, and all session data in a beautiful UI.\n\nIf sessionId is provided, opens directly to that session. Otherwise opens to the home page showing all sessions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ]
+}

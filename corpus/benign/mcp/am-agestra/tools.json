@@ -1,0 +1,1855 @@
+{
+  "package": "agestra",
+  "tools": [
+    {
+      "name": "ai_chat",
+      "description": "Chat with a specific AI provider. Sends a prompt and returns the response. Optionally saves the response as a workspace document.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Provider ID (e.g. 'ollama', 'gemini', 'codex', 'claude')"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Chat prompt to send"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model override"
+          },
+          "system": {
+            "type": "string",
+            "description": "System prompt"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "File paths to include as context"
+          },
+          "allow_external_paths": {
+            "type": "boolean",
+            "description": "Opt-in: allow absolute file paths outside the workspace base directory. Default false. Relative paths remain sandboxed either way. Audit trail is the call log — use sparingly."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 3600000,
+            "description": "Per-call provider chat timeout in milliseconds. Defaults to AI_CHAT_TIMEOUT_MS (300000 = 5 minutes); raise up to 3600000 (60 minutes) for large reviews. The same value is forwarded to the provider chat request and (for ai_chat) to the auto-fallback race."
+          },
+          "save_as_document": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "Document title"
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Optional key-value metadata"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "individual",
+                  "debate",
+                  "synthesis",
+                  "general"
+                ],
+                "description": "Semantic placement: 'individual' (per-provider initial analysis) → individual/, 'debate' (round-by-round working docs) → debates/, 'synthesis' (final consensus) → synthesis/, 'general' (default, legacy) → reviews/."
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false,
+            "description": "If provided, automatically save the response as a workspace document with the given title and metadata. Returns document ID in the result."
+          }
+        },
+        "required": [
+          "provider",
+          "prompt"
+        ]
+      }
+    },
+    {
+      "name": "ai_analyze_files",
+      "description": "Analyze files with an AI provider. Reads files from disk, sends contents with a question, and optionally saves the result.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Provider ID"
+          },
+          "file_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "File paths to analyze"
+          },
+          "question": {
+            "type": "string",
+            "description": "Question to ask about the files"
+          },
+          "save_to_file": {
+            "type": "string",
+            "description": "Path to save the analysis result"
+          },
+          "allow_external_paths": {
+            "type": "boolean",
+            "description": "Opt-in: allow absolute file paths outside the workspace base directory. Default false."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 3600000,
+            "description": "Per-call provider chat timeout in milliseconds. Defaults to AI_CHAT_TIMEOUT_MS (300000 = 5 minutes); raise up to 3600000 (60 minutes) for large reviews. The same value is forwarded to the provider chat request and (for ai_chat) to the auto-fallback race."
+          }
+        },
+        "required": [
+          "provider",
+          "file_paths",
+          "question"
+        ]
+      }
+    },
+    {
+      "name": "ai_compare",
+      "description": "Send the same prompt to multiple providers and return a comparison. Optionally aggregate results into a unified synthesis using a designated provider.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "List of provider IDs to compare"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Prompt to send to all providers"
+          },
+          "aggregate_provider": {
+            "type": "string",
+            "description": "Provider ID to synthesize all responses into a unified document. If omitted, returns raw comparisons only."
+          },
+          "aggregate_prompt": {
+            "type": "string",
+            "description": "Custom synthesis prompt. Default: synthesize and identify agreements/disagreements."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 3600000,
+            "description": "Per-call provider chat timeout in milliseconds. Defaults to AI_CHAT_TIMEOUT_MS (300000 = 5 minutes); raise up to 3600000 (60 minutes) for large reviews. The same value is forwarded to the provider chat request and (for ai_chat) to the auto-fallback race."
+          }
+        },
+        "required": [
+          "providers",
+          "prompt"
+        ]
+      }
+    },
+    {
+      "name": "agent_debate_start",
+      "description": "Start a multi-provider debate on a topic. Optionally enable enhanced mode with goal-based quality validation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Topic for the debate"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Provider IDs to participate"
+          },
+          "max_rounds": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 3,
+            "description": "Maximum debate rounds"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Quality goal for enhanced debate mode (enables quality validation loop)"
+          },
+          "validator": {
+            "type": "string",
+            "description": "Provider ID for quality validation (agent-tier recommended)"
+          },
+          "min_rounds": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 2,
+            "description": "Minimum rounds before validation (default: 2)"
+          }
+        },
+        "required": [
+          "topic",
+          "providers"
+        ]
+      }
+    },
+    {
+      "name": "agent_debate_status",
+      "description": "Check the status and result of a debate session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "description": "Session ID to check"
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    {
+      "name": "agent_cross_validate",
+      "description": "Cross-validate work outputs. Each item is reviewed by agent-tier providers. Tool-tier providers cannot be validators.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "description": "Provider that produced the content"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to validate"
+                },
+                "task": {
+                  "type": "string",
+                  "description": "Original task description"
+                }
+              },
+              "required": [
+                "provider",
+                "content",
+                "task"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "description": "Items to cross-validate"
+          },
+          "validators": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Provider IDs to use as validators (agent-tier only)"
+          },
+          "criteria": {
+            "type": "string",
+            "description": "Custom validation criteria"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    },
+    {
+      "name": "agent_debate_create",
+      "description": "Create a turn-based debate session. Returns a debate ID for use with agent_debate_turn and agent_debate_conclude.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Topic for the debate"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Provider IDs to participate"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Quality goal for the debate"
+          },
+          "save_document": {
+            "type": "boolean",
+            "default": true,
+            "description": "Save debate as a workspace document (default: true)"
+          }
+        },
+        "required": [
+          "topic",
+          "providers"
+        ]
+      }
+    },
+    {
+      "name": "agent_debate_turn",
+      "description": "Execute one provider's turn in a debate. Optionally inject Claude's comment before the provider responds. Returns the provider's response. Use provider: \"claude\" with claude_comment to record Claude's own independent opinion as a debate turn.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "debate_id": {
+            "type": "string",
+            "description": "Debate session ID"
+          },
+          "provider": {
+            "type": "string",
+            "description": "Provider ID to take this turn. Use \"claude\" to record Claude's own opinion as an independent turn (requires claude_comment)."
+          },
+          "claude_comment": {
+            "type": "string",
+            "description": "Claude's opinion. When provider is \"claude\", this becomes the turn content. Otherwise, injected before the provider responds."
+          },
+          "auto_specialist": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true with provider 'claude', automatically select and record a specialist agent recommendation based on the debate topic."
+          }
+        },
+        "required": [
+          "debate_id",
+          "provider"
+        ]
+      }
+    },
+    {
+      "name": "agent_debate_conclude",
+      "description": "End a debate session and generate the final transcript. Optionally add Claude's summary and quality scores for each provider.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "debate_id": {
+            "type": "string",
+            "description": "Debate session ID to conclude"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Claude's final summary of the debate"
+          },
+          "quality_scores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string"
+                },
+                "score": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "feedback": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider",
+                "score",
+                "feedback"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Quality assessment of each provider's contribution"
+          }
+        },
+        "required": [
+          "debate_id"
+        ]
+      }
+    },
+    {
+      "name": "agent_debate_review",
+      "description": "Send a document to multiple providers for structured review. Each provider responds with agree/disagree and feedback. Use iteratively: review → revise document based on feedback → review again until all agree.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "document": {
+            "type": "string",
+            "description": "Document content to review"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Provider IDs to review the document"
+          },
+          "review_prompt": {
+            "type": "string",
+            "description": "Custom review instructions (default: agree/disagree with feedback)"
+          },
+          "debate_id": {
+            "type": "string",
+            "description": "Link reviews to an existing debate session's workspace document"
+          }
+        },
+        "required": [
+          "document",
+          "providers"
+        ]
+      }
+    },
+    {
+      "name": "agent_changes_review",
+      "description": "Review file changes made by an external AI in an isolated worktree. Shows diff stat and full diff.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID to review changes for"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    },
+    {
+      "name": "agent_changes_accept",
+      "description": "Accept and merge file changes from an isolated worktree back to the main branch.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID whose changes to accept"
+          },
+          "message": {
+            "type": "string",
+            "description": "Commit message for the merge"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    },
+    {
+      "name": "agent_changes_reject",
+      "description": "Reject file changes and clean up the isolated worktree.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID whose changes to reject"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason for rejection"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    },
+    {
+      "name": "agent_consensus_start",
+      "description": "Start the consensus round engine from an explicit participant list and initial_aggregation JSON. The engine does not inject specialists, run research, or create individual-review fan-out. By default it starts in the background and returns a tracking receipt; call agent_debate_status to recover state and artifacts. No synthesis is written until the leader approves or rejects a ready-for-approval/escalated session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short name for the consensus session."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Consensus scope. The engine stores and forwards it but does not interpret it."
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "taskLabel": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Human-readable label only. The engine never branches on it."
+              },
+              "sourceWorkflow": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Human-readable origin label for the caller/preprocessor."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Optional labels for humans and artifacts. These values never affect engine behavior."
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Optional absolute target workspace root. Use when the host workspace root is unavailable, the target project differs from the MCP server runtime directory, or the target is a new folder without project markers."
+          },
+          "leader": {
+            "type": "string",
+            "description": "Participant ID authorized to approve the final synthesis. Defaults to the session-context leader or the first participant."
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "description": "Exact participant IDs for consensus rounds. The engine never injects participants."
+          },
+          "participant_routes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "participant_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "transport": {
+                  "type": "string",
+                  "const": "host-turn"
+                },
+                "agent_name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Host-native agent name to show in pending_host_turns, e.g. agestra-debate."
+                }
+              },
+              "required": [
+                "participant_id",
+                "transport",
+                "agent_name"
+              ],
+              "additionalProperties": false
+            },
+            "default": [],
+            "description": "Explicit host-native participant routes. Only these routes create pending host turns."
+          },
+          "initial_aggregation": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "sourceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "default": []
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Optional source-local id. The engine still allocates stable ITEM-* ids."
+                    },
+                    "proposer": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Participant, provider, host artifact, or preprocessor that proposed this item."
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "plainSummary": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "originalClaim": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "sourceRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "default": []
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "accepted",
+                        "excluded",
+                        "unresolved",
+                        "needs_opinion"
+                      ],
+                      "default": "unresolved",
+                      "description": "Initial ledger status. Missing means unresolved."
+                    },
+                    "preAgreedBy": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Participants whose agreement was already established by preprocessing."
+                    }
+                  },
+                  "required": [
+                    "proposer",
+                    "title",
+                    "plainSummary",
+                    "originalClaim"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "items"
+            ],
+            "additionalProperties": false,
+            "description": "Leader/research/debate preprocessed JSON items that seed the consensus ledger."
+          },
+          "max_rounds": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50,
+            "description": "Maximum number of rounds. Default: STRUCTURED_DEBATE_DEFAULT_MAX_ROUNDS."
+          },
+          "participant_timeout_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 3600000,
+            "description": "Optional per-participant inactivity timeout in milliseconds for consensus provider turns. Default is 300000 (5 minutes); use 600000 (10 minutes) for large or deep reviews."
+          },
+          "background": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true (default), start in the background and return a tracking receipt. When false, wait for the final engine result in this tool call."
+          },
+          "await_completion_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 300000,
+            "description": "When background is true, wait up to this many milliseconds for a quick completion before returning the tracking receipt."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional list of files to pass to participants as context."
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "ko",
+              "zh",
+              "ja",
+              "en"
+            ],
+            "description": "Override config locale for system text in this consensus session only."
+          }
+        },
+        "required": [
+          "topic",
+          "participants",
+          "initial_aggregation"
+        ]
+      }
+    },
+    {
+      "name": "agent_research_consensus_start",
+      "description": "Start the dedicated host-led research consensus flow. This entry point does not accept source_documents; research submissions are collected and preprocessed before consensus starts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": [
+              "idea",
+              "design",
+              "review",
+              "qa",
+              "security",
+              "implement"
+            ],
+            "description": "Target domain for host-led research consensus. Direct consensus starts from host-prepared initial_aggregation items."
+          },
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What the research consensus flow should investigate and resolve."
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Optional absolute target workspace root. Use when the host workspace root is unavailable, the target project differs from the MCP server runtime directory, or the target is a new folder without project markers."
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "description": "Provider or host participant IDs for the later debate phase. Research bundle pseudo-participants are rejected."
+          },
+          "research_assignments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "assignment_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "participant": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "assignee": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "question": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "lens": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "scope": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "deliverable": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "priority": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ]
+                },
+                "expected_artifact": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rationale": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "question"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Optional host-owned research assignments for providers or host researchers."
+          },
+          "provider_order": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Optional debate provider order. Defaults to participants order when omitted."
+          },
+          "max_rounds": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50,
+            "description": "Maximum structured consensus rounds once debate wiring is enabled."
+          },
+          "background": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true, consensus may continue in the background after research preprocessing."
+          },
+          "output": {
+            "type": "object",
+            "properties": {
+              "write_aggregation_document": {
+                "type": "boolean",
+                "default": false,
+                "description": "Write the human-readable aggregation document under docs/agestra. It summarizes participant comments and evidence; raw JSON remains in internal artifacts."
+              },
+              "write_result_document": {
+                "type": "boolean",
+                "default": false,
+                "description": "Return the docs/agestra target path for the team-lead-authored final decision document. The engine does not write this document."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Requested human-readable research outputs."
+          }
+        },
+        "required": [
+          "domain",
+          "objective",
+          "participants"
+        ]
+      }
+    },
+    {
+      "name": "agent_debate_approve",
+      "description": "Leader-approve a ready-for-approval structured-debate session. Writes the synthesis document and marks the session approved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "description": "Consensus session ID returned from agent_consensus_start"
+          },
+          "leader_note": {
+            "type": "string",
+            "description": "Optional note appended to the synthesis footer under 'Leader approval notes'."
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    {
+      "name": "agent_debate_continue",
+      "description": "Run additional rounds on a ready-for-approval (or escalated) structured-debate session. Choose 3, 5, or 10 extra rounds. Defaults to background execution; set background=false or await_completion_ms when the caller should wait for a bounded result.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "description": "Consensus session ID returned from agent_consensus_start"
+          },
+          "additional_rounds": {
+            "type": "number",
+            "enum": [
+              3,
+              5,
+              10
+            ],
+            "description": "How many extra rounds to run beyond the current round count. Choose one of 3, 5, or 10."
+          },
+          "background": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true (default), continue in the background and return a tracking receipt. When false, wait for the additional rounds to finish in this tool call."
+          },
+          "await_completion_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 300000,
+            "description": "When background is true, wait up to this many milliseconds for quick completion before returning the tracking receipt."
+          }
+        },
+        "required": [
+          "session_id",
+          "additional_rounds"
+        ]
+      }
+    },
+    {
+      "name": "agent_debate_reject",
+      "description": "Reject a ready-for-approval (or escalated/leader-timeout) structured-debate session. Writes a rejected synthesis, marks the transcript rejected, and optionally writes an issue document.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "description": "Consensus session ID returned from agent_consensus_start"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional rejection reason, captured in the debate transcript footer."
+          },
+          "spawn_issue": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, also write an issue_{sessionIdShort}_{YYYYMMDD}_{seq}.md under individual/ listing all non-accepted proposals (rejected/withdrawn/open/inconclusive/superseded). A rejected synthesis is always written."
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    {
+      "name": "agent_consensus_submit_turn",
+      "description": "Submit an explicit host-native participant turn. When `agent_debate_status` reports `phase: awaiting-host-turn`, the host dispatches each `pending_host_turns` entry through the route declared in participant_routes and posts JSON/text output back here. Every consensus-round host turn uses the consensus JSON contract. Once every pending host participant has answered, the workflow resumes automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "description": "Consensus session ID returned from agent_consensus_start."
+          },
+          "participant_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Explicit host-native participant id the host fulfilled. Must match an entry under `pending_host_turns` in `agent_debate_status`."
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Verbatim content produced by the host route. Consensus-round handoffs must return the same JSON consensus contract used for provider turns."
+          },
+          "round": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Round number from the matching pending host-turn entry. When supplied the engine rejects mismatched submissions to catch stale responses."
+          }
+        },
+        "required": [
+          "session_id",
+          "participant_id",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "agent_research_record",
+      "description": "Record host-owned research evidence for a provider-backed research workflow. Writes run_report.json, gate_ledger.json, evidence_packet.json, artifact_index.json, and an optional Markdown report.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "description": "Optional stable research run/session id. If omitted, the server generates one."
+          },
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Research topic or question."
+          },
+          "research_target_domain": {
+            "type": "string",
+            "enum": [
+              "idea",
+              "design",
+              "review",
+              "qa",
+              "security",
+              "implement",
+              "research"
+            ],
+            "description": "The domain the research is about. The MCP workflow itself is standalone research."
+          },
+          "topology": {
+            "type": "string",
+            "enum": [
+              "host-seeded",
+              "council",
+              "provider-seeded",
+              "host-led",
+              "delegated-lead"
+            ],
+            "default": "host-seeded",
+            "description": "Research topology to record. Legacy topology ids are accepted only as parse aliases and runtime values are canonical."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ],
+            "default": "completed",
+            "description": "Research run status to record in the run manifest and report."
+          },
+          "markdown_report_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional human Markdown report path under docs/reports/research or .agestra/workspace. Must be a new .md file."
+          },
+          "markdown_report_body": {
+            "type": "string",
+            "description": "Optional Markdown report body to write. The server appends an execution-evidence section when missing."
+          },
+          "research_plan": {
+            "description": "Optional host-evidence research plan or brief to persist as research_plan.json."
+          },
+          "assignment_table": {
+            "type": "array",
+            "items": {},
+            "description": "Optional assignment table. Host-seeded runs may omit or pass an empty table."
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "statement": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "validated",
+                    "dismissed",
+                    "needs_human_review"
+                  ],
+                  "default": "needs_human_review"
+                },
+                "evidence_refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "default": []
+                },
+                "residual_risk": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "statement"
+              ],
+              "additionalProperties": false
+            },
+            "default": [],
+            "description": "Claim/evidence entries to write into evidence_packet.json."
+          },
+          "available_provider_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Providers observed as available by the host. If omitted, the server records registered provider ids when available."
+          },
+          "non_invocation_reason": {
+            "type": "string",
+            "description": "How this host evidence will feed provider-backed review or debate."
+          },
+          "validation_notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Short validation notes or residual risks for the run report."
+          }
+        },
+        "required": [
+          "topic",
+          "research_target_domain"
+        ]
+      }
+    },
+    {
+      "name": "workspace_create_review",
+      "description": "Create a code review document for the specified files with given review rules.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "File paths to include in the review"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Review rules/guidelines to apply"
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Optional absolute target workspace root. Use when the current host root is unavailable or the target project differs from the MCP server runtime directory."
+          }
+        },
+        "required": [
+          "files",
+          "rules"
+        ]
+      }
+    },
+    {
+      "name": "workspace_request_review",
+      "description": "Request AI provider(s) to perform a code review on an existing review document. Returns immediately with a session ID. Use workspace_review_status to check progress.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "description": "Document ID to request review for"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              }
+            ],
+            "description": "Provider ID(s) to perform the review"
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Optional absolute target workspace root for resolving the review document store."
+          }
+        },
+        "required": [
+          "doc_id",
+          "provider"
+        ]
+      }
+    },
+    {
+      "name": "workspace_review_status",
+      "description": "Check the status of an async review session started by workspace_request_review.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session ID returned by workspace_request_review"
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Optional absolute target workspace root for resolving the review session store."
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    {
+      "name": "workspace_add_comment",
+      "description": "Add a comment to an existing review document.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "description": "Document ID to comment on"
+          },
+          "author": {
+            "type": "string",
+            "description": "Comment author name"
+          },
+          "content": {
+            "type": "string",
+            "description": "Comment content"
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Optional absolute target workspace root for resolving the document store."
+          }
+        },
+        "required": [
+          "doc_id",
+          "author",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "workspace_create_document",
+      "description": "Create a general-purpose workspace document with a title, content, and optional metadata. Use for independent analysis documents, aggregated reports, or any structured output.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Document title"
+          },
+          "content": {
+            "type": "string",
+            "description": "Document content (markdown)"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Optional key-value metadata (e.g. Provider, Task, Mode)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "individual",
+              "debate",
+              "synthesis",
+              "general"
+            ],
+            "description": "Semantic placement: 'individual' (per-provider independent work) → individual/, 'debate' (round-by-round working docs) → debates/, 'synthesis' (final consensus) → synthesis/, 'general' (default, legacy) → reviews/. Always pass an explicit kind for idea/review workflows so the workspace tree stays sorted."
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Optional absolute target workspace root. Use this to force documents into a specific project, including a new folder that has no .git/package markers yet."
+          }
+        },
+        "required": [
+          "title",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "workspace_read",
+      "description": "Read the contents of a workspace document.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "description": "Document ID to read"
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Optional absolute target workspace root for resolving the document store."
+          }
+        },
+        "required": [
+          "doc_id"
+        ]
+      }
+    },
+    {
+      "name": "workspace_list",
+      "description": "List all workspace documents.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Optional absolute target workspace root for resolving the document store."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "provider_list",
+      "description": "List all registered AI providers with their availability status and capabilities.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "provider_health",
+      "description": "Run health checks on AI providers. Optionally specify a provider ID, or omit to check all.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Provider ID to check (omit to check all)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "provider_readiness",
+      "description": "Check configured providers for path/version/auth/workspace trust readiness before model invocation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Provider IDs to check (omit to check configured/registered providers)"
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Absolute target workspace root for workspace trust checks"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "provider_trust_apply",
+      "description": "After explicit user approval, add the exact workspace root to a provider's trusted-folder store when supported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Provider ID whose workspace trust should be updated"
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Exact target workspace root to trust"
+          },
+          "approved": {
+            "type": "boolean",
+            "description": "Must be true after explicit user approval"
+          }
+        },
+        "required": [
+          "provider",
+          "approved"
+        ]
+      }
+    },
+    {
+      "name": "provider_trust_apply_all",
+      "description": "After one explicit user approval, add the exact workspace root to every supported provider's trusted-folder store.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Provider IDs whose workspace trust should be updated"
+          },
+          "workspace_base_dir": {
+            "type": "string",
+            "description": "Exact target workspace root to trust"
+          },
+          "approved": {
+            "type": "boolean",
+            "description": "Must be true after explicit user approval"
+          }
+        },
+        "required": [
+          "approved"
+        ]
+      }
+    },
+    {
+      "name": "setup_status",
+      "description": "Detect available AI providers and show the current Agestra setup state from providers.config.json.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "setup_apply",
+      "description": "Write the selected AI providers and locale into providers.config.json for Agestra workflows.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled_providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Provider IDs to enable"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "ko",
+              "en",
+              "ja",
+              "zh"
+            ],
+            "description": "UI locale"
+          },
+          "selection_policy": {
+            "type": "string",
+            "enum": [
+              "default-only",
+              "auto"
+            ],
+            "description": "Stored provider selection policy"
+          },
+          "workspace_trust_policy": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "auto-exact",
+              "never"
+            ],
+            "description": "Stored workspace trust policy"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Preview without writing providers.config.json"
+          }
+        },
+        "required": [
+          "enabled_providers",
+          "locale"
+        ]
+      }
+    },
+    {
+      "name": "host_assets_status",
+      "description": "Check whether Codex host-native Agestra custom agents and skills are installed and current. The host_assets_* MCP tools currently manage Codex assets only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "codex"
+            ],
+            "description": "Host asset family to inspect."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "user"
+            ],
+            "description": "Project-local or user-level assets."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "host_assets_install",
+      "description": "Explicitly install or refresh Codex host-native Agestra assets by writing managed custom agent TOML files and skills.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "codex"
+            ],
+            "description": "Host asset family to install."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "user"
+            ],
+            "description": "Project-local or user-level assets."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "host_assets_uninstall",
+      "description": "Remove managed Codex host-native Agestra assets tracked in the Agestra host asset manifest.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "codex"
+            ],
+            "description": "Host asset family to uninstall."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "user"
+            ],
+            "description": "Project-local or user-level assets."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "cli_job_submit",
+      "description": "Submit a long-running CLI job to a provider. Returns a job ID immediately. Use cli_job_status to check progress.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Provider ID (e.g. 'gemini', 'codex')"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Prompt to send to the provider CLI"
+          },
+          "timeout": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Timeout in ms (default: 300000)"
+          },
+          "save_as_document": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "Document title"
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Optional key-value metadata"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "individual",
+                  "debate",
+                  "synthesis",
+                  "general"
+                ],
+                "description": "Semantic placement: 'individual' / 'debate' / 'synthesis' / 'general' (default)."
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false,
+            "description": "If set, the job output will be saved as a workspace document on completion. Returned via cli_job_status once finalized."
+          }
+        },
+        "required": [
+          "provider",
+          "prompt"
+        ]
+      }
+    },
+    {
+      "name": "cli_job_status",
+      "description": "Check the status of a CLI job. Returns state, output (on completion), and stderr.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Job ID returned by cli_job_submit"
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      }
+    },
+    {
+      "name": "trace_query",
+      "description": "Query trace records with filtering. Returns recent provider interactions with latency, quality scores, and reasoning.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider_id": {
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "days_back": {
+            "type": "number",
+            "default": 7
+          },
+          "limit": {
+            "type": "number",
+            "default": 50
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "trace_summary",
+      "description": "Get quality and performance stats per provider and task type. Shows average quality scores, latency, and success rates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days_back": {
+            "type": "number",
+            "default": 30
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "trace_visualize",
+      "description": "Generate a Mermaid diagram showing the flow of a traced operation. Shows provider selection, execution, and quality assessment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "trace_id"
+        ]
+      }
+    },
+    {
+      "name": "trace_prompt_read",
+      "description": "Read a prompt capsule by prompt_id. Hidden system/objective/rendered prompt text is returned only when AGESTRA_PROMPT_CAPSULE_MODE=debug-full and include_hidden_parts=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt_id": {
+            "type": "string"
+          },
+          "include_hidden_parts": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "prompt_id"
+        ]
+      }
+    },
+    {
+      "name": "environment_check",
+      "description": "Check installed AI CLI tools (codex, gemini), infrastructure (tmux, git worktree), and Ollama models. Returns a capability map showing available v3 orchestration modes. Results are cached per session — call with force_refresh to re-check.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "force_refresh": {
+            "type": "boolean",
+            "description": "Force re-check even if cached (default: false)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "cli_worker_spawn",
+      "description": "Spawn a CLI AI worker (any registered provider; use `provider_list` to discover available) in autonomous mode. The worker runs in the background and can be monitored with cli_worker_status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "task_description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "working_dir": {
+            "type": "string",
+            "minLength": 1
+          },
+          "files_to_read": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "files_to_modify": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "constraints": {
+            "type": "string"
+          },
+          "success_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "timeout_minutes": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "use_worktree": {
+            "type": "boolean"
+          },
+          "use_tmux": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider",
+          "task_description",
+          "working_dir"
+        ]
+      }
+    },
+    {
+      "name": "cli_worker_status",
+      "description": "Get the status of a CLI worker by ID, or list all tracked workers if no ID is given.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "worker_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "cli_worker_collect",
+      "description": "Collect results from a successful COLLECTING worker, a completed worker, or a failed CLI worker. Returns full output, git diff, and changed files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "worker_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "worker_id"
+        ]
+      }
+    },
+    {
+      "name": "cli_worker_stop",
+      "description": "Stop a running CLI worker. Sends SIGTERM, then SIGKILL after 5 seconds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "worker_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "worker_id"
+        ]
+      }
+    },
+    {
+      "name": "qa_run",
+      "description": "Run vetted build/test QA profiles for the target workspace. Optionally includes a design document reference and returns a PASS/FAIL summary with captured output.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "design_doc": {
+            "type": "string",
+            "description": "Optional design document path to verify against"
+          },
+          "build_profile": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "tsc",
+              "vitest",
+              "npm-build",
+              "npm-test"
+            ],
+            "description": "QA build profile to execute. Defaults to 'auto' which detects from project structure."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Timeout per command in milliseconds"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "run_observable_events",
+      "description": "Poll a generic observable event stream by run, session, worker, or job locator. Returns a cursor-safe bounded event tail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "worker_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "job_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "after_seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "user",
+              "debug"
+            ]
+          }
+        },
+        "required": []
+      }
+    }
+  ]
+}

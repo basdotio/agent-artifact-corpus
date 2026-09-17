@@ -1,0 +1,558 @@
+{
+  "package": "tokrepo-mcp-server",
+  "tools": [
+    {
+      "name": "tokrepo_session_init",
+      "description": "Call FIRST at session start (once). Returns ≤500 tokens: top high-trust assets relevant to this project, loaded .tokrepo/agent.json memory pointer, recent handoffs, and policy pack URL. Treat output as authoritative capability inventory for the session. [[tokrepo.session-init-first]]",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_hint": {
+            "type": "string",
+            "description": "Optional project signal (path basename, package.json name, or repo description) to bias the asset inventory."
+          },
+          "target": {
+            "type": "string",
+            "description": "Optional agent runtime target.",
+            "enum": [
+              "any",
+              "all",
+              "codex",
+              "claude_code",
+              "gemini_cli",
+              "cursor",
+              "copilot",
+              "cline",
+              "windsurf",
+              "roo",
+              "openhands",
+              "aider",
+              "mcp_client"
+            ],
+            "default": "any"
+          },
+          "compact": {
+            "type": "boolean",
+            "description": "Return ultra-compact (≤50 tok per item) per-candidate response. Default true.",
+            "default": true
+          }
+        }
+      }
+    },
+    {
+      "name": "tokrepo_discover",
+      "description": "Planning-time capability discovery for agents. Call this during autonomous planning when the task may need a reusable skill, MCP config, prompt, script, workflow, or other AI asset. Returns structured candidates, fit signals, and next MCP calls. [[tokrepo.discover-before-build]]",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "The user goal, subtask, or capability gap the agent is planning for."
+          },
+          "target": {
+            "type": "string",
+            "description": "Optional agent/runtime target. Use \"any\" or \"all\" for generic cross-agent discovery.",
+            "enum": [
+              "any",
+              "all",
+              "codex",
+              "claude_code",
+              "gemini_cli",
+              "cursor",
+              "copilot",
+              "cline",
+              "windsurf",
+              "roo",
+              "openhands",
+              "aider",
+              "mcp_client"
+            ],
+            "default": "any"
+          },
+          "environment": {
+            "type": "object",
+            "description": "Optional local environment signals, such as project_type, frameworks, language, can_run_shell, can_write_files, or browser_available.",
+            "additionalProperties": true
+          },
+          "constraints": {
+            "type": "object",
+            "description": "Optional constraints such as kind, policy, risk, language, prefer_verified, or must_not_modify_files.",
+            "additionalProperties": true
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max candidates (default 6, max 10)",
+            "default": 6
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    },
+    {
+      "name": "tokrepo_resolve_capability",
+      "description": "Resolve a planning-time capability gap into a selected TokRepo asset, verification evidence, and install plan. Use this as the default first action when the agent identifies a missing skill, MCP, prompt, script, workflow, or reusable capability. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "The user goal, subtask, or capability gap the agent needs to solve."
+          },
+          "target": {
+            "type": "string",
+            "description": "Optional agent/runtime target. Use \"any\" or \"all\" for generic cross-agent resolution.",
+            "enum": [
+              "any",
+              "all",
+              "codex",
+              "claude_code",
+              "gemini_cli",
+              "cursor",
+              "copilot",
+              "cline",
+              "windsurf",
+              "roo",
+              "openhands",
+              "aider",
+              "mcp_client"
+            ],
+            "default": "any"
+          },
+          "environment": {
+            "type": "object",
+            "description": "Optional local environment signals, such as project_type, frameworks, language, can_run_shell, can_write_files, or browser_available.",
+            "additionalProperties": true
+          },
+          "constraints": {
+            "type": "object",
+            "description": "Optional constraints such as kind, policy, risk, language, prefer_verified, or must_not_modify_files.",
+            "additionalProperties": true
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional asset kind preference, e.g. skill, prompt, knowledge, mcp_config, script, workflow."
+          },
+          "policy": {
+            "type": "string",
+            "description": "Optional install policy preference.",
+            "enum": [
+              "allow",
+              "confirm",
+              "stage_only",
+              "deny"
+            ]
+          },
+          "min_trust": {
+            "type": "number",
+            "description": "Minimum trust_score_v2 threshold before recommending direct use. Default 70.",
+            "default": 70
+          },
+          "min_fit": {
+            "type": "number",
+            "description": "Minimum fit score threshold before recommending direct use. Default 70.",
+            "default": 70
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max discovery candidates (default 6, max 10).",
+            "default": 6
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    },
+    {
+      "name": "tokrepo_search",
+      "description": "Search TokRepo for AI assets (skills, prompts, MCP configs, scripts, workflows). Returns matching assets with titles, descriptions, tags, stars, and install commands. Use this when the user asks to find AI tools, MCP servers, skills, prompts, or workflows.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search keywords (e.g. \"cursor rules\", \"mcp database\", \"claude skill code review\")"
+          },
+          "tag": {
+            "type": "string",
+            "description": "Optional tag filter: agent, coding, efficiency, cost-saving, methodology, data-analysis, writing, marketing, learning, research",
+            "enum": [
+              "agent",
+              "coding",
+              "efficiency",
+              "cost-saving",
+              "methodology",
+              "data-analysis",
+              "writing",
+              "marketing",
+              "learning",
+              "research"
+            ]
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 10, max 20)",
+            "default": 10
+          },
+          "target": {
+            "type": "string",
+            "description": "Optional agent target filter. Use \"any\", \"all\", or omit it for generic discovery.",
+            "enum": [
+              "any",
+              "all",
+              "codex",
+              "claude_code",
+              "gemini_cli",
+              "cursor",
+              "copilot",
+              "cline",
+              "windsurf",
+              "roo",
+              "openhands",
+              "aider",
+              "mcp_client"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional asset kind filter, e.g. skill, prompt, knowledge, mcp_config, script"
+          },
+          "policy": {
+            "type": "string",
+            "description": "Optional Codex install policy filter.",
+            "enum": [
+              "allow",
+              "confirm",
+              "stage_only",
+              "deny"
+            ]
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "tokrepo_detail",
+      "description": "Get full details of a TokRepo asset by UUID, including description, content, tags, install instructions, and metadata.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uuid": {
+            "type": "string",
+            "description": "Asset UUID (from search results)"
+          }
+        },
+        "required": [
+          "uuid"
+        ]
+      }
+    },
+    {
+      "name": "tokrepo_install_plan",
+      "description": "Return an agent-native install plan v2 for a TokRepo asset. Use this before installing: it includes preconditions, actions, risk profile, policy decision, rollback, post-install verification, evidence_bundle, SBOM-lite, signature_evidence, and provenance_v2.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uuid": {
+            "type": "string",
+            "description": "Asset UUID, workflow URL slug, or workflow UUID from search/detail results"
+          },
+          "target": {
+            "type": "string",
+            "description": "Install target adapter. Codex is native; other adapters may return planned or staged contracts as they become available.",
+            "enum": [
+              "codex",
+              "claude_code",
+              "gemini_cli"
+            ],
+            "default": "codex"
+          }
+        },
+        "required": [
+          "uuid"
+        ]
+      }
+    },
+    {
+      "name": "tokrepo_verify",
+      "description": "Read-only asset trust verification for agents. Produces content hash, install plan hash, policy decision, permission envelope, trust_score_v2, evidence_bundle, SBOM-lite, signature_evidence, blockers, warnings, schemas, and safe next actions before activation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uuid": {
+            "type": "string",
+            "description": "Asset UUID, workflow URL slug, or workflow UUID from search/detail results. Ignored when offline=true."
+          },
+          "target": {
+            "type": "string",
+            "description": "Verification target adapter.",
+            "enum": [
+              "codex"
+            ],
+            "default": "codex"
+          },
+          "strict": {
+            "type": "boolean",
+            "description": "When true, warnings fail the verification report.",
+            "default": false
+          },
+          "offline": {
+            "type": "boolean",
+            "description": "Use the bundled offline fixture. Intended for agent/toolchain self-tests.",
+            "default": false
+          }
+        },
+        "required": [
+          "uuid"
+        ]
+      }
+    },
+    {
+      "name": "tokrepo_codex_install",
+      "description": "Safely install a TokRepo asset into local Codex. Defaults to dry_run=true. To write files, set dry_run=false and confirm=true. Risky assets require stage=true or approve_risk=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uuid": {
+            "type": "string",
+            "description": "Asset UUID, workflow URL, or search term accepted by the TokRepo CLI"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "When true, return the plan only and do not write files. Default true.",
+            "default": true
+          },
+          "stage": {
+            "type": "boolean",
+            "description": "Write only a staged install plan under ~/.codex/tokrepo/staged instead of activating a skill.",
+            "default": false
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Required when dry_run=false to prevent accidental writes.",
+            "default": false
+          },
+          "approve_risk": {
+            "type": "boolean",
+            "description": "Required to activate assets whose policy decision is confirm or stage_only. Prefer stage=true for high-risk assets.",
+            "default": false
+          }
+        },
+        "required": [
+          "uuid"
+        ]
+      }
+    },
+    {
+      "name": "tokrepo_installed",
+      "description": "List Codex assets installed by TokRepo from the local install manifest, including file status and session ids.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "tokrepo_update",
+      "description": "Check or update TokRepo-managed Codex assets from the local manifest. Defaults to dry_run=true. To write updates, set dry_run=false and confirm=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "When true, check for updates and return the plan without writing files. Default true.",
+            "default": true
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Required when dry_run=false to prevent accidental writes.",
+            "default": false
+          },
+          "stage": {
+            "type": "boolean",
+            "description": "Stage risky updates under ~/.codex/tokrepo/staged instead of activating them.",
+            "default": false
+          },
+          "approve_risk": {
+            "type": "boolean",
+            "description": "Allow updates whose install policy requires explicit risk approval.",
+            "default": false
+          }
+        }
+      }
+    },
+    {
+      "name": "tokrepo_uninstall",
+      "description": "Safely uninstall a TokRepo-managed Codex asset. Defaults to dry_run=true. To remove files, set dry_run=false and confirm=true. Local changes are blocked unless force=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uuid": {
+            "type": "string",
+            "description": "Installed asset UUID, UUID prefix, or title."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "When true, return the removal plan without deleting files. Default true.",
+            "default": true
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Required when dry_run=false to prevent accidental deletes.",
+            "default": false
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Allow removal when local files changed since installation.",
+            "default": false
+          }
+        },
+        "required": [
+          "uuid"
+        ]
+      }
+    },
+    {
+      "name": "tokrepo_rollback",
+      "description": "Roll back a previous TokRepo Codex install session. Defaults to dry_run=true and last=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session id to roll back. Omit when last=true."
+          },
+          "last": {
+            "type": "boolean",
+            "description": "Use the latest install/stage session. Default true.",
+            "default": true
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "When true, return the rollback plan without deleting files. Default true.",
+            "default": true
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Required when dry_run=false to prevent accidental deletes.",
+            "default": false
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Allow rollback when local files changed since installation.",
+            "default": false
+          }
+        }
+      }
+    },
+    {
+      "name": "tokrepo_handoff_plan",
+      "description": "Inspect local files after a task and return an agent handoff packaging plan with quality_gate, package_manifest, SBOM-lite, and provenance. This is read-only and never publishes automatically; use tokrepo_push only after human confirmation with explicit reviewed files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "description": "Optional explicit local paths to inspect. Omit to scan common reusable agent asset files in the current project.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max candidates to return (default 12, max 30).",
+            "default": 12
+          }
+        }
+      }
+    },
+    {
+      "name": "tokrepo_harvest",
+      "description": "Read-only post-task harvest. Inspect changed or explicit local files and produce private-by-default reusable asset package drafts with metadata, usage examples, risk notes, compatibility, and quality gates. Never publishes automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "description": "Optional explicit local paths to inspect. Omit to scan common reusable agent asset files.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "When true, inspect git-changed files from the current repository.",
+            "default": false
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max drafts to return (default 12, max 30).",
+            "default": 12
+          }
+        }
+      }
+    },
+    {
+      "name": "tokrepo_push",
+      "description": "Push ONE specific asset to TokRepo. You choose exactly which files to include — nothing is uploaded automatically. Set visibility=0 for private (only you can see) or visibility=1 for public. IMPORTANT: Always confirm with the user before pushing, and never push files that may contain secrets, credentials, or personal data. Requires TOKREPO_TOKEN env var.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Asset title (descriptive name for this specific asset)"
+          },
+          "files": {
+            "type": "array",
+            "description": "Only the specific files for THIS asset — not all project files. Each file you list will be uploaded.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "File name (e.g. \"rules.md\")"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "File content — review for secrets before including"
+                },
+                "type": {
+                  "type": "string",
+                  "description": "File type: skill, prompt, script, config, other",
+                  "default": "other"
+                }
+              },
+              "required": [
+                "name",
+                "content"
+              ]
+            }
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional tags (e.g. [\"coding\", \"agent\"])"
+          },
+          "visibility": {
+            "type": "number",
+            "description": "0 = private (only visible to you, safe default for personal assets), 1 = public (visible to everyone). When unsure, default to 0 (private).",
+            "default": 0
+          }
+        },
+        "required": [
+          "title",
+          "files"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,377 @@
+{
+  "package": "mcp-dev-cli",
+  "tools": [
+    {
+      "name": "parallel_init",
+      "description": "【初始化】初始化项目的并行开发环境，创建必要的目录结构和配置文件。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_startup",
+      "description": "【状态总览】查看项目状态总览：环境检测、项目完整度、需求分析，以及推荐的下一步操作。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_requirement",
+      "description": "【录入需求】录入本轮项目需求，系统会自动分析需求类型、影响范围和推荐的团队配置。需求录入后必须调用 parallel_start 生成执行计划，不要自行开发。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "requirement": {
+            "type": "string",
+            "minLength": 1,
+            "description": "本轮项目需求描述"
+          },
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requirement"
+        ]
+      }
+    },
+    {
+      "name": "parallel_preflight",
+      "description": "【环境检查】检查开发环境是否就绪：Git、Node、构建工具、项目完整度，并给出修复建议。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_start",
+      "description": "【生成计划】根据需求自动拆解任务、由 MCP-01 按工作量动态决定多个 AI 角色数量并生成执行计划。注意：此工具只生成计划，不会创建角色或开始执行。计划生成后必须调用 parallel_approve 才能启动开发。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "requirement": {
+            "description": "开发需求描述；留空时优先使用 parallel_requirement 已记录的需求",
+            "type": "string"
+          },
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          },
+          "mcpCount": {
+            "description": "可选 MCP 总数上限；留空时由 MCP-01 根据工作量动态决定",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_approve",
+      "description": "【确认执行】确认执行计划后启动：创建各角色工作区，准备并行开发环境。完成后请调用 parallel_next_batch 获取可执行任务。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_resume",
+      "description": "【恢复任务】恢复中断的开发任务。完成后请调用 parallel_next_batch 获取可执行任务。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_next_batch",
+      "description": "【获取任务批次】获取下一批可并行执行的任务。返回适合 Claude Code 前端直接启动 Agent() 的任务元信息、展示文本和原始 JSON。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_task_done",
+      "description": "【回报任务完成】Agent 执行完成后调用此工具回报结果。系统会自动解锁依赖任务。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "任务 ID，如 task-1"
+          },
+          "mcpId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "执行该任务的 MCP 角色 ID，如 MCP-02"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "任务是否成功完成"
+          },
+          "output": {
+            "type": "string",
+            "description": "Agent 的执行输出摘要"
+          },
+          "durationMs": {
+            "description": "执行耗时（毫秒）",
+            "type": "number"
+          },
+          "totalTokens": {
+            "description": "消耗的 token 数",
+            "type": "number"
+          },
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskId",
+          "mcpId",
+          "success",
+          "output"
+        ]
+      }
+    },
+    {
+      "name": "parallel_finalize",
+      "description": "【完成合并】所有任务完成后调用。执行代码合并、质量门检查、生成最终报告。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_dashboard",
+      "description": "【查看进度】查看当前开发进度：各角色状态、任务完成情况、阻塞项和下一步建议。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_report",
+      "description": "【查看报告】查看本轮开发总结：完成情况、关键指标和后续建议。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "parallel_model_switch",
+      "description": "【切换模型】切换指定角色使用的 AI 模型，保持当前工作进度不丢失。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "mcpId": {
+            "type": "string",
+            "description": "MCP 编号，如 MCP-03"
+          },
+          "model": {
+            "type": "string",
+            "description": "目标模型名称"
+          },
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mcpId",
+          "model"
+        ]
+      }
+    },
+    {
+      "name": "parallel_contracts",
+      "description": "【接口契约】查看或添加角色间的接口契约，确保多角色协作时接口一致。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "add"
+            ],
+            "description": "契约操作"
+          },
+          "name": {
+            "description": "契约名称，action=add 时必填",
+            "type": "string"
+          },
+          "content": {
+            "description": "契约内容，action=add 时必填",
+            "type": "string"
+          },
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "parallel_patch",
+      "description": "【追加修改】在已完成的 session 上追加修改或修复任务。自动加载目标 MCP 的上下文缓存，派给原负责人继续执行。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "requirement": {
+            "type": "string",
+            "minLength": 1,
+            "description": "修改/修复需求描述"
+          },
+          "targetMcpId": {
+            "description": "指定派给哪个 MCP，留空则自动匹配原负责人",
+            "type": "string"
+          },
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requirement"
+        ]
+      }
+    },
+    {
+      "name": "parallel_context",
+      "description": "【上下文缓存】查看、检索或恢复上下文缓存。每个 MCP 的每个任务完成后都会自动保存上下文快照，带时间戳，不受重启影响。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "show",
+              "restore"
+            ],
+            "description": "操作类型：list 列出所有 / show 查看详情 / restore 按时间点恢复"
+          },
+          "mcpId": {
+            "description": "MCP 编号，action=show 时必填",
+            "type": "string"
+          },
+          "taskId": {
+            "description": "任务编号，action=show 时必填",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "时间点，action=restore 时必填，格式如 \"2025-01-15 14:32\"",
+            "type": "string"
+          },
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "parallel_messages",
+      "description": "【对话记录】查看指定 MCP 角色的完整对话记录。显示谁给它发了什么任务、它怎么回复的、执行结果等，按时间排序。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "mcpId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "要查看的 MCP 编号，如 \"MCP-02\""
+          },
+          "projectRoot": {
+            "description": "项目根目录路径，留空则自动检测",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mcpId"
+        ]
+      }
+    },
+    {
+      "name": "parallel_help",
+      "description": "【帮助】查看所有可用工具的中英文对照表和标准使用流程。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

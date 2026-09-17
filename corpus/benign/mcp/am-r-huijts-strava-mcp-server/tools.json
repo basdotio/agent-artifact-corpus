@@ -1,0 +1,544 @@
+{
+  "package": "@r-huijts/strava-mcp-server",
+  "tools": [
+    {
+      "name": "get-athlete-profile",
+      "description": "Fetches the profile information for the authenticated athlete, including their unique numeric ID needed for other tools like get-athlete-stats.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get-athlete-stats",
+      "description": "Fetches the activity statistics (recent, YTD, all-time) for a specific athlete using their ID. Requires the athleteId obtained from the get-athlete-profile tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "athleteId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "The unique identifier of the athlete to fetch stats for. Obtain this ID first by calling the get-athlete-profile tool."
+          }
+        },
+        "required": [
+          "athleteId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-activity-details",
+      "description": "Fetches detailed information about a specific activity using its ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "activityId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "The unique identifier of the activity to fetch details for."
+          }
+        },
+        "required": [
+          "activityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-recent-activities",
+      "description": "Fetches the most recent activities for the authenticated athlete.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "perPage": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 30,
+            "description": "Number of activities to retrieve (default: 30)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list-athlete-clubs",
+      "description": "Lists the clubs the authenticated athlete is a member of.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list-starred-segments",
+      "description": "Lists the segments starred by the authenticated athlete.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get-segment",
+      "description": "Fetches detailed information about a specific segment using its ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "segmentId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "The unique identifier of the segment to fetch."
+          }
+        },
+        "required": [
+          "segmentId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "explore-segments",
+      "description": "Searches for popular segments within a given geographical area.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bounds": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?$",
+            "description": "The geographical area to search, specified as a comma-separated string: south_west_lat,south_west_lng,north_east_lat,north_east_lng"
+          },
+          "activityType": {
+            "type": "string",
+            "enum": [
+              "running",
+              "riding"
+            ],
+            "description": "Filter segments by activity type (optional: 'running' or 'riding')."
+          },
+          "minCat": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5,
+            "description": "Filter by minimum climb category (optional, 0-5). Requires riding activityType."
+          },
+          "maxCat": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5,
+            "description": "Filter by maximum climb category (optional, 0-5). Requires riding activityType."
+          }
+        },
+        "required": [
+          "bounds"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "star-segment",
+      "description": "Stars or unstars a specific segment for the authenticated athlete.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "segmentId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "The unique identifier of the segment to star or unstar."
+          },
+          "starred": {
+            "type": "boolean",
+            "description": "Set to true to star the segment, false to unstar it."
+          }
+        },
+        "required": [
+          "segmentId",
+          "starred"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-segment-effort",
+      "description": "Fetches detailed information about a specific segment effort using its ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "effortId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "The unique identifier of the segment effort to fetch."
+          }
+        },
+        "required": [
+          "effortId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list-segment-efforts",
+      "description": "Lists the authenticated athlete's efforts on a specific segment, optionally filtering by date.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "segmentId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "The ID of the segment for which to list efforts."
+          },
+          "startDateLocal": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Filter efforts starting after this ISO 8601 date-time (optional)."
+          },
+          "endDateLocal": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Filter efforts ending before this ISO 8601 date-time (optional)."
+          },
+          "perPage": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 200,
+            "default": 30,
+            "description": "Number of efforts to return per page (default: 30, max: 200)."
+          }
+        },
+        "required": [
+          "segmentId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list-athlete-routes",
+      "description": "Lists the routes created by the authenticated athlete, with pagination.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 1,
+            "description": "Page number for pagination"
+          },
+          "perPage": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "Number of routes per page (max 50)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-route",
+      "description": "Fetches detailed information about a specific route using its ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "routeId": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "The unique identifier of the route to fetch."
+          }
+        },
+        "required": [
+          "routeId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "export-route-gpx",
+      "description": "Exports a specific Strava route in GPX format and saves it to a pre-configured local directory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "routeId": {
+            "type": "string",
+            "description": "The ID of the Strava route to export."
+          }
+        },
+        "required": [
+          "routeId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "export-route-tcx",
+      "description": "Exports a specific Strava route in TCX format and saves it to a pre-configured local directory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "routeId": {
+            "type": "string",
+            "description": "The ID of the Strava route to export."
+          }
+        },
+        "required": [
+          "routeId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-activity-streams",
+      "description": "Retrieves detailed time-series data streams from a Strava activity. Perfect for analyzing workout metrics, visualizing routes, or performing detailed activity analysis.\n\nKey Features:\n1. Multiple Data Types: Access various metrics like heart rate, power, speed, GPS coordinates, etc.\n2. Flexible Resolution: Choose data density from low (~100 points) to high (~10000 points)\n3. Smart Pagination: Get data in manageable chunks optimized for LLM context limits\n4. Rich Statistics: Includes min/max/avg for numeric streams\n5. Dual Format Support: Compact (LLM-optimized) or verbose (human-readable)\n6. Intelligent Downsampling: Automatically reduce large datasets while preserving key features\n\nFormat Options:\n- compact (default): Raw arrays, minified JSON, ~70-80% smaller payloads, ideal for LLM processing\n- verbose: Human-readable objects with formatted values, backward compatible with legacy format\n\nCommon Use Cases:\n- Analyzing workout intensity through heart rate zones\n- Calculating power metrics for cycling activities\n- Visualizing route data using GPS coordinates\n- Analyzing pace and elevation changes\n- Detailed segment analysis\n\nOutput Format:\n1. Metadata: Activity overview, available streams, data points, units, format info\n2. Statistics: Summary stats for each stream type (max/min/avg where applicable)\n3. Data: Time-series data in compact arrays or verbose objects (based on format parameter)\n\nNotes:\n- Requires activity:read scope\n- Not all streams are available for all activities\n- Older activities might have limited data\n- Large activities are automatically chunked to ~50KB per message\n- Use max_points parameter to downsample very large activities intelligently",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "number",
+              "string"
+            ],
+            "description": "The Strava activity identifier to fetch streams for. This can be obtained from activity URLs or the get-activities tool."
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "time",
+                "distance",
+                "latlng",
+                "altitude",
+                "velocity_smooth",
+                "heartrate",
+                "cadence",
+                "watts",
+                "temp",
+                "moving",
+                "grade_smooth"
+              ]
+            },
+            "default": [
+              "time",
+              "distance",
+              "heartrate",
+              "cadence",
+              "watts"
+            ],
+            "description": "Array of stream types to fetch. Available types:\n- time: Time in seconds from start\n- distance: Distance in meters from start\n- latlng: Array of [latitude, longitude] pairs\n- altitude: Elevation in meters\n- velocity_smooth: Smoothed speed in meters/second\n- heartrate: Heart rate in beats per minute\n- cadence: Cadence in revolutions per minute\n- watts: Power output in watts\n- temp: Temperature in Celsius\n- moving: Boolean indicating if moving\n- grade_smooth: Road grade as percentage"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "description": "Optional data resolution. Affects number of data points returned:\n- low: ~100 points\n- medium: ~1000 points\n- high: ~10000 points\nDefault varies based on activity length."
+          },
+          "series_type": {
+            "type": "string",
+            "enum": [
+              "time",
+              "distance"
+            ],
+            "default": "distance",
+            "description": "Optional base series type for the streams:\n- time: Data points are indexed by time (seconds from start)\n- distance: Data points are indexed by distance (meters from start)\nUseful for comparing different activities or analyzing specific segments."
+          },
+          "page": {
+            "type": "number",
+            "default": 1,
+            "description": "Optional page number for paginated results. Use with points_per_page to retrieve specific data ranges.\nExample: page=2 with points_per_page=100 gets points 101-200."
+          },
+          "points_per_page": {
+            "type": "number",
+            "default": 100,
+            "description": "Optional number of data points per page. Special values:\n- Positive number: Returns that many points per page\n- -1: Returns ALL data points split into multiple messages (~1000 points each)\nUse -1 when you need the complete activity data for analysis."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "verbose"
+            ],
+            "default": "compact",
+            "description": "Output format:\n- compact: Raw arrays, minified JSON (~70-80% smaller, LLM-friendly)\n- verbose: Human-readable objects with formatted values (backward compatible)"
+          },
+          "max_points": {
+            "type": "number",
+            "description": "Maximum number of data points to return. If activity exceeds this, data will be intelligently downsampled while preserving peaks and valleys. Useful for very large activities."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-activity-laps",
+      "description": "\nRetrieves detailed lap data for a specific Strava activity.\n\nUse Cases:\n- Get complete lap data including timestamps, speeds, and metrics\n- Access raw values for detailed analysis or visualization\n- Extract specific lap metrics for comparison or tracking\n\nParameters:\n- id (required): The unique identifier of the Strava activity.\n\nOutput Format:\nReturns both a human-readable summary and complete JSON data for each lap, including:\n1. A text summary with formatted metrics\n2. Raw lap data containing all fields from the Strava API:\n   - Unique lap ID and indices\n   - Timestamps (start_date, start_date_local)\n   - Distance and timing metrics\n   - Speed metrics (average and max)\n   - Performance metrics (heart rate, cadence, power if available)\n   - Elevation data\n   - Resource state information\n   - Activity and athlete references\n\nNotes:\n- Requires activity:read scope for public/followers activities, activity:read_all for private activities\n- Returns complete data as received from Strava API without omissions\n- All numeric values are preserved in their original precision\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "number",
+              "string"
+            ],
+            "description": "The identifier of the activity to fetch laps for."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-athlete-zones",
+      "description": "Retrieves the authenticated athlete's configured heart rate and power zones.\n\nOutput includes both a formatted summary and the raw JSON data.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get-all-activities",
+      "description": "Fetches complete activity history with optional filtering by date range and activity type. Supports pagination to retrieve all activities.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "description": "ISO date string for activities after this date (e.g., '2024-01-01')"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "ISO date string for activities before this date (e.g., '2024-12-31')"
+          },
+          "activityTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of activity types to filter (e.g., ['Run', 'Ride'])"
+          },
+          "sportTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of sport types for granular filtering (e.g., ['MountainBikeRide', 'TrailRun'])"
+          },
+          "maxActivities": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 500,
+            "description": "Maximum activities to return after filtering (default: 500)"
+          },
+          "maxApiCalls": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 10,
+            "description": "Maximum API calls to prevent quota exhaustion (default: 10 = ~2000 activities)"
+          },
+          "perPage": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "minimum": 1,
+            "maximum": 200,
+            "default": 200,
+            "description": "Activities per API call (default: 200, max: 200)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-activity-photos",
+      "description": "\nRetrieves photos associated with a specific Strava activity.\n\nUse Cases:\n- Fetch all photos uploaded to an activity\n- Get photo URLs for display or download\n- Access photo metadata including location and timestamps\n\nParameters:\n- id (required): The unique identifier of the Strava activity.\n- size (optional): Size of photos to return in pixels (e.g., 100, 600, 2048). If not specified, returns all available sizes.\n\nOutput Format:\nReturns both a human-readable summary and complete JSON data for each photo, including:\n1. A text summary with photo count and URLs\n2. Raw photo data containing all fields from the Strava API:\n   - Photo ID and unique identifier\n   - URLs for different sizes\n   - Source (1 = Strava, 2 = Instagram)\n   - Timestamps (uploaded_at, created_at)\n   - Location coordinates if available\n   - Caption if provided\n\nNotes:\n- Requires activity:read scope for public/followers activities, activity:read_all for private activities\n- Photos may come from Strava uploads or linked Instagram posts\n- Returns empty array if activity has no photos\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "number",
+              "string"
+            ],
+            "description": "The identifier of the activity to fetch photos for."
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Optional photo size in pixels (e.g., 100, 600, 2048)."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-server-version",
+      "description": "Returns the Strava MCP server version and related metadata.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "connect-strava",
+      "description": "Connect your Strava account to enable activity tracking. This will open a browser window for secure authentication. Use this when the user asks to connect, link, or authenticate their Strava account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "description": "Force re-authentication even if already connected"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "disconnect-strava",
+      "description": "Disconnect your Strava account and remove stored credentials. Use this when the user wants to logout, disconnect, or remove their Strava connection.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "check-strava-connection",
+      "description": "Check if Strava is connected and show the current connection status. Use this when the user asks about their connection status.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

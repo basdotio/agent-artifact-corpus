@@ -1,0 +1,652 @@
+{
+  "package": "@caffeineai/mcp",
+  "tools": [
+    {
+      "name": "caffeine_auth_login",
+      "description": "Start a Caffeine login flow. Returns an auth URL (OAuth, default) or a device code (when deviceFlow is true) immediately; the user completes login in their browser while the flow finishes in the background. Poll caffeine_auth_status to check completion.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceFlow": {
+            "type": "boolean",
+            "description": "Use the device authorization grant instead of OAuth loopback. Prefer this for remote or headless hosts."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_auth_logout",
+      "description": "Log out of Caffeine. Clears tokens from the local keychain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "caffeine_auth_status",
+      "description": "Check whether the user is authenticated with Caffeine. Returns the current user if logged in.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "caffeine_list_projects",
+      "description": "List all Caffeine projects for the authenticated user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "caffeine_show_project",
+      "description": "Get detailed information about a single Caffeine project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_start_session",
+      "description": "Start a Caffeine chat session for a project. By default this waits for a stable state; pass detach to return immediately.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "message": {
+            "type": "string",
+            "description": "Prompt to send"
+          },
+          "detach": {
+            "type": "boolean",
+            "description": "Return immediately instead of waiting for a stable state"
+          },
+          "clarificationLevel": {
+            "type": "string",
+            "enum": [
+              "instant",
+              "guided"
+            ],
+            "description": "Clarification mode for the prompt"
+          }
+        },
+        "required": [
+          "projectId",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_active_sessions",
+      "description": "List likely active or blocked chat sessions across the user's projects. This is heuristic in v1 and based on recent message activity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "recentWindowMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How recent a project must be to count as active"
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Maximum number of projects to inspect"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_resume_session",
+      "description": "Resume a detached chat session and wait for the next stable state without streaming live updates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Optional session alias"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum time to wait in milliseconds"
+          },
+          "pollIntervalMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Polling interval in milliseconds"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_watch_session",
+      "description": "Attach to a project chat session, stream progress notifications when supported, and return the latest transcript plus stable summary.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Optional session alias"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum time to watch in milliseconds"
+          },
+          "pollIntervalMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Polling interval for chat messages in milliseconds"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_session_status",
+      "description": "Show a high-level summary for a likely active chat session, including the recommended next action.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Optional session alias"
+          },
+          "recentWindowMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How recent a project must be to count as active"
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Maximum number of projects to inspect"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_session_transcript",
+      "description": "Return the current chat transcript for a session or project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Optional session alias"
+          },
+          "fromIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional starting message index"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_session_feed",
+      "description": "Collect raw project feed events for a chat session over a bounded window.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Optional session alias"
+          },
+          "lastEventId": {
+            "type": "string",
+            "description": "Resume after this feed event id"
+          },
+          "maxEvents": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Maximum number of feed events to collect"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum time to collect feed events in milliseconds"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_detach_session",
+      "description": "Detach from a chat session. In v1 session attachment is client-side, so this returns an acknowledgement only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Optional session alias"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_send",
+      "description": "Send a prompt to the Caffeine AI for a project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "message": {
+            "type": "string",
+            "description": "Prompt to send"
+          }
+        },
+        "required": [
+          "projectId",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_reply",
+      "description": "Send a freeform clarification reply to an existing Caffeine project chat.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "message": {
+            "type": "string",
+            "description": "Reply to send"
+          }
+        },
+        "required": [
+          "projectId",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_list",
+      "description": "List chat messages for a project, optionally starting from a specific message index.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "fromIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional start index for listing messages"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_tail",
+      "description": "Poll a project chat until the AI reaches a stable state such as awaiting clarification or completion.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "fromIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional starting message index"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum time to wait in milliseconds"
+          },
+          "pollIntervalMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Polling interval in milliseconds"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_submit_form",
+      "description": "Submit a structured clarification form reply for a project chat message.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "messageIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The system-dialog message index"
+          },
+          "formData": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Form field values"
+          }
+        },
+        "required": [
+          "projectId",
+          "messageIndex",
+          "formData"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_chat_url",
+      "description": "Get the Caffeine web chat URL for a project. The caller can open this URL in a browser to continue the project's Caffeine AI conversation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_config_list",
+      "description": "List all Caffeine CLI configuration entries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "caffeine_config_get",
+      "description": "Get a single Caffeine CLI configuration value.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The config key to look up"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_doctor",
+      "description": "Run Caffeine environment diagnostics. Returns a list of checks with ok/warn/fail status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "caffeine_create_project",
+      "description": "Create a new Caffeine project. The project name is derived automatically by the AI.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "caffeine_delete_project",
+      "description": "Permanently delete a Caffeine project. This action cannot be undone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The project ID to delete"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_clone_project",
+      "description": "Clone a Caffeine project to a local directory, downloading all files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The project ID to clone"
+          },
+          "dest": {
+            "type": "string",
+            "description": "Destination directory path"
+          },
+          "draftVersion": {
+            "type": "number",
+            "description": "Specific draft version to clone"
+          },
+          "includeWip": {
+            "type": "boolean",
+            "description": "Include work-in-progress files"
+          }
+        },
+        "required": [
+          "id",
+          "dest"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_config_set",
+      "description": "Set a Caffeine CLI configuration value.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The config key"
+          },
+          "value": {
+            "type": "string",
+            "description": "The value to set"
+          }
+        },
+        "required": [
+          "key",
+          "value"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_export_project",
+      "description": "Export the current Caffeine project directory as a .zip archive.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "outputFile": {
+            "type": "string",
+            "description": "Output file path for the zip"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Overwrite existing file if it exists"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_import_project",
+      "description": "Import a Caffeine project from a .zip archive.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Path to the .zip file to import"
+          },
+          "outputDir": {
+            "type": "string",
+            "description": "Directory to extract into"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Overwrite existing directory if it exists"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_build",
+      "description": "Build the current Caffeine project. Compiles canisters and produces deployment artifacts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "description": "Project directory (defaults to cwd)"
+          },
+          "outputDir": {
+            "type": "string",
+            "description": "Output directory for build artifacts"
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "Enable verbose output"
+          },
+          "regenerate": {
+            "type": "boolean",
+            "description": "Force regeneration of build files"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_check",
+      "description": "Run checks on the current Caffeine project. Validates code and configuration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "description": "Project directory (defaults to cwd)"
+          },
+          "fix": {
+            "type": "boolean",
+            "description": "Attempt to auto-fix issues"
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "Enable verbose output"
+          },
+          "regenerate": {
+            "type": "boolean",
+            "description": "Force regeneration of check files"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caffeine_preview",
+      "description": "Start a preview of the current Caffeine project. Returns the preview URL when done. Hosts that support MCP progress notifications may show live deployment updates while this runs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

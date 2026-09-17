@@ -1,0 +1,304 @@
+{
+  "package": "@yjzf/mcp-server-yjzf",
+  "tools": [
+    {
+      "name": "hello_world",
+      "description": "Say hello world to YJZF",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "overview_by_c",
+      "description": "获取直营城市C端行为数据数据指标报表 生成Excel文件",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "startInclusive": {
+            "description": "数据开始时间，毫秒时间戳，可选",
+            "type": "number"
+          },
+          "endExclusive": {
+            "description": "数据结束时间，毫秒时间戳，可选",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "count_all_statement",
+      "description": "获取总部数据指标报表，生成 Excel 文件。支持两种模式：\n1. 旧模式（不传 statisticsScope）：固定查询城市公司+营销线层级两个维度，使用默认20项指标\n2. 动态模式（传入 statisticsScope）：按指定维度和条件进行单轮查询，支持自定义指标\n\n⚠️ 动态模式的所有参数值（branchIds、bizlineIds、storeManagerIds、agentCodeQueries 等）必须先通过 statement_query 工具查询获取真实值，严禁自行编造或猜测 ID/code。\n调用顺序：statement_query(get_query_guide) → statement_query(get_branches) → [维度专属查询] → statement_query(get_statistics_targets) → 本工具。\n用户说某个指标大类名称（如\"房源库存指标\"）时，必须传入该大类下返回的所有父级 code，不可只传一个。\n不传时间参数时默认查询当月第一天到昨天，最大时间间隔 12 个月。不需要自行计算时间戳，不传即可使用默认值。\n\n🔁 后续/重复导出规则：当用户要求\"把其他城市也导一份\"或\"换个城市再导一次\"时：\n- agentCodeQueries 必须与上一次成功导出使用的完全相同（同样的 code 列表、同样的数量）\n- statisticsScope 必须与上一次相同\n- 仅 branchIds、bizlineIds、storeManagerIds 需要根据新城市重新通过 statement_query 查询\n- 禁止从上下文中随意挑选 code，必须原样复用上次的完整 agentCodeQueries 数组",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "statisticsScope": {
+            "description": "统计维度: 5=城市公司, 7=营销线层级, 51=行政区, 52=商圈, 53=小区, 1=经纪人, 17=子公司。不传则走旧的固定查询逻辑",
+            "type": "number"
+          },
+          "branchIds": {
+            "description": "城市公司 ID 列表。必须通过 statement_query({ action: 'get_branches', preset: '直营' }) 获取，从结果中匹配目标城市的 branchId。禁止用 keyword 搜索直营城市，禁止编造",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bizlineIds": {
+            "description": "营销线层级 ID 列表，仅维度=7 时必传。必须通过 statement_query({ action: 'get_hierarchies' }) 获取真实 key 值，禁止编造",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "storeManagerIds": {
+            "description": "管理人员 ID 列表，仅维度=7 时使用。必须传 statement_query({ action: 'get_store_managers' }) 返回的 key 字段值，禁止传中文名称(val)。不传或空数组=全选",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "districtCodes": {
+            "description": "行政区编码列表，仅维度 51/52/53 时使用。必须传 statement_query({ action: 'get_districts' }) 返回的 code 字段值，禁止传中文名称(name)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tradingAreaIds": {
+            "description": "商圈 ID 列表，仅维度 52/53 时使用。必须传 statement_query({ action: 'get_trading_areas' }) 返回的 code 字段值，禁止传中文名称(name)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subBranchIds": {
+            "description": "子公司 ID 列表，仅维度 17 时使用。必须通过 statement_query({ action: 'get_sub_branches', branchIds }) 获取真实 subBranchId，禁止编造",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "agentCodeQueries": {
+            "description": "统计指标 code 列表。必须通过 statement_query({ action: 'get_statistics_targets', statisticsScope, topName }) 获取真实 code，禁止编造。\n- 用户说某个指标大类名称（如\"房源库存指标\"）时，传入该大类下所有父级 code。\n- 用户说某个父级指标（如\"上架房源数\"）且未指定子项时，传父级 code（如 \"55\"），会导出该父级下所有子项。\n- 用户明确指定子项/口径（如\"上架房源数-二手房\"、\"签单量-买卖\"）时，必须传对应 childNodes 里的子项 code（如 \"301\"），不要传父级 code。",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "startTime": {
+            "description": "开始时间(毫秒时间戳)。不传则默认当月第一天，无需自行计算",
+            "type": "number"
+          },
+          "endTime": {
+            "description": "结束时间(毫秒时间戳)。不传则默认昨天23:59:59，无需自行计算",
+            "type": "number"
+          },
+          "status": {
+            "description": "状态筛选，仅经纪人维度(1)使用。1=在职，2=离职",
+            "type": "string"
+          },
+          "isEnabled": {
+            "description": "启用状态筛选，仅经纪人维度(1)使用。1=启用，0=禁用",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_current_time",
+      "description": "获取当前时间的毫秒时间戳和格式化时间 当需要知晓当前日期时间时必须先调用此工具",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "date_to_timestamp",
+      "description": "将 yyyymmdd 格式的日期转换为毫秒时间戳（北京时间）。默认返回当天 00:00:00 的时间戳，传 endOfDay=true 返回当天 23:59:59.999 的时间戳。用于 startTime 时不传 endOfDay，用于 endTime 时传 endOfDay=true",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 8,
+            "pattern": "^\\d{8}$",
+            "description": "yyyymmdd 格式的日期字符串，例如 20250416"
+          },
+          "endOfDay": {
+            "description": "是否返回当天结束时间（23:59:59.999）。用于 endTime 时传 true，用于 startTime 时不传或传 false",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "date"
+        ]
+      }
+    },
+    {
+      "name": "investment_contract",
+      "description": "从 ERP 系统查询直营城市招商加盟合同列表数据，生成 Excel 文件",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "new_house_contract_export",
+      "description": "从 ERP 系统导出新房合同数据（认购合同、签约合同、解约合同），生成三个独立的 Excel 文件。不传时间时默认查询当月第一天到今天。时间范围超过3个月时自动使用异步导出。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "startTime": {
+            "description": "开始时间，毫秒时间戳，可选，不传则默认当月第一天",
+            "type": "number"
+          },
+          "endTime": {
+            "description": "结束时间，毫秒时间戳，可选，不传则默认今天",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "statement_query",
+      "description": "数据指标报表的查询条件助手。在调用 count_all_statement 导出报表前，使用此工具逐步获取可选的查询条件值。\n\n⚠️ get_branches 使用规范：\n- 用户说\"所有城市\"/\"全部城市\" → 不传 preset 和 keyword，返回 ERP 全量城市列表\n- 用户指定具体直营城市名（如\"广州\"\"南宁\"）→ 传 preset=\"直营\"，从返回的直营城市中匹配\n- keyword 仅用于非直营城市或探索性搜索，返回多条相似结果时必须让用户确认\n\n支持的 action:\n- \"get_branches\"           → 获取城市公司列表（不传参=全量，preset=\"直营\"=仅直营城市，keyword=模糊搜索）\n- \"get_hierarchies\"        → 获取营销线层级选项（需传 branchIds。仅营销线层级维度(7)时使用）\n- \"get_store_managers\"     → 根据层级获取管理人员列表（需传 branchIds + bizlineIds。仅营销线层级维度(7)时使用）\n- \"get_statistics_targets\" → 获取统计指标（不传 topName 返回22个大类名称；传 topName 返回该类下完整指标明细。需传 statisticsScope 指定维度）\n- \"get_query_guide\"        → 获取各统计维度所需条件的依赖关系和调用顺序说明\n- \"get_districts\"          → 获取行政区列表（需传 branchIds 且长度必须为1。仅 scope=52/53 时使用，作为可选筛选条件）\n- \"get_trading_areas\"      → 获取商圈列表（需传 branchIds + districtCodes。仅 scope=53 时使用，作为可选筛选条件）\n- \"get_sub_branches\"       → 获取子公司列表（需传 branchIds 且长度必须为1。仅 scope=17 时使用，作为可选筛选条件）\n\n典型调用顺序：\n1. get_query_guide → 了解维度与条件的依赖关系\n2. get_branches → 确定城市公司（全部城市不传参；指定直营城市传 preset=\"直营\"）\n3. get_statistics_targets → 先获取大类列表 → 再传 topName 获取具体指标\n4. 若维度=7: get_hierarchies → 获取营销线层级 → get_store_managers → 获取管理人员\n5. 若维度=52/53: get_districts → 获取行政区列表（可选筛选）\n6. 若维度=53: get_trading_areas → 获取商圈列表（可选筛选）\n7. 若维度=17: get_sub_branches → 获取子公司列表（可选筛选）\n8. 条件收集完毕后调用 count_all_statement 导出",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "get_branches",
+              "get_hierarchies",
+              "get_store_managers",
+              "get_statistics_targets",
+              "get_query_guide",
+              "get_districts",
+              "get_trading_areas",
+              "get_sub_branches"
+            ],
+            "description": "要执行的查询动作"
+          },
+          "statisticsScope": {
+            "description": "统计维度数字，get_statistics_targets 时传入。5=城市公司, 7=营销线层级, 51=行政区, 52=商圈, 53=小区, 1=经纪人, 17=子公司。不同维度返回不同指标字典。默认5",
+            "type": "number"
+          },
+          "topName": {
+            "description": "指标大类名称，get_statistics_targets 时可选。不传返回所有大类名称列表；传入则返回该大类下的完整指标明细",
+            "type": "string"
+          },
+          "preset": {
+            "description": "预设筛选，get_branches 时可选。传 '直营' 只返回直营城市。不传则返回全量城市。用户说'所有城市'/'全部城市'时不要传此参数",
+            "type": "string"
+          },
+          "keyword": {
+            "description": "关键词搜索，get_branches 时可选。仅用于非直营城市或不确定城市类型时的探索性搜索。返回多条相似结果时必须让用户确认选择，禁止自动选取",
+            "type": "string"
+          },
+          "branchIds": {
+            "description": "城市公司 ID 列表。get_hierarchies / get_store_managers / get_districts / get_trading_areas 时必传",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bizlineIds": {
+            "description": "营销线层级 ID 列表（即 get_hierarchies 返回的 key 值），get_store_managers 时必传",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "districtCodes": {
+            "description": "行政区编码列表，get_trading_areas 时必传。值来自 get_districts 返回结果的 code 字段",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "branch_select",
+      "description": "获取可选的城市公司列表（单选）。需要选择城市公司时调用此工具，返回的 branchId 和 cityCode 作为其他工具（如 contract_data_report_export）的必填参数。支持按关键词搜索和直营城市预设筛选。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "preset": {
+            "description": "预设筛选: '直营'=仅直营城市。不传返回全量城市",
+            "type": "string"
+          },
+          "keyword": {
+            "description": "按城市名称关键词搜索",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "lease_sale_contract_export",
+      "description": "从ERP系统导出租售合同（成交数据表）Excel文件。必须先调用 branch_select 获取 branchId 和 cityCode。支持2个action: get_contract_types获取合同类型选项, export执行导出。",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "get_contract_types",
+              "export"
+            ],
+            "description": "要执行的动作"
+          },
+          "branchId": {
+            "type": "string",
+            "description": "城市公司ID(即organId)，必须通过 branch_select 工具获取，禁止自行编造"
+          },
+          "cityCode": {
+            "type": "string",
+            "description": "城市编码，必须通过 branch_select 工具获取，禁止自行编造"
+          },
+          "branchName": {
+            "type": "string",
+            "description": "城市公司名称，必须通过 branch_select 工具获取，禁止自行编造"
+          },
+          "contractTypeList": {
+            "description": "合同类型列表，必须传 get_contract_types 返回的 val 字段值，禁止传中文名称(name)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "signTmStart": {
+            "description": "签单开始时间(毫秒时间戳)，不传默认12个月前",
+            "type": "number"
+          },
+          "signTmEnd": {
+            "description": "签单结束时间(毫秒时间戳)，不传默认今天结束",
+            "type": "number"
+          }
+        },
+        "required": [
+          "action",
+          "branchId",
+          "cityCode",
+          "branchName"
+        ]
+      }
+    }
+  ]
+}

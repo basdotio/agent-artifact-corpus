@@ -1,0 +1,260 @@
+{
+  "package": "@aashari/mcp-server-atlassian-bitbucket",
+  "tools": [
+    {
+      "name": "bb_get",
+      "description": "Read any Bitbucket data. Returns TOON format by default (30-60% fewer tokens than JSON).\n\n**IMPORTANT - Cost Optimization:**\n- ALWAYS use `jq` param to filter response fields. Unfiltered responses are very expensive!\n- Use `pagelen` query param to restrict result count (e.g., `pagelen: \"5\"`)\n- If unsure about available fields, first fetch ONE item with `pagelen: \"1\"` and NO jq filter to explore the schema, then use jq in subsequent calls\n\n**Schema Discovery Pattern:**\n1. First call: `path: \"/workspaces\", queryParams: {\"pagelen\": \"1\"}` (no jq) - explore available fields\n2. Then use: `jq: \"values[*].{slug: slug, name: name, uuid: uuid}\"` - extract only what you need\n\n**Output format:** TOON (default, token-efficient) or JSON (`outputFormat: \"json\"`)\n\n**Common paths:**\n- `/workspaces` - list workspaces\n- `/repositories/{workspace}` - list repos in workspace\n- `/repositories/{workspace}/{repo}` - get repo details\n- `/repositories/{workspace}/{repo}/pullrequests` - list PRs\n- `/repositories/{workspace}/{repo}/pullrequests/{id}` - get PR details\n- `/repositories/{workspace}/{repo}/pullrequests/{id}/comments` - list PR comments\n- `/repositories/{workspace}/{repo}/pullrequests/{id}/diff` - get PR diff\n- `/repositories/{workspace}/{repo}/refs/branches` - list branches\n- `/repositories/{workspace}/{repo}/commits` - list commits\n- `/repositories/{workspace}/{repo}/src/{commit}/{filepath}` - get file content\n- `/repositories/{workspace}/{repo}/diff/{source}..{destination}` - compare branches/commits\n\n**Query params:** `pagelen` (page size), `page` (page number), `q` (filter), `sort` (order), `fields` (sparse response)\n\n**Example filters (q param):** `state=\"OPEN\"`, `source.branch.name=\"feature\"`, `title~\"bug\"`\n\n**JQ examples:** `values[*].slug`, `values[0]`, `values[*].{name: name, uuid: uuid}`\n\nThe `/2.0` prefix is added automatically. API reference: https://developer.atlassian.com/cloud/bitbucket/rest/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Bitbucket API endpoint path (without base URL). Must start with \"/\". Examples: \"/workspaces\", \"/repositories/{workspace}/{repo_slug}\", \"/repositories/{workspace}/{repo_slug}/pullrequests/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"pagelen\": \"25\", \"page\": \"2\", \"q\": \"state=\\\"OPEN\\\"\", \"fields\": \"values.title,values.state\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"values[*].{name: name, slug: slug}\" (extract specific fields), \"values[0]\" (first result), \"values[*].name\" (names only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "bb_post",
+      "description": "Create Bitbucket resources. Returns TOON format by default (token-efficient).\n\n**IMPORTANT - Cost Optimization:**\n- Use `jq` param to extract only needed fields from response (e.g., `jq: \"{id: id, title: title}\"`)\n- Unfiltered responses include all metadata and are expensive!\n\n**Output format:** TOON (default) or JSON (`outputFormat: \"json\"`)\n\n**Common operations:**\n\n1. **Create PR:** `/repositories/{workspace}/{repo}/pullrequests`\n   body: `{\"title\": \"...\", \"source\": {\"branch\": {\"name\": \"feature\"}}, \"destination\": {\"branch\": {\"name\": \"main\"}}}`\n\n2. **Add PR comment:** `/repositories/{workspace}/{repo}/pullrequests/{id}/comments`\n   body: `{\"content\": {\"raw\": \"Comment text\"}}`\n\n3. **Approve PR:** `/repositories/{workspace}/{repo}/pullrequests/{id}/approve`\n   body: `{}`\n\n4. **Request changes:** `/repositories/{workspace}/{repo}/pullrequests/{id}/request-changes`\n   body: `{}`\n\n5. **Merge PR:** `/repositories/{workspace}/{repo}/pullrequests/{id}/merge`\n   body: `{\"merge_strategy\": \"squash\"}` (strategies: merge_commit, squash, fast_forward)\n\nThe `/2.0` prefix is added automatically. API reference: https://developer.atlassian.com/cloud/bitbucket/rest/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Bitbucket API endpoint path (without base URL). Must start with \"/\". Examples: \"/workspaces\", \"/repositories/{workspace}/{repo_slug}\", \"/repositories/{workspace}/{repo_slug}/pullrequests/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"pagelen\": \"25\", \"page\": \"2\", \"q\": \"state=\\\"OPEN\\\"\", \"fields\": \"values.title,values.state\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"values[*].{name: name, slug: slug}\" (extract specific fields), \"values[0]\" (first result), \"values[*].name\" (names only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          },
+          "body": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Request body as a JSON object. Structure depends on the endpoint. Example for PR: {\"title\": \"My PR\", \"source\": {\"branch\": {\"name\": \"feature\"}}}"
+          }
+        },
+        "required": [
+          "path",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "bb_put",
+      "description": "Replace Bitbucket resources (full update). Returns TOON format by default.\n\n**IMPORTANT - Cost Optimization:**\n- Use `jq` param to extract only needed fields from response\n- Example: `jq: \"{uuid: uuid, name: name}\"`\n\n**Output format:** TOON (default) or JSON (`outputFormat: \"json\"`)\n\n**Common operations:**\n\n1. **Update repository:** `/repositories/{workspace}/{repo}`\n   body: `{\"description\": \"...\", \"is_private\": true, \"has_issues\": true}`\n\n2. **Create/update file:** `/repositories/{workspace}/{repo}/src`\n   Note: Use multipart form data for file uploads (complex - prefer PATCH for metadata)\n\n3. **Update branch restriction:** `/repositories/{workspace}/{repo}/branch-restrictions/{id}`\n   body: `{\"kind\": \"push\", \"pattern\": \"main\", \"users\": [{\"uuid\": \"...\"}]}`\n\nThe `/2.0` prefix is added automatically. API reference: https://developer.atlassian.com/cloud/bitbucket/rest/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Bitbucket API endpoint path (without base URL). Must start with \"/\". Examples: \"/workspaces\", \"/repositories/{workspace}/{repo_slug}\", \"/repositories/{workspace}/{repo_slug}/pullrequests/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"pagelen\": \"25\", \"page\": \"2\", \"q\": \"state=\\\"OPEN\\\"\", \"fields\": \"values.title,values.state\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"values[*].{name: name, slug: slug}\" (extract specific fields), \"values[0]\" (first result), \"values[*].name\" (names only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          },
+          "body": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Request body as a JSON object. Structure depends on the endpoint. Example for PR: {\"title\": \"My PR\", \"source\": {\"branch\": {\"name\": \"feature\"}}}"
+          }
+        },
+        "required": [
+          "path",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "bb_patch",
+      "description": "Partially update Bitbucket resources. Returns TOON format by default.\n\n**IMPORTANT - Cost Optimization:** Use `jq` param to filter response fields.\n\n**Output format:** TOON (default) or JSON (`outputFormat: \"json\"`)\n\n**Common operations:**\n\n1. **Update PR title/description:** `/repositories/{workspace}/{repo}/pullrequests/{id}`\n   body: `{\"title\": \"New title\", \"description\": \"Updated description\"}`\n\n2. **Update PR reviewers:** `/repositories/{workspace}/{repo}/pullrequests/{id}`\n   body: `{\"reviewers\": [{\"uuid\": \"{user-uuid}\"}]}`\n\n3. **Update repository properties:** `/repositories/{workspace}/{repo}`\n   body: `{\"description\": \"New description\"}`\n\n4. **Update comment:** `/repositories/{workspace}/{repo}/pullrequests/{pr_id}/comments/{comment_id}`\n   body: `{\"content\": {\"raw\": \"Updated comment\"}}`\n\nThe `/2.0` prefix is added automatically. API reference: https://developer.atlassian.com/cloud/bitbucket/rest/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Bitbucket API endpoint path (without base URL). Must start with \"/\". Examples: \"/workspaces\", \"/repositories/{workspace}/{repo_slug}\", \"/repositories/{workspace}/{repo_slug}/pullrequests/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"pagelen\": \"25\", \"page\": \"2\", \"q\": \"state=\\\"OPEN\\\"\", \"fields\": \"values.title,values.state\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"values[*].{name: name, slug: slug}\" (extract specific fields), \"values[0]\" (first result), \"values[*].name\" (names only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          },
+          "body": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Request body as a JSON object. Structure depends on the endpoint. Example for PR: {\"title\": \"My PR\", \"source\": {\"branch\": {\"name\": \"feature\"}}}"
+          }
+        },
+        "required": [
+          "path",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "bb_delete",
+      "description": "Delete Bitbucket resources. Returns TOON format by default.\n\n**Output format:** TOON (default) or JSON (`outputFormat: \"json\"`)\n\n**Common operations:**\n\n1. **Delete branch:** `/repositories/{workspace}/{repo}/refs/branches/{branch_name}`\n2. **Delete PR comment:** `/repositories/{workspace}/{repo}/pullrequests/{pr_id}/comments/{comment_id}`\n3. **Decline PR:** `/repositories/{workspace}/{repo}/pullrequests/{id}/decline`\n4. **Remove PR approval:** `/repositories/{workspace}/{repo}/pullrequests/{id}/approve`\n5. **Delete repository:** `/repositories/{workspace}/{repo}` (caution: irreversible)\n\nNote: Most DELETE endpoints return 204 No Content on success.\n\nThe `/2.0` prefix is added automatically. API reference: https://developer.atlassian.com/cloud/bitbucket/rest/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Bitbucket API endpoint path (without base URL). Must start with \"/\". Examples: \"/workspaces\", \"/repositories/{workspace}/{repo_slug}\", \"/repositories/{workspace}/{repo_slug}/pullrequests/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"pagelen\": \"25\", \"page\": \"2\", \"q\": \"state=\\\"OPEN\\\"\", \"fields\": \"values.title,values.state\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"values[*].{name: name, slug: slug}\" (extract specific fields), \"values[0]\" (first result), \"values[*].name\" (names only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "bb_clone",
+      "description": "Clone a Bitbucket repository to your local filesystem using SSH (preferred) or HTTPS.\n\nProvide `repoSlug` and `targetPath` (absolute path). Clones into `targetPath/repoSlug`. SSH keys must be configured; falls back to HTTPS if unavailable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "workspaceSlug": {
+            "description": "Bitbucket workspace slug containing the repository. If not provided, the tool will use your default workspace (either configured via BITBUCKET_DEFAULT_WORKSPACE or the first workspace in your account). Example: \"myteam\"",
+            "type": "string"
+          },
+          "repoSlug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Repository name/slug to clone. This is the short name of the repository. Example: \"project-api\""
+          },
+          "targetPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Directory path where the repository will be cloned. IMPORTANT: Absolute paths are strongly recommended (e.g., \"/home/user/projects\" or \"C:\\Users\\name\\projects\"). Relative paths will be resolved relative to the server's working directory, which may not be what you expect. The repository will be cloned into a subdirectory at targetPath/repoSlug. Make sure you have write permissions to this location."
+          }
+        },
+        "required": [
+          "repoSlug",
+          "targetPath"
+        ]
+      }
+    }
+  ]
+}

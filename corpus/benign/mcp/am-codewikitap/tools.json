@@ -1,0 +1,191 @@
+{
+  "package": "codewikitap",
+  "tools": [
+    {
+      "name": "list_project_dependencies",
+      "description": "Lists direct deps + framework context across ALL manifests under cwd. Polyglot monorepos return `manifests[]`; top-level fields project the cwd-nearest manifest. Flags: includeDev=true; includeOptional=false.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeDev": {
+            "type": "boolean"
+          },
+          "includeOptional": {
+            "type": "boolean",
+            "description": "v2.8: include npm optionalDependencies (kind:\"optional\"). Default true."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "v2.5: pagination offset; default 0. Pagination caps response size only — first page is NOT faster than no-pagination (full list always resolved server-side)."
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "v2.5: max deps to return; default unlimited. Pair with `total` and `offset` to walk pages."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "resolve_repo",
+      "description": "Resolve a vague library name to a canonical github.com/owner/repo. Skip when caller already has owner/repo. Use before get_page or find_chunks.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Library name (e.g. \"react\") or full module path (e.g. \"github.com/spf13/cobra\")."
+          },
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "go"
+            ],
+            "description": "Ecosystem hint; npm assumed when omitted."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_page",
+      "description": "Fetch a CodeWiki page by slug; set listPages:true for the page index; set prepareOnly:true to pre-warm the index without returning page content (side effect: HTTP fetch + sqlite write, subject to CodeWiki rate-limit 1 page/4s per origin). Always surface citation.sourceUrl.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "Canonical \"<owner>/<repo>\" identifier."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Top-level page slug within the repo wiki. Omit to fetch the root/overview page."
+          },
+          "subsection": {
+            "type": "string",
+            "description": "Deeper heading slug — when given, returns only that subsection subtree."
+          },
+          "maxTokens": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Token budget (estimate). Default 8000."
+          },
+          "listPages": {
+            "type": "boolean",
+            "description": "When true, returns the page index (table of contents) for this repo instead of fetching a page. Other args ignored."
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "description": "When true, pre-warms the index for `repo` (HTTP fetch + sqlite write). Sync race against INDEX_BUILD_TIMEOUT_MS; returns status:ready or status:index_building. Idempotent via single-flight + TTL — safe to retry. Use only when find_chunks reported status:index_building and you need a guaranteed cache hit."
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_chunks",
+      "description": "Hybrid semantic+BM25 retrieval over CodeWiki pages. Returns ranked chunks with anchored citations. Pass `repo` to scope; omit to query already-indexed repos. find_chunks auto-indexes the repo on first call — do NOT pre-warm unless a prior call returned status:index_building. Always surface citation.sourceUrl.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Natural-language query to retrieve relevant chunks for."
+          },
+          "repo": {
+            "type": "string",
+            "description": "Canonical \"<owner>/<repo>\" to scope retrieval. Omit to query already-indexed repos."
+          },
+          "k": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Max chunks to return (1–32). Default 8."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "v2.5: pagination offset; default 0. Pair with `total` in the response to walk pages."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_neighbors",
+      "description": "Traverse the CodeWiki knowledge graph: find pages referencing a file, diagram-node neighbors, intra-repo section links, or cross-repo references. Pass a query.kind plus its required fields. Always surface citation.sourceUrl.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pages_referencing_file",
+              "diagram_neighbors",
+              "section_links",
+              "cross_repo"
+            ],
+            "description": "Query kind — each value requires its own co-fields:\n- pages_referencing_file: requires file_path\n- diagram_neighbors: requires repo + section_slug\n- section_links: requires repo + section_slug\n- cross_repo: requires repo\nAll other input fields (github_repo, diagram_node_id, direction, limit, query) are optional regardless of kind."
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Required when kind=pages_referencing_file. Repo-relative file path whose referencing sections are returned."
+          },
+          "github_repo": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Required when kind ∈ {diagram_neighbors, section_links, cross_repo}. Canonical \"<owner>/<repo>\" of the wiki to traverse."
+          },
+          "section_slug": {
+            "type": "string",
+            "description": "Required when kind ∈ {diagram_neighbors, section_links}. Heading slug anchoring the traversal."
+          },
+          "diagram_node_id": {
+            "type": "string",
+            "description": "Optional when kind=diagram_neighbors. Stable Graphviz node id (the SVG <title> / Mermaid alias, e.g. \"ReactHooks.js\"), NOT the human-readable label. Discover ids from get_page diagram text-fallback (\"nodes: <id>=\\\"<label>\\\"\") or the Mermaid block. Omit to return all diagram members of the section."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out",
+              "both"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 64
+          },
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

@@ -1,0 +1,272 @@
+{
+  "package": "task-master-ai",
+  "tools": [
+    {
+      "name": "get_tasks",
+      "description": "Get all tasks from Task Master, optionally filtering by status and including subtasks.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string",
+            "description": "The directory of the project. Must be an absolute path."
+          },
+          "status": {
+            "description": "Filter tasks by status (e.g., 'pending', 'done') or multiple statuses separated by commas (e.g., 'blocked,deferred')",
+            "type": "string"
+          },
+          "withSubtasks": {
+            "description": "Include subtasks nested within their parent tasks in the response",
+            "type": "boolean"
+          },
+          "tag": {
+            "description": "Tag context to operate on",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectRoot"
+        ]
+      }
+    },
+    {
+      "name": "next_task",
+      "description": "Find the next task to work on based on dependencies and status",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "file": {
+            "description": "Absolute path to the tasks file",
+            "type": "string"
+          },
+          "complexityReport": {
+            "description": "Path to the complexity report file (relative to project root or absolute)",
+            "type": "string"
+          },
+          "projectRoot": {
+            "type": "string",
+            "description": "The directory of the project. Must be an absolute path."
+          },
+          "tag": {
+            "description": "Tag context to operate on",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectRoot"
+        ]
+      }
+    },
+    {
+      "name": "get_task",
+      "description": "Get detailed information about a specific task",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Task ID(s) to get (can be comma-separated for multiple tasks)"
+          },
+          "status": {
+            "description": "Filter subtasks by status (e.g., 'pending', 'done')",
+            "type": "string"
+          },
+          "projectRoot": {
+            "type": "string",
+            "description": "Absolute path to the project root directory (Optional, usually from session)"
+          },
+          "tag": {
+            "description": "Tag context to operate on",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectRoot"
+        ]
+      }
+    },
+    {
+      "name": "set_task_status",
+      "description": "Set the status of one or more tasks or subtasks.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Task ID or subtask ID (e.g., '15', '15.2'). Can be comma-separated to update multiple tasks/subtasks at once."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in-progress",
+              "done",
+              "deferred",
+              "cancelled",
+              "blocked",
+              "review"
+            ],
+            "description": "New status to set (e.g., 'pending', 'done', 'in-progress', 'review', 'deferred', 'cancelled')."
+          },
+          "projectRoot": {
+            "type": "string",
+            "description": "The directory of the project. Must be an absolute path."
+          },
+          "tag": {
+            "description": "Optional tag context to operate on",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "projectRoot"
+        ]
+      }
+    },
+    {
+      "name": "update_subtask",
+      "description": "Appends timestamped information to a specific subtask without replacing existing content. If you just want to update the subtask status, use set_task_status instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ID of the subtask to update in format \"parentId.subtaskId\" (e.g., \"5.2\"). Parent ID is the ID of the task that contains the subtask."
+          },
+          "prompt": {
+            "description": "Information to add to the subtask. Required unless only updating metadata.",
+            "type": "string"
+          },
+          "research": {
+            "description": "Use Perplexity AI for research-backed updates",
+            "type": "boolean"
+          },
+          "metadata": {
+            "description": "JSON string of metadata to merge into subtask metadata. Example: '{\"ticketId\": \"JIRA-456\", \"reviewed\": true}'. Requires TASK_MASTER_ALLOW_METADATA_UPDATES=true in MCP environment.",
+            "type": "string"
+          },
+          "file": {
+            "description": "Absolute path to the tasks file",
+            "type": "string"
+          },
+          "projectRoot": {
+            "type": "string",
+            "description": "The directory of the project. Must be an absolute path."
+          },
+          "tag": {
+            "description": "Tag context to operate on",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectRoot"
+        ]
+      }
+    },
+    {
+      "name": "parse_prd",
+      "description": "Parse a Product Requirements Document (PRD) text file to automatically generate initial tasks. Reinitializing the project is not necessary to run this tool. It is recommended to run parse-prd after initializing the project and creating/importing a prd.txt file in the project root's .taskmaster/docs directory.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "input": {
+            "default": ".taskmaster/docs/prd.txt",
+            "description": "Absolute path to the PRD document file (.txt, .md, etc.)",
+            "type": "string"
+          },
+          "projectRoot": {
+            "type": "string",
+            "description": "The directory of the project. Must be an absolute path."
+          },
+          "tag": {
+            "description": "Tag context to operate on",
+            "type": "string"
+          },
+          "output": {
+            "description": "Output path for tasks.json file (default: .taskmaster/tasks/tasks.json)",
+            "type": "string"
+          },
+          "numTasks": {
+            "description": "Approximate number of top-level tasks to generate (default: 10). As the agent, if you have enough information, ensure to enter a number of tasks that would logically scale with project complexity. Setting to 0 will allow Taskmaster to determine the appropriate number of tasks based on the complexity of the PRD. Avoid entering numbers above 50 due to context window limitations.",
+            "type": "string"
+          },
+          "force": {
+            "default": false,
+            "description": "Overwrite existing output file without prompting.",
+            "type": "boolean"
+          },
+          "research": {
+            "description": "Enable Taskmaster to use the research role for potentially more informed task generation. Requires appropriate API key.",
+            "type": "boolean"
+          },
+          "append": {
+            "description": "Append generated tasks to existing file.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "projectRoot"
+        ]
+      }
+    },
+    {
+      "name": "expand_task",
+      "description": "Expand a task into subtasks for detailed implementation",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ID of task to expand"
+          },
+          "num": {
+            "description": "Number of subtasks to generate",
+            "type": "string"
+          },
+          "research": {
+            "default": false,
+            "description": "Use research role for generation",
+            "type": "boolean"
+          },
+          "prompt": {
+            "description": "Additional context for subtask generation",
+            "type": "string"
+          },
+          "file": {
+            "description": "Path to the tasks file relative to project root (e.g., tasks/tasks.json)",
+            "type": "string"
+          },
+          "projectRoot": {
+            "type": "string",
+            "description": "The directory of the project. Must be an absolute path."
+          },
+          "force": {
+            "default": false,
+            "description": "Force expansion even if subtasks exist",
+            "type": "boolean"
+          },
+          "tag": {
+            "description": "Tag context to operate on",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectRoot"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,793 @@
+{
+  "package": "@padenot/firefox-devtools-mcp",
+  "tools": [
+    {
+      "name": "list_pages",
+      "description": "List open tabs (index, title, URL). Selected tab is marked.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "new_page",
+      "description": "Open new tab at URL. Returns tab index.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Target URL"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "navigate_page",
+      "description": "Navigate selected tab to URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Target URL"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "select_page",
+      "description": "Select active tab by index, URL, or title. Index takes precedence.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageIdx": {
+            "type": "number",
+            "description": "Tab index (0-based, most reliable)"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL substring (case-insensitive)"
+          },
+          "title": {
+            "type": "string",
+            "description": "Title substring (case-insensitive)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "close_page",
+      "description": "Close tab by index.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageIdx": {
+            "type": "number",
+            "description": "Tab index to close"
+          }
+        },
+        "required": [
+          "pageIdx"
+        ]
+      }
+    },
+    {
+      "name": "evaluate_script",
+      "description": "Execute JS function in page. Prefer UID tools for interactions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "function": {
+            "type": "string",
+            "description": "JS function string, e.g. () => document.title"
+          },
+          "args": {
+            "type": "array",
+            "description": "UIDs to pass as function arguments",
+            "items": {
+              "type": "object",
+              "properties": {
+                "uid": {
+                  "type": "string",
+                  "description": "Element UID from snapshot"
+                }
+              },
+              "required": [
+                "uid"
+              ]
+            }
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Timeout in ms (default: 5000)"
+          }
+        },
+        "required": [
+          "function"
+        ]
+      }
+    },
+    {
+      "name": "list_console_messages",
+      "description": "List console messages. Supports filtering by level, time, text, source.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "debug",
+              "info",
+              "warn",
+              "error"
+            ],
+            "description": "Filter by level"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max messages (default: 50)"
+          },
+          "sinceMs": {
+            "type": "number",
+            "description": "Only last N ms"
+          },
+          "textContains": {
+            "type": "string",
+            "description": "Text filter (case-insensitive)"
+          },
+          "source": {
+            "type": "string",
+            "description": "Filter by source"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_console_messages",
+      "description": "Clear collected console messages.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_network_requests",
+      "description": "List network requests. Returns IDs for get_network_request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Max requests (default: 50)"
+          },
+          "sinceMs": {
+            "type": "number",
+            "description": "Only last N ms"
+          },
+          "urlContains": {
+            "type": "string",
+            "description": "URL filter (case-insensitive)"
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method filter"
+          },
+          "status": {
+            "type": "number",
+            "description": "Exact status code"
+          },
+          "statusMin": {
+            "type": "number",
+            "description": "Min status code"
+          },
+          "statusMax": {
+            "type": "number",
+            "description": "Max status code"
+          },
+          "isXHR": {
+            "type": "boolean",
+            "description": "XHR/fetch only"
+          },
+          "resourceType": {
+            "type": "string",
+            "description": "Resource type filter"
+          },
+          "sortBy": {
+            "type": "string",
+            "enum": [
+              "timestamp",
+              "duration",
+              "status"
+            ],
+            "description": "Sort field (default: timestamp)"
+          },
+          "detail": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "min",
+              "full"
+            ],
+            "description": "Detail level (default: summary)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_network_request",
+      "description": "Get request details by ID. URL lookup as fallback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Request ID from list_network_requests"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL fallback (may match multiple)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "take_snapshot",
+      "description": "Capture DOM snapshot with stable UIDs. Retake after navigation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxLines": {
+            "type": "number",
+            "description": "Max lines (default: 100)"
+          },
+          "includeAttributes": {
+            "type": "boolean",
+            "description": "Include ARIA attributes (default: false)"
+          },
+          "includeText": {
+            "type": "boolean",
+            "description": "Include text (default: true)"
+          },
+          "maxDepth": {
+            "type": "number",
+            "description": "Max tree depth"
+          },
+          "includeAll": {
+            "type": "boolean",
+            "description": "Include all visible elements without relevance filtering. Useful for Vue/Livewire apps (default: false)"
+          },
+          "selector": {
+            "type": "string",
+            "description": "CSS selector to scope snapshot to specific element (e.g., \"#app\")"
+          }
+        }
+      }
+    },
+    {
+      "name": "resolve_uid_to_selector",
+      "description": "Resolve UID to CSS selector. Fails if stale.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string",
+            "description": "UID from snapshot"
+          }
+        },
+        "required": [
+          "uid"
+        ]
+      }
+    },
+    {
+      "name": "clear_snapshot",
+      "description": "Clear snapshot cache. Usually not needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "click_by_uid",
+      "description": "Click element by UID. Set dblClick for double-click.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string",
+            "description": "Element UID from snapshot"
+          },
+          "dblClick": {
+            "type": "boolean",
+            "description": "Double-click (default: false)"
+          }
+        },
+        "required": [
+          "uid"
+        ]
+      }
+    },
+    {
+      "name": "hover_by_uid",
+      "description": "Hover over element by UID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string",
+            "description": "Element UID from snapshot"
+          }
+        },
+        "required": [
+          "uid"
+        ]
+      }
+    },
+    {
+      "name": "fill_by_uid",
+      "description": "Fill text input/textarea by UID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string",
+            "description": "Input element UID from snapshot"
+          },
+          "value": {
+            "type": "string",
+            "description": "Text to fill"
+          }
+        },
+        "required": [
+          "uid",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "drag_by_uid_to_uid",
+      "description": "Drag element to another (HTML5 drag events).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fromUid": {
+            "type": "string",
+            "description": "Source element UID"
+          },
+          "toUid": {
+            "type": "string",
+            "description": "Target element UID"
+          }
+        },
+        "required": [
+          "fromUid",
+          "toUid"
+        ]
+      }
+    },
+    {
+      "name": "fill_form_by_uid",
+      "description": "Fill multiple form fields at once.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "elements": {
+            "type": "array",
+            "description": "Array of {uid, value} pairs",
+            "items": {
+              "type": "object",
+              "properties": {
+                "uid": {
+                  "type": "string",
+                  "description": "Field UID"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "Field value"
+                }
+              },
+              "required": [
+                "uid",
+                "value"
+              ]
+            }
+          }
+        },
+        "required": [
+          "elements"
+        ]
+      }
+    },
+    {
+      "name": "upload_file_by_uid",
+      "description": "Upload file to file input by UID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string",
+            "description": "File input UID from snapshot"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Local file path"
+          }
+        },
+        "required": [
+          "uid",
+          "filePath"
+        ]
+      }
+    },
+    {
+      "name": "screenshot_page",
+      "description": "Capture page screenshot as base64 PNG.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "saveTo": {
+            "type": "string",
+            "description": "Optional file path to save the screenshot to instead of returning it as image data in the response."
+          }
+        }
+      }
+    },
+    {
+      "name": "screenshot_by_uid",
+      "description": "Capture element screenshot by UID as base64 PNG.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string",
+            "description": "Element UID from snapshot"
+          },
+          "saveTo": {
+            "type": "string",
+            "description": "Optional file path to save the screenshot to instead of returning it as image data in the response."
+          }
+        },
+        "required": [
+          "uid"
+        ]
+      }
+    },
+    {
+      "name": "accept_dialog",
+      "description": "Accept browser dialog. Provide promptText for prompts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "promptText": {
+            "type": "string",
+            "description": "Text for prompt dialogs"
+          }
+        }
+      }
+    },
+    {
+      "name": "dismiss_dialog",
+      "description": "Dismiss browser dialog.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "navigate_history",
+      "description": "Navigate history back/forward. UIDs become stale.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "back",
+              "forward"
+            ],
+            "description": "back or forward"
+          }
+        },
+        "required": [
+          "direction"
+        ]
+      }
+    },
+    {
+      "name": "set_viewport_size",
+      "description": "Set viewport dimensions in pixels.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "width": {
+            "type": "number",
+            "description": "Width in pixels"
+          },
+          "height": {
+            "type": "number",
+            "description": "Height in pixels"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ]
+      }
+    },
+    {
+      "name": "get_firefox_output",
+      "description": "Retrieve Firefox output (stdout/stderr including MOZ_LOG, warnings, crashes, stack traces). Returns recent output from the capture file. Use filters to focus on specific content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "type": "number",
+            "description": "Number of recent log lines to return (default: 100, max: 10000)"
+          },
+          "grep": {
+            "type": "string",
+            "description": "Filter log lines containing this string (case-insensitive)"
+          },
+          "since": {
+            "type": "number",
+            "description": "Only show logs written in the last N seconds"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_firefox_info",
+      "description": "Get information about the current Firefox instance configuration, including binary path, environment variables, and output file location.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "restart_firefox",
+      "description": "Restart Firefox with different configuration. Allows changing binary path, environment variables, and other options. All current tabs will be closed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "firefoxPath": {
+            "type": "string",
+            "description": "New Firefox binary path (optional, keeps current if not specified)"
+          },
+          "profilePath": {
+            "type": "string",
+            "description": "Firefox profile path (optional, keeps current if not specified)"
+          },
+          "env": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "New environment variables in KEY=VALUE format (optional, e.g., [\"MOZ_LOG=HTMLMediaElement:5\", \"MOZ_LOG_FILE=/tmp/ff.log\"])"
+          },
+          "headless": {
+            "type": "boolean",
+            "description": "Run in headless mode (optional, keeps current if not specified)"
+          },
+          "startUrl": {
+            "type": "string",
+            "description": "URL to navigate to after restart (optional, uses about:home if not specified)"
+          },
+          "prefs": {
+            "type": "object",
+            "description": "Firefox preferences to set at startup. Values are auto-typed: true/false become booleans, integers become numbers, everything else is a string. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "list_chrome_contexts",
+      "description": "List chrome (privileged) browsing contexts. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 env var. Use restart_firefox with env parameter to enable.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "select_chrome_context",
+      "description": "Select a chrome browsing context by ID and set Marionette context to chrome. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 env var.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contextId": {
+            "type": "string",
+            "description": "Chrome browsing context ID from list_chrome_contexts"
+          }
+        },
+        "required": [
+          "contextId"
+        ]
+      }
+    },
+    {
+      "name": "evaluate_chrome_script",
+      "description": "Evaluate JavaScript in the current chrome context. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 env var. Returns the result of the expression.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "JavaScript expression to evaluate in the chrome context"
+          }
+        },
+        "required": [
+          "expression"
+        ]
+      }
+    },
+    {
+      "name": "set_firefox_prefs",
+      "description": "Set Firefox preferences at runtime via Services.prefs API. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 env var.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prefs": {
+            "type": "object",
+            "description": "Object mapping preference names to values. Values are auto-typed: true/false become booleans, integers become numbers, everything else is a string.",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "prefs"
+        ]
+      }
+    },
+    {
+      "name": "get_firefox_prefs",
+      "description": "Get Firefox preference values via Services.prefs API. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 env var.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of preference names to read"
+          }
+        },
+        "required": [
+          "names"
+        ]
+      }
+    },
+    {
+      "name": "install_extension",
+      "description": "Install a Firefox extension using WebDriver BiDi webExtension.install command. Supports installing from archive (.xpi/.zip), base64-encoded data, or unpacked directory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "archivePath",
+              "base64",
+              "path"
+            ],
+            "description": "Extension data type: \"archivePath\" for .xpi/.zip, \"base64\" for encoded data, \"path\" for unpacked directory"
+          },
+          "path": {
+            "type": "string",
+            "description": "File path (for archivePath or path types)"
+          },
+          "value": {
+            "type": "string",
+            "description": "Base64-encoded extension data (for base64 type)"
+          },
+          "permanent": {
+            "type": "boolean",
+            "description": "Firefox-specific: Install permanently (requires signed extension). Default: false (temporary install)"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "uninstall_extension",
+      "description": "Uninstall a Firefox extension using WebDriver BiDi webExtension.uninstall command. Requires the extension ID returned by install_extension or obtained from list_extensions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Extension ID (e.g., \"addon@example.com\")"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "list_extensions",
+      "description": "List installed Firefox extensions with UUIDs and background scripts. Uses chrome-privileged AddonManager API as workaround for missing webExtension.getExtensions BiDi command. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 env var.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional: Filter by exact extension IDs (e.g., [\"addon@example.com\"])"
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional: Filter by partial name match (case-insensitive, e.g., \"shopify\")"
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Optional: Filter by enabled (true) or disabled (false) status"
+          },
+          "isSystem": {
+            "type": "boolean",
+            "description": "Optional: Filter by system/built-in (true) or user-installed (false) extensions"
+          }
+        }
+      }
+    }
+  ]
+}

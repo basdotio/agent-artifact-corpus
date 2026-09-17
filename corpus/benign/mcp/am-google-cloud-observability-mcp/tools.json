@@ -1,0 +1,484 @@
+{
+  "package": "@google-cloud/observability-mcp",
+  "tools": [
+    {
+      "name": "list_log_entries",
+      "description": "Use this as the primary tool to search and retrieve log entries from Google Cloud Logging.\n    It's essential for debugging application behavior, finding specific error messages, or auditing events.\n    The 'filter' is powerful and can be used to select logs by severity, resource type, text content, and more.\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resourceNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Required. Names of one or more parent resources from which to retrieve log entries.\n          Resources may either be resource containers (e.g. 'projects/[PROJECT_ID]') or specific LogViews (e.g. 'projects/[PROJECT_ID]/locations/[LOCATION_ID]/buckets/[BUCKET_ID]/views/[VIEW_ID]').\n          For the case of resource containers, all logs ingested into that container will be returned regardless of which LogBuckets they are actually stored in - i.e. these queries may fan out to multiple regions.\n          Projects listed in the project_ids field are added to this list.\n          A maximum of 100 resources may be specified in a single request."
+          },
+          "filter": {
+            "type": "string",
+            "description": "Optional. A filter that chooses which log entries to return.\n          For more information, see Logging query language (https://cloud.google.com/logging/docs/view/logging-query-language).\n          Only log entries that match the filter are returned.\n          An empty filter matches all log entries in the resources listed in resource_names.\n          Referencing a parent resource that is not listed in resource_names will cause the filter to return no results.\n          To make queries faster, you can make the filter more selective by using restrictions on indexed fields (https://cloud.google.com/logging/docs/view/logging-query-language#indexed-fields) as well as limit the time range of the query by adding range restrictions on the timestamp field.\n          Examples:\n          - To find all error-level logs: 'severity=\"ERROR\"'\n          - To find logs from a specific GCE instance: 'resource.type=\"gce_instance\" AND resource.labels.instance_id=\"1234567890123456789\"'\n          - To find logs containing a specific text message: 'textPayload:\"database connection failed\"'\n          - To find logs within a specific time range: 'timestamp >= \"2025-01-01T00:00:00Z\" AND timestamp < \"2025-01-01T01:00:00Z\"'"
+          },
+          "orderBy": {
+            "type": "string",
+            "enum": [
+              "timestamp asc",
+              "timestamp desc"
+            ],
+            "default": "timestamp asc",
+            "description": "Optional. How the results should be sorted.\n          The timestamp asc option returns entries in order of increasing values of LogEntry.timestamp (oldest first), and the second option returns entries in order of decreasing timestamps (newest first).\n          Entries with equal timestamps are returned in order of their insert_id values.\n          We recommend setting the order_by field to \"timestamp desc\" when listing recently ingested log entries.\n          If not set, the default value of \"timestamp asc\" may take a long time to fetch matching logs that are only recently ingested."
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. The maximum number of results to return from this request.\n          Default is 50. If the value is negative, the request is rejected.\n          The presence of next_page_token in the response indicates that more results might be available."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If present, then retrieve the next batch of results from the preceding call to this method.\n          page_token must be the value of next_page_token from the previous response.\n          The values of other method parameters should be identical to those in the previous call."
+          }
+        },
+        "required": [
+          "resourceNames"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_log_names",
+      "description": "Use this as the primary tool to list the log names in a Google Cloud project.\n    This is useful for discovering what logs are available for a project.\n    Only logs which have log entries will be listed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parent": {
+            "type": "string",
+            "description": "Required. The parent resource whose logs are to be listed:\n        e.g. \"projects/[PROJECT_ID]\"\""
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. The maximum number of results to return from this request.\n          Non-positive values are ignored.\n          The presence of nextPageToken in the response indicates that more results might be available."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If present, then retrieve the next batch of results from the preceding call to this method.\n          pageToken must be the value of nextPageToken from the previous response.\n          The values of other method parameters should be identical to those in the previous call."
+          }
+        },
+        "required": [
+          "parent"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_buckets",
+      "description": "Use this as the primary tool to list the log buckets in a Google Cloud project.\n    Log buckets are containers that store and organize your log data.\n    This tool is useful for understanding how your logs are stored and for managing your logging configurations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parent": {
+            "type": "string",
+            "description": "Required. The parent resource whose buckets are to be listed:\n        \"projects/[PROJECT_ID]/locations/[LOCATION_ID]\"\n        \"organizations/[ORGANIZATION_ID]/locations/[LOCATION_ID]\"\n        \"billingAccounts/[BILLING_ACCOUNT_ID]/locations/[LOCATION_ID]\"\n        \"folders/[FOLDER_ID]/locations/[LOCATION_ID]\"\n        Note: The locations portion of the resource must be specified, but supplying the character - in place of LOCATION_ID will return all buckets."
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. The maximum number of results to return from this request.\n          Non-positive values are ignored.\n          The presence of nextPageToken in the response indicates that more results might be available."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If present, then retrieve the next batch of results from the preceding call to this method.\n          pageToken must be the value of nextPageToken from the previous response.\n          The values of other method parameters should be identical to those in the previous call."
+          }
+        },
+        "required": [
+          "parent"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_views",
+      "description": "Use this as the primary tool to list the log views in a given log bucket.\n    Log views provide fine-grained access control to the logs in your buckets.\n    This is useful for managing who has access to which logs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parent": {
+            "type": "string",
+            "description": "Required. The bucket whose views are to be listed: \"projects/[PROJECT_ID]/locations/[LOCATION_ID]/buckets/[BUCKET_ID]\""
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. The maximum number of results to return from this request.\n          Non-positive values are ignored.\n          The presence of nextPageToken in the response indicates that more results might be available."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If present, then retrieve the next batch of results from the preceding call to this method.\n          pageToken must be the value of nextPageToken from the previous response.\n          The values of other method parameters should be identical to those in the previous call."
+          }
+        },
+        "required": [
+          "parent"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_sinks",
+      "description": "Use this as the primary tool to list the log sinks in a Google Cloud project.\n    Log sinks control how Cloud Logging routes your logs to supported destinations, such as Cloud Storage buckets, BigQuery datasets, or Pub/Sub topics.\n    This is useful for understanding your logging export configurations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parent": {
+            "type": "string",
+            "description": "Required. The parent resource whose sinks are to be listed:\n        \"projects/[PROJECT_ID]\"\n        \"organizations/[ORGANIZATION_ID]\"\n        \"billingAccounts/[BILLING_ACCOUNT_ID]\"\n        \"folders/[FOLDER_ID]\""
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. The maximum number of results to return from this request.\n          Non-positive values are ignored.\n          The presence of nextPageToken in the response indicates that more results might be available."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If present, then retrieve the next batch of results from the preceding call to this method.\n          pageToken must be the value of nextPageToken from the previous response.\n          The values of other method parameters should be identical to those in the previous call."
+          }
+        },
+        "required": [
+          "parent"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_log_scopes",
+      "description": "Use this as the primary tool to list the log scopes in a Google Cloud project.\n    Log scopes allow you to query logs from multiple projects in a single view.\n    This is useful for centralized logging across a large organization.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parent": {
+            "type": "string",
+            "description": "Required. The parent resource whose log scopes are to be listed: \"projects/[PROJECT_ID]/locations/[LOCATION_ID]\".\n        The default location is \"global\"."
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. The maximum number of results to return from this request.\n          Non-positive values are ignored.\n          The presence of nextPageToken in the response indicates that more results might be available."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If present, then retrieve the next batch of results from the preceding call to this method.\n          pageToken must be the value of nextPageToken from the previous response.\n          The values of other method parameters should be identical to those in the previous call."
+          }
+        },
+        "required": [
+          "parent"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_metric_descriptors",
+      "description": "Use this as the primary tool to discover the types of metrics available in a Google Cloud project.\n    This is a good first step to understanding what data is available for monitoring and building dashboards or alerts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Required. The project on which to execute the request.\n        The format is: projects/[PROJECT_ID_OR_NUMBER]"
+          },
+          "filter": {
+            "type": "string",
+            "description": "Optional. If this field is empty, all custom and system-defined metric descriptors are returned.\n          Otherwise, the filter specifies which metric descriptors are to be returned. See Monitoring Query Language (https://cloud.google.com/monitoring/api/v3/filters) for more details.\n          Examples:\n          - To find metrics related to GCE instances: 'resource.type = \"gce_instance\"'\n          - To find a specific metric type: 'metric.type = \"compute.googleapis.com/instance/cpu/usage_time\"'\n          - To find all metrics with \"cpu\" in their type: 'metric.type : \"cpu\"'"
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. A positive number that is the maximum number of results to return."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If this field is not empty then it must contain the nextPageToken value returned by a previous call to this method."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_time_series",
+      "description": "Use this as the primary tool to retrieve metric data over a specific time period.\n    This is the core tool for monitoring and observability, allowing you to get the actual data points for a given metric.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Required. The project, organization or folder on which to execute the request. The format is:\n        projects/[PROJECT_ID_OR_NUMBER]\n        organizations/[ORGANIZATION_ID]\n        folders/[FOLDER_ID]"
+          },
+          "filter": {
+            "type": "string",
+            "description": "Required. A monitoring filter that specifies which time series should be returned.\n        (https://cloud.google.com/monitoring/api/v3/filters#time-series-filter).\n        Examples:\n        - To get CPU usage:\n            'metric.type = \"compute.googleapis.com/instance/cpu/usage_time\"'\n        - To return all time series from a specific Compute Engine instance, use the following filter:\n            'metric.type = \"compute.googleapis.com/instance/cpu/usage_time\" AND metric.labels.instance_name = \"my-instance-name\"'\n        - To return all time series from Compute Engine instances whose names start with frontend-, use the following filter:\n            'metric.type = \"compute.googleapis.com/instance/cpu/usage_time\" AND metric.labels.instance_name = starts_with(\"frontend-\")'"
+          },
+          "interval": {
+            "type": "object",
+            "properties": {
+              "startTime": {
+                "type": "string",
+                "description": "Optional. Start of the time interval (inclusive) during which the time series data was collected.\n              Must be in RFC 3339 format."
+              },
+              "endTime": {
+                "type": "string",
+                "description": "Required. End of the time interval (inclusive) during which the time series data was collected.\n            Must be in RFC 3339 format."
+              }
+            },
+            "required": [
+              "endTime"
+            ],
+            "additionalProperties": false,
+            "description": "Required. The time interval for which results should be returned.\n        Only time series that contain data points in the specified interval are included in the response."
+          },
+          "aggregation": {
+            "type": "object",
+            "properties": {
+              "alignmentPeriod": {
+                "type": "string",
+                "default": "60",
+                "description": "The alignmentPeriod specifies a time interval, in seconds, that is used to divide the data in all the time series into consistent blocks of time.\n              The value must be at least 60 seconds."
+              },
+              "perSeriesAligner": {
+                "type": "string",
+                "enum": [
+                  "ALIGN_NONE",
+                  "ALIGN_DELTA",
+                  "ALIGN_RATE",
+                  "ALIGN_INTERPOLATE",
+                  "ALIGN_NEXT_OLDER",
+                  "ALIGN_MIN",
+                  "ALIGN_MAX",
+                  "ALIGN_MEAN",
+                  "ALIGN_COUNT",
+                  "ALIGN_SUM",
+                  "ALIGN_STDDEV",
+                  "ALIGN_PERCENTILE_99",
+                  "ALIGN_PERCENTILE_95",
+                  "ALIGN_PERCENTILE_50",
+                  "ALIGN_PERCENT_CHANGE"
+                ],
+                "description": "An Aligner describes how to bring the data points in a single time series into temporal alignment.\n              Except for ALIGN_NONE, all alignments cause all the data points in an alignmentPeriod to be mathematically grouped together, resulting in a single data point for each alignmentPeriod with end timestamp at the end of the period."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Optional. Specifies the alignment of data points in individual time series. By default (if no aggregation is explicitly specified), the raw time series data is returned."
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. A positive number that is the maximum number of results to return."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If this field is not empty then it must contain the nextPageToken value returned by a previous call to this method."
+          }
+        },
+        "required": [
+          "name",
+          "filter",
+          "interval"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_alert_policies",
+      "description": "Use this as the primary tool to list the alerting policies in a Google Cloud project.\n    Alerting policies define the conditions under which you want to be notified about issues with your services.\n    This is useful for understanding what alerts are currently configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Required. The project whose alert policies are to be listed.\n        The format is: projects/[PROJECT_ID_OR_NUMBER]"
+          },
+          "filter": {
+            "type": "string",
+            "description": "Optional. If provided, this field specifies the criteria that must be met by alert policies to be included in the response.\n          For more information on filtering alert policies see Cloud Monitoring Filter Syntax (https://cloud.google.com/monitoring/api/v3/sorting-and-filtering#filter_syntax)\n          Examples:\n          - To return all entries with a non-empty display name or description where the user_labels field has the active key set (with any value):\n              (NOT display_name.empty OR NOT description.empty) AND user_labels='active'\n          - To return all entries whose description contains 'cloud':\n              description:'cloud'\n          - To return all entries whose title matches \"Temp XYZ\":\n              display_name=monitoring.regex.full_match('Temp \\d{3}')"
+          },
+          "orderBy": {
+            "type": "string",
+            "description": "Optional. A comma-separated list of fields by which to sort the result.\n          The result will be sorted by aescending order.\n          If a field is prefixed with a -, it is sorted in descending order.\n          Sortable fields are: name, display_name, documentation.content, documentation.mime_type, user_labels, conditions.size, combiner, enabled, notification_channels."
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. The maximum number of results to return in a single response."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If this field is not empty then it must contain the nextPageToken value returned by a previous call to this method."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_alerts",
+      "description": "Use this as the primary tool to list the alerts in a Google Cloud project.\n    An alert is the representation of a violation of an alert policy.\n    This is useful for understanding current and past violations of an alert policy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parent": {
+            "type": "string",
+            "description": "Required. The parent project to list alerts for.\n        The required format is: projects/[PROJECT_ID_OR_NUMBER]"
+          },
+          "filter": {
+            "type": "string",
+            "description": "Optional. An alert is returned if there is a match on any fields belonging to the alert or its subfields.\n          An example to filter for only OPEN alerts would be: state=\"OPEN\""
+          },
+          "orderBy": {
+            "type": "string",
+            "description": "Optional. A comma-separated list of fields in Alert to use for sorting. \n          The default sort direction is ascending. To specify descending order for a field, add a desc modifier. \n          The following fields are supported: 'open_time', 'close_time'. \n          For example, 'close_time desc, open_time' will return the alerts closed most recently, with ties broken in the order of older alerts listed first. \n          If the field is not set, the results are sorted by 'open_time desc'."
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 20,
+            "description": "Optional. The maximum number of results to return in a single response. \n          Default is 20. If the value is negative, the request is rejected. \n          The maximum value is 1000; values above 1000 will be coerced to 1000."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. If non-empty, page_token must contain a value returned as the next_page_token in a previous response to request the next set of results. \n          The values of other method parameters should be identical to those in the previous call."
+          }
+        },
+        "required": [
+          "parent"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_traces",
+      "description": "Use this as the primary tool to retrieve and examine distributed traces from Google Cloud Trace.\n    Traces provide a detailed view of the path of a request as it travels through your application's services.\n    This is essential for understanding latency issues and debugging complex, multi-service workflows.\n    This will only return the root trace span, to gather full information call get_trace with that id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Required. The Google Cloud project ID."
+          },
+          "filter": {
+            "type": "string",
+            "description": "Optional.\n          The filter to apply when listing traces.\n          For more information on building trace filters see Cloud Trace Filters (https://cloud.google.com/trace/docs/trace-filters).\n          Some examples:\n            To filter for latency greater than or equal to a value, do latency:[DURATION] (e.g. 'latency:1s', 'latency:500ms')\n            For a prefix string match on the root span name, do root:[NAME_PREFIX] (e.g. 'root:main.api.HTTP')\n            For an exact string match on the root span name, do +root:[NAME] (e.g. '+root:main.api.HTTP Get')\n            To filter by HTTP status code: 'http.status_code:[CODE]' (e.g. 'http.status_code:500')\n            To filter by method: 'method:[METHOD_NAME]' (e.g. 'method:Get')"
+          },
+          "orderBy": {
+            "type": "string",
+            "description": "Optional. Field used to sort the returned traces.\n          Can be one of the following: 'trace_id', 'name', 'duration', 'start'.\n          Descending order can be specified by appending 'desc' to the sort field."
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 50,
+            "description": "Optional. The maximum number of traces to return."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. Token identifying the page of results to return."
+          },
+          "startTime": {
+            "type": "string",
+            "description": "Optional. Start of the time interval (inclusive) during which the trace data was collected from the application.\n          Must be in RFC 3339 format."
+          },
+          "endTime": {
+            "type": "string",
+            "description": "Optional. End of the time interval (inclusive) during which the trace data was collected from the application.\n          Must be in RFC 3339 format."
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_trace",
+      "description": "Use this as the primary tool to retrieve a single distributed trace from Google Cloud Trace.\n    Traces provide a detailed view of the path of a request as it travels through your application's services.\n    This is essential for understanding latency issues and debugging complex, multi-service workflows.\n    This is often used as a follow on to list_traces to get full details on a specific trace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Required. The Google Cloud project ID."
+          },
+          "traceId": {
+            "type": "string",
+            "description": "Required. The ID of the trace to retrieve."
+          }
+        },
+        "required": [
+          "projectId",
+          "traceId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_group_stats",
+      "description": "Use this tool ONLY to find and analyze recurring stack traces in your application. \n    It aggregates similar stack traces, providing statistics like the number of occurrences and the number of affected users.\n\n    DO NOT use this tool for general error searches or to view individual error logs. For queries asking to \"find errors\", or \"show me errors\", you MUST use list_log_entries tool.\n\n    CRITICAL: Default to other tooling for generic questions about errors.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectName": {
+            "type": "string",
+            "description": "Required. The resource name of the Google Cloud Platform project.\n          Written as 'projects/{projectID}' or 'projects/{projectNumber}'."
+          },
+          "timeRangePeriod": {
+            "type": "string",
+            "enum": [
+              "PERIOD_1_HOUR",
+              "PERIOD_6_HOURS",
+              "PERIOD_1_DAY",
+              "PERIOD_1_WEEK",
+              "PERIOD_30_DAYS"
+            ],
+            "default": "PERIOD_6_HOURS",
+            "description": "Optional. The time range to query."
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "COUNT_DESC",
+              "LAST_SEEN_DESC",
+              "CREATED_DESC",
+              "AFFECTED_USERS_DESC"
+            ],
+            "default": "COUNT_DESC",
+            "description": "Optional. The sort order in which the results are returned."
+          },
+          "pageSize": {
+            "type": "number",
+            "default": 20,
+            "description": "Optional. The maximum number of results to return per response."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Optional. A next_page_token provided by a previous response."
+          }
+        },
+        "required": [
+          "projectName"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

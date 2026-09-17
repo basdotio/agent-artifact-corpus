@@ -1,0 +1,410 @@
+{
+  "package": "@cyanheads/pubchem-mcp-server",
+  "tools": [
+    {
+      "name": "pubchem_search_compounds",
+      "description": "Search PubChem for chemical compounds by identifier (name, SMILES, or InChIKey, batched up to 25), molecular formula in Hill notation, substructure or superstructure containment, or 2D Tanimoto similarity. Optionally hydrate results with properties to avoid a follow-up pubchem_get_compound_details call.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "searchType": {
+            "type": "string",
+            "enum": [
+              "identifier",
+              "formula",
+              "substructure",
+              "superstructure",
+              "similarity"
+            ],
+            "description": "Search strategy. \"identifier\": name/SMILES/InChIKey lookup. \"formula\": molecular formula. \"substructure\": find compounds containing the query as a substructure. \"superstructure\": find compounds that are themselves substructures of the query. \"similarity\": 2D Tanimoto similarity to the query."
+          },
+          "identifierType": {
+            "description": "Required for identifier search. Type of chemical identifier: \"name\", \"smiles\", or \"inchikey\".",
+            "type": "string",
+            "enum": [
+              "name",
+              "smiles",
+              "inchikey"
+            ]
+          },
+          "identifiers": {
+            "description": "Required for identifier search. Array of identifiers to resolve (1-25). Examples: [\"aspirin\", \"ibuprofen\"] for name, [\"CC(=O)OC1=CC=CC=C1C(=O)O\"] for SMILES, [\"BSYNRYMUTXBXSQ-UHFFFAOYSA-N\"] for inchikey (27-char block format).",
+            "minItems": 1,
+            "maxItems": 25,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "formula": {
+            "description": "Required for formula search. Molecular formula in Hill notation (e.g. \"C6H12O6\", \"CaH2O2\").",
+            "type": "string"
+          },
+          "allowOtherElements": {
+            "default": false,
+            "description": "Formula search only. When true, includes compounds with additional elements beyond the formula.",
+            "type": "boolean"
+          },
+          "query": {
+            "description": "Required for substructure/superstructure/similarity searches. A SMILES string (e.g. \"CC(=O)O\") or PubChem CID as a string (e.g. \"2244\").",
+            "type": "string"
+          },
+          "queryType": {
+            "description": "Required for structure/similarity searches. Format of the query: \"smiles\" or \"cid\".",
+            "type": "string",
+            "enum": [
+              "smiles",
+              "cid"
+            ]
+          },
+          "threshold": {
+            "default": 90,
+            "description": "Similarity search only. Minimum Tanimoto similarity (70-100). 90+ for close analogs, 70-80 for scaffold hops. Default: 90.",
+            "type": "number",
+            "minimum": 70,
+            "maximum": 100
+          },
+          "maxResults": {
+            "default": 20,
+            "description": "Maximum CIDs to return (1-200). Default: 20.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "properties": {
+            "description": "Optional: fetch these properties for each result, avoiding a follow-up details call. E.g. [\"MolecularFormula\", \"MolecularWeight\", \"CanonicalSMILES\"].",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "MolecularFormula",
+                "MolecularWeight",
+                "CanonicalSMILES",
+                "IsomericSMILES",
+                "InChI",
+                "InChIKey",
+                "IUPACName",
+                "Title",
+                "XLogP",
+                "ExactMass",
+                "MonoisotopicMass",
+                "TPSA",
+                "Complexity",
+                "Charge",
+                "HBondDonorCount",
+                "HBondAcceptorCount",
+                "RotatableBondCount",
+                "HeavyAtomCount",
+                "IsotopeAtomCount",
+                "AtomStereoCount",
+                "DefinedAtomStereoCount",
+                "UndefinedAtomStereoCount",
+                "BondStereoCount",
+                "DefinedBondStereoCount",
+                "UndefinedBondStereoCount",
+                "CovalentUnitCount",
+                "Volume3D"
+              ]
+            }
+          }
+        },
+        "required": [
+          "searchType"
+        ]
+      }
+    },
+    {
+      "name": "pubchem_get_compound_details",
+      "description": "Get detailed compound information by CID. Returns physicochemical properties (molecular weight, SMILES, InChIKey, XLogP, TPSA, etc.), optionally with a textual description (pharmacology, mechanism, therapeutic use), all known synonyms, drug-likeness assessment (Lipinski/Veber rules), and/or pharmacological classification (FDA classes, MeSH classes, ATC codes). Efficiently batches up to 100 CIDs.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "cids": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "description": "PubChem Compound IDs to fetch (1-100). Batched efficiently. Resolve from names/SMILES with pubchem_search_compounds."
+          },
+          "properties": {
+            "description": "Properties to retrieve. Defaults to a core set: MolecularFormula, MolecularWeight, IUPACName, CanonicalSMILES, IsomericSMILES, InChIKey, XLogP, TPSA, HBondDonorCount, HBondAcceptorCount, RotatableBondCount, HeavyAtomCount, Charge, Complexity.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "MolecularFormula",
+                "MolecularWeight",
+                "CanonicalSMILES",
+                "IsomericSMILES",
+                "InChI",
+                "InChIKey",
+                "IUPACName",
+                "Title",
+                "XLogP",
+                "ExactMass",
+                "MonoisotopicMass",
+                "TPSA",
+                "Complexity",
+                "Charge",
+                "HBondDonorCount",
+                "HBondAcceptorCount",
+                "RotatableBondCount",
+                "HeavyAtomCount",
+                "IsotopeAtomCount",
+                "AtomStereoCount",
+                "DefinedAtomStereoCount",
+                "UndefinedAtomStereoCount",
+                "BondStereoCount",
+                "DefinedBondStereoCount",
+                "UndefinedBondStereoCount",
+                "CovalentUnitCount",
+                "Volume3D"
+              ]
+            }
+          },
+          "includeDescription": {
+            "default": false,
+            "description": "Include textual descriptions (pharmacology, mechanism, therapeutic use) attributed by source. Well-studied compounds have many overlapping summaries — capped via maxDescriptions. Fetched only for the first 10 CIDs in the batch; remaining CIDs return without descriptions.",
+            "type": "boolean"
+          },
+          "maxDescriptions": {
+            "default": 3,
+            "description": "Max number of distinct description entries per compound (1-20). PubChem returns near-duplicate summaries from many depositors; we dedup and cap to keep responses focused. Default: 3.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "includeSynonyms": {
+            "default": false,
+            "description": "Fetch all known names and synonyms (trade names, systematic names, registry numbers). One API call per CID — slower than the property batch for large CID lists.",
+            "type": "boolean"
+          },
+          "includeDrugLikeness": {
+            "default": false,
+            "description": "Compute drug-likeness assessment: Lipinski Rule of Five (MW, XLogP, HBD, HBA) and Veber rules (TPSA, rotatable bonds). No extra API calls — computed from properties.",
+            "type": "boolean"
+          },
+          "includeClassification": {
+            "default": false,
+            "description": "Include pharmacological classification: FDA Established Pharmacologic Classes, mechanisms of action, MeSH classes, and ATC codes. Fetched only for the first 10 CIDs in the batch; remaining CIDs return without classification.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cids"
+        ]
+      }
+    },
+    {
+      "name": "pubchem_get_compound_image",
+      "description": "Fetch a 2D structure diagram (PNG image) for a compound by CID.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "cid": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "PubChem Compound ID. Resolve from name/SMILES with pubchem_search_compounds."
+          },
+          "size": {
+            "default": "large",
+            "description": "Image size: \"small\" (100x100) or \"large\" (300x300). Default: \"large\".",
+            "type": "string",
+            "enum": [
+              "small",
+              "large"
+            ]
+          }
+        },
+        "required": [
+          "cid"
+        ]
+      }
+    },
+    {
+      "name": "pubchem_get_compound_xrefs",
+      "description": "Get external database cross-references for a compound: PubMed citations, patent IDs, gene/protein associations, registry numbers, and taxonomy IDs. Results are capped per type with total counts reported.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "cid": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "PubChem Compound ID. Resolve from name/SMILES with pubchem_search_compounds."
+          },
+          "xrefTypes": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "RegistryID",
+                "RN",
+                "PubMedID",
+                "PatentID",
+                "GeneID",
+                "ProteinGI",
+                "TaxonomyID"
+              ]
+            },
+            "description": "Cross-reference types to retrieve. String IDs: RegistryID (DSSTox/EPA registry numbers), RN (CAS numbers), PatentID. Numeric IDs: PubMedID, GeneID (NCBI Gene), ProteinGI (legacy NCBI Protein GI), TaxonomyID."
+          },
+          "maxPerType": {
+            "default": 50,
+            "description": "Max IDs to return per xref type (1-500). A compound may have thousands of PubMed references. Total count always reported. Default: 50.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "cid",
+          "xrefTypes"
+        ]
+      }
+    },
+    {
+      "name": "pubchem_get_compound_safety",
+      "description": "Get GHS (Globally Harmonized System) hazard classification and safety data for a compound. Returns signal word, pictograms, hazard statements (H-codes), and precautionary statements (P-codes). Data sourced from PubChem depositors — source attribution included.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "cid": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "PubChem Compound ID. Resolve from name/SMILES with pubchem_search_compounds."
+          }
+        },
+        "required": [
+          "cid"
+        ]
+      }
+    },
+    {
+      "name": "pubchem_get_bioactivity",
+      "description": "Get a compound's bioactivity profile: which assays tested it, activity outcomes (Active/Inactive/Inconclusive), target identifiers (NCBI Gene ID, UniProt/GenBank accession), and quantitative values (IC50, EC50, Ki, etc.). Filter by outcome to focus on active results.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "cid": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "PubChem Compound ID. Resolve from name/SMILES with pubchem_search_compounds."
+          },
+          "outcomeFilter": {
+            "default": "all",
+            "description": "Filter by activity outcome. \"active\" shows only assays where the compound showed activity — most useful for understanding biological profile. Default: \"all\".",
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive",
+              "all"
+            ]
+          },
+          "maxResults": {
+            "default": 20,
+            "description": "Max assay results to return (1-100). Well-studied compounds have thousands of records. Default: 20.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "cid"
+        ]
+      }
+    },
+    {
+      "name": "pubchem_search_assays",
+      "description": "Find PubChem bioassays associated with a biological target. Search by gene symbol (e.g. \"EGFR\"), protein name, NCBI Gene ID, or UniProt accession. Returns assay IDs (AIDs) which can be explored further with pubchem_get_summary.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "genesymbol",
+              "proteinname",
+              "geneid",
+              "proteinaccession"
+            ],
+            "description": "Target identifier type. \"genesymbol\" and \"proteinname\" accept text names. \"geneid\" accepts NCBI Gene IDs. \"proteinaccession\" accepts UniProt accessions."
+          },
+          "targetQuery": {
+            "type": "string",
+            "description": "Target identifier. Examples: \"EGFR\" (genesymbol), \"Epidermal growth factor receptor\" (proteinname), \"1956\" (geneid), \"P00533\" (proteinaccession)."
+          },
+          "maxResults": {
+            "default": 50,
+            "description": "Max AIDs to return (1-200). Popular targets may have thousands of assays. Default: 50.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "targetType",
+          "targetQuery"
+        ]
+      }
+    },
+    {
+      "name": "pubchem_get_summary",
+      "description": "Get descriptive summaries for PubChem entities by ID. Supports assays (AID), genes (Gene ID), proteins (UniProt accession), and taxonomy (Tax ID). Up to 10 per call.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "enum": [
+              "assay",
+              "gene",
+              "protein",
+              "taxonomy"
+            ],
+            "description": "Entity type. Determines ID format and returned fields."
+          },
+          "identifiers": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "String identifier (e.g. UniProt accession)."
+                },
+                {
+                  "type": "number",
+                  "description": "Numeric identifier (e.g. AID, Gene ID, Tax ID)."
+                }
+              ],
+              "description": "Entity identifier — string or number depending on entityType."
+            },
+            "description": "Entity identifiers (1-10). Type depends on entityType:\n- assay: AID (number), e.g. [1000]\n- gene: Gene ID (number), e.g. [1956]\n- protein: UniProt accession (string), e.g. [\"P00533\"]\n- taxonomy: Tax ID (number), e.g. [9606]"
+          }
+        },
+        "required": [
+          "entityType",
+          "identifiers"
+        ]
+      }
+    }
+  ]
+}

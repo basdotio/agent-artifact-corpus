@@ -1,0 +1,3955 @@
+{
+  "package": "ue-mcp",
+  "tools": [
+    {
+      "name": "project",
+      "description": "Project status, config INI files, and C++ source inspection.\n\nActions:\n- get_status: Check server mode and editor connection\n- set_project: Switch project. Params: projectPath\n- get_info: Read .uproject file details\n- read_config: Read INI config. Params: configName (e.g. 'Engine', 'Game')\n- search_config: Search INI files. Params: query\n- list_config_tags: Extract gameplay tags from config\n- read_cpp_header: Parse a .h file. Params: headerPath\n- read_module: Read module source. Params: moduleName\n- list_modules: List C++ modules\n- search_cpp: Search .h/.cpp files. Params: query, directory?\n- read_engine_header: Parse a .h file from the engine source tree. Params: headerPath (relative to Engine/Source, or absolute)\n- find_engine_symbol: Grep engine headers for a symbol. Params: symbol, maxResults?\n- list_engine_modules: List modules in Engine/Source/Runtime\n- search_engine_cpp: Search engine .h/.cpp/.inl files across Runtime/Editor/Developer/Plugins. Params: query, tree? (Runtime|Editor|Developer|Plugins|all — default Runtime), subdirectory?, maxResults? (default 500)\n- set_config: Write to INI. Params: configName, section, key, value\n- build: Build C++ project. Params: configuration?, platform?, clean?\n- generate_project_files: Generate IDE project files (Visual Studio, Xcode, etc.)\n- create_cpp_class: Create a new native UCLASS in a project module. Uses the same engine template path as File → New C++ Class. Writes .h + .cpp; returns both paths plus needsEditorRestart (true unless Live Coding successfully hot-reloaded). Params: className (no prefix), parentClass? (default UObject; accepts short names like 'Actor' or /Script/<Module>.<Class> paths), moduleName? (default: first project module, use list_project_modules to pick), classDomain? ('public'|'private'|'classes', default public), subPath?\n- list_project_modules: List native modules in the current project (name, host type, source path). Feed moduleName from here into create_cpp_class.\n- live_coding_compile: Trigger a Live Coding compile (Windows only). Hot-patches method bodies of existing UCLASSes without editor restart — the fast inner loop for UFUNCTION implementations. Does NOT reliably register brand-new UCLASSes; use build_project + editor restart for those. Params: wait? (default false — fire and return 'in_progress').\n- live_coding_status: Report Live Coding availability/state (available, started, enabledForSession, compiling). Helps choose between live_coding_compile and build_project.\n- write_cpp_file: Write a .h / .cpp / .inl file under the project's Source/ tree. Used to append UPROPERTYs/UFUNCTIONs or method bodies after create_cpp_class. Writes are scoped to Source/ for safety. Params: path (relative to Source/ or absolute within Source/), content (full file contents). After editing, call live_coding_compile (for existing classes) or build_project (for new classes).\n- read_cpp_source: Read a .cpp file from the project Source/ tree. Companion to read_cpp_header for round-trip edits. Params: sourcePath (relative to Source/ or absolute).\n- add_module_dependency: Add a module to a target module's Build.cs dependency array. Params: moduleName (the Build.cs to edit — must exist in the project), dependency (module name to add, e.g. 'UMG'), access? ('public'|'private', default 'private'). Creates the corresponding AddRange block if missing. Rebuild required afterward.\n- add_cpp_member: Append a UPROPERTY/UFUNCTION declaration to an existing UCLASS header inside the access specifier you choose. Idempotent: if a declaration containing the same memberName is already present, returns existed:true. Params: headerPath (relative to Source/ or absolute), declaration (full multi-line UPROPERTY(...) / UFUNCTION(...) block plus its single-line member or function signature), memberName (the identifier the declaration introduces - used for idempotency), access? ('public'|'protected'|'private', default 'public').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "get_status",
+              "set_project",
+              "get_info",
+              "read_config",
+              "search_config",
+              "list_config_tags",
+              "read_cpp_header",
+              "read_module",
+              "list_modules",
+              "search_cpp",
+              "read_engine_header",
+              "find_engine_symbol",
+              "list_engine_modules",
+              "search_engine_cpp",
+              "set_config",
+              "build",
+              "generate_project_files",
+              "create_cpp_class",
+              "list_project_modules",
+              "live_coding_compile",
+              "live_coding_status",
+              "write_cpp_file",
+              "read_cpp_source",
+              "add_module_dependency",
+              "add_cpp_member"
+            ],
+            "description": "Action to perform"
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "For set_project: path to .uproject"
+          },
+          "configName": {
+            "type": "string",
+            "description": "For read_config/set_config: config file name"
+          },
+          "query": {
+            "type": "string",
+            "description": "For search_config/search_cpp: search text"
+          },
+          "headerPath": {
+            "type": "string",
+            "description": "For read_cpp_header: path to .h file"
+          },
+          "moduleName": {
+            "type": "string",
+            "description": "For read_module: module name"
+          },
+          "directory": {
+            "type": "string",
+            "description": "For search_cpp: subdirectory"
+          },
+          "section": {
+            "type": "string",
+            "description": "For set_config: INI section"
+          },
+          "key": {
+            "type": "string",
+            "description": "For set_config: INI key"
+          },
+          "value": {
+            "type": "string",
+            "description": "For set_config: INI value"
+          },
+          "configuration": {
+            "type": "string",
+            "description": "Build configuration: Development, Debug, Shipping"
+          },
+          "platform": {
+            "type": "string",
+            "description": "Target platform: Win64, Linux, Mac"
+          },
+          "clean": {
+            "type": "boolean",
+            "description": "Clean build"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name for find_engine_symbol"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Cap on find_engine_symbol / search_engine_cpp hits (default 100 / 500)"
+          },
+          "tree": {
+            "type": "string",
+            "description": "For search_engine_cpp: Runtime|Editor|Developer|Plugins|all (default Runtime)"
+          },
+          "subdirectory": {
+            "type": "string",
+            "description": "For search_engine_cpp: subdirectory within the chosen tree"
+          },
+          "className": {
+            "type": "string",
+            "description": "For create_cpp_class: new class name (no A/U prefix — handled by parent type)"
+          },
+          "parentClass": {
+            "type": "string",
+            "description": "For create_cpp_class: parent UClass. Short native names ('Actor') or /Script/<Module>.<Class> paths work. Default UObject."
+          },
+          "classDomain": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private",
+              "classes"
+            ],
+            "description": "For create_cpp_class: which folder under the module (Public/Private/Classes). Default 'public'."
+          },
+          "subPath": {
+            "type": "string",
+            "description": "For create_cpp_class: nested folder under the class domain (e.g. 'Gameplay/Abilities')."
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "For live_coding_compile: block until compile finishes. Default false."
+          },
+          "path": {
+            "type": "string",
+            "description": "For write_cpp_file: path to write (relative to Source/ or absolute within Source/)."
+          },
+          "content": {
+            "type": "string",
+            "description": "For write_cpp_file: full file contents."
+          },
+          "sourcePath": {
+            "type": "string",
+            "description": "For read_cpp_source: path to .cpp (relative to Source/ or absolute)."
+          },
+          "dependency": {
+            "type": "string",
+            "description": "For add_module_dependency: module name to add (e.g. 'UMG')."
+          },
+          "declaration": {
+            "type": "string",
+            "description": "For add_cpp_member: full UPROPERTY(...) / UFUNCTION(...) block plus the member or function signature."
+          },
+          "memberName": {
+            "type": "string",
+            "description": "For add_cpp_member: the identifier the declaration introduces (used for idempotency)."
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private"
+            ],
+            "description": "For add_module_dependency: 'public' (PublicDependencyModuleNames) or 'private' (default)."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "asset",
+      "description": "Asset management: list, search, read, CRUD, import meshes/textures, datatables.\n\nActions:\n- list: List assets via the AssetRegistry (sees /Game and every mounted plugin root). Params: directory? (default /Game), classFilter?, recursive? (default true), maxResults? (default 2000)\n- search: Search by name/class/path. Params: query, directory?, maxResults?, searchAll?\n- read: Read asset via reflection. Params: assetPath\n- read_properties: Read asset properties with values. Params: assetPath, propertyName?, includeValues?\n- duplicate: Duplicate asset. Params: sourcePath, destinationPath\n- rename: Rename asset. Params: assetPath, newName (or sourcePath, destinationPath), force?. World Partition levels are detected and their __ExternalActors__/__ExternalObjects__ packages migrate atomically alongside the .umap, source-side redirectors get fixed up, and the active editor world is swapped to blank if it matches the source (#409). Refuses if any package is dirty - save first. If a prior rename left externals orphaned at the old path, re-running reconciles them. Rollback descriptor is emitted even on partial failure so the inverse rename can recover. `force=true` lets the call merge into a destination with pre-existing externals (used by rollback). For batches of 3+ scene-referenced non-world assets use bulk_rename instead.\n- bulk_rename: Batched rename using IAssetTools::RenameAssets - single transaction with one redirector-fixup pass (matches Content Browser drag). Use this over looped rename for scene-referenced assets. World assets are rejected (status=rejected_world); use rename_asset which handles WP externals atomically (#409). Params: renames[] where each entry is {sourcePath, destinationPath} OR {assetPath, newName}.\n- move: Move asset. Params: sourcePath, destinationPath\n- delete: Delete asset. On failure returns reason (open_in_editor / has_referencers / unknown) plus referencer list. Pass force=true to auto-close any open asset editors before deleting (#278). Params: assetPath, force?\n- delete_batch: Batch-delete assets. Per-path status (deleted/absent/failed) plus reason+referencers on failed entries (#278). Params: assetPaths[], force?\n- create_data_asset: Create UDataAsset instance of custom class. Params: name, className (/Script/Module.ClassName or loaded name), packagePath?, properties? (key/value map)\n- save: Save asset(s). Params: assetPath?\n- save_all_dirty: Flush every dirty package to disk in one call. End-of-workflow shortcut after bulk import/edit. Params: saveMapPackages? (default true), saveContentPackages? (default true). Returns savedAll boolean (#429)\n- set_mesh_material: Assign material to static mesh slot. Params: assetPath, materialPath, slotIndex?\n- recenter_pivot: Move static mesh pivot to geometry center. Params: assetPath OR assetPaths\n- import_static_mesh: Import from FBX/OBJ. Params: filePath, name?, packagePath?, combineMeshes?, importMaterials?, importTextures?, generateLightmapUVs?\n- import_skeletal_mesh: Import skeletal mesh from FBX. Params: filePath, name?, packagePath?, skeletonPath?, importMaterials?, importTextures?\n- import_animation: Import anim from FBX. Params: filePath, name?, packagePath?, skeletonPath\n- import_texture: Import image. Params: filePath, name?, packagePath?\n- import_texture_batch: Import many textures in one call - the loop stays inside the editor (no per-file bridge round-trip), so this finishes far faster than N import_texture calls. Per-item result records mirror import_texture. Params: items[]: [{filePath, packagePath?, name?, replaceExisting?}], packagePath? (default for items that don't set it), save? (default true), automated? (default true). Returns requested/imported/failed counts + items[] (#430)\n- reimport: Reimport asset from source file. Params: assetPath, filePath?\n- read_datatable: Read DataTable rows. Params: assetPath, rowFilter?\n- create_datatable: Create DataTable. Params: name, packagePath?, rowStruct\n- reimport_datatable: Reimport DataTable from JSON. Params: assetPath, jsonPath?, jsonString?\n- list_textures: List textures. Params: directory?, recursive?\n- get_texture_info: Get texture details. Params: assetPath\n- set_texture_settings: Set texture settings. Params: assetPath, settings (object with compressionSettings?, lodGroup?, sRGB?, neverStream?). Keys may also be passed at the top level.\n- add_socket: Add socket to StaticMesh or SkeletalMesh. Idempotent on socket name; pass onConflict='update' to overwrite an existing socket's transform with the supplied relativeLocation/relativeRotation/relativeScale (#412). Params: assetPath, socketName, boneName? (SkeletalMesh only, default 'root'), relativeLocation?, relativeRotation?, relativeScale?, onConflict? (skip\\|update\\|error, default skip)\n- remove_socket: Remove socket by name. Params: assetPath, socketName\n- list_sockets: List sockets on a mesh (StaticMesh or SkeletalMesh). Params: assetPath\n- set_socket_transform: Update an existing socket's relative transform on StaticMesh or SkeletalMesh. Pass any subset of relativeLocation/relativeRotation/relativeScale; omitted fields stay at their current values. Errors if the socket does not exist (use add_socket to create). Common after FBX import when SOCKET_* empties land with scale=(100,100,100) (#412). Params: assetPath, socketName, relativeLocation?, relativeRotation?, relativeScale?\n- set_property: Set a UPROPERTY on any loaded asset (Material, DataAsset, DataTable, SubsurfaceProfile, etc.) using a dotted path. Walks nested structs and sub-objects internally - no more read-modify-write copies (e.g. `settings.mean_free_path_distance` on a UMaterial). Value goes through MCPJsonProperty::SetJsonOnProperty so JSON null clears object refs, structs accept {x,y,z}, arrays/maps round-trip. Params: assetPath, propertyName (dotted path), value (#420)\n- set_texture_settings_by_type: Apply the canonical (compressionSettings, sRGB, LOD group) combo to every texture in each group: normal -> Normalmap, grayscale -> Grayscale, baseColor -> Default sRGB, hdr -> HDR. Params: groups (object: {normal?:[paths], grayscale?:[paths], baseColor?:[paths], hdr?:[paths]}) (#421)\n- create_interchange_pipeline: One-call factory for a UInterchangeGenericAssetsPipeline asset with the 15-property mesh-import boilerplate already applied (RecomputeNormals=false, MikkTSpace=true, HighPrecisionTangents=true, BuildNanite=false, CreatePhysicsAsset=false, etc.). Params: assetPath OR (name + packagePath?), meshType? (skeletal default | static), options? (dotted-path overrides on the resulting pipeline e.g. {'MeshPipeline.bBuildNanite': true}), onConflict? (#421)\n- reload_package: Force reload an asset package from disk. Params: assetPath\n- health_check: Diagnose stuck-unloadable asset. Returns onDisk/inRegistry/isLoaded/canLoad/isStuck flags so an agent can detect the half-shutdown state where load returns null but the file exists (#279). Params: assetPath\n- force_reload: Aggressive reload that resets package loaders + GCs + LoadObject. Recovers from the half-shutdown state without an editor restart (#279). Closes any open editors first. Params: assetPath\n- export: Export asset to disk file (Texture2D → PNG, StaticMesh → FBX, etc.). Params: assetPath, outputPath\n- search_fts: Ranked asset search (token-scored over name/class/path). Params: query, maxResults?, classFilter?\n- reindex_fts: Rebuild the SQLite FTS5 asset index. Params: directory?\n- get_referencers: Reverse dependency lookup. Params: packages[] OR packagePath (#150). Returns {referencersByPackage, totalReferencers}.\n- set_sk_material_slots: Set materials on a USkeletalMesh by slot name or slotIndex (bypasses the blueprint override-materials path that UE's ICH silently reverts). Params: assetPath, slots[{slotName?|slotIndex?, materialPath}]\n- diagnose_registry: Scan a content path and compare disk vs AssetRegistry (including in-memory pending-kill entries). Returns onDiskCount, inMemoryIncludedCount, ghostCount and paths. Params: path, recursive? (default true), reconcile? (forceRescan=true)\n- get_mesh_bounds: Get StaticMesh OR SkeletalMesh bounding box. Params: assetPath. Returns min, max, boxExtent, boxCenter, meshKind (#193/#351)\n- get_mesh_info: One-call mesh QA: bounds + material slots + skeleton + LOD/vertex counts. Works for both UStaticMesh and USkeletalMesh. Params: assetPath. Returns meshKind, boundsOrigin, boundsExtent, heightM, lodCount, vertexCount, skeletonPath (skeletal only), materialSlots:[{index, slotName, materialPath, isDefaultFallback}], materialCount (#431)\n- read_import_sources: Read AssetImportData source filenames on an imported asset (StaticMesh, SkeletalMesh, Texture, Animation, etc.). Returns sources[] of {relativeFilename, absolutePath, timestamp, fileHash, displayLabelName}. Params: assetPath (#270)\n- get_mesh_collision: Inspect StaticMesh collision setup. Params: assetPath. Returns collisionTraceFlag, hasSimple/ComplexCollision, element counts (#177)\n- move_folder: Move/rename entire content folder with redirector fixup in one transaction. Params: sourcePath, destinationPath (#192)\n- create_folder: Create empty content browser folder(s). Params: path OR paths[] (e.g. /Game/Foo, /Game/Bar/Baz). Returns per-path created/existed/failed (#212)\n- set_mesh_nav: Set StaticMesh nav contribution. Params: assetPath, bHasNavigationData?, clearNavCollision? (#167)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "search",
+              "read",
+              "read_properties",
+              "duplicate",
+              "rename",
+              "bulk_rename",
+              "move",
+              "delete",
+              "delete_batch",
+              "create_data_asset",
+              "save",
+              "save_all_dirty",
+              "set_mesh_material",
+              "recenter_pivot",
+              "import_static_mesh",
+              "import_skeletal_mesh",
+              "import_animation",
+              "import_texture",
+              "import_texture_batch",
+              "reimport",
+              "read_datatable",
+              "create_datatable",
+              "reimport_datatable",
+              "list_textures",
+              "get_texture_info",
+              "set_texture_settings",
+              "add_socket",
+              "remove_socket",
+              "list_sockets",
+              "set_socket_transform",
+              "set_property",
+              "set_texture_settings_by_type",
+              "create_interchange_pipeline",
+              "reload_package",
+              "health_check",
+              "force_reload",
+              "export",
+              "search_fts",
+              "reindex_fts",
+              "get_referencers",
+              "set_sk_material_slots",
+              "diagnose_registry",
+              "get_mesh_bounds",
+              "get_mesh_info",
+              "read_import_sources",
+              "get_mesh_collision",
+              "move_folder",
+              "create_folder",
+              "set_mesh_nav"
+            ],
+            "description": "Action to perform"
+          },
+          "saveMapPackages": {
+            "type": "boolean",
+            "description": "save_all_dirty: include map packages (default true)"
+          },
+          "saveContentPackages": {
+            "type": "boolean",
+            "description": "save_all_dirty: include content packages (default true)"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "filePath": {
+                  "type": "string"
+                },
+                "packagePath": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "replaceExisting": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "filePath"
+              ],
+              "additionalProperties": false
+            },
+            "description": "import_texture_batch entries"
+          },
+          "save": {
+            "type": "boolean",
+            "description": "import_texture_batch: save imported packages immediately (default true)"
+          },
+          "automated": {
+            "type": "boolean",
+            "description": "import_texture_batch: bypass interactive dialogs (default true)"
+          },
+          "assetPath": {
+            "type": "string",
+            "description": "Asset path"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "maxResults": {
+            "type": "number"
+          },
+          "typeFilter": {
+            "type": "string"
+          },
+          "searchAll": {
+            "type": "boolean",
+            "description": "Search all content roots (plugins, engine content) not just /Game/"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "sourcePath": {
+            "type": "string"
+          },
+          "destinationPath": {
+            "type": "string"
+          },
+          "newName": {
+            "type": "string"
+          },
+          "materialPath": {
+            "type": "string",
+            "description": "Material asset path for set_mesh_material"
+          },
+          "slotIndex": {
+            "type": "number",
+            "description": "Material slot index (default 0)"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Absolute file path for imports"
+          },
+          "name": {
+            "type": "string",
+            "description": "Asset name (defaults to filename)"
+          },
+          "packagePath": {
+            "type": "string",
+            "description": "Destination package path (e.g. /Game/Meshes)"
+          },
+          "groups": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "set_texture_settings_by_type: { normal?: [...], grayscale?: [...], baseColor?: [...], hdr?: [...] }"
+          },
+          "meshType": {
+            "type": "string",
+            "description": "create_interchange_pipeline: 'skeletal' (default) or 'static'"
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "create_interchange_pipeline: dotted-path overrides"
+          },
+          "skeletonPath": {
+            "type": "string"
+          },
+          "combineMeshes": {
+            "type": "boolean",
+            "description": "Combine all meshes in FBX into one (default false — imports as separate assets)"
+          },
+          "importMaterials": {
+            "type": "boolean"
+          },
+          "importTextures": {
+            "type": "boolean"
+          },
+          "generateLightmapUVs": {
+            "type": "boolean"
+          },
+          "rowFilter": {
+            "type": "string"
+          },
+          "rowStruct": {
+            "type": "string"
+          },
+          "jsonPath": {
+            "type": "string"
+          },
+          "jsonString": {
+            "type": "string"
+          },
+          "exportName": {
+            "type": "string"
+          },
+          "propertyName": {
+            "type": "string"
+          },
+          "includeValues": {
+            "type": "boolean",
+            "description": "Include property values in read_properties"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "compressionSettings": {
+            "type": "string",
+            "description": "Texture compression: Default, Normalmap, Grayscale, Displacementmap, VectorDisplacementmap, HDR, EditorIcon, Alpha, DistanceFieldFont, HDR_Compressed, BC7"
+          },
+          "lodGroup": {
+            "type": "string",
+            "description": "Texture LOD group: World, WorldNormalMap, Character, UI, Lightmap, Effects, etc."
+          },
+          "sRGB": {
+            "type": "boolean"
+          },
+          "neverStream": {
+            "type": "boolean"
+          },
+          "assetPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of asset paths (for recenter_pivot batch — first mesh sets reference pivot)"
+          },
+          "renames": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "Array of rename descriptors for bulk_rename — each {sourcePath, destinationPath} or {assetPath, newName}"
+          },
+          "socketName": {
+            "type": "string",
+            "description": "Socket name"
+          },
+          "boneName": {
+            "type": "string",
+            "description": "Bone name (for skeletal mesh sockets)"
+          },
+          "relativeLocation": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "additionalProperties": false,
+            "description": "Socket relative location"
+          },
+          "relativeRotation": {
+            "type": "object",
+            "properties": {
+              "pitch": {
+                "type": "number"
+              },
+              "yaw": {
+                "type": "number"
+              },
+              "roll": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "pitch",
+              "yaw",
+              "roll"
+            ],
+            "additionalProperties": false,
+            "description": "Socket relative rotation"
+          },
+          "relativeScale": {
+            "$ref": "#/properties/relativeLocation",
+            "description": "Socket relative scale"
+          },
+          "outputPath": {
+            "type": "string",
+            "description": "Absolute file path for export (e.g. C:/output/texture.png)"
+          },
+          "classFilter": {
+            "type": "string",
+            "description": "Restrict search_fts to assets whose class name contains this substring"
+          },
+          "className": {
+            "type": "string",
+            "description": "UClass path (/Script/Module.ClassName) or loaded class name for create_data_asset"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Key/value property overrides for create_data_asset"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Package paths for get_referencers"
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "slotName": {
+                  "type": "string"
+                },
+                "slotIndex": {
+                  "type": "number"
+                },
+                "materialPath": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "materialPath"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Per-slot material assignments for set_sk_material_slots"
+          },
+          "path": {
+            "type": "string",
+            "description": "Content path (e.g. /Game/Foo) - used by diagnose_registry, create_folder"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple content paths for create_folder"
+          },
+          "reconcile": {
+            "type": "boolean",
+            "description": "diagnose_registry: force synchronous rescan (evicts pending-kill ghosts)"
+          },
+          "bHasNavigationData": {
+            "type": "boolean",
+            "description": "Toggle nav data generation for set_mesh_nav"
+          },
+          "clearNavCollision": {
+            "type": "boolean",
+            "description": "Remove NavCollision from mesh for set_mesh_nav"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "delete / delete_batch: auto-close any open asset editors before deleting (#278)"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "blueprint",
+      "description": "Blueprint reading, authoring, and compilation. Covers variables, functions, graphs, nodes, components, interfaces, and event dispatchers.\n\nActions:\n- read: Read BP structure incl. SCS components AND inherited native components from the CDO (CharacterMesh0, CharMoveComp, etc.). Params: assetPath, includeComponentProperties? (dump UPROPERTY name/type/value per component template; off by default) (#353/#370)\n- list_variables: List variables. Params: assetPath\n- list_functions: List functions/graphs. Params: assetPath\n- read_graph: Read graph nodes. Params: assetPath, graphName\n- read_graph_summary: Lightweight graph summary (nodes+edges only, ~10KB). Params: assetPath, graphName?\n- get_execution_flow: Trace exec pins from an entry point. Params: assetPath, graphName?, entryPoint?\n- get_dependencies: Forward (classes/functions/assets) or reverse (referencers) deps. Params: assetPath, reverse?\n- create: Create Blueprint. Params: assetPath, parentClass?\n- add_variable: Add variable. Params: assetPath, name, varType\n- set_variable_properties: Edit variable properties. Params: assetPath, name, instanceEditable?, blueprintReadOnly?, category?, tooltip?, replicationType?, exposeOnSpawn?\n- create_function: Create function. Params: assetPath, functionName\n- delete_function: Delete function. Params: assetPath, functionName\n- rename_function: Rename function. Params: assetPath, oldName, newName\n- add_node: Add graph node. Params: assetPath, graphName?, nodeClass, nodeParams?\n- delete_node: Delete node. Params: assetPath, graphName, nodeName\n- set_node_property: Set node pin default or struct property. Params: assetPath, graphName, nodeName, propertyName, value\n- connect_pins: Wire nodes. Params: sourceNode, sourcePin, targetNode, targetPin, assetPath, graphName?\n- add_component: Add BP component. Params: assetPath, componentClass, componentName?, parentComponent? (SCS parent for hierarchy — #115)\n- remove_component: Remove SCS component. Params: assetPath, componentName\n- set_component_property: Set property on SCS or inherited component. Inherited components go through the child BP's InheritableComponentHandler override template so the parent stays untouched. Pass value=null to clear a TObjectPtr/SoftObject/WeakObject/UClass/Interface reference (e.g. clear AnimClass on CharacterMesh0) (#420). Params: assetPath, componentName, propertyName, value\n- set_capsule_size: Call UCapsuleComponent::SetCapsuleSize on a CapsuleComponent template (CharacterMovement-friendly path; raw property writes leave the visualizer stale). Pass either or both of halfHeight/radius. Returns the new + previous values. Params: assetPath, componentName, halfHeight?, radius? (#419)\n- get_component_property: Read a single property value from an SCS or inherited component template. Returns the ICH override value for child BPs if one exists. Params: assetPath, componentName, propertyName\n- set_class_default: Set UPROPERTY on Blueprint CDO. Pass value=null to clear an object/class/interface reference (#420). Params: assetPath, propertyName, value\n- delete_variable: Delete a member variable. Params: assetPath, name\n- add_function_parameter: Add input or output parameter to a function. Params: assetPath, functionName, parameterName, parameterType?, isOutput?\n- set_variable_default: Set default value on a BP variable. Params: assetPath, name, value\n- compile: Compile Blueprint. Params: assetPath\n- list_node_types: List node types. Params: category?, includeFunctions?\n- search_node_types: Search nodes. Params: query\n- create_interface: Create BP Interface. Params: assetPath\n- add_interface: Implement interface. Params: blueprintPath, interfacePath\n- list_graphs: List all graphs in a blueprint. Params: assetPath\n- add_event_dispatcher: Add event dispatcher (multicast delegate variable + signature graph + UFunction). Without parameters, broadcasters fire void(). With parameters, the signature graph gets typed user pins so K2Node_CallDelegate compiles cleanly (#276). Params: blueprintPath, name, parameters?: [{name, type}] where type is bool/int/float/string/name/text/vector/rotator/transform/object:/Script/Module.Class/struct:/Script/Module.Struct\n- duplicate: Duplicate blueprint asset. Params: sourcePath, destinationPath\n- add_local_variable: Add function-scope local variable. Params: assetPath, functionName, name, varType?\n- list_local_variables: List local variables in a function. Params: assetPath, functionName\n- validate: Validate blueprint without saving (compile + collect diagnostics). Params: assetPath\n- read_component_properties: Dump ALL UPROPERTYs on a BP component template incl. array contents (#105). Params: assetPath, componentName\n- read_node_property: Read a node pin default OR a reflected node property for verification (#102). Params: assetPath, graphName?, nodeName, propertyName\n- reparent_component: Reparent an SCS component under a new parent (#115). Params: assetPath, componentName, newParent\n- reparent: Change a Blueprint's ParentClass and recompile (#138). Params: assetPath, parentClass (short name or full path).\n- set_actor_tick_settings: Set actor CDO tick settings (#116). Params: assetPath, bCanEverTick?, bStartWithTickEnabled?, TickInterval?\n- export_nodes_t3d: Export graph nodes as T3D text (Ctrl+C equivalent) for bulk round-trip (#130). Params: assetPath, graphName?, nodeIds? (omit = whole graph)\n- import_nodes_t3d: Paste a T3D node blob into a graph (Ctrl+V equivalent) for bulk authoring (#130). Params: assetPath, graphName?, t3d, posX?, posY?\n- set_cdo_property: Set UPROPERTY on any C++ class CDO (not just Blueprints). Params: className, propertyName, value (#182/#183)\n- get_cdo_properties: Read UPROPERTY values from any C++ class CDO. Params: className, propertyNames? (#183)\n- run_construction_script: Spawn temp actor, run construction script, return generated components and transforms. Params: assetPath, location? (#195)\n- compile_all: Batch compile + save Blueprints. Params: assetPaths[], save? (default true). Returns per-path status (compiled/failed/not_found) (#284)\n- cleanup_graph: Remove orphan/corrupted nodes (no class, blank title+no pins, missing target UFunction). Params: assetPath, graphName? (default: every graph) (#285)\n- connect_pins_batch: Apply many pin connections in one call (single compile + save). Params: assetPath, graphName?, connections[]: [{sourceNode, sourcePin, targetNode, targetPin}] (#267)\n- set_node_position: Move a graph node to (posX, posY). Params: assetPath, graphName?, nodeId, posX, posY (#277)\n- auto_layout: Topological layered layout for a graph. Eliminates the (0,0) stack from programmatic add_node. Params: assetPath, graphName?, columnGap? (default 360), rowGap? (default 200) (#277)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "read",
+              "list_variables",
+              "list_functions",
+              "read_graph",
+              "read_graph_summary",
+              "get_execution_flow",
+              "get_dependencies",
+              "create",
+              "add_variable",
+              "set_variable_properties",
+              "create_function",
+              "delete_function",
+              "rename_function",
+              "add_node",
+              "delete_node",
+              "set_node_property",
+              "connect_pins",
+              "add_component",
+              "remove_component",
+              "set_component_property",
+              "set_capsule_size",
+              "get_component_property",
+              "set_class_default",
+              "delete_variable",
+              "add_function_parameter",
+              "set_variable_default",
+              "compile",
+              "list_node_types",
+              "search_node_types",
+              "create_interface",
+              "add_interface",
+              "list_graphs",
+              "add_event_dispatcher",
+              "duplicate",
+              "add_local_variable",
+              "list_local_variables",
+              "validate",
+              "read_component_properties",
+              "read_node_property",
+              "reparent_component",
+              "reparent",
+              "set_actor_tick_settings",
+              "export_nodes_t3d",
+              "import_nodes_t3d",
+              "set_cdo_property",
+              "get_cdo_properties",
+              "run_construction_script",
+              "compile_all",
+              "cleanup_graph",
+              "connect_pins_batch",
+              "set_node_position",
+              "auto_layout"
+            ],
+            "description": "Action to perform"
+          },
+          "assetPath": {
+            "type": "string",
+            "description": "Blueprint asset path"
+          },
+          "graphName": {
+            "type": "string"
+          },
+          "functionName": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "varType": {
+            "type": "string",
+            "description": "Variable type"
+          },
+          "parentClass": {
+            "type": "string"
+          },
+          "instanceEditable": {
+            "type": "boolean"
+          },
+          "blueprintReadOnly": {
+            "type": "boolean"
+          },
+          "category": {
+            "type": "string"
+          },
+          "tooltip": {
+            "type": "string"
+          },
+          "replicationType": {
+            "type": "string"
+          },
+          "exposeOnSpawn": {
+            "type": "boolean",
+            "description": "Toggle ExposeOnSpawn flag on a variable"
+          },
+          "oldName": {
+            "type": "string"
+          },
+          "newName": {
+            "type": "string"
+          },
+          "nodeClass": {
+            "type": "string"
+          },
+          "nodeParams": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "nodeName": {
+            "type": "string"
+          },
+          "propertyName": {
+            "type": "string"
+          },
+          "value": {},
+          "sourceNode": {
+            "type": "string"
+          },
+          "sourcePin": {
+            "type": "string"
+          },
+          "targetNode": {
+            "type": "string"
+          },
+          "targetPin": {
+            "type": "string"
+          },
+          "componentClass": {
+            "type": "string"
+          },
+          "componentName": {
+            "type": "string"
+          },
+          "halfHeight": {
+            "type": "number",
+            "description": "set_capsule_size: capsule half height (unscaled)"
+          },
+          "radius": {
+            "type": "number",
+            "description": "set_capsule_size: capsule radius (unscaled)"
+          },
+          "parentComponent": {
+            "type": "string",
+            "description": "Parent SCS component for add_component hierarchy (#115)"
+          },
+          "newParent": {
+            "type": "string",
+            "description": "New parent component name for reparent_component"
+          },
+          "bCanEverTick": {
+            "type": "boolean"
+          },
+          "bStartWithTickEnabled": {
+            "type": "boolean"
+          },
+          "TickInterval": {
+            "type": "number"
+          },
+          "parameterName": {
+            "type": "string"
+          },
+          "parameterType": {
+            "type": "string"
+          },
+          "isOutput": {
+            "type": "boolean"
+          },
+          "query": {
+            "type": "string"
+          },
+          "includeFunctions": {
+            "type": "boolean"
+          },
+          "blueprintPath": {
+            "type": "string"
+          },
+          "interfacePath": {
+            "type": "string"
+          },
+          "entryPoint": {
+            "type": "string",
+            "description": "Event/function name to start exec-flow trace"
+          },
+          "reverse": {
+            "type": "boolean",
+            "description": "get_dependencies: true → referencers of this asset"
+          },
+          "includeComponentProperties": {
+            "type": "boolean",
+            "description": "read: dump UPROPERTY name/type/value per component template (#353/#370)"
+          },
+          "sourcePath": {
+            "type": "string"
+          },
+          "destinationPath": {
+            "type": "string"
+          },
+          "nodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Node guids/names to export (omit = whole graph)"
+          },
+          "t3d": {
+            "type": "string",
+            "description": "T3D blob from export_nodes_t3d (or copied from the BP graph editor)"
+          },
+          "className": {
+            "type": "string",
+            "description": "C++ class name or path for set_cdo_property / get_cdo_properties"
+          },
+          "propertyNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Property names to read for get_cdo_properties (omit = all)"
+          },
+          "posX": {
+            "type": "number",
+            "description": "Re-center pasted nodes around this X (with posY)"
+          },
+          "posY": {
+            "type": "number",
+            "description": "Re-center pasted nodes around this Y (with posX)"
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "description": "add_event_dispatcher: typed signature parameters [{name, type}]. type is bool/int/float/string/name/text/vector/rotator/transform/object:/Script/Module.Class/struct:/Script/Module.Struct"
+          },
+          "assetPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Asset paths for compile_all"
+          },
+          "save": {
+            "type": "boolean",
+            "description": "compile_all: persist on success (default true)"
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Node guid or name (set_node_position)"
+          },
+          "columnGap": {
+            "type": "number",
+            "description": "auto_layout: horizontal spacing between columns (default 360)"
+          },
+          "rowGap": {
+            "type": "number",
+            "description": "auto_layout: vertical spacing between rows (default 200)"
+          },
+          "connections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sourceNode": {
+                  "type": "string"
+                },
+                "sourcePin": {
+                  "type": "string"
+                },
+                "targetNode": {
+                  "type": "string"
+                },
+                "targetPin": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sourceNode",
+                "sourcePin",
+                "targetNode",
+                "targetPin"
+              ],
+              "additionalProperties": false
+            },
+            "description": "connect_pins_batch: per-connection records"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "level",
+      "description": "Level actors, selection, components, level management, volumes, lights, and splines.\n\nActions:\n- get_outliner: List actors. Params: classFilter?, nameFilter?, world? (editor|pie|auto), limit?\n- place_actor: Spawn actor. Params: actorClass, label?, location?, rotation?, scale?, staticMesh?, material?\n- delete_actor: Remove actor. Params: actorLabel\n- get_actor_details: Inspect actor. Params: actorLabel OR actorPath, includeProperties?, propertyName?, world? (editor|pie)\n- move_actor: Transform actor. Params: actorLabel, location?, rotation?, scale?\n- select: Select actors. Params: actorLabels[]\n- get_selected: Get selection\n- add_component: Add component to actor. Params: actorLabel, componentClass, componentName?\n- remove_component: Remove instance component from a level actor by name. Idempotent: returns alreadyDeleted=true if no matching component exists. Params: actorLabel, componentName (#426)\n- set_component_property: Set component prop. Pass value=null to clear a TObjectPtr/SoftObject/WeakObject/UClass/Interface reference (#420). Params: actorLabel, componentName, propertyName, value\n- get_current: Get current level name and path\n- load: Load level. Params: levelPath\n- save: Save current level\n- list: List levels. Params: directory?, recursive?\n- create: Create new level. Params: levelPath?, templateLevel?\n- spawn_volume: Place volume. Params: volumeType, location?, extent?, label?\n- list_volumes: List volumes. Params: volumeType?\n- set_volume_properties: Edit volume. Params: actorLabel, properties\n- spawn_light: Place light. Params: lightType (point|spot|directional|rect|sky), location?, rotation?, intensity?, color? ({r,g,b} 0-255), mobility? (static|stationary|movable; default movable so the light renders without a build), label? (#331/#310)\n- set_light_properties: Edit light. Params: actorLabel, intensity?, color?, rotation? (DirectionalLight sun angle), mobility? (static|stationary|movable), recaptureSky?, temperature?, castShadows?, attenuationRadius?\n- set_fog_properties: Edit ExponentialHeightFog. Params: actorLabel?, fogDensity?, fogHeightFalloff?, startDistance?, fogInscatteringColor?\n- get_actors_by_class: List actors by class name. Params: className, world? (editor|pie)\n- count_actors_by_class: Histogram of actor classes in the level (sorted desc). Params: world? (editor|pie), topN? (#146)\n- get_runtime_virtual_texture_summary: List RuntimeVirtualTextureVolume actors + their bound VirtualTexture assets (#150)\n- set_water_body_property: Set a property on an actor's WaterBodyComponent (ShapeDilation, WaterLevel, etc.). Params: actorLabel, propertyName, value. Requires Water plugin. For spline edits use level(set_spline_points) (#151)\n- build_lighting: Build lights. Params: quality?\n- get_spline_info: Read spline. Params: actorLabel\n- set_spline_points: Set spline points. Params: actorLabel, points[], closedLoop?\n- set_actor_material: Set material on actor. Params: actorLabel, materialPath, slotIndex?\n- get_world_settings: Read world settings (GameMode, KillZ, gravity, etc.)\n- set_world_settings: Set world settings. Params: defaultGameMode?, killZ?, globalGravityZ?, enableWorldBoundsChecks?\n- get_actor_bounds: Get actor AABB. Params: actorLabel. Returns origin + extent (#188)\n- get_component_tree: Deep component-tree dump for an actor. Returns per-component: name, class, attachParent, attachSocket, mobility, visibility, relative+world transforms, tags. For PrimitiveComponents adds collisionProfile/collisionEnabled/bounds/castShadow. For StaticMeshComponent adds staticMesh + materials[]. For SkeletalMeshComponent adds skeletalMesh + skeleton + materials[]. Params: actorLabel | actorPath, world? (editor|pie), componentClass? (substring filter), includeProperties? (dump UPROPERTY name/type/value per component) (#240/#241/#302/#320/#370/#353)\n- get_relative_transform: Compute target's transform in reference's local space (location/rotation/scale). Common dungeon/calibration workflow. Params: target (actor label), reference (actor label), world? (#386/#387)\n- resolve_actor: Resolve internal/runtime actor name to editor label. Params: internalName (e.g. StaticMeshActor_141). Returns actorLabel, actorPath, className, location (#178)\n- set_actor_property: Set per-instance UPROPERTY on a level actor. Params: actorLabel ('WorldSettings' targets the world settings actor), propertyName (dotted paths like 'Foo.Bar' supported), value (string/number/bool/object/array; an actor label resolves to AActor* refs), force? (bypass EditDefaultsOnly), world? (editor|pie) (#202/#230)\n- delete_actors: Bulk-delete actors. Params: at least one of labelPrefix, className, tag; dryRun? to preview. Returns matched/deleted/labels (#220)\n- add_actor_tag: Append a tag to an actor's Tags array. Params: actorLabel, tag (#219)\n- remove_actor_tag: Remove a tag from an actor's Tags array. Params: actorLabel, tag (#219)\n- set_actor_tags: Replace an actor's Tags array. Params: actorLabel, tags[] (#219)\n- list_actor_tags: List an actor's Tags. Params: actorLabel (#219)\n- attach_actor: Attach actor as child. Params: childLabel, parentLabel, attachRule? (KeepWorld|KeepRelative|SnapToTarget; default KeepWorld), socketName? (#205)\n- detach_actor: Detach actor from parent. Params: childLabel (#205)\n- set_actor_mobility: Set actor root component Mobility. Params: actorLabel, mobility (static|stationary|movable) (#205)\n- get_current_edit_level: Read the active edit-target sub-level (#204)\n- set_current_edit_level: Set the active edit-target sub-level so subsequent spawns land in it. Params: levelName (e.g. SubLevel_A) (#204)\n- list_streaming_sublevels: List streaming sub-levels with transform + initially-loaded/visible flags (#206)\n- add_streaming_sublevel: Add a streaming sub-level. Params: levelPath, streamingClass? (LevelStreamingDynamic|LevelStreamingAlwaysLoaded), location?, initiallyLoaded?, initiallyVisible? (#206)\n- remove_streaming_sublevel: Remove a streaming sub-level. Params: levelName | levelPath (#206)\n- set_streaming_sublevel_properties: Update sub-level transform/visibility flags. Params: levelName | levelPath, location?, initiallyLoaded?, initiallyVisible?, editorVisible? (#206)\n- spawn_grid: Batch-spawn StaticMeshActors on a grid. Params: staticMesh, min, max (Vec3 bounds), countX?, countY?, countZ?, jitter?, labelPrefix? (#203)\n- batch_translate: Translate a set of actors by an offset. Params: offset (Vec3), actorLabels[] OR tag (#203)\n- place_actors_batch: Bulk-spawn StaticMeshActors with per-instance mesh + transform. Params: actors[]: [{staticMesh, location?, rotation?, scale?, label?}]. Mesh loads cached per path. Returns spawned/failedMesh/failedSpawn counts + labels (#264)\n- line_trace: Line trace in the editor world. Returns hit + actorLabel/actorClass/componentName/componentClass/location/impactPoint/normal/distance/faceIndex/boneName/physicalMaterial. Params: start (Vec3), end? (Vec3) OR direction? (Vec3) + distance? (default 200000), ignoreActors? (array of labels) (#420)\n- snap_actor_to_floor: Snap an actor's bounds-bottom to the first downward line-trace hit. Equivalent of the End-key shortcut, works on arbitrary geometry (not just Landscape). Params: actorLabel, floorOffset? (added to impact Z, default 0), maxDistance? (default 100000) (#419)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "get_outliner",
+              "place_actor",
+              "delete_actor",
+              "get_actor_details",
+              "move_actor",
+              "select",
+              "get_selected",
+              "add_component",
+              "remove_component",
+              "set_component_property",
+              "get_current",
+              "load",
+              "save",
+              "list",
+              "create",
+              "spawn_volume",
+              "list_volumes",
+              "set_volume_properties",
+              "spawn_light",
+              "set_light_properties",
+              "set_fog_properties",
+              "get_actors_by_class",
+              "count_actors_by_class",
+              "get_runtime_virtual_texture_summary",
+              "set_water_body_property",
+              "build_lighting",
+              "get_spline_info",
+              "set_spline_points",
+              "set_actor_material",
+              "get_world_settings",
+              "set_world_settings",
+              "get_actor_bounds",
+              "get_component_tree",
+              "get_relative_transform",
+              "resolve_actor",
+              "set_actor_property",
+              "delete_actors",
+              "add_actor_tag",
+              "remove_actor_tag",
+              "set_actor_tags",
+              "list_actor_tags",
+              "attach_actor",
+              "detach_actor",
+              "set_actor_mobility",
+              "get_current_edit_level",
+              "set_current_edit_level",
+              "list_streaming_sublevels",
+              "add_streaming_sublevel",
+              "remove_streaming_sublevel",
+              "set_streaming_sublevel_properties",
+              "spawn_grid",
+              "batch_translate",
+              "place_actors_batch",
+              "line_trace",
+              "snap_actor_to_floor"
+            ],
+            "description": "Action to perform"
+          },
+          "actorLabel": {
+            "type": "string"
+          },
+          "actorLabels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "actorClass": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "additionalProperties": false
+          },
+          "rotation": {
+            "type": "object",
+            "properties": {
+              "pitch": {
+                "type": "number"
+              },
+              "yaw": {
+                "type": "number"
+              },
+              "roll": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "pitch",
+              "yaw",
+              "roll"
+            ],
+            "additionalProperties": false
+          },
+          "scale": {
+            "$ref": "#/properties/location"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "classFilter": {
+            "type": "string"
+          },
+          "nameFilter": {
+            "type": "string"
+          },
+          "componentClass": {
+            "type": "string"
+          },
+          "componentName": {
+            "type": "string"
+          },
+          "propertyName": {
+            "type": "string"
+          },
+          "value": {},
+          "levelPath": {
+            "type": "string"
+          },
+          "templateLevel": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "volumeType": {
+            "type": "string"
+          },
+          "extent": {
+            "$ref": "#/properties/location"
+          },
+          "lightType": {
+            "type": "string"
+          },
+          "intensity": {
+            "type": "number"
+          },
+          "color": {
+            "type": "object",
+            "properties": {
+              "r": {
+                "type": "number"
+              },
+              "g": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              },
+              "a": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "r",
+              "g",
+              "b"
+            ],
+            "additionalProperties": false
+          },
+          "temperature": {
+            "type": "number"
+          },
+          "castShadows": {
+            "type": "boolean"
+          },
+          "attenuationRadius": {
+            "type": "number"
+          },
+          "innerConeAngle": {
+            "type": "number"
+          },
+          "outerConeAngle": {
+            "type": "number"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/location"
+            }
+          },
+          "closedLoop": {
+            "type": "boolean"
+          },
+          "staticMesh": {
+            "type": "string",
+            "description": "Asset path for static mesh (e.g. /Engine/BasicShapes/Cube.Cube)"
+          },
+          "material": {
+            "type": "string",
+            "description": "Asset path for material to apply at slot 0"
+          },
+          "materialPath": {
+            "type": "string",
+            "description": "Material asset path for set_actor_material"
+          },
+          "slotIndex": {
+            "type": "number",
+            "description": "Material slot index (default 0)"
+          },
+          "actorPath": {
+            "type": "string",
+            "description": "Full actor object path; alternative to actorLabel"
+          },
+          "includeProperties": {
+            "type": "boolean",
+            "description": "Include reflected UPROPERTY values in get_actor_details"
+          },
+          "world": {
+            "type": "string",
+            "description": "World scope: editor (default) or pie"
+          },
+          "className": {
+            "type": "string",
+            "description": "Class name filter for get_actors_by_class"
+          },
+          "topN": {
+            "type": "number",
+            "description": "Limit for count_actors_by_class result"
+          },
+          "fogDensity": {
+            "type": "number"
+          },
+          "fogHeightFalloff": {
+            "type": "number"
+          },
+          "startDistance": {
+            "type": "number"
+          },
+          "fogInscatteringColor": {
+            "$ref": "#/properties/color"
+          },
+          "recaptureSky": {
+            "type": "boolean"
+          },
+          "defaultGameMode": {
+            "type": "string"
+          },
+          "killZ": {
+            "type": "number"
+          },
+          "globalGravityZ": {
+            "type": "number"
+          },
+          "enableWorldBoundsChecks": {
+            "type": "boolean"
+          },
+          "internalName": {
+            "type": "string",
+            "description": "Internal/runtime UObject name for resolve_actor (e.g. StaticMeshActor_141)"
+          },
+          "target": {
+            "type": "string",
+            "description": "Target actor label for get_relative_transform"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Reference actor label for get_relative_transform"
+          },
+          "start": {
+            "$ref": "#/properties/location",
+            "description": "line_trace: ray start"
+          },
+          "end": {
+            "$ref": "#/properties/location",
+            "description": "line_trace: ray end (use this OR direction+distance)"
+          },
+          "direction": {
+            "$ref": "#/properties/location",
+            "description": "line_trace: ray direction (unit-normalized internally)"
+          },
+          "distance": {
+            "type": "number",
+            "description": "line_trace: ray length when direction is supplied (default 200000)"
+          },
+          "ignoreActors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "line_trace: actor labels to skip"
+          },
+          "floorOffset": {
+            "type": "number",
+            "description": "snap_actor_to_floor: vertical offset added to impact Z"
+          },
+          "maxDistance": {
+            "type": "number",
+            "description": "snap_actor_to_floor: line-trace length downward (default 100000)"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "set_actor_property: bypass EditDefaultsOnly to write per-instance overrides"
+          },
+          "labelPrefix": {
+            "type": "string",
+            "description": "delete_actors: actor label prefix filter"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "delete_actors: report matches without deleting"
+          },
+          "childLabel": {
+            "type": "string"
+          },
+          "parentLabel": {
+            "type": "string"
+          },
+          "attachRule": {
+            "type": "string",
+            "description": "attach_actor: KeepWorld | KeepRelative | SnapToTarget"
+          },
+          "socketName": {
+            "type": "string"
+          },
+          "mobility": {
+            "type": "string",
+            "description": "set_actor_mobility: static | stationary | movable"
+          },
+          "levelName": {
+            "type": "string"
+          },
+          "streamingClass": {
+            "type": "string",
+            "description": "add_streaming_sublevel: LevelStreamingDynamic (default) | LevelStreamingAlwaysLoaded"
+          },
+          "initiallyLoaded": {
+            "type": "boolean"
+          },
+          "initiallyVisible": {
+            "type": "boolean"
+          },
+          "editorVisible": {
+            "type": "boolean",
+            "description": "set_streaming_sublevel_properties: editor viewport visibility"
+          },
+          "min": {
+            "$ref": "#/properties/location",
+            "description": "spawn_grid lower bound"
+          },
+          "max": {
+            "$ref": "#/properties/location",
+            "description": "spawn_grid upper bound"
+          },
+          "countX": {
+            "type": "number"
+          },
+          "countY": {
+            "type": "number"
+          },
+          "countZ": {
+            "type": "number"
+          },
+          "jitter": {
+            "type": "number",
+            "description": "spawn_grid: per-axis location jitter"
+          },
+          "offset": {
+            "$ref": "#/properties/location"
+          },
+          "actors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "staticMesh": {
+                  "type": "string"
+                },
+                "location": {
+                  "$ref": "#/properties/location"
+                },
+                "rotation": {
+                  "$ref": "#/properties/rotation"
+                },
+                "scale": {
+                  "$ref": "#/properties/location"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "staticMesh"
+              ],
+              "additionalProperties": false
+            },
+            "description": "place_actors_batch: per-instance mesh+transform records"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "material",
+      "description": "Materials: create, read, parameters, shading, textures, and graph authoring (expression nodes, connections).\n\nActions:\n- read: Read material structure. Params: assetPath\n- list_parameters: List overridable parameters. Params: assetPath\n- set_parameter: Set parameter on MaterialInstance. Params: assetPath, parameterName, parameterType, value\n- set_expression_value: Set value on expression node. Params: materialPath, expressionIndex, value\n- disconnect_property: Disconnect a material property input. Params: materialPath, property\n- create_instance: Create material instance. Params: parentPath, name?, packagePath?\n- create: Create material. Params: name, packagePath?\n- create_simple: Single-call simple material. Params: name, packagePath?, baseColor? ({r,g,b}), metallic?, specular?, roughness?, emissive?, usages?[] (e.g. InstancedStaticMeshes, Nanite, NiagaraSprites). Recompiles + saves in one shot (#225)\n- set_usage: Set EMaterialUsage flag(s) on a material. Params: assetPath, usage OR usages[], enabled? (default true). Recompiles + saves (#225)\n- set_shading_model: Set shading model. Params: assetPath, shadingModel\n- set_blend_mode: Set blend mode. Params: assetPath, blendMode\n- set_domain: Set material domain. Params: assetPath, materialDomain (Surface | DeferredDecal | LightFunction | Volume | PostProcess | UI | RuntimeVirtualTexture). Required for post-process / decal / UI authoring (#299/#356).\n- set_base_color: Set base color. Params: assetPath, color\n- connect_texture: Connect texture to property. Params: materialPath, texturePath, property\n- add_expression: Add expression node. Params: materialPath, expressionType, name?, parameterName?, group?, sortPriority?, defaultValue? (scalar number or {r,g,b,a} for vector params), value? (number for Constant, {r,g,b} for Constant3Vector, {x,y} for Constant2Vector), channels? ({r,g,b,a} bools for ComponentMask), positionX?, positionY? (#318)\n- connect_expressions: Wire two expressions. Params: materialPath, sourceExpression, sourceOutput?, targetExpression, targetInput?\n- connect_to_property: Wire expression to material output. Params: materialPath, expressionName, outputName?, property\n- list_expressions: List expression nodes. Params: materialPath\n- delete_expression: Remove expression. Params: materialPath, expressionName\n- list_expression_types: List available expression types\n- recompile: Recompile material. Pass recompileChildren=true to cascade to every MaterialInstanceConstant whose parent chain reaches this material (#421). Params: materialPath, recompileChildren?\n- duplicate: Duplicate material asset. Params: sourcePath, destinationPath\n- validate: Validate material graph — find orphans, broken refs. Params: assetPath\n- get_shader_stats: Shader compile stats, sampler+param counts. Params: assetPath\n- export_graph: Export material graph as JSON. Params: assetPath\n- import_graph: Rebuild graph from JSON. Params: assetPath, nodes, propertyConnections?\n- build_graph: Build graph from spec. Params: assetPath, nodes, propertyConnections?\n- render_preview: Render preview PNG. Params: assetPath, outputPath, width?, height?\n- begin_transaction: Begin undo transaction. Params: label?\n- end_transaction: End undo transaction",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "read",
+              "list_parameters",
+              "set_parameter",
+              "set_expression_value",
+              "disconnect_property",
+              "create_instance",
+              "create",
+              "create_simple",
+              "set_usage",
+              "set_shading_model",
+              "set_blend_mode",
+              "set_domain",
+              "set_base_color",
+              "connect_texture",
+              "add_expression",
+              "connect_expressions",
+              "connect_to_property",
+              "list_expressions",
+              "delete_expression",
+              "list_expression_types",
+              "recompile",
+              "duplicate",
+              "validate",
+              "get_shader_stats",
+              "export_graph",
+              "import_graph",
+              "build_graph",
+              "render_preview",
+              "begin_transaction",
+              "end_transaction"
+            ],
+            "description": "Action to perform"
+          },
+          "assetPath": {
+            "type": "string"
+          },
+          "parameterName": {
+            "type": "string"
+          },
+          "parameterType": {
+            "type": "string",
+            "description": "Parameter type for set_parameter: scalar, vector, texture"
+          },
+          "expressionIndex": {
+            "type": "number"
+          },
+          "value": {},
+          "parentPath": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "shadingModel": {
+            "type": "string"
+          },
+          "blendMode": {
+            "type": "string",
+            "description": "Blend mode: Opaque, Masked, Translucent, Additive, Modulate, AlphaComposite, AlphaHoldout"
+          },
+          "materialDomain": {
+            "type": "string",
+            "description": "Material domain for set_domain: Surface, DeferredDecal, LightFunction, Volume, PostProcess, UI, RuntimeVirtualTexture"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Alias for materialDomain"
+          },
+          "group": {
+            "type": "string",
+            "description": "Parameter Group on add_expression for parameter nodes (#318)"
+          },
+          "sortPriority": {
+            "type": "number",
+            "description": "SortPriority within a parameter Group"
+          },
+          "defaultValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            ],
+            "description": "ScalarParameter default (number) or VectorParameter default ({r,g,b,a})"
+          },
+          "channels": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "ComponentMask channels {r,g,b,a} bools"
+          },
+          "positionX": {
+            "type": "number"
+          },
+          "positionY": {
+            "type": "number"
+          },
+          "color": {
+            "type": "object",
+            "properties": {
+              "r": {
+                "type": "number"
+              },
+              "g": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              },
+              "a": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "r",
+              "g",
+              "b"
+            ],
+            "additionalProperties": false
+          },
+          "materialPath": {
+            "type": "string"
+          },
+          "recompileChildren": {
+            "type": "boolean",
+            "description": "recompile_material: cascade to MaterialInstances whose parent chain reaches this material"
+          },
+          "texturePath": {
+            "type": "string"
+          },
+          "property": {
+            "type": "string",
+            "description": "Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc."
+          },
+          "expressionType": {
+            "type": "string",
+            "description": "Expression type: Constant, TextureSample, Multiply, Lerp, ScalarParameter, etc."
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "sourceExpression": {
+            "type": "string"
+          },
+          "sourceOutput": {
+            "type": "string"
+          },
+          "targetExpression": {
+            "type": "string"
+          },
+          "targetInput": {
+            "type": "string"
+          },
+          "expressionName": {
+            "type": "string"
+          },
+          "outputName": {
+            "type": "string"
+          },
+          "sourcePath": {
+            "type": "string"
+          },
+          "destinationPath": {
+            "type": "string"
+          },
+          "outputPath": {
+            "type": "string",
+            "description": "Absolute file path for render_preview PNG output"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "Graph spec: [{name,class,posX,posY,...}]"
+          },
+          "propertyConnections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "[{property,from,outputIndex}]"
+          },
+          "label": {
+            "type": "string",
+            "description": "Transaction label"
+          },
+          "baseColor": {
+            "$ref": "#/properties/color",
+            "description": "create_simple base color"
+          },
+          "metallic": {
+            "type": "number"
+          },
+          "specular": {
+            "type": "number"
+          },
+          "roughness": {
+            "type": "number"
+          },
+          "emissive": {
+            "type": "number"
+          },
+          "usage": {
+            "type": "string",
+            "description": "set_usage: single MATUSAGE flag name"
+          },
+          "usages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "MATUSAGE flag names for create_simple/set_usage (InstancedStaticMeshes, Nanite, NiagaraSprites, ...)"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "set_usage: enable (default true) or disable"
+          },
+          "onConflict": {
+            "type": "string",
+            "description": "create_simple: skip (default) | error"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "animation",
+      "description": "Animation assets, skeletons, montages, blendspaces, anim blueprints, physics assets.\n\nActions:\n- read_anim_blueprint: Read AnimBP structure. Params: assetPath\n- read_montage: Read montage. Params: assetPath\n- read_sequence: Read anim sequence. Params: assetPath\n- read_blendspace: Read blendspace. Params: assetPath\n- add_blend_sample: Append a sample to a BlendSpace. Params: assetPath, animation (AnimSequence path), position {x,y} (or flat x,y) (#248)\n- set_blend_sample: Move an existing BlendSpace sample or swap its animation. Params: assetPath, sampleIndex, position? {x,y} (or flat x,y), animation? (#272)\n- list: List anim assets. Params: directory?, recursive?\n- create_montage: Create montage. Params: animSequencePath, name?, packagePath?\n- create_anim_blueprint: Create AnimBP. Params: skeletonPath, name?, packagePath?, parentClass?\n- create_blendspace: Create blendspace. Params: skeletonPath, name?, packagePath?, axisHorizontal?, axisVertical?\n- add_notify: Add notify. Params: assetPath, notifyName, triggerTime, notifyClass?\n- get_skeleton_info: Read skeleton. Params: assetPath\n- list_sockets: List sockets. Params: assetPath\n- list_skeletal_meshes: List skeletal meshes. Params: directory?, recursive?\n- get_physics_asset: Read physics asset. Params: assetPath\n- create_sequence: Create blank AnimSequence. Params: name, skeletonPath, packagePath?, numFrames?, frameRate?\n- set_bone_keyframes: Set bone transform keyframes. Params: assetPath, boneName, keyframes\n- get_bone_transforms: Read reference pose transforms. Params: skeletonPath, boneNames?, space? ('local' default, or 'component' for composed parent-chain transforms - retarget-chain / anatomical-scale work) (#245)\n- set_montage_sequence: Replace animation sequence in a montage. Params: assetPath, animSequencePath, slotIndex?\n- set_montage_properties: Set montage properties. Params: assetPath, sequenceLength?, rateScale?, blendIn?, blendOut?\n- create_state_machine: Create state machine in AnimBP. Params: assetPath, name?, graphName?\n- add_state: Add state to a state machine. Params: assetPath, stateMachineName, stateName\n- add_transition: Add directed transition between states. Params: assetPath, stateMachineName, fromState, toState\n- set_state_animation: Assign anim asset to state. Params: assetPath, stateMachineName, stateName, animAssetPath\n- set_transition_blend: Set blend type/duration on transition. Params: assetPath, stateMachineName, fromState, toState, blendDuration?, blendLogic?\n- read_state_machine: Read state machine topology. Params: assetPath, stateMachineName\n- read_anim_graph: Read AnimBP AnimGraph nodes with properties & pins. Params: assetPath, graphName?\n- add_curve: Add float curve to AnimSequence. Params: assetPath, curveName, curveType?\n- set_montage_slot: Set slot name on a montage track. Params: assetPath, slotName, trackIndex?\n- add_montage_section: Add composite section to montage. Params: assetPath, sectionName, startTime?, linkedSection?\n- create_ik_rig: Create IKRigDefinition asset, optionally with retargetRoot + chains[]. Params: name, skeletalMeshPath, packagePath?, retargetRoot?, chains?: [{name, startBone, endBone, goal?}]\n- read_ik_rig: Read IK Rig chains, solvers, skeleton. Params: assetPath\n- list_control_rig_variables: List ControlRig variables and hierarchy. Params: assetPath\n- set_root_motion: Set root motion settings on AnimSequence. Params: assetPath, enableRootMotion?, forceRootLock?, useNormalizedRootMotionScale?, rootMotionRootLock?\n- add_virtual_bone: Add virtual bone. Params: skeletonPath, sourceBone, targetBone\n- remove_virtual_bone: Remove virtual bone. Params: skeletonPath, virtualBoneName\n- create_composite: Create AnimComposite. Params: name, skeletonPath, packagePath?\n- list_modifiers: List applied animation modifiers. Params: assetPath\n- create_ik_retargeter: Create IKRetargeter asset and (default) initialize the UE 5.7 ops stack: assigns sourceRig+targetRig to all ops, runs AutoMapChains. Returns chainsMapped count. Params: name, packagePath?, sourceRig?, targetRig?, autoMapChains? (default true) (#246)\n- read_ik_retargeter: Read IKRetargeter: source/target rigs and chain mappings. Params: assetPath (#246)\n- set_anim_blueprint_skeleton: Set target skeleton on AnimBP. Params: assetPath, skeletonPath\n- read_bone_track: Read bone transform samples from AnimSequence. Params: assetPath, boneName, frames?: [int]\n- create_pose_search_database: Create a PoseSearchDatabase asset (motion matching). Params: name, packagePath?, schemaPath?\n- set_pose_search_schema: Set the Schema on an existing PoseSearchDatabase. Params: assetPath, schemaPath\n- add_pose_search_sequence: Append an AnimSequence/AnimComposite/AnimMontage/BlendSpace to a PoseSearchDatabase. Params: assetPath, sequencePath\n- build_pose_search_index: Build (or rebuild) the search index. Params: assetPath, wait? (default true)\n- read_pose_search_database: Inspect a PoseSearchDatabase: schema, animation entries, cost biases, tags. Params: assetPath\n- set_sequence_properties: Batch-set properties on AnimSequence assets. If a path is a Montage and resolveFromMontages is true (default), resolves to its first AnimSequence. Params: assetPaths[], properties{enableRootMotion?, forceRootLock?, useNormalizedRootMotionScale?, rootMotionRootLock?}, resolveFromMontages?\n- bake_root_motion_from_bone: Bake delta translation from a source bone (e.g. pelvis) onto the root bone across the whole sequence; compensates the source bone so world-space position is unchanged. Params: assetPath, sourceBone, rootBone? (default 'root'), axes? (default ['x','y']), interpolation? ('linear'|'per_frame', default 'linear')\n- get_bone_transform: Read a bone or socket transform on a live actor's SkeletalMeshComponent. Wraps GetBoneTransform / GetSocketTransform. Params: actorLabel, boneName (or socket name), componentName? (default: CharacterMesh0 / Mesh / first SK component), space? (world|component|local, default world). Returns location, rotation, scale (#420)\n- list_bones: List bones in a live actor's SkeletalMeshComponent ref skeleton (name, index, parent). Params: actorLabel, componentName? (#420)\n- rebind_leader_pose: Re-bind every secondary SkeletalMeshComponent on an actor to a body component (default CharacterMesh0 / Mesh). One-call fix for the 'character explodes after rotating the actor' failure mode. Params: actorLabel, bodyComponent? (#419)\n- preview_animation: Toggle bUpdateAnimationInEditor + VisibilityBasedAnimTickOption=AlwaysTickPoseAndRefreshBones on every SkeletalMeshComponent of an actor. Bypasses the 'cannot be edited on templates' guard for level instances. Params: actorLabel, enabled (#419/#420)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "read_anim_blueprint",
+              "read_montage",
+              "read_sequence",
+              "read_blendspace",
+              "add_blend_sample",
+              "set_blend_sample",
+              "list",
+              "create_montage",
+              "create_anim_blueprint",
+              "create_blendspace",
+              "add_notify",
+              "get_skeleton_info",
+              "list_sockets",
+              "list_skeletal_meshes",
+              "get_physics_asset",
+              "create_sequence",
+              "set_bone_keyframes",
+              "get_bone_transforms",
+              "set_montage_sequence",
+              "set_montage_properties",
+              "create_state_machine",
+              "add_state",
+              "add_transition",
+              "set_state_animation",
+              "set_transition_blend",
+              "read_state_machine",
+              "read_anim_graph",
+              "add_curve",
+              "set_montage_slot",
+              "add_montage_section",
+              "create_ik_rig",
+              "read_ik_rig",
+              "list_control_rig_variables",
+              "set_root_motion",
+              "add_virtual_bone",
+              "remove_virtual_bone",
+              "create_composite",
+              "list_modifiers",
+              "create_ik_retargeter",
+              "read_ik_retargeter",
+              "set_anim_blueprint_skeleton",
+              "read_bone_track",
+              "create_pose_search_database",
+              "set_pose_search_schema",
+              "add_pose_search_sequence",
+              "build_pose_search_index",
+              "read_pose_search_database",
+              "set_sequence_properties",
+              "bake_root_motion_from_bone",
+              "get_bone_transform",
+              "list_bones",
+              "rebind_leader_pose",
+              "preview_animation"
+            ],
+            "description": "Action to perform"
+          },
+          "assetPath": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "animSequencePath": {
+            "type": "string"
+          },
+          "skeletonPath": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "axisHorizontal": {
+            "type": "string"
+          },
+          "axisVertical": {
+            "type": "string"
+          },
+          "notifyName": {
+            "type": "string"
+          },
+          "triggerTime": {
+            "type": "number"
+          },
+          "notifyClass": {
+            "type": "string"
+          },
+          "slotIndex": {
+            "type": "number"
+          },
+          "sequenceLength": {
+            "type": "number"
+          },
+          "rateScale": {
+            "type": "number"
+          },
+          "blendIn": {
+            "type": "number"
+          },
+          "blendOut": {
+            "type": "number"
+          },
+          "numFrames": {
+            "type": "number"
+          },
+          "frameRate": {
+            "type": "number"
+          },
+          "boneName": {
+            "type": "string"
+          },
+          "boneNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parentClass": {
+            "type": "string",
+            "description": "Parent AnimInstance class name for create_anim_blueprint"
+          },
+          "stateMachineName": {
+            "type": "string"
+          },
+          "stateName": {
+            "type": "string"
+          },
+          "fromState": {
+            "type": "string"
+          },
+          "toState": {
+            "type": "string"
+          },
+          "animAssetPath": {
+            "type": "string",
+            "description": "Path to animation sequence or blendspace"
+          },
+          "blendDuration": {
+            "type": "number"
+          },
+          "blendLogic": {
+            "type": "string",
+            "description": "Standard or Inertialization"
+          },
+          "graphName": {
+            "type": "string",
+            "description": "Target graph name (default: AnimGraph)"
+          },
+          "curveName": {
+            "type": "string",
+            "description": "Curve name for add_curve"
+          },
+          "curveType": {
+            "type": "string",
+            "description": "Curve type (default: float)"
+          },
+          "slotName": {
+            "type": "string",
+            "description": "Slot name for set_montage_slot"
+          },
+          "trackIndex": {
+            "type": "number",
+            "description": "Slot track index (default: 0)"
+          },
+          "sectionName": {
+            "type": "string",
+            "description": "Section name for add_montage_section"
+          },
+          "startTime": {
+            "type": "number",
+            "description": "Start time for montage section"
+          },
+          "linkedSection": {
+            "type": "string",
+            "description": "Next section name to link to"
+          },
+          "skeletalMeshPath": {
+            "type": "string",
+            "description": "Path to skeletal mesh for create_ik_rig"
+          },
+          "enableRootMotion": {
+            "type": "boolean"
+          },
+          "forceRootLock": {
+            "type": "boolean"
+          },
+          "useNormalizedRootMotionScale": {
+            "type": "boolean"
+          },
+          "rootMotionRootLock": {
+            "type": "string",
+            "description": "RefPose|AnimFirstFrame|Zero"
+          },
+          "sourceBone": {
+            "type": "string"
+          },
+          "targetBone": {
+            "type": "string"
+          },
+          "virtualBoneName": {
+            "type": "string"
+          },
+          "retargetRoot": {
+            "type": "string",
+            "description": "Retarget root bone name for IK Rig"
+          },
+          "sourceRig": {
+            "type": "string",
+            "description": "Source IKRig path for create_ik_retargeter"
+          },
+          "targetRig": {
+            "type": "string",
+            "description": "Target IKRig path for create_ik_retargeter"
+          },
+          "autoMapChains": {
+            "type": "boolean",
+            "description": "create_ik_retargeter: assign rigs to ops + AutoMapChains after creation (default true)"
+          },
+          "onConflict": {
+            "type": "string",
+            "description": "Asset-creation conflict policy: skip (default) | error | overwrite"
+          },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Specific frames to sample for read_bone_track"
+          },
+          "chains": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "startBone": {
+                  "type": "string"
+                },
+                "endBone": {
+                  "type": "string"
+                },
+                "goal": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "startBone",
+                "endBone"
+              ],
+              "additionalProperties": false
+            },
+            "description": "IK retarget chains for create_ik_rig"
+          },
+          "keyframes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "frame": {
+                  "type": "number"
+                },
+                "location": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "z": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z"
+                  ],
+                  "additionalProperties": false
+                },
+                "rotation": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "z": {
+                      "type": "number"
+                    },
+                    "w": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z",
+                    "w"
+                  ],
+                  "additionalProperties": false
+                },
+                "scale": {
+                  "$ref": "#/properties/keyframes/items/properties/location"
+                }
+              },
+              "required": [
+                "frame"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "schemaPath": {
+            "type": "string",
+            "description": "Path to a UPoseSearchSchema asset"
+          },
+          "sequencePath": {
+            "type": "string",
+            "description": "Animation asset path to add to a PoseSearchDatabase"
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "build_pose_search_index: block until the async build resolves (default true)"
+          },
+          "assetPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Asset paths (batch) for set_sequence_properties"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Property dict for set_sequence_properties"
+          },
+          "resolveFromMontages": {
+            "type": "boolean",
+            "description": "Resolve AnimMontage inputs to first anim reference (default true)"
+          },
+          "rootBone": {
+            "type": "string",
+            "description": "Root bone name for bake_root_motion_from_bone (default 'root')"
+          },
+          "axes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Axes to bake ('x','y','z') for bake_root_motion_from_bone"
+          },
+          "interpolation": {
+            "type": "string",
+            "description": "bake_root_motion_from_bone: 'linear' (default) or 'per_frame'"
+          },
+          "space": {
+            "type": "string",
+            "description": "Bone-space frame. get_bone_transforms (ref skeleton): 'local' (default) | 'component'. get_bone_transform (live actor): 'world' (default) | 'component' | 'local'"
+          },
+          "animation": {
+            "type": "string",
+            "description": "AnimSequence path for add_blend_sample / set_blend_sample"
+          },
+          "sampleIndex": {
+            "type": "number",
+            "description": "BlendSpace sample index for set_blend_sample"
+          },
+          "position": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false,
+            "description": "BlendSpace sample position {x,y}"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "actorLabel": {
+            "type": "string",
+            "description": "Actor label for live skeletal queries"
+          },
+          "componentName": {
+            "type": "string",
+            "description": "SkeletalMeshComponent name (default: CharacterMesh0 / Mesh)"
+          },
+          "bodyComponent": {
+            "type": "string",
+            "description": "rebind_leader_pose: explicit body component name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "preview_animation: toggle on/off"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "landscape",
+      "description": "Landscape terrain: info, layers, sculpting, painting, materials, heightmap import.\n\nActions:\n- get_info: Get landscape setup\n- list_layers: List paint layers\n- sample: Sample height/layers. Params: x, y\n- list_splines: Read landscape splines\n- get_component: Inspect component. Params: componentIndex\n- set_material: Set landscape material. Params: materialPath\n- add_layer_info: Register paint layer (creates LayerInfo asset + binds to active landscape). Params: layerName, packagePath?, weightBlended?\n- create_layer_info: Standalone LayerInfo asset creation - no landscape required. Params: layerName, name? (default LI_<layerName>), packagePath? (default /Game/Landscape/LayerInfos), physMaterial? (asset path), hardness? (#251)\n- create: Spawn a new ALandscape with a flat heightmap. Defaults match the Editor's Landscape Mode 'create new' (8x8 components, 63 quads/subsection, 2 subsections/component = 1016x1016 quads). Params: location? (Vec3), scale? (Vec3, default 100,100,100), componentCountX? (default 8), componentCountY? (default 8), subsectionSizeQuads? (one of 7|15|31|63|127|255, default 63), numSubsections? (1|2, default 2), heightOffset? (uint16, default 32768 = mid-elevation), label? (#303)\n- get_material_usage_summary: Per-proxy summary: landscape/hole material paths + component/grass/nanite counts (#150)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "get_info",
+              "list_layers",
+              "sample",
+              "list_splines",
+              "get_component",
+              "set_material",
+              "add_layer_info",
+              "create_layer_info",
+              "create",
+              "get_material_usage_summary"
+            ],
+            "description": "Action to perform"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "radius": {
+            "type": "number"
+          },
+          "strength": {
+            "type": "number"
+          },
+          "falloff": {
+            "type": "number"
+          },
+          "layerName": {
+            "type": "string"
+          },
+          "materialPath": {
+            "type": "string"
+          },
+          "filePath": {
+            "type": "string"
+          },
+          "componentIndex": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "physMaterial": {
+            "type": "string"
+          },
+          "hardness": {
+            "type": "number"
+          },
+          "onConflict": {
+            "type": "string"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "additionalProperties": false
+          },
+          "scale": {
+            "$ref": "#/properties/location"
+          },
+          "componentCountX": {
+            "type": "number"
+          },
+          "componentCountY": {
+            "type": "number"
+          },
+          "subsectionSizeQuads": {
+            "type": "number"
+          },
+          "numSubsections": {
+            "type": "number"
+          },
+          "heightOffset": {
+            "type": "number"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pcg",
+      "description": "Procedural Content Generation: graphs, nodes, connections, execution, volumes.\n\nActions:\n- list_graphs: List PCG graphs. Params: directory?, recursive?\n- read_graph: Read graph structure. Params: assetPath\n- read_node_settings: Read node settings. Params: assetPath, nodeName\n- get_components: List PCG components in level\n- get_component_details: Inspect PCG component. Params: actorLabel\n- create_graph: Create graph. Params: name, packagePath?\n- add_node: Add node. Params: assetPath, nodeType, nodeName?\n- connect_nodes: Wire nodes. Params: assetPath, sourceNode, sourcePin, targetNode, targetPin. Returns edgeVerified=true after confirming the UPCGEdge persisted; surfaces an error if AddEdge succeeded but no edge object was instantiated (#304).\n- disconnect_nodes: Remove a wired edge between two PCG nodes. Params: assetPath, sourceNode, targetNode, sourcePin? (default: any), targetPin? (default: any). Returns removedEdges count (#346).\n- set_node_settings: Set node params. Params: assetPath, nodeName, settings\n- set_static_mesh_spawner_meshes: Populate weighted MeshEntries on a PCGStaticMeshSpawner node (#145). Params: assetPath, nodeName, entries=[{mesh, weight?}], replace? (default true)\n- remove_node: Remove node. Params: assetPath, nodeName\n- execute: Regenerate PCG. Params: actorLabel\n- force_regenerate: Force a stuck PCG component to regenerate (clears graph ref, re-sets, cleanup+generate). Params: actorLabel (#146)\n- cleanup: Cleanup a PCG component (remove spawned content). Params: actorLabel, removeComponents? (default true) (#146)\n- toggle_graph: Toggle a PCG component's graph assignment to force reinit (no generate). Params: actorLabel, graphPath? (#146)\n- add_volume: Place PCG volume. Params: graphPath, location?, extent?\n- import_graph: Bulk-author a PCG graph from JSON. Params: assetPath, nodes=[{name,class,posX?,posY?,settings?}], connections=[{from,fromPin?,to,toPin?}], replace? (default false). One call replaces N add_node + M connect_nodes + K set_node_settings (#213).\n- export_graph: Export a PCG graph as JSON. Params: assetPath, includeSettings? (default true). Round-trip safe with import_graph (#213).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list_graphs",
+              "read_graph",
+              "read_node_settings",
+              "get_components",
+              "get_component_details",
+              "create_graph",
+              "add_node",
+              "connect_nodes",
+              "disconnect_nodes",
+              "set_node_settings",
+              "set_static_mesh_spawner_meshes",
+              "remove_node",
+              "execute",
+              "force_regenerate",
+              "cleanup",
+              "toggle_graph",
+              "add_volume",
+              "import_graph",
+              "export_graph"
+            ],
+            "description": "Action to perform"
+          },
+          "assetPath": {
+            "type": "string"
+          },
+          "actorLabel": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "nodeType": {
+            "type": "string"
+          },
+          "nodeName": {
+            "type": "string"
+          },
+          "sourceNode": {
+            "type": "string"
+          },
+          "sourcePin": {
+            "type": "string"
+          },
+          "targetNode": {
+            "type": "string"
+          },
+          "targetPin": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "Array of {mesh, weight?} entries for set_static_mesh_spawner_meshes"
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "set_static_mesh_spawner_meshes: overwrite existing MeshEntries (default true). import_graph: wipe existing user nodes first (default false)."
+          },
+          "graphPath": {
+            "type": "string"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "additionalProperties": false
+          },
+          "extent": {
+            "$ref": "#/properties/location"
+          },
+          "removeComponents": {
+            "type": "boolean",
+            "description": "cleanup: remove managed spawned components (default true)"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "import_graph: [{name, class, posX?, posY?, settings?}]"
+          },
+          "connections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "import_graph: [{from, fromPin?, to, toPin?}]"
+          },
+          "includeSettings": {
+            "type": "boolean",
+            "description": "export_graph: include per-node editable settings in the response (default true)"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "foliage",
+      "description": "Foliage painting, types, sampling, and settings.\n\nActions:\n- list_types: List foliage types in level\n- get_settings: Read foliage type settings. Params: foliageTypeName\n- sample: Query instances in region. Params: center, radius, foliageType?\n- create_type: Create foliage type from mesh. Params: meshPath, name?, packagePath?\n- set_settings: Modify type settings. Params: foliageTypeName, settings",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list_types",
+              "get_settings",
+              "sample",
+              "create_type",
+              "set_settings"
+            ],
+            "description": "Action to perform"
+          },
+          "foliageTypeName": {
+            "type": "string"
+          },
+          "foliageType": {
+            "type": "string"
+          },
+          "center": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "additionalProperties": false
+          },
+          "radius": {
+            "type": "number"
+          },
+          "count": {
+            "type": "number"
+          },
+          "density": {
+            "type": "number"
+          },
+          "meshPath": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "niagara",
+      "description": "Niagara VFX: systems, emitters, spawning, parameters, and graph authoring.\n\nActions:\n- list: List Niagara assets. Params: directory?, recursive?\n- get_info: Inspect system. Params: assetPath\n- spawn: Spawn VFX. Params: systemPath, location, rotation?, label?\n- set_parameter: Set parameter. Params: actorLabel, parameterName, value, parameterType?\n- create: Create system. Params: name, packagePath?\n- create_emitter: Create Niagara emitter. Params: name, packagePath?, templatePath?\n- add_emitter: Add emitter to system. Params: systemPath, emitterPath\n- list_emitters: List emitters in system. Params: systemPath\n- set_emitter_property: Set emitter property. Params: systemPath, emitterName?, propertyName, value\n- list_modules: List Niagara modules. Params: directory?\n- get_emitter_info: Inspect emitter. Params: assetPath\n- list_renderers: List renderers on an emitter. Params: systemPath, emitterName?, emitterIndex?\n- add_renderer: Add renderer (sprite/mesh/ribbon or full class). Params: systemPath, rendererType, emitterName?, emitterIndex?\n- remove_renderer: Remove renderer by index. Params: systemPath, rendererIndex, emitterName?, emitterIndex?\n- set_renderer_property: Set renderer bool/number/string property. Params: systemPath, rendererIndex, propertyName, value, emitterName?, emitterIndex?\n- inspect_data_interfaces: List user-scope data interfaces. Params: systemPath\n- create_system_from_spec: Declaratively create a system + emitters. Params: name, packagePath?, emitters?:[{path}]\n- get_compiled_hlsl: Read GPU compute script info for an emitter. Params: systemPath, emitterName?, emitterIndex?\n- list_system_parameters: List user-exposed system parameters. Params: systemPath\n- list_module_inputs: List modules + their input pins for an emitter. Params: systemPath, emitterName?, emitterIndex?, stackContext? (ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate|all — default all)\n- set_module_input: Set literal default on a module input pin. Params: systemPath, moduleName, inputName, value, emitterName?, emitterIndex?, stackContext?\n- list_static_switches: List static switch inputs on a module. Params: systemPath, moduleName, emitterName?, emitterIndex?, stackContext?\n- set_static_switch: Set static switch value on a module's function call node. Params: systemPath, moduleName, switchName, value, emitterName?, emitterIndex?, stackContext?\n- create_module_from_hlsl: Create a NiagaraScript module backed by a custom HLSL node. Params: name, hlsl, packagePath?, inputs?:[{name,type}], outputs?:[{name,type}]\n- create_scratch_module: Create empty Niagara scratch module. Params: name, packagePath?, inputs?:[{name,type}], outputs?:[{name,type}] (#185)\n- batch: Run a sequence of niagara operations against the bridge in order. Fails fast on the first error (returns results up to that point + error). Params: ops:[{action, params}] where action is any niagara subaction listed above.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get_info",
+              "spawn",
+              "set_parameter",
+              "create",
+              "create_emitter",
+              "add_emitter",
+              "list_emitters",
+              "set_emitter_property",
+              "list_modules",
+              "get_emitter_info",
+              "list_renderers",
+              "add_renderer",
+              "remove_renderer",
+              "set_renderer_property",
+              "inspect_data_interfaces",
+              "create_system_from_spec",
+              "get_compiled_hlsl",
+              "list_system_parameters",
+              "list_module_inputs",
+              "set_module_input",
+              "list_static_switches",
+              "set_static_switch",
+              "create_module_from_hlsl",
+              "create_scratch_module",
+              "batch"
+            ],
+            "description": "Action to perform"
+          },
+          "assetPath": {
+            "type": "string"
+          },
+          "actorLabel": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "systemPath": {
+            "type": "string"
+          },
+          "emitterPath": {
+            "type": "string"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "additionalProperties": false
+          },
+          "rotation": {
+            "type": "object",
+            "properties": {
+              "pitch": {
+                "type": "number"
+              },
+              "yaw": {
+                "type": "number"
+              },
+              "roll": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "pitch",
+              "yaw",
+              "roll"
+            ],
+            "additionalProperties": false
+          },
+          "label": {
+            "type": "string"
+          },
+          "parameterName": {
+            "type": "string"
+          },
+          "value": {},
+          "parameterType": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "templatePath": {
+            "type": "string"
+          },
+          "emitterName": {
+            "type": "string"
+          },
+          "emitterIndex": {
+            "type": "number"
+          },
+          "rendererType": {
+            "type": "string",
+            "description": "sprite|mesh|ribbon or full class name"
+          },
+          "rendererIndex": {
+            "type": "number"
+          },
+          "propertyName": {
+            "type": "string"
+          },
+          "emitters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "Spec: [{path:'/Game/VFX/E_Fire'}]"
+          },
+          "onConflict": {
+            "type": "string",
+            "description": "skip|error when asset exists"
+          },
+          "moduleName": {
+            "type": "string",
+            "description": "For module input / static switch ops: name of the module function call node"
+          },
+          "inputName": {
+            "type": "string",
+            "description": "For set_module_input: module input pin name"
+          },
+          "switchName": {
+            "type": "string",
+            "description": "For set_static_switch: static switch input name"
+          },
+          "stackContext": {
+            "type": "string",
+            "description": "ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate|all (default all)"
+          },
+          "hlsl": {
+            "type": "string",
+            "description": "For create_module_from_hlsl: HLSL body"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "For create_module_from_hlsl: [{name, type}]"
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "For create_module_from_hlsl: [{name, type}]"
+          },
+          "ops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "For batch: [{action, params}]"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "audio",
+      "description": "Audio: sound assets, playback, ambient sounds, SoundCues, MetaSounds.\n\nActions:\n- list: List sound assets. Params: directory?, recursive?\n- play_at_location: Play sound. Params: soundPath, location, volumeMultiplier?, pitchMultiplier?\n- spawn_ambient: Place ambient sound. Params: soundPath, location, label?\n- create_cue: Create SoundCue. Params: name, packagePath?, soundWavePath?\n- create_metasound: Create MetaSoundSource. Params: name, packagePath?",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "play_at_location",
+              "spawn_ambient",
+              "create_cue",
+              "create_metasound"
+            ],
+            "description": "Action to perform"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "soundPath": {
+            "type": "string"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "additionalProperties": false
+          },
+          "volumeMultiplier": {
+            "type": "number"
+          },
+          "pitchMultiplier": {
+            "type": "number"
+          },
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "soundWavePath": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "widget",
+      "description": "UMG Widget Blueprints, Editor Utility Widgets, and Editor Utility Blueprints.\n\nActions:\n- read_tree: Read widget hierarchy. Params: assetPath\n- get_details: Inspect widget. Params: assetPath, widgetName\n- set_property: Set widget property. Params: assetPath, widgetName, propertyName, value\n- list: List Widget BPs. Params: directory?, recursive?\n- read_animations: Read UMG animations. Params: assetPath\n- create: Create Widget BP. Params: name, packagePath?, parentClass?\n- create_utility_widget: Create editor utility widget. Params: name, packagePath?\n- run_utility_widget: Open editor utility widget. Params: assetPath\n- create_utility_blueprint: Create editor utility blueprint. Params: name, packagePath?\n- run_utility_blueprint: Run editor utility blueprint. Params: assetPath\n- add_widget: Add widget to widget tree. Params: assetPath, widgetClass, widgetName?, parentWidgetName?\n- remove_widget: Remove widget from tree. Params: assetPath, widgetName\n- move_widget: Reparent widget. Params: assetPath, widgetName, newParentWidgetName\n- set_root: Replace WBP root with an existing widget by name (#365). Params: assetPath, widgetName\n- wrap_root: Wrap the current root in a new panel widget (UMG 'Wrap With'). Params: assetPath, wrapperClass (must be a UPanelWidget subclass), wrapperName? (#365)\n- list_classes: List available widget classes\n- list_runtime: (#160) List live UUserWidget instances in the PIE world. Params: classFilter?, namePrefix?, viewportOnly?\n- get_runtime: (#160) Inspect a live PIE widget tree with text/visibility/brush/percent values. Params: widgetName? | className?, childName?, maxDepth?\n- get_runtime_delegates: (#161) Read delegate binding state on a live PIE widget. Params: widgetName, className?. Returns array of {delegateName, isBound, numBindings}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "read_tree",
+              "get_details",
+              "set_property",
+              "list",
+              "read_animations",
+              "create",
+              "create_utility_widget",
+              "run_utility_widget",
+              "create_utility_blueprint",
+              "run_utility_blueprint",
+              "add_widget",
+              "remove_widget",
+              "move_widget",
+              "set_root",
+              "wrap_root",
+              "list_classes",
+              "list_runtime",
+              "get_runtime",
+              "get_runtime_delegates"
+            ],
+            "description": "Action to perform"
+          },
+          "assetPath": {
+            "type": "string"
+          },
+          "widgetName": {
+            "type": "string"
+          },
+          "widgetClass": {
+            "type": "string"
+          },
+          "parentWidgetName": {
+            "type": "string"
+          },
+          "newParentWidgetName": {
+            "type": "string"
+          },
+          "propertyName": {
+            "type": "string"
+          },
+          "value": {},
+          "directory": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "parentClass": {
+            "type": "string"
+          },
+          "classFilter": {
+            "type": "string",
+            "description": "Class name substring filter for list_runtime"
+          },
+          "className": {
+            "type": "string",
+            "description": "Widget class name for get_runtime (first match wins)"
+          },
+          "namePrefix": {
+            "type": "string",
+            "description": "Instance name prefix filter for list_runtime"
+          },
+          "viewportOnly": {
+            "type": "boolean",
+            "description": "list_runtime: only return widgets currently added to the viewport"
+          },
+          "childName": {
+            "type": "string",
+            "description": "get_runtime: restrict the tree walk to the named child inside the UserWidget"
+          },
+          "maxDepth": {
+            "type": "number",
+            "description": "get_runtime: max widget-tree depth to walk (default 6)"
+          },
+          "wrapperClass": {
+            "type": "string",
+            "description": "wrap_root: panel widget class (CanvasPanel, VerticalBox, Overlay, etc.)"
+          },
+          "wrapperName": {
+            "type": "string",
+            "description": "wrap_root: optional name for the new wrapper widget"
+          },
+          "path": {
+            "type": "string",
+            "description": "Alias for assetPath"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "editor",
+      "description": "Editor commands, Python execution, PIE, undo/redo, hot reload, viewport, performance, sequencer, build pipeline, logs, editor control.\n\nActions:\n- start_editor: Launch Unreal Editor with the current project and reconnect bridge\n- stop_editor: Close Unreal Editor gracefully\n- restart_editor: Stop then start the editor\n- execute_command: Run console command. Params: command\n- execute_python: Run Python in editor. Params: code\n- run_python_file: Run a Python file from disk with __file__/__name__ populated (#142). Params: filePath, args?\n- set_property: Set UObject property. Params: objectPath, propertyName, value\n- play_in_editor: PIE control. Params: pieAction (start|stop|status), waitForAssetRegistry? (start only; default true - block until the AssetRegistry initial scan completes before requesting PIE, otherwise PIE silently no-ops on cold editor starts), assetRegistryTimeoutSeconds? (default 180) (#406)\n- get_runtime_value: Read PIE actor property. Params: actorLabel, propertyName (supports dotted paths: component.field or component.struct.field for nested reads on component subobjects, #344/#381)\n- get_pie_pawn: Resolve the controlled pawn in the active PIE world. Params: playerIndex? (default 0). Returns actorLabel/class/location/rotation (#228/#229)\n- invoke_function: Call a BlueprintCallable / Exec UFUNCTION on a target actor or one of its components. Params: actorLabel, functionName, component? (component subobject name; redirects target from the actor to that component, #382), args? (object), actorArgs? (object mapping UObject* parameter name to actor label, resolved against live actors in the active world; #383), world? (editor|pie). Returns out/return params (#228/#229)\n- set_pie_time_scale: Fast-forward PIE game time. Params: factor (>0). Raises WorldSettings caps and calls SetGlobalTimeDilation.\n- hot_reload: Hot reload C++\n- undo: Undo last transaction\n- redo: Redo last transaction\n- get_perf_stats: Editor performance stats\n- run_stat: Run stat command. Params: command\n- set_scalability: Set quality. Params: level\n- capture_screenshot: Screenshot. Params: filename?, resolution?, target? (auto|pie|editor; auto routes to PIE viewport when PIE is running) (#226)\n- capture_scene_png: Headless PNG screenshot via SceneCapture2D (works unfocused, guaranteed RGBA8 LDR). Params: outputPath, location?, rotation?, width? (default 1280), height? (default 720), fov? (default 90) (#148)\n- get_viewport: Get viewport camera\n- hit_test_viewport_pixel: Ray-cast from a screen pixel through the active editor viewport and return the first hit. Builds the ray from the live viewport's projection matrix (no FOV/aspect guessing). Returns hit + actorLabel/actorClass/componentName/componentClass/materialPath/location/impactPoint/normal/distance/faceIndex/boneName/physicalMaterial. Params: x, y (pixel coords), width? height? (override viewport size when picking from a different-resolution screenshot), maxDistance? (default 200000), ignoreActors? (array of actor labels) (#418)\n- get_runtime_values: Bulk runtime read across the active world. For each actor/component matching classFilter, resolves every path against the (actor|component) root and returns rows of {actorLabel, actorClass, componentName?, componentClass?, values, errors?}. Paths support property hops, sub-object hops, and zero-arg BlueprintCallable getter calls at any segment (e.g. 'PowerConnector.GetRequired' reaches a UFUNCTION on a UObject sub-object). classFilter matches actor class OR component class - omit to match everything. World defaults to PIE if running, else editor. Params: classFilter?, paths[], world? (editor|pie) (#414)\n- set_viewport: Set viewport camera. Params: location?, rotation?\n- focus_on_actor: Focus on actor. Params: actorLabel\n- create_sequence: Create Level Sequence. Params: name, packagePath?\n- get_sequence_info: Read sequence. Params: assetPath, includeSectionDetails? (attach sockets, first transform key values per track)\n- add_sequence_track: Add track. Params: assetPath, trackType, actorLabel?\n- play_sequence: Play/stop/pause sequence. Params: assetPath, sequenceAction\n- build_all: Build all (geometry, lighting, paths, HLOD)\n- build_geometry: Rebuild BSP geometry\n- build_hlod: Build HLODs\n- validate_assets: Run data validation. Params: directory?\n- get_build_status: Get build/map status\n- cook_content: Cook content. Params: platform?\n- get_log: Read output log. Params: maxLines?, filter?, category?\n- search_log: Search log. Params: query\n- get_message_log: Read message log. Params: logName?\n- list_crashes: List crash reports\n- get_crash_info: Get crash details. Params: crashFolder\n- check_for_crashes: Check for recent crashes\n- set_dialog_policy: Auto-respond to dialogs matching a pattern. Params: pattern, response\n- clear_dialog_policy: Clear dialog policies. Params: pattern?\n- get_dialog_policy: Get current dialog policies\n- list_dialogs: List active modal dialogs\n- respond_to_dialog: Click a button on the active modal dialog. Params: buttonIndex?, buttonLabel?\n- open_asset: Open asset in its editor. Params: assetPath\n- reload_bridge: Hot-reload Python bridge handlers from disk\n- save_dirty: Flush every dirty package and return a per-package saved/failed map. Use after multi-step CDO/component edits when set_class_default leaves the asset dirty without persisting (#378). Params: includeMaps? (default true), includeContent? (default true)\n- configure_pie: Set ULevelEditorPlaySettings - multi-client PIE, net mode, single-process flag. Params: numClients?, netMode? (standalone|listen|client), runUnderOneProcess?, launchSeparateServer? (#384)\n- get_pie_config: Read current ULevelEditorPlaySettings (numClients, netMode, single-process, separate-server) (#384)\n- list_dirty_packages: Enumerate currently-dirty content + map packages (#340)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start_editor",
+              "stop_editor",
+              "restart_editor",
+              "execute_command",
+              "execute_python",
+              "run_python_file",
+              "set_property",
+              "play_in_editor",
+              "get_runtime_value",
+              "get_pie_pawn",
+              "invoke_function",
+              "set_pie_time_scale",
+              "hot_reload",
+              "undo",
+              "redo",
+              "get_perf_stats",
+              "run_stat",
+              "set_scalability",
+              "capture_screenshot",
+              "capture_scene_png",
+              "get_viewport",
+              "hit_test_viewport_pixel",
+              "get_runtime_values",
+              "set_viewport",
+              "focus_on_actor",
+              "create_sequence",
+              "get_sequence_info",
+              "add_sequence_track",
+              "play_sequence",
+              "build_all",
+              "build_geometry",
+              "build_hlod",
+              "validate_assets",
+              "get_build_status",
+              "cook_content",
+              "get_log",
+              "search_log",
+              "get_message_log",
+              "list_crashes",
+              "get_crash_info",
+              "check_for_crashes",
+              "set_dialog_policy",
+              "clear_dialog_policy",
+              "get_dialog_policy",
+              "list_dialogs",
+              "respond_to_dialog",
+              "open_asset",
+              "reload_bridge",
+              "save_dirty",
+              "configure_pie",
+              "get_pie_config",
+              "list_dirty_packages"
+            ],
+            "description": "Action to perform"
+          },
+          "command": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Absolute path to a .py file for run_python_file"
+          },
+          "args": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            ],
+            "description": "run_python_file: array of positional args. invoke_function: object mapping parameter name to value"
+          },
+          "objectPath": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "description": "capture_screenshot target: auto (default) | pie | editor"
+          },
+          "playerIndex": {
+            "type": "number",
+            "description": "get_pie_pawn: 0-based player index (default 0)"
+          },
+          "functionName": {
+            "type": "string"
+          },
+          "component": {
+            "type": "string",
+            "description": "invoke_function: optional component subobject name to call the function on instead of the actor (#382)"
+          },
+          "actorArgs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "invoke_function: map of UObject* parameter name to actor label, resolved against live actors in the active world (#383)"
+          },
+          "world": {
+            "type": "string",
+            "description": "invoke_function world scope: editor (default) | pie"
+          },
+          "propertyName": {
+            "type": "string"
+          },
+          "value": {},
+          "pieAction": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop",
+              "status"
+            ]
+          },
+          "waitForAssetRegistry": {
+            "type": "boolean",
+            "description": "play_in_editor start: block until AssetRegistry finishes the initial scan (default true)"
+          },
+          "assetRegistryTimeoutSeconds": {
+            "type": "number",
+            "description": "play_in_editor start: wait budget for the AssetRegistry scan (default 180s)"
+          },
+          "actorLabel": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "number"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "additionalProperties": false
+          },
+          "rotation": {
+            "type": "object",
+            "properties": {
+              "pitch": {
+                "type": "number"
+              },
+              "yaw": {
+                "type": "number"
+              },
+              "roll": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "pitch",
+              "yaw",
+              "roll"
+            ],
+            "additionalProperties": false
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "assetPath": {
+            "type": "string"
+          },
+          "trackType": {
+            "type": "string"
+          },
+          "sequenceAction": {
+            "type": "string",
+            "enum": [
+              "play",
+              "stop",
+              "pause"
+            ]
+          },
+          "directory": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "maxLines": {
+            "type": "number"
+          },
+          "filter": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "logName": {
+            "type": "string"
+          },
+          "crashFolder": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Substring to match in dialog title or message"
+          },
+          "response": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no",
+              "ok",
+              "cancel",
+              "retry",
+              "continue",
+              "yesall",
+              "noall"
+            ],
+            "description": "Auto-response for matched dialogs"
+          },
+          "buttonIndex": {
+            "type": "number",
+            "description": "Index of button to click in active dialog"
+          },
+          "buttonLabel": {
+            "type": "string",
+            "description": "Label of button to click in active dialog"
+          },
+          "factor": {
+            "type": "number",
+            "description": "Time-scale factor for set_pie_time_scale (e.g. 500)"
+          },
+          "includeSectionDetails": {
+            "type": "boolean",
+            "description": "Include attach sockets + first-key transform values in get_sequence_info"
+          },
+          "outputPath": {
+            "type": "string",
+            "description": "Absolute or project-relative output path for capture_scene_png (e.g. \"Saved/Screenshots/cap.png\")"
+          },
+          "width": {
+            "type": "number",
+            "description": "Capture width in pixels"
+          },
+          "height": {
+            "type": "number",
+            "description": "Capture height in pixels"
+          },
+          "fov": {
+            "type": "number",
+            "description": "Capture FOV in degrees"
+          },
+          "x": {
+            "type": "number",
+            "description": "hit_test_viewport_pixel: viewport pixel X"
+          },
+          "y": {
+            "type": "number",
+            "description": "hit_test_viewport_pixel: viewport pixel Y"
+          },
+          "maxDistance": {
+            "type": "number",
+            "description": "hit_test_viewport_pixel: max ray length in cm (default 200000)"
+          },
+          "ignoreActors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "hit_test_viewport_pixel: actor labels to skip"
+          },
+          "classFilter": {
+            "type": "string",
+            "description": "get_runtime_values: actor or component class name (omit for all)"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "get_runtime_values: dotted property/function paths to evaluate per match"
+          },
+          "includeMaps": {
+            "type": "boolean",
+            "description": "save_dirty: include map packages (default true)"
+          },
+          "includeContent": {
+            "type": "boolean",
+            "description": "save_dirty: include content packages (default true)"
+          },
+          "numClients": {
+            "type": "number",
+            "description": "configure_pie: number of PIE clients"
+          },
+          "netMode": {
+            "type": "string",
+            "description": "configure_pie: standalone | listen | client"
+          },
+          "runUnderOneProcess": {
+            "type": "boolean",
+            "description": "configure_pie: single-process flag"
+          },
+          "launchSeparateServer": {
+            "type": "boolean",
+            "description": "configure_pie: separate dedicated server"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "reflection",
+      "description": "UE reflection: classes, structs, enums, gameplay tags.\n\nActions:\n- reflect_class: Reflect UClass. Params: className, includeInherited?\n- reflect_struct: Reflect UScriptStruct. Params: structName\n- reflect_enum: Reflect UEnum. Params: enumName\n- list_classes: List classes. Params: parentFilter?, limit?\n- list_tags: List gameplay tags. Params: filter?\n- create_tag: Create gameplay tag. Params: tag, comment?\n- create_enum: Create UUserDefinedEnum asset, optionally seeded with entries. Params: name, packagePath?, entries?: (string|{name, displayName?})[], onConflict? (#274)\n- set_enum_entries: Replace entries on an existing UUserDefinedEnum. Params: assetPath, entries[] (#274)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "reflect_class",
+              "reflect_struct",
+              "reflect_enum",
+              "list_classes",
+              "list_tags",
+              "create_tag",
+              "create_enum",
+              "set_enum_entries"
+            ],
+            "description": "Action to perform"
+          },
+          "className": {
+            "type": "string"
+          },
+          "includeInherited": {
+            "type": "boolean"
+          },
+          "structName": {
+            "type": "string"
+          },
+          "enumName": {
+            "type": "string"
+          },
+          "parentFilter": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "filter": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Enum asset name (create_enum)"
+          },
+          "packagePath": {
+            "type": "string",
+            "description": "Package path (default /Game)"
+          },
+          "assetPath": {
+            "type": "string",
+            "description": "Existing UserDefinedEnum path (set_enum_entries)"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "description": "Enum entries — strings or {name, displayName?}"
+          },
+          "onConflict": {
+            "type": "string",
+            "description": "Asset-creation conflict policy: skip (default) | error | overwrite"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gameplay",
+      "description": "Gameplay systems: physics, collision, navigation, input, behavior trees, AI (EQS, perception, State Trees, Smart Objects), game framework.\n\nActions:\n- set_collision_profile: Set collision preset. Params: actorLabel, profileName\n- set_simulate_physics: Toggle physics. Params: actorLabel, simulate\n- set_collision_enabled: Set collision mode. Params: actorLabel, collisionEnabled\n- set_physics_properties: Set mass/damping/gravity. Params: actorLabel, mass?, linearDamping?, angularDamping?, enableGravity?\n- rebuild_navigation: Rebuild navmesh\n- find_nav_path: Synchronous nav-path query between two world points. Returns valid/partial/length plus the polyline. The standard 'why doesn't my AI move?' diagnostic. Params: start (Vec3), end (Vec3), pathfindingContext? (actorLabel - uses its agent + filter) (#424)\n- list_nav_invokers: Enumerate actors carrying a NavigationInvokerComponent + their tile generation/removal radii. Diagnoses 'no navmesh in this region' caused by missing or mis-sized invokers (#424)\n- get_navmesh_info: Query nav system\n- project_to_nav: Project point to navmesh. Params: location, extent?\n- spawn_nav_modifier: Place nav modifier. Params: location, extent?, areaClass?\n- create_input_action: Create InputAction. Params: name, packagePath?, valueType?\n- create_input_mapping: Create InputMappingContext. Params: name, packagePath?\n- list_input_assets: List input assets. Params: directory?, recursive?\n- read_imc: Read InputMappingContext mappings. Params: imcPath. Returns {key, inputAction, triggers[], modifiers[]}.\n- list_input_mappings: Alias for read_imc. List key→action bindings with triggers/modifiers. Params: imcPath\n- add_imc_mapping: Add key mapping to IMC. Params: imcPath, inputActionPath, key\n- set_mapping_modifiers: Set modifiers/triggers on an IMC mapping. Params: imcPath, mappingIndex?, modifiers?, triggers?\n- remove_imc_mapping: (#158) Remove an IMC mapping. Params: imcPath, mappingIndex? | (inputActionPath? + key?)\n- set_imc_mapping_key: (#158) Rebind an IMC mapping to a new key. Params: imcPath, newKey, mappingIndex? | key? | inputActionPath?\n- set_imc_mapping_action: (#158) Retarget an IMC mapping to a different InputAction. Params: imcPath, newInputActionPath, mappingIndex? | key? | inputActionPath?\n- list_behavior_trees: List behavior trees. Params: directory?, recursive?\n- get_behavior_tree_info: Inspect behavior tree (top-level + blackboard). Params: assetPath\n- read_behavior_tree_graph: Walk BT tree: composites, tasks, decorators, services with blackboard keys. Params: assetPath\n- create_blackboard: Create Blackboard. Params: name, packagePath?\n- add_blackboard_key: Add a typed key to a Blackboard asset. Params: blackboardPath, keyName, keyType (Bool|Int|Float|String|Name|Vector|Rotator|Object|Class|Enum), baseClass? (for Object/Class types; e.g. /Script/Engine.Actor) (#250)\n- set_behavior_tree_blackboard: Rebind a BehaviorTree asset's BlackboardAsset reference. Params: behaviorTreePath, blackboardPath. The C++ field is protected so reflection is the only writable path (#250)\n- create_behavior_tree: Create behavior tree. Params: name, packagePath?, blackboardPath?\n- create_eqs_query: Create EQS query. Params: name, packagePath?\n- list_eqs_queries: List EQS queries. Params: directory?\n- add_perception: Add AIPerceptionComponent. Params: blueprintPath, senses?\n- configure_sense: Configure perception sense. Params: blueprintPath, senseType, settings?\n- create_state_tree: Create StateTree. Params: name, packagePath?\n- list_state_trees: List StateTrees. Params: directory?\n- add_state_tree_component: Add StateTreeComponent. Params: blueprintPath\n- create_smart_object_def: Create SmartObjectDefinition. Params: name, packagePath?\n- add_smart_object_component: Add SmartObjectComponent. Params: blueprintPath\n- add_smart_object_slot: Append a FSmartObjectSlotDefinition to a SmartObjectDefinition's Slots array. Params: assetPath, name?, offset? ({x,y,z}), rotation? ({pitch,yaw,roll}), tags? (array). Returns the new slotIndex. Rollback removes the slot (#416)\n- set_smart_object_slot: Mutate an existing slot's offset/rotation/tags. Params: assetPath, slotIndex, offset? ({x,y,z}), rotation? ({pitch,yaw,roll}), tags? (array). Omitted fields keep their current values (#416)\n- remove_smart_object_slot: Remove a slot by index. Idempotent: out-of-range returns alreadyDeleted=true. Params: assetPath, slotIndex (#416)\n- list_smart_object_slots: List slots on a SmartObjectDefinition with index, offset, rotation, and raw text. Params: assetPath (#416)\n- add_smart_object_slot_behavior: Attach a behavior definition (UBehaviorDefinition asset or class) to a slot's BehaviorDefinitions array. Pass instanceProperties to seed UPROPERTYs on a freshly-spawned class-instance. Params: assetPath, slotIndex, behaviorClass (asset path or class path), instanceProperties? (#416)\n- inspect_pie: Inspect PIE runtime. Params: actorLabel?\n- get_pie_anim_state: Get PIE anim instance state. Params: actorLabel\n- get_pie_anim_properties: Read arbitrary UPROPERTY values on a PIE actor's AnimInstance (#139). Params: actorLabel, propertyNames? (omit = dump all)\n- get_pie_subsystem_state: Read UPROPERTY values on a running subsystem in PIE (#139). Params: subsystemClass, scope? (game|world|engine|localplayer), propertyNames?\n- create_game_mode: Create GameMode BP. Params: name, packagePath?, parentClass?, defaults?\n- create_game_state: Create GameState BP. Params: name, packagePath?, parentClass?\n- create_player_controller: Create PlayerController BP. Params: name, packagePath?, parentClass?\n- create_player_state: Create PlayerState BP. Params: name, packagePath?\n- create_hud: Create HUD BP. Params: name, packagePath?\n- set_world_game_mode: Set level GameMode override. Params: gameModePath\n- get_framework_info: Get level framework classes\n- get_navmesh_details: Read RecastNavMesh generation params (cellSize, agentHeight, maxStepHeight, etc.) (#163)\n- apply_damage_in_pie: Apply damage to PIE actor. Params: actorLabel, baseDamage?, damageTypeClass? (#186)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "set_collision_profile",
+              "set_simulate_physics",
+              "set_collision_enabled",
+              "set_physics_properties",
+              "rebuild_navigation",
+              "find_nav_path",
+              "list_nav_invokers",
+              "get_navmesh_info",
+              "project_to_nav",
+              "spawn_nav_modifier",
+              "create_input_action",
+              "create_input_mapping",
+              "list_input_assets",
+              "read_imc",
+              "list_input_mappings",
+              "add_imc_mapping",
+              "set_mapping_modifiers",
+              "remove_imc_mapping",
+              "set_imc_mapping_key",
+              "set_imc_mapping_action",
+              "list_behavior_trees",
+              "get_behavior_tree_info",
+              "read_behavior_tree_graph",
+              "create_blackboard",
+              "add_blackboard_key",
+              "set_behavior_tree_blackboard",
+              "create_behavior_tree",
+              "create_eqs_query",
+              "list_eqs_queries",
+              "add_perception",
+              "configure_sense",
+              "create_state_tree",
+              "list_state_trees",
+              "add_state_tree_component",
+              "create_smart_object_def",
+              "add_smart_object_component",
+              "add_smart_object_slot",
+              "set_smart_object_slot",
+              "remove_smart_object_slot",
+              "list_smart_object_slots",
+              "add_smart_object_slot_behavior",
+              "inspect_pie",
+              "get_pie_anim_state",
+              "get_pie_anim_properties",
+              "get_pie_subsystem_state",
+              "create_game_mode",
+              "create_game_state",
+              "create_player_controller",
+              "create_player_state",
+              "create_hud",
+              "set_world_game_mode",
+              "get_framework_info",
+              "get_navmesh_details",
+              "apply_damage_in_pie"
+            ],
+            "description": "Action to perform"
+          },
+          "actorLabel": {
+            "type": "string"
+          },
+          "profileName": {
+            "type": "string"
+          },
+          "simulate": {
+            "type": "boolean"
+          },
+          "collisionEnabled": {
+            "type": "string"
+          },
+          "mass": {
+            "type": "number"
+          },
+          "linearDamping": {
+            "type": "number"
+          },
+          "angularDamping": {
+            "type": "number"
+          },
+          "enableGravity": {
+            "type": "boolean"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "additionalProperties": false
+          },
+          "extent": {
+            "$ref": "#/properties/location"
+          },
+          "start": {
+            "$ref": "#/properties/location",
+            "description": "find_nav_path: query start"
+          },
+          "end": {
+            "$ref": "#/properties/location",
+            "description": "find_nav_path: query end"
+          },
+          "pathfindingContext": {
+            "type": "string",
+            "description": "find_nav_path: actor label whose agent/filter the query uses"
+          },
+          "areaClass": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "valueType": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "assetPath": {
+            "type": "string"
+          },
+          "blackboardPath": {
+            "type": "string"
+          },
+          "behaviorTreePath": {
+            "type": "string",
+            "description": "BehaviorTree asset path for set_behavior_tree_blackboard"
+          },
+          "keyName": {
+            "type": "string",
+            "description": "Blackboard key name for add_blackboard_key"
+          },
+          "keyType": {
+            "type": "string",
+            "description": "Blackboard key type: Bool, Int, Float, String, Name, Vector, Rotator, Object, Class, Enum"
+          },
+          "baseClass": {
+            "type": "string",
+            "description": "Base class path for Object/Class blackboard keys (e.g. /Script/Engine.Actor)"
+          },
+          "blueprintPath": {
+            "type": "string"
+          },
+          "slotIndex": {
+            "type": "number",
+            "description": "SmartObject slot index"
+          },
+          "offset": {
+            "$ref": "#/properties/location",
+            "description": "SmartObject slot offset"
+          },
+          "rotation": {
+            "type": "object",
+            "properties": {
+              "pitch": {
+                "type": "number"
+              },
+              "yaw": {
+                "type": "number"
+              },
+              "roll": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "pitch",
+              "yaw",
+              "roll"
+            ],
+            "additionalProperties": false,
+            "description": "SmartObject slot rotation"
+          },
+          "tags": {
+            "type": "array",
+            "items": {},
+            "description": "SmartObject slot tags (gameplay tag strings or struct shapes)"
+          },
+          "behaviorClass": {
+            "type": "string",
+            "description": "SmartObject behavior class or asset path for add_smart_object_slot_behavior"
+          },
+          "instanceProperties": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Property writes to apply to a freshly-spawned behavior instance"
+          },
+          "senses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "senseType": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "parentClass": {
+            "type": "string"
+          },
+          "defaults": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "gameModePath": {
+            "type": "string"
+          },
+          "imcPath": {
+            "type": "string"
+          },
+          "inputActionPath": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "newKey": {
+            "type": "string",
+            "description": "New FKey name for set_imc_mapping_key"
+          },
+          "newInputActionPath": {
+            "type": "string",
+            "description": "New InputAction path for set_imc_mapping_action"
+          },
+          "mappingIndex": {
+            "type": "number",
+            "description": "Index of mapping in IMC (default 0)"
+          },
+          "modifiers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "Array of modifier objects: {type, ...props}"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "Array of trigger objects: {type, ...props}"
+          },
+          "propertyNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Property names to read for get_pie_anim_properties/get_pie_subsystem_state"
+          },
+          "subsystemClass": {
+            "type": "string",
+            "description": "Subsystem class path or short name for get_pie_subsystem_state"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "game",
+              "world",
+              "engine",
+              "localplayer"
+            ],
+            "description": "Subsystem scope for get_pie_subsystem_state (default: game)"
+          },
+          "baseDamage": {
+            "type": "number",
+            "description": "Damage amount for apply_damage_in_pie (default 10)"
+          },
+          "damageTypeClass": {
+            "type": "string",
+            "description": "Damage type class for apply_damage_in_pie"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gas",
+      "description": "Gameplay Ability System: abilities, effects, attribute sets, cues.\n\nActions:\n- add_asc: Add AbilitySystemComponent. Params: blueprintPath, componentName?\n- create_attribute_set: Create AttributeSet BP. Params: name, packagePath?\n- add_attribute: Add attribute to set. Params: attributeSetPath, attributeName, defaultValue?\n- create_ability: Create GameplayAbility BP. Params: name, packagePath?, parentClass?\n- set_ability_tags: Set tags on ability. Params: abilityPath, ability_tags?, cancel_abilities_with_tag?, activation_required_tags?, activation_blocked_tags?\n- create_effect: Create GameplayEffect BP. Params: name, packagePath?, durationPolicy?\n- set_effect_modifier: Add modifier. Params: effectPath, attribute, operation?, magnitude?\n- create_cue: Create GameplayCue. Params: name, packagePath?, cueType?\n- get_info: Inspect GAS setup. Params: blueprintPath",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "add_asc",
+              "create_attribute_set",
+              "add_attribute",
+              "create_ability",
+              "set_ability_tags",
+              "create_effect",
+              "set_effect_modifier",
+              "create_cue",
+              "get_info"
+            ],
+            "description": "Action to perform"
+          },
+          "blueprintPath": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "componentName": {
+            "type": "string"
+          },
+          "attributeSetPath": {
+            "type": "string"
+          },
+          "attributeName": {
+            "type": "string"
+          },
+          "defaultValue": {
+            "type": "number"
+          },
+          "parentClass": {
+            "type": "string"
+          },
+          "abilityPath": {
+            "type": "string"
+          },
+          "ability_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cancel_abilities_with_tag": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "block_abilities_with_tag": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "activation_required_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "activation_blocked_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "effectPath": {
+            "type": "string"
+          },
+          "attribute": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "magnitude": {
+            "type": "number"
+          },
+          "durationPolicy": {
+            "type": "string"
+          },
+          "cueType": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "networking",
+      "description": "Networking and replication: actor replication, property replication, net relevancy, dormancy.\n\nActions:\n- set_replicates: Enable actor replication. Params: blueprintPath, replicates?\n- set_property_replicated: Mark variable as replicated. Params: blueprintPath, propertyName, replicated?, replicationCondition?, repNotify?\n- configure_net_frequency: Set update frequency. Params: blueprintPath, netUpdateFrequency?, minNetUpdateFrequency?\n- set_dormancy: Set net dormancy. Params: blueprintPath, dormancy\n- set_net_load_on_client: Control client loading. Params: blueprintPath, loadOnClient?\n- set_always_relevant: Always network relevant. Params: blueprintPath, alwaysRelevant?\n- set_only_relevant_to_owner: Only relevant to owner. Params: blueprintPath, onlyRelevantToOwner?\n- configure_cull_distance: Net cull distance. Params: blueprintPath, netCullDistanceSquared?\n- set_priority: Net priority. Params: blueprintPath, netPriority?\n- set_replicate_movement: Replicate movement. Params: blueprintPath, replicateMovement?\n- get_info: Get networking info. Params: blueprintPath",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "set_replicates",
+              "set_property_replicated",
+              "configure_net_frequency",
+              "set_dormancy",
+              "set_net_load_on_client",
+              "set_always_relevant",
+              "set_only_relevant_to_owner",
+              "configure_cull_distance",
+              "set_priority",
+              "set_replicate_movement",
+              "get_info"
+            ],
+            "description": "Action to perform"
+          },
+          "blueprintPath": {
+            "type": "string"
+          },
+          "propertyName": {
+            "type": "string"
+          },
+          "replicates": {
+            "type": "boolean"
+          },
+          "replicated": {
+            "type": "boolean"
+          },
+          "replicationCondition": {
+            "type": "string"
+          },
+          "repNotify": {
+            "type": "boolean"
+          },
+          "netUpdateFrequency": {
+            "type": "number"
+          },
+          "minNetUpdateFrequency": {
+            "type": "number"
+          },
+          "dormancy": {
+            "type": "string"
+          },
+          "loadOnClient": {
+            "type": "boolean"
+          },
+          "alwaysRelevant": {
+            "type": "boolean"
+          },
+          "onlyRelevantToOwner": {
+            "type": "boolean"
+          },
+          "netCullDistanceSquared": {
+            "type": "number"
+          },
+          "netPriority": {
+            "type": "number"
+          },
+          "replicateMovement": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "demo",
+      "description": "Neon Shrine demo scene builder and cleanup.\n\nActions:\n- step: Execute demo step. Params: stepIndex?\n- cleanup: Remove demo assets and actors. Switches editor to /Game/MCP_Home before deleting so the editor is never left on an Untitled map.\n- go_home: Switch the editor to /Game/MCP_Home (creating it on first use). Use this before any operation that would leave the editor on an Untitled map.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "step",
+              "cleanup",
+              "go_home"
+            ],
+            "description": "Action to perform"
+          },
+          "stepIndex": {
+            "type": "number",
+            "description": "Step index to execute. Omit for step list."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "feedback",
+      "description": "Submit feedback to improve ue-mcp when native tools fall short and execute_python was used as a workaround.\n\nActions:\n- submit: Submit feedback about a tool gap. Params: title, summary, pythonWorkaround?, idealTool?",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "submit"
+            ],
+            "description": "Action to perform"
+          },
+          "title": {
+            "type": "string",
+            "description": "Short title describing the tool gap (do not include project-specific details)"
+          },
+          "summary": {
+            "type": "string",
+            "description": "What the user was trying to accomplish and why the native tool couldn't handle it"
+          },
+          "pythonWorkaround": {
+            "type": "string",
+            "description": "The execute_python code that was used as a workaround"
+          },
+          "idealTool": {
+            "type": "string",
+            "description": "What tool/action should have handled this natively (e.g. 'blueprint(action=set_variable_default)')"
+          },
+          "useBot": {
+            "type": "boolean",
+            "description": "Submit as the ue-mcp-feedback bot instead of authoring as the real GitHub user. Default false - issues author as the user via OAuth device flow on first use."
+          }
+        },
+        "required": [
+          "action",
+          "title",
+          "summary"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "statetree",
+      "description": "StateTree asset editing: read, modify states/tasks/conditions/transitions/bindings/evaluators/global tasks/colors/state parameters/root parameters, compile and validate.\n\nActions:\n- read: Full dump of a StateTree asset: state hierarchy (with description, tag, customTickRate, color), tasks, conditions, transitions, evaluators, global tasks, root params, bindings. Params: assetPath\n- list_states: List all states with IDs and paths. Params: assetPath\n- add_state: Add child state. Params: assetPath, stateId? (parent GUID, omit for root), name, stateType? (State|Group|LinkedAsset|Subtree), selectionBehavior?, insertIndex?\n- remove_state: Remove a state by ID. Params: assetPath, stateId\n- set_state_property: Set a property on a state. Params: assetPath, stateId, propertyName (name|type|selectionBehavior|bEnabled|weight|linkedAsset|description|tag|customTickRate|color), value. For tag: gameplay tag string or empty to clear. For customTickRate: number in seconds or empty to disable. For color: palette color display name, GUID, or empty to clear.\n- clear_state_nodes: Remove all tasks/conditions/transitions from a state. Params: assetPath, stateId\n- add_task: Add a task to a state. Params: assetPath, stateId, structType (C++ struct name e.g. FMyStateTreeTask or an engine-shipped task like FStateTreeRunParallelStateTreesTask), instanceProperties?\n- add_enter_condition: Add an enter condition to a state. Params: assetPath, stateId, structType (C++ struct name), instanceProperties?, operand? (And|Or)\n- remove_enter_condition: Remove an enter condition by index. Params: assetPath, stateId, conditionIndex\n- remove_task: Remove a task by index. Params: assetPath, stateId, taskIndex\n- set_task_instance_property: Set a property on a task's instance data. Params: assetPath, stateId, taskIndex, propertyName, value\n- set_task_property: Set a property on the task's node struct (FStateTreeTaskBase-level: bConsideredForCompletion, bTaskEnabled, bShouldStateChangeOnReselect). Distinct from set_task_instance_property which targets instance data. Params: assetPath, stateId, taskIndex, propertyName, value (string-encoded e.g. 'true'/'false')\n- add_transition: Add a transition to a state. Params: assetPath, stateId, trigger (OnStateCompleted|OnStateSucceeded|OnStateFailed|OnTick|OnEvent; combine with | e.g. OnStateSucceeded|OnStateFailed), transitionType (GotoState|NextState|Succeeded|Failed), eventTag?, targetStateId?, targetStatePath?, priority? (Low|Normal|Medium|High|Critical), delayDuration?, bDelayTransition?\n- add_transition_condition: Add a condition to an existing transition. Params: assetPath, stateId, transitionIndex, structType, instanceProperties?, operand?\n- remove_transition: Remove a transition by index. Params: assetPath, stateId, transitionIndex\n- add_binding: Add a property binding. Params: assetPath, sourceStructId, sourcePath, targetStructId, targetPath\n- remove_binding: Remove a property binding. Params: assetPath, targetStructId, targetPath\n- list_bindings: List all property bindings. Params: assetPath, structId? (filter)\n- add_evaluator: Add an evaluator to the StateTree (tree-level). Params: assetPath, structType (must derive from FStateTreeEvaluatorBase), instanceProperties?\n- remove_evaluator: Remove an evaluator by node ID. Params: assetPath, nodeId\n- set_evaluator_instance_property: Set a property on an evaluator's instance data. Params: assetPath, nodeId, propertyName, value\n- set_evaluator_property: Set a property on the evaluator's node struct (FStateTreeEvaluatorBase-level). Params: assetPath, nodeId, propertyName, value\n- add_global_task: Add a global task to the StateTree (tree-level). Params: assetPath, structType (must derive from FStateTreeTaskBase), instanceProperties?\n- remove_global_task: Remove a global task by node ID. Params: assetPath, nodeId\n- set_global_task_instance_property: Set a property on a global task's instance data. Params: assetPath, nodeId, propertyName, value\n- set_global_task_property: Set a property on a global task's node struct (FStateTreeTaskBase-level). Params: assetPath, nodeId, propertyName, value\n- list_colors: List all color palette entries for a StateTree. Params: assetPath. Returns: colors[] with id, displayName, color.\n- add_color: Add a new color to the StateTree palette. Params: assetPath, displayName, color? (FLinearColor string e.g. '(R=1.0,G=0.0,B=0.0,A=1.0)')\n- list_state_parameters: List parameters defined on a state. Params: assetPath, stateId. Returns: parameters[] with name, id, type, value; also bFixedLayout.\n- add_state_parameter: Add a parameter to a state's property bag. Rejects fixed-layout (linked) states. Params: assetPath, stateId, paramName, paramType (Bool|Int32|Int64|Float|Double|Name|String|Text)\n- remove_state_parameter: Remove a parameter from a state's property bag by name. Rejects fixed-layout (linked) states. Params: assetPath, stateId, paramName\n- set_state_parameter: Set the value of an existing state parameter. On fixed-layout states, also marks the parameter as overridden. Params: assetPath, stateId, paramName, value\n- set_root_parameters: Define root parameters (property bag). Params: assetPath, parameters[] ({name, type}) where type is float|int32|bool|string|name|double\n- compile: Compile a StateTree asset. Returns success, errors[], warnings[]. Params: assetPath\n- validate: Validate a StateTree asset without compiling. Params: assetPath",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "read",
+              "list_states",
+              "add_state",
+              "remove_state",
+              "set_state_property",
+              "clear_state_nodes",
+              "add_task",
+              "add_enter_condition",
+              "remove_enter_condition",
+              "remove_task",
+              "set_task_instance_property",
+              "set_task_property",
+              "add_transition",
+              "add_transition_condition",
+              "remove_transition",
+              "add_binding",
+              "remove_binding",
+              "list_bindings",
+              "add_evaluator",
+              "remove_evaluator",
+              "set_evaluator_instance_property",
+              "set_evaluator_property",
+              "add_global_task",
+              "remove_global_task",
+              "set_global_task_instance_property",
+              "set_global_task_property",
+              "list_colors",
+              "add_color",
+              "list_state_parameters",
+              "add_state_parameter",
+              "remove_state_parameter",
+              "set_state_parameter",
+              "set_root_parameters",
+              "compile",
+              "validate"
+            ],
+            "description": "Action to perform"
+          },
+          "assetPath": {
+            "type": "string",
+            "description": "StateTree asset path, e.g. /Game/Path/To/ST_Asset"
+          },
+          "stateId": {
+            "type": "string",
+            "description": "GUID of the target state (or parent state for add_state)"
+          },
+          "statePath": {
+            "type": "string",
+            "description": "Dot-path to state as alternative to stateId"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name for a new state"
+          },
+          "stateType": {
+            "type": "string",
+            "description": "State type: State, Group, LinkedAsset, Subtree"
+          },
+          "selectionBehavior": {
+            "type": "string",
+            "description": "Selection behavior: TryEnterState, TrySelectChildrenInOrder, TrySelectChildrenAtRandom, etc."
+          },
+          "insertIndex": {
+            "type": "number",
+            "description": "Insert position for add_state"
+          },
+          "propertyName": {
+            "type": "string",
+            "description": "Property name for set_state_property / set_task_instance_property / set_evaluator_instance_property / set_global_task_instance_property"
+          },
+          "value": {
+            "type": "string",
+            "description": "Property value to set (as string)"
+          },
+          "structType": {
+            "type": "string",
+            "description": "C++ struct name for tasks/conditions/evaluators, e.g. FMyStateTreeTask"
+          },
+          "instanceProperties": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Key-value map of instance data properties to set on new tasks/conditions/evaluators/global tasks"
+          },
+          "operand": {
+            "type": "string",
+            "description": "Expression operand for conditions: And or Or"
+          },
+          "taskIndex": {
+            "type": "number",
+            "description": "Task index within the state for remove/set operations"
+          },
+          "conditionIndex": {
+            "type": "number",
+            "description": "Enter condition index for remove_enter_condition"
+          },
+          "trigger": {
+            "type": "string",
+            "description": "Transition trigger: OnStateCompleted, OnStateSucceeded, OnStateFailed, OnTick, OnEvent"
+          },
+          "transitionType": {
+            "type": "string",
+            "description": "Transition type: GotoState, NextState, Succeeded, Failed, NextSelectableState"
+          },
+          "eventTag": {
+            "type": "string",
+            "description": "Gameplay tag for OnEvent transitions, e.g. MyGame.SomeEvent"
+          },
+          "targetStateId": {
+            "type": "string",
+            "description": "Target state GUID for GotoState transitions"
+          },
+          "targetStatePath": {
+            "type": "string",
+            "description": "Target state dot-path for GotoState transitions"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Transition priority: Low, Normal, Medium, High, Critical"
+          },
+          "delayDuration": {
+            "type": "number",
+            "description": "Transition delay in seconds"
+          },
+          "bDelayTransition": {
+            "type": "boolean",
+            "description": "Enable transition delay"
+          },
+          "transitionIndex": {
+            "type": "number",
+            "description": "Transition index for remove/condition operations"
+          },
+          "sourceStructId": {
+            "type": "string",
+            "description": "Source struct GUID for bindings"
+          },
+          "sourcePath": {
+            "type": "string",
+            "description": "Source property path for bindings"
+          },
+          "targetStructId": {
+            "type": "string",
+            "description": "Target struct GUID for bindings"
+          },
+          "targetPath": {
+            "type": "string",
+            "description": "Target property path for bindings"
+          },
+          "structId": {
+            "type": "string",
+            "description": "Filter bindings by struct GUID"
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "GUID of an evaluator or global task node (for remove/set_*_property operations)"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Display name for a new color palette entry"
+          },
+          "color": {
+            "type": "string",
+            "description": "FLinearColor string e.g. '(R=1.0,G=0.0,B=0.0,A=1.0)' for add_color"
+          },
+          "paramName": {
+            "type": "string",
+            "description": "Parameter name for state parameter operations"
+          },
+          "paramType": {
+            "type": "string",
+            "description": "Parameter type for add_state_parameter: Bool, Int32, Int64, Float, Double, Name, String, Text"
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Root parameter definitions: [{name, type}] where type is float, int32, bool, string, name, double"
+          },
+          "linkedSubtree": {
+            "type": "string",
+            "description": "Asset path for LinkedAsset/Subtree states"
+          }
+        },
+        "required": [
+          "action",
+          "assetPath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "flow",
+      "description": "Run pre-built named sequences for this project. ALWAYS check project(action=\"get_status\") first - its 'flows' field lists what's available. If a flow matches the user's request, run it via flow(action=\"run\", flowName=\"...\") instead of composing the sequence by hand. Config reloads on every call - no restart needed.\n\nActions:\n- run: Execute a flow. Params: flowName, skip?, params?, rollback_on_failure?\n- plan: Show execution plan without running. Params: flowName\n- list: List available flows\n\nStep types supported in YAML flows: any MCP action (category.action), nested flows (flow:),\nand 'shell' for running shell/exec commands. Example shell step:\n  steps:\n    1: { task: shell, options: { command: \"npm run up:build\" } }\n\nparams: Runtime options merged into every step's options (highest priority). Use to override YAML-hardcoded values like levelPath, directory, configuration, etc.\n\nrollback_on_failure: When true, rollback records from completed steps are invoked in reverse order if a subsequent step fails.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "run",
+              "plan",
+              "list"
+            ],
+            "description": "Action to perform"
+          },
+          "flowName": {
+            "type": "string",
+            "description": "Flow name from ue-mcp.yml"
+          },
+          "skip": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Step names or numbers to skip"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Runtime options merged into every step's options (highest priority)"
+          },
+          "rollback_on_failure": {
+            "type": "boolean",
+            "description": "Invoke inverse tasks in reverse order on failure"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

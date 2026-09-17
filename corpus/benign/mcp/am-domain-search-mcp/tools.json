@@ -1,0 +1,413 @@
+{
+  "package": "domain-search-mcp",
+  "tools": [
+    {
+      "name": "search_domain",
+      "description": "Search for domain availability and pricing across multiple TLDs.\n\nReturns:\n- Availability status for each domain\n- Pricing (first year and renewal) when Pricing API is configured\n- Whether WHOIS privacy is included\n- Human-readable insights and next steps\n\nExamples:\n- search_domain(\"vibecoding\") → checks vibecoding.com, .io, .dev\n- search_domain(\"myapp\", [\"com\", \"io\"]) → checks specific TLDs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain_name": {
+            "type": "string",
+            "description": "The domain name to search (e.g., 'vibecoding'). No extension needed."
+          },
+          "tlds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "TLD extensions to check (e.g., ['com', 'io', 'dev']). Defaults to ['com', 'io', 'dev']."
+          },
+          "registrars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional: specific registrars to check. Leave empty to auto-select."
+          }
+        },
+        "required": [
+          "domain_name"
+        ]
+      }
+    },
+    {
+      "name": "bulk_search",
+      "description": "Check availability for multiple domain names at once.\n\nEfficiently searches up to 100 domains in parallel with rate limiting.\nUse a single TLD for best performance.\n\nReturns:\n- Availability status for each domain\n- Pricing where available\n- Summary statistics\n\nExample:\n- bulk_search([\"vibecoding\", \"myapp\", \"coolstartup\"], \"io\")",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of domain names to check. Don't include extensions. Max 100."
+          },
+          "tld": {
+            "type": "string",
+            "description": "TLD to check for all domains (e.g., 'com'). Defaults to 'com'."
+          },
+          "registrar": {
+            "type": "string",
+            "description": "Optional: specific registrar to use (BYOK only)."
+          }
+        },
+        "required": [
+          "domains"
+        ]
+      }
+    },
+    {
+      "name": "compare_registrars",
+      "description": "Compare domain pricing across multiple registrars.\n\nChecks the same domain at different registrars to find:\n- Best first year price\n- Best renewal price\n- Overall recommendation\n\nUses the Pricing API when configured; otherwise falls back to BYOK registrars.\n\nReturns pricing comparison and a recommendation.\n\nExample:\n- compare_registrars(\"vibecoding\", \"com\") → compares Porkbun (and any configured BYOK registrars)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The domain name to compare (without extension)."
+          },
+          "tld": {
+            "type": "string",
+            "description": "The TLD extension (e.g., 'com', 'io')."
+          },
+          "registrars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Registrars to compare. Defaults to ['porkbun']."
+          }
+        },
+        "required": [
+          "domain",
+          "tld"
+        ]
+      }
+    },
+    {
+      "name": "suggest_domains",
+      "description": "Generate and check availability of domain name variations.\n\nCreates variations like:\n- Hyphenated: vibe-coding\n- With numbers: vibecoding1, vibecoding2\n- Prefixes: getvibecoding, tryvibecoding\n- Suffixes: vibecodingapp, vibecodinghq\n\nReturns only available suggestions, ranked by quality.\n\nExample:\n- suggest_domains(\"vibecoding\") → finds available variations",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "base_name": {
+            "type": "string",
+            "description": "The base domain name to generate variations from."
+          },
+          "tld": {
+            "type": "string",
+            "description": "TLD to check (e.g., 'com'). Defaults to 'com'."
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "hyphen",
+                "numbers",
+                "abbreviations",
+                "synonyms",
+                "prefixes",
+                "suffixes"
+              ]
+            },
+            "description": "Types of variations to generate. Defaults to all."
+          },
+          "max_suggestions": {
+            "type": "number",
+            "description": "Maximum suggestions to return (1-50). Defaults to 10."
+          }
+        },
+        "required": [
+          "base_name"
+        ]
+      }
+    },
+    {
+      "name": "suggest_domains_smart",
+      "description": "AI-powered domain name suggestion engine.\n\nGenerate creative, brandable domain names from keywords or business descriptions.\nCombines multiple intelligent sources for maximum coverage and quality.\n\nFeatures:\n- ZERO-CONFIG: Works out of the box with our fine-tuned Qwen 7B-DPO model\n- Domain-specialized fine-tuned model for higher quality suggestions\n- Understands natural language queries (\"coffee shop in seattle\")\n- Auto-detects industry for contextual suggestions\n- Generates portmanteau/blended names (instagram = instant + telegram)\n- Applies modern naming patterns (ly, ify, io, hub, etc.)\n- Filters premium domains by default\n- Availability verified via Porkbun/RDAP\n- Graceful fallback: Fine-tuned Qwen → Semantic engine\n\nExamples:\n- suggest_domains_smart(\"ai customer service\") → AI-themed suggestions\n- suggest_domains_smart(\"organic coffee\", industry=\"food\") → Food-focused names\n- suggest_domains_smart(\"vibecoding\", style=\"short\") → Minimal length names",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Keywords, business description, or base domain name."
+          },
+          "tld": {
+            "type": "string",
+            "description": "TLD to check (e.g., 'com'). Defaults to 'com'."
+          },
+          "industry": {
+            "type": "string",
+            "enum": [
+              "tech",
+              "startup",
+              "finance",
+              "health",
+              "food",
+              "creative",
+              "ecommerce",
+              "education",
+              "gaming",
+              "social"
+            ],
+            "description": "Industry for contextual suggestions. Auto-detected if omitted."
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "brandable",
+              "descriptive",
+              "short",
+              "creative"
+            ],
+            "description": "Suggestion style preference."
+          },
+          "max_suggestions": {
+            "type": "number",
+            "description": "Maximum suggestions to return (1-50). Defaults to 15."
+          },
+          "include_premium": {
+            "type": "boolean",
+            "description": "Include premium domains. Defaults to false."
+          },
+          "project_context": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Project name"
+              },
+              "description": {
+                "type": "string",
+                "description": "Project description"
+              },
+              "keywords": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Keywords"
+              },
+              "industry": {
+                "type": "string",
+                "description": "Industry context"
+              },
+              "repository_url": {
+                "type": "string",
+                "description": "Repository URL"
+              }
+            },
+            "description": "Project context from analyze_project for better suggestions."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "tld_info",
+      "description": "Get information about a Top Level Domain (TLD).\n\nReturns:\n- Description and typical use case\n- Price range\n- Any special restrictions\n- Popularity and recommendations\n\nExample:\n- tld_info(\"io\") → info about .io domains",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tld": {
+            "type": "string",
+            "description": "The TLD to get info about (e.g., 'com', 'io', 'dev')."
+          },
+          "detailed": {
+            "type": "boolean",
+            "description": "Include detailed information. Defaults to false."
+          }
+        },
+        "required": [
+          "tld"
+        ]
+      }
+    },
+    {
+      "name": "check_socials",
+      "description": "Check if a username is available on social media and developer platforms.\n\nSupports 10 platforms with varying confidence levels:\n- HIGH: GitHub, npm, PyPI, Reddit, Twitter/X (reliable public APIs)\n- MEDIUM: YouTube, ProductHunt (status code based)\n- LOW: Instagram, LinkedIn, TikTok (block automated checks - verify manually)\n\nReturns availability status with confidence indicator.\n\nExample:\n- check_socials(\"vibecoding\") → checks GitHub, Twitter, Reddit, npm\n- check_socials(\"myapp\", [\"github\", \"npm\", \"pypi\"]) → developer platforms only",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The username/handle to check."
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "github",
+                "twitter",
+                "instagram",
+                "linkedin",
+                "tiktok",
+                "reddit",
+                "youtube",
+                "npm",
+                "pypi",
+                "producthunt"
+              ]
+            },
+            "description": "Platforms to check. Defaults to ['github', 'twitter', 'reddit', 'npm']."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "analyze_project",
+      "description": "Analyze a local project or GitHub repository to extract context for domain suggestions.\n\nThis tool scans project manifest files (package.json, pyproject.toml, Cargo.toml, go.mod)\nand README files to understand your project, then generates relevant domain name suggestions.\n\n**Use Cases:**\n1. Find a domain for your existing codebase\n2. Get domain ideas that match your project's identity\n3. Analyze any GitHub repo for branding inspiration\n\n**Supported Projects:**\n- Node.js (package.json)\n- Python (pyproject.toml, setup.py)\n- Rust (Cargo.toml)\n- Go (go.mod)\n- Any project with README.md\n\n**Examples:**\n- analyze_project(\"/path/to/my-app\") → Analyzes local project\n- analyze_project(\"https://github.com/vercel/next.js\") → Analyzes GitHub repo\n- analyze_project(\"/my-project\", suggest_domains=true, style=\"short\") → Short brandable names",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Local path or GitHub URL to analyze."
+          },
+          "include_source_files": {
+            "type": "boolean",
+            "description": "Scan source files for keywords. Defaults to false."
+          },
+          "suggest_domains": {
+            "type": "boolean",
+            "description": "Auto-generate domain suggestions. Defaults to true."
+          },
+          "tld": {
+            "type": "string",
+            "description": "Primary TLD for suggestions. Defaults to 'com'."
+          },
+          "max_suggestions": {
+            "type": "number",
+            "description": "Maximum suggestions (1-30). Defaults to 10."
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "brandable",
+              "descriptive",
+              "short",
+              "creative"
+            ],
+            "description": "Suggestion style preference."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "hunt_domains",
+      "description": "Find valuable domains for investment opportunities.\n\nScans Sedo auctions, generates pattern-based candidates, and calculates investment scores\nbased on length, TLD value, keyword matches, and pronounceability.\n\n**Investment Score Factors:**\n- Length: Shorter = higher score (3-4 chars = +25 points)\n- TLD Value: .com = +25, .io/.ai = +15, .co = +12\n- Keyword Match: +5 per keyword found in domain\n- Pronounceability: Good vowel ratio = +10\n- Aftermarket Price: Lower prices get bonus points\n\n**Pattern Types:**\n- `short`: 3-5 character pronounceable patterns (CVC, CVCV)\n- `dictionary`: Common words that make good domains\n- `brandable`: Keyword + modern suffixes (-ly, -ify, -io)\n- `acronym`: Abbreviations from multiple keywords\n- `numeric`: Keyword + numbers (7, 24, 365)\n\n**Examples:**\n- hunt_domains(keywords=[\"ai\", \"chat\"]) → Find AI/chat themed domains\n- hunt_domains(max_length=5, tlds=[\"com\"]) → Ultra-short .com domains\n- hunt_domains(max_aftermarket_price=500) → Sedo auctions under $500\n- hunt_domains(patterns=[\"short\"], score_threshold=60) → High-scoring short domains",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Keywords to search for and incorporate into patterns."
+          },
+          "tlds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "TLDs to search. Defaults to ['com', 'io', 'co']."
+          },
+          "min_length": {
+            "type": "number",
+            "description": "Minimum domain name length. Defaults to 3."
+          },
+          "max_length": {
+            "type": "number",
+            "description": "Maximum domain name length. Defaults to 12."
+          },
+          "include_aftermarket": {
+            "type": "boolean",
+            "description": "Include Sedo auctions. Defaults to true."
+          },
+          "max_aftermarket_price": {
+            "type": "number",
+            "description": "Maximum aftermarket price (USD)."
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "short",
+                "dictionary",
+                "numeric",
+                "brandable",
+                "acronym"
+              ]
+            },
+            "description": "Pattern types to generate."
+          },
+          "max_results": {
+            "type": "number",
+            "description": "Maximum results (1-50). Defaults to 20."
+          },
+          "score_threshold": {
+            "type": "number",
+            "description": "Minimum investment score (0-100). Defaults to 40."
+          }
+        }
+      }
+    },
+    {
+      "name": "expiring_domains",
+      "description": "Find domains that are about to expire and may become available soon.\n\nMonitors the federated negative cache for domains approaching their expiration date.\nUseful for domain investors and those watching specific domains.\n\nRequires NEGATIVE_CACHE_URL to be configured.\n\nExamples:\n- expiring_domains(days=30) → Domains expiring in the next 30 days\n- expiring_domains(tlds=[\"com\"], days=7) → .com domains expiring within a week\n- expiring_domains(keywords=\"ai\") → AI-related domains expiring soon",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tlds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter by TLDs (e.g., ['com', 'io']). Omit to search all TLDs."
+          },
+          "days": {
+            "type": "number",
+            "description": "Find domains expiring within this many days. Defaults to 30."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum results to return (1-100). Defaults to 25."
+          },
+          "keywords": {
+            "type": "string",
+            "description": "Filter by keywords in domain name."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "ai_health",
+      "description": "Check health status of AI inference services.\n\nReturns status of:\n- VPS Qwen (self-hosted llama.cpp)\n- Together.ai (cloud fallback)\n- Semantic Engine (offline, always available)\n- Circuit breaker states\n- Adaptive concurrency limits\n\nUse when:\n- AI suggestions are slow or failing\n- Diagnosing which AI source is being used\n- Monitoring inference infrastructure",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "verbose": {
+            "type": "boolean",
+            "description": "Include detailed metrics and circuit breaker states.",
+            "default": false
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,2026 @@
+{
+  "package": "@harusame64/desktop-touch-mcp",
+  "tools": [
+    {
+      "name": "screenshot",
+      "description": "Purpose: Capture desktop, window, or region across detail levels (meta / text / image / som / ocr) and capture modes (normal / background).\nDetails: detail='meta' (default) returns window titles+positions only (~20 tok/window, no image). detail='text' returns UIA actionable elements with clickAt coords, no image (~100-300 tok). detail='som' returns a Set-of-Marks annotated image plus OCR-detected elements with IDs (bypasses UIA entirely). detail='ocr' returns Windows OCR words with screen-pixel clickAt coords (Phase 4: absorbs former screenshot_ocr — use when UIA is sparse and you want to force OCR unconditionally). detail='image' and detail='som' are server-blocked unless confirmImage=true is also passed. mode='background' captures hidden/minimised/occluded windows via PrintWindow (Phase 4: absorbs former screenshot_background) — pair with windowTitle/hwnd. dotByDot=true returns 1:1 pixel WebP; compute screen coords: screen_x = origin_x + image_x (or screen_x = origin_x + image_x / scale when dotByDotMaxDimension is set — scale printed in response). diffMode=true returns only changed windows after the first call (~160 tok). region={x,y,width,height} captures a sub-rectangle (Phase 4: absorbs former scope_element when paired with windowTitle/hwnd — discover element bounds via desktop_discover, then pass region here). Data reduction: grayscale=true (−50%), dotByDotMaxDimension=1280 (caps longest edge), windowTitle+region (sub-crop to exclude browser chrome — e.g. region={x:0, y:120, width:1920, height:900}).\nPrefer: Use meta to orient, text before clicking, dotByDot only when precise pixel coords are needed. Use detail='som' for native apps or games that do not expose UIA elements (UIA-Blind). Use detail='ocr' for OCR-only (skip UIA entirely). Use mode='background' when the target window must stay hidden or cannot be brought to foreground. Prefer browser_* tools for Chrome. Use diffMode after actions to confirm state changed. Only use image+confirmImage when text returned 0 actionable elements and visual inspection is genuinely required.\nCaveats: Default mode scales to maxDimension=768 — image pixels ≠ screen pixels; apply the scale formula before passing to mouse_click. Foreground detail='image' is always blocked without confirmImage=true. diffMode requires a prior full-capture baseline (non-diff call or workspace_snapshot) — calling diffMode cold returns a full frame, not a diff. mode='background' requires windowTitle or hwnd, and only composes with detail in {'image','meta'} — detail='text'/'som'/'ocr' run only against foreground capture (the dispatcher rejects the conflicting combination). Passing mode='background' is itself the acknowledgement that image pixels are wanted, so confirmImage is NOT required for it (matches the former screenshot_background contract). fullContent=false enables legacy mode (faster but GPU windows may be black). detail='ocr' requires windowTitle or hwnd; first call may take ~1s (WinRT cold-start) and the matching OCR language pack must be installed.\nExamples:\n  screenshot() → meta orientation of all windows\n  screenshot({detail:'text', windowTitle:'Notepad'}) → clickable elements with coords\n  screenshot({detail:'ocr', windowTitle:'PDF', ocrLanguage:'ja'}) → OCR words with screen-pixel coords\n  screenshot({mode:'background', windowTitle:'Chrome', dotByDot:true, dotByDotMaxDimension:1280, grayscale:true}) → background-capture pixel-accurate Chrome\n  screenshot({windowTitle:'Notepad', region:{x:0,y:120,width:600,height:400}}) → cropped sub-region (zoom into element after desktop_discover)",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "windowTitle": {
+            "description": "Capture only the window whose title contains this string. Use '@active' for the current foreground window. Prefer over full-screen when target window is known.",
+            "type": "string"
+          },
+          "hwnd": {
+            "description": "Direct window handle ID (takes precedence over windowTitle). Obtain from desktop_discover (windows[].hwnd). String type to avoid 64-bit precision issues.",
+            "type": "string"
+          },
+          "displayId": {
+            "description": "Capture a specific monitor (0 = primary). Use desktop_state({includeScreen:true}) to list displays.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "region": {
+            "description": "Capture only this sub-region. Without windowTitle: virtual screen coordinates. With windowTitle: window-local coordinates — useful to exclude browser chrome (tabs/address bar). Example: windowTitle='Chrome', region={x:0, y:120, width:1920, height:900} skips the 120px browser chrome.",
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "description": "Left edge. Without windowTitle: virtual screen coordinates. With windowTitle: window-local coordinates (0 = window left edge)."
+              },
+              "y": {
+                "type": "number",
+                "description": "Top edge. Without windowTitle: virtual screen coordinates. With windowTitle: window-local coordinates (0 = window top edge)."
+              },
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ]
+          },
+          "maxDimension": {
+            "default": 768,
+            "description": "Max width or height in pixels (default 768). Use 1280 to read small text, code, or fine UI details. Ignored when dotByDot=true.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "dotByDot": {
+            "description": "1:1 pixel mode — no scaling, WebP compression. Window captures include 'origin: (x,y)' so you can compute screen position: screen_x = origin_x + image_x. When dotByDotMaxDimension is also set, scale factor is included: screen_x = origin_x + image_x / scale.",
+            "type": "boolean"
+          },
+          "dotByDotMaxDimension": {
+            "description": "Cap the longest edge (pixels) when dotByDot=true. Reduces payload while preserving coordinate math. Example: 1280 on a 1920×1080 screen → scale≈0.667. Response includes scale factor: screen_x = origin_x + image_x / scale. Recommended for Chrome: dotByDot=true, dotByDotMaxDimension=1280, grayscale=true.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "grayscale": {
+            "description": "Convert to grayscale before encoding. Reduces file size ~50% for text-heavy content (e.g. AWS console, code editors). Avoid when color is meaningful (charts, status indicators).",
+            "type": "boolean"
+          },
+          "webpQuality": {
+            "default": 60,
+            "description": "WebP quality when dotByDot=true or diffMode=true. 40=layout only, 60=general (default), 80=fine text.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "diffMode": {
+            "description": "Layer diff mode — compares each window against the buffered previous frame. First call = full I-frame (all windows). Subsequent calls = only changed windows (P-frame). Implicitly enables dotByDot. Best used with windowTitle=undefined to snapshot all windows.",
+            "type": "boolean"
+          },
+          "detail": {
+            "description": "Response detail level (omit to let the server pick a smart default):\n  omitted — auto: 'image' when dotByDot/region/displayId is specified, else 'meta'\n  'meta'  — window title + screen region only (~20 tok/window, cheapest)\n  'text'  — UIA element tree as JSON with text values (~100-300 tok/window, no image)\n  'image' — actual screenshot pixels. BLOCKED unless confirmImage=true is also passed.\n  'som'   — Set-of-Marks image + OCR elements (bypasses UIA entirely). BLOCKED unless confirmImage=true is also passed.\n  'ocr'   — Windows OCR words with screen-pixel clickAt coords (Phase 4: absorbs former screenshot_ocr). Use when UIA returns no actionable elements (WinUI3 custom-drawn UIs, game overlays, PDF viewers). Note: detail='text' auto-falls back to OCR via ocrFallback='auto'; choose detail='ocr' only when forcing OCR unconditionally.",
+            "type": "string",
+            "enum": [
+              "meta",
+              "text",
+              "image",
+              "som",
+              "ocr"
+            ]
+          },
+          "mode": {
+            "description": "Capture mode.\n  'normal'     — default. Window-targeted captures (windowTitle / hwnd) use Win32 PrintWindow with automatic BitBlt fallback when PrintWindow returns no data or an all-black frame; the route used is reported in hints.captureSource. Fullscreen / displayId captures use BitBlt.\n  'background' — explicit Win32 PrintWindow capture, retained for back-compat and explicit selection. Requires windowTitle (or hwnd). Pair with fullContent for GPU-rendered apps.",
+            "default": "normal",
+            "type": "string",
+            "enum": [
+              "normal",
+              "background"
+            ]
+          },
+          "fullContent": {
+            "description": "When mode='background', use PW_RENDERFULLCONTENT to capture GPU-rendered windows (Chrome, Electron, WinUI3). Default true. Set false for legacy mode (faster but GPU windows may appear black). Ignored unless mode='background'.",
+            "type": "boolean"
+          },
+          "confirmImage": {
+            "description": "Must be true to receive image pixels when detail='image'. Without this flag, detail='image' is blocked and a guidance message is returned instead. Prefer detail='text' / diffMode=true / dotByDot=true first — only set confirmImage=true when visual inspection is genuinely required.",
+            "type": "boolean"
+          },
+          "ocrFallback": {
+            "default": "auto",
+            "description": "OCR fallback behaviour when detail='text'. 'auto' (default): fire Windows OCR if UIA returns 0 actionable elements OR hints.uiaSparse=true (UIA returned <5 elements, typical for Chrome). 'always': always augment actionable[] with OCR words. 'never': disable OCR entirely.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ]
+          },
+          "ocrLanguage": {
+            "default": "ja",
+            "description": "BCP-47 language tag for the OCR engine (e.g. 'ja', 'en-US'). Used when detail='text' (OCR fallback) or detail='ocr' (direct OCR).",
+            "type": "string"
+          },
+          "preprocessPolicy": {
+            "default": "auto",
+            "description": "OCR preprocessing scale policy for detail='som' and OCR fallback paths. 'auto' (default): clamp scale to 1 on OOM (>8MP) or high-DPI (≥150%). 'aggressive': relaxes DPI clamp to 175%, preserving upscale on 150%-DPI monitors (e.g. Outlook PWA). Also auto-enables adaptive binarization. 'minimal': always scale=1 regardless of DPI/resolution.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "aggressive",
+              "minimal"
+            ]
+          },
+          "preprocessAdaptive": {
+            "description": "When true, apply Sauvola adaptive binarization after contrast stretch. Improves recognition of thin text on low-contrast or gradient backgrounds. Automatically enabled when preprocessPolicy='aggressive'. Requires Rust native engine; silently skipped otherwise.",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mouse_click",
+      "description": "Click at screen coordinates. Normally pass windowTitle so the server auto-guards the click (verifies target identity, foreground, coordinate is inside the target rect) and returns post.perception without a confirmation screenshot. origin+scale from dotByDot=true screenshots are converted to screen coords before guarding. doubleClick:true for double-click; tripleClick:true for triple-click (selects a full line of text). Prefer click_element (UIA) for native apps, prefer browser_click for Chrome. Examples: mouse_click({windowTitle:'Notepad', x:200, y:150}) // guarded — post.perception.status='ok'. mouse_click({x:100, y:100}) // unguarded — post.perception.status='unguarded'. If a guard failure returns a suggestedFix, pass its fixId to approve the fix: mouse_click({fixId:'fix-...'}) // one-shot, expires in 15s. lensId is optional and only for advanced pinned-target workflows; omit it for normal use. Caveats: origin+scale are meaningful ONLY with dotByDot=true screenshot responses. hints.verifyDelivery:{status:'delivered'|'focus_only'|'unverifiable', reason} reports the post-click observation in 3 values (focused-element shift, window-foreground change, or no signal). Win11 foreground refusal during the homing path (UIPI cross-elevation / admin-only target / call from a background process or service) returns code:'ForegroundRestricted' ok:false rather than landing the click on the wrong window — recover by switching to a tool that accepts windowTitle directly (click_element / desktop_act) — browser_* tools target by tabId/selector, not windowTitle. MouseClickNotDelivered is reserved-only (false-positive risk is too high to emit a typed code), so degradation is expressed via the 'unverifiable' status, not a separate error.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number",
+            "description": "X coordinate. Screen-absolute by default. When 'origin' is provided, treated as image-local (pixel position within the screenshot)."
+          },
+          "y": {
+            "type": "number",
+            "description": "Y coordinate. Screen-absolute by default. When 'origin' is provided, treated as image-local."
+          },
+          "origin": {
+            "description": "When set, (x,y) are image-local coords from a screenshot. Server converts to screen coords: screen_x = origin.x + x / (scale ?? 1), screen_y = origin.y + y / (scale ?? 1). Copy origin values directly from the screenshot response text. This eliminates manual coord math and prevents out-of-window clicks.",
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "description": "Screen x of image top-left (copy from screenshot response)"
+              },
+              "y": {
+                "type": "number",
+                "description": "Screen y of image top-left (copy from screenshot response)"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ]
+          },
+          "scale": {
+            "description": "Scale factor from screenshot response (only when dotByDotMaxDimension caused a resize). Omit if the screenshot was 1:1. Only used when 'origin' is also provided.",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "button": {
+            "default": "left",
+            "description": "Mouse button to click",
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ]
+          },
+          "doubleClick": {
+            "description": "Whether to double-click",
+            "type": "boolean"
+          },
+          "tripleClick": {
+            "description": "Whether to triple-click (select a line of text). Takes precedence over doubleClick when both are true.",
+            "type": "boolean"
+          },
+          "narrate": {
+            "default": "minimal",
+            "description": "Narration level. \"rich\": include UIA diff in post.rich (appeared/disappeared/valueDeltas) — eliminates the need for a verification screenshot. Default: \"minimal\".",
+            "type": "string",
+            "enum": [
+              "minimal",
+              "rich"
+            ]
+          },
+          "speed": {
+            "description": "Cursor movement speed in px/sec. 0 = instant (teleport, no animation). Omit to use the configured default (DESKTOP_TOUCH_MOUSE_SPEED env var, default 3000).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "homing": {
+            "description": "Enable homing correction (default true). When enabled, the MCP server corrects stale coordinates if the target window moved since the last screenshot. Set false to disable all correction (like traction control OFF).",
+            "type": "boolean"
+          },
+          "windowTitle": {
+            "description": "Hint: partial title of the window being clicked. Enables window-delta correction and auto-focus if the window went behind another. Use '@active' for the current foreground window. Example: \"メモ帳\", \"Google Chrome\"",
+            "type": "string"
+          },
+          "elementName": {
+            "description": "Hint: name/label of the UI element (from actionable[].name in screenshot(detail='text')). Requires windowTitle. Triggers UIA re-query to get fresh coordinates when the window resized or moved far.",
+            "type": "string"
+          },
+          "elementId": {
+            "description": "Hint: automationId of the UI element (from actionable[].id). Requires windowTitle. Used with elementName for more precise UIA re-query.",
+            "type": "string"
+          },
+          "hwnd": {
+            "description": "Direct window handle ID (takes precedence over windowTitle). Obtain from desktop_discover response (windows[].hwnd). String type to avoid 64-bit precision issues.",
+            "type": "string"
+          },
+          "forceFocus": {
+            "description": "When true, bypass Windows foreground-stealing protection via AttachThreadInput before focusing the target window. Required when a pinned window (e.g. Claude CLI) keeps stealing focus. Default: follows env DESKTOP_TOUCH_FORCE_FOCUS (default false). Set DESKTOP_TOUCH_FORCE_FOCUS=1 to make true the global default.",
+            "type": "boolean"
+          },
+          "trackFocus": {
+            "description": "When true (default), detect if focus was stolen from the target window after the action. Reports focusLost:{afterMs,expected,stolenBy,stolenByProcessName} in the response. Set false to skip the settle wait and focus check.",
+            "type": "boolean"
+          },
+          "settleMs": {
+            "default": 300,
+            "description": "Milliseconds to wait after the action before checking foreground window (default 300). Only used when trackFocus=true.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "verifyDelivery": {
+            "description": "When true (default), capture pre/post snapshots of element-under-cursor + focusedElement + foregroundWindow + scrollPos to populate hints.verifyDelivery with status='delivered' | 'focus_only' | 'unverifiable' (issue #178). Set false to skip the extra UIA work when the caller will read post state itself.",
+            "type": "boolean"
+          },
+          "lensId": {
+            "description": "Optional perception lens ID for advanced pinned-target workflows. When provided, guards are evaluated before clicking (safe.clickCoordinates, target.identityStable) and a perception envelope is attached to post.perception in the response. For normal use, omit lensId and pass windowTitle directly — Auto Perception handles tracking.",
+            "type": "string"
+          },
+          "fixId": {
+            "description": "One-shot fix approval ID. If a previous mouse_click returned a suggestedFix, pass that fixId here to approve it. The server revalidates the fix and executes with corrected args. fixId expires in 15 seconds and can only be used once.",
+            "type": "string"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ]
+      }
+    },
+    {
+      "name": "mouse_drag",
+      "description": "Click and drag from (startX, startY) to (endX, endY) holding the left mouse button — for sliders, drag-and-drop, canvas drawing, and window resizing. Pass windowTitle so the server auto-guards the start coordinate and returns post.perception. Examples: mouse_drag({windowTitle:'Notepad', startX:50, startY:50, endX:200, endY:200}). lensId is optional and only for advanced pinned-target workflows. Caveats: Left button only. Both start and endpoint are guarded. Cross-window and desktop drags are blocked by default — pass allowCrossWindowDrag:true to confirm intent. hints.verifyDelivery:{status:'delivered'|'focus_only'|'unverifiable', reason} reports the post-drop observation in the same 3-value shape as mouse_click. MouseDragNotDelivered is SUGGESTS-registered but reserved-only (not emitted) — degradation is expressed via the 'unverifiable' status rather than a typed code. Win11 foreground refusal (UIPI cross-elevation / admin-only target / call from a background process or service) returns code:'ForegroundRestricted' ok:false from the homing path.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "startX": {
+            "type": "number"
+          },
+          "startY": {
+            "type": "number"
+          },
+          "endX": {
+            "type": "number"
+          },
+          "endY": {
+            "type": "number"
+          },
+          "narrate": {
+            "default": "minimal",
+            "description": "Narration level. \"rich\": include UIA diff in post.rich (appeared/disappeared/valueDeltas) — eliminates the need for a verification screenshot. Default: \"minimal\".",
+            "type": "string",
+            "enum": [
+              "minimal",
+              "rich"
+            ]
+          },
+          "speed": {
+            "description": "Cursor movement speed in px/sec. 0 = instant (teleport, no animation). Omit to use the configured default (DESKTOP_TOUCH_MOUSE_SPEED env var, default 3000).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "homing": {
+            "description": "Enable homing correction (default true). When enabled, the MCP server corrects stale coordinates if the target window moved since the last screenshot. Set false to disable all correction (like traction control OFF).",
+            "type": "boolean"
+          },
+          "windowTitle": {
+            "description": "Hint: partial title of the window being clicked. Enables window-delta correction and auto-focus if the window went behind another. Use '@active' for the current foreground window. Example: \"メモ帳\", \"Google Chrome\"",
+            "type": "string"
+          },
+          "hwnd": {
+            "description": "Direct window handle ID (takes precedence over windowTitle). Obtain from desktop_discover response (windows[].hwnd). String type to avoid 64-bit precision issues.",
+            "type": "string"
+          },
+          "lensId": {
+            "description": "Optional perception lens ID. Guards and envelope same as mouse_click.",
+            "type": "string"
+          },
+          "allowCrossWindowDrag": {
+            "description": "When true, allow dragging the endpoint into a different window or the desktop background. Default false — cross-window drags (including desktop/wallpaper) are blocked to prevent accidents. Pass true to confirm intent for deliberate cross-window or desktop-area drags.",
+            "type": "boolean"
+          },
+          "allowTabDrag": {
+            "description": "When true, allow drags that start in the title-bar / tab-strip area of a tabbed app (Notepad, Terminal, Edge, Chrome, etc.). Default false — such drags are blocked because they detach the tab into a new window rather than moving the window. Pass true only when you intentionally want to rearrange or detach a tab. Note: active only when auto-guard is enabled (same scope as allowCrossWindowDrag).",
+            "type": "boolean"
+          },
+          "verifyDelivery": {
+            "description": "When true (default), capture pre/post snapshots of element-under-cursor + focusedElement + foregroundWindow + scrollPos to populate hints.verifyDelivery with status='delivered' | 'focus_only' | 'unverifiable' (issue #178). Set false to skip the extra UIA work when the caller will read post state itself.",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "startX",
+          "startY",
+          "endX",
+          "endY"
+        ]
+      }
+    },
+    {
+      "name": "keyboard",
+      "description": "Purpose: Send keyboard input to a window: 'type' for text, 'press' for key combos, 'sequence' for atomic multi-step chords.\nDetails: action='type' inserts text (auto-clipboard for non-ASCII / IME-safe). action='press' sends key combos like 'ctrl+c'/'alt+tab'. action='sequence' runs ordered steps in one keyboard lock — use for Alt+letter, letter mnemonic chains where intermediate tool calls would close the menu. Pass windowTitle to auto-focus and auto-guard (identity, foreground, modal) before input. Omitting windowTitle acts on the active window (unguarded).\nPrefer: Use windowTitle to auto-focus before injection. Set lensId for perception guards. Use desktop_act({action:'setValue'}) for UIA ValuePattern text fields.\nCaveats: win+r/win+x/win+s/win+l blocked. action='type' does not handle CJK IME composition — use use_clipboard=true or desktop_act({action:'setValue'}). Non-ASCII text (CJK / emoji / diacritics / smart-quote-class punctuation) auto-clipboards to prevent silent-drop and Chrome accelerator hijack; pass forceKeystrokes:true to disable. Background (PostMessage/WM_CHAR) auto-engages for terminal-class windows (Windows Terminal / cmd / PowerShell); DTM_BG_AUTO=1 enables globally. Foreground non-terminal type runs a per-chunk leash; user focus-steal mid-stream aborts with FocusLostDuringType + context.typed/remaining; pass abortOnFocusLoss:false to disable. BG type verifies WM_CHAR via UIA TextPattern read-back; mismatch returns BackgroundInputNotDelivered (see SUGGESTS for false-positive notes). BG press read-back is scoped to terminal-class + enter/tab/arrow; other combos return verifyDelivery:'unverifiable', failure returns BackgroundKeyNotDelivered. action='sequence' is FG-only (BG/foreground_flash schema-rejected); emits verifyDelivery:'focus_only'; mid-loop focus theft returns MenuFocusLostMidSequence + context.remaining: Step[]. Win11 FG refusal returns ForegroundRestricted — terminal-class targets auto-engage BG; non-terminal switch to desktop_act / click_element.\nExamples:\n  keyboard({action:'type', text:'hello', windowTitle:'Notepad'}) → text injected (guarded)\n  keyboard({action:'type', text:'hello'}) → text injected (unguarded)\n  keyboard({action:'press', keys:'ctrl+c'}) → copy\n  keyboard({action:'press', keys:'escape', windowTitle:'Dialog'}) → dismiss dialog\n  keyboard({action:'sequence', steps:[{keys:'alt+i', gapMs:100},{keys:'m'}], windowTitle:'Microsoft Visual Basic'}) → Insert > Module (atomic)",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "type",
+              "press",
+              "sequence"
+            ],
+            "description": "Action selector — one of: type, press, sequence. Per-action required fields are enforced at call time (see the tool description); this flat schema lists every action's fields as optional."
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 10000,
+            "description": "The text to type (max 10,000 characters)"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "background",
+                  "foreground",
+                  "foreground_flash"
+                ]
+              },
+              {
+                "type": "string",
+                "const": "foreground"
+              }
+            ]
+          },
+          "narrate": {
+            "type": "string",
+            "enum": [
+              "minimal",
+              "rich"
+            ]
+          },
+          "use_clipboard": {
+            "type": "boolean"
+          },
+          "replaceAll": {
+            "type": "boolean"
+          },
+          "forceKeystrokes": {
+            "type": "boolean"
+          },
+          "windowTitle": {
+            "type": "string"
+          },
+          "hwnd": {
+            "type": "string"
+          },
+          "forceFocus": {
+            "type": "boolean"
+          },
+          "trackFocus": {
+            "type": "boolean"
+          },
+          "settleMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "lensId": {
+            "type": "string"
+          },
+          "fixId": {
+            "type": "string"
+          },
+          "abortOnFocusLoss": {
+            "type": "boolean"
+          },
+          "forceImeOff": {
+            "type": "boolean"
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keys": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Key combo string, e.g. 'ctrl+c', 'alt+tab', 'enter', 'ctrl+shift+s'. Note: win+r, win+x, win+s, win+l are blocked for security."
+          },
+          "steps": {
+            "minItems": 1,
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "keys": {
+                  "type": "string",
+                  "maxLength": 100,
+                  "description": "Key combo for this step (e.g. 'alt+i' then 'm'). Same syntax as keyboard(action='press'). Blocked combos (win+r, win+x, win+s, win+l) are rejected per-step."
+                },
+                "holdMs": {
+                  "description": "Hold time within this step (key-down → wait holdMs → key-up). Default 0 = tap. Use a positive value when the target requires a long press (rare for menu nav; useful for some games / accessibility apps).",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 500
+                },
+                "gapMs": {
+                  "description": "Wait between this step's release and the next step's press. Default 80ms — chosen to give Windows menu pump time to register the previous mnemonic before the next letter. The last step's gapMs is ignored.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2000
+                }
+              },
+              "required": [
+                "keys"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Ordered list of key-press steps. Min 1, max 16. Total duration must not exceed 5000ms (excludes settleMs and focus acquisition). N=1 is allowed but inherits the sequence verification contract (hints.verifyDelivery.status='focus_only'); if you want the stricter keyboard:press contract, call keyboard({action:'press', keys}) directly (issue #278, matrix doc §3.1)."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "focus_window",
+      "description": "Bring a window to the foreground by partial title match (case-insensitive). Use when a tool does not accept a windowTitle param, or when you need to switch focus before a sequence of actions. Use chromeTabUrlContains to activate a specific Chrome/Edge tab by URL substring before focusing — only the active tab's title appears in the windows list. If CDP is unavailable, chromeTabUrlContains is silently skipped — check response.hints.warnings. Returns WindowNotFound if no match exists; call desktop_discover to see available titles. Caveats: On some apps focus may be immediately stolen back (modal dialogs, UAC prompts) — verify with desktop_state after focusing. Win11 foreground refusal (UIPI cross-elevation / admin-only target / call from a background process or service) returns code:'ForegroundRestricted' ok:false instead of silently failing — recover by switching to a tool that does not require foreground transfer: desktop_act / click_element use UIA InvokePattern (no foreground needed); keyboard BG path bypasses foreground for terminal-class targets only (Windows Terminal / cmd / PowerShell — keyboard with windowTitle on non-terminal apps still hits the same ForegroundRestricted refusal). browser_* tools target by tabId/selector, not windowTitle.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Partial window title to search for (case-insensitive)"
+          },
+          "chromeTabUrlContains": {
+            "description": "When set, activate the Chrome/Edge tab whose URL contains this substring before focusing the window. Requires Chrome/Edge running with --remote-debugging-port (default 9222). Use this when the target is a Chrome tab that is not currently active — the active tab title is the only one visible in the window title list.",
+            "type": "string"
+          },
+          "cdpPort": {
+            "default": 9222,
+            "description": "CDP port for chromeTabUrlContains (default 9222)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "forceFocus": {
+            "description": "When set, use AttachThreadInput-based foreground escalation on the first attempt. When omitted (default), focus_window first tries the standard SetForegroundWindow path and auto-escalates to force-focus only if Win11 refused the default attempt (issue #197). Override env: DESKTOP_TOUCH_FORCE_FOCUS=1 sets the implicit default to true. If both default and force paths fail, focus_window now returns ok:false code:'ForegroundRestricted' instead of the previous silent ok:true with windowChanged:false.",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "click_element",
+      "description": "Invoke a UI element by name or automationId via UIA InvokePattern — no screen coordinates needed. The server auto-guards using windowTitle (verifies identity, foreground, modal) and returns post.perception.status. Prefer over mouse_click for buttons, menu items, and links in native Windows apps. Use desktop_discover first to discover automationIds. Pass fixId from a suggestedFix to re-target after window identity drift. lensId is optional for advanced pinned-lens use. Caveats: Typed errors: code:'InvokePatternNotSupported' — the control does not expose InvokePattern, fall back to mouse_click; code:'ElementDisabled' — the element is in a disabled state, re-check preconditions before retry; code:'GuardFailed' — read the perception envelope (attention / guard fields) and choose recovery (re-focus, wait, or pass the suggestedFix.fixId on the next call). Some custom controls do not expose InvokePattern at all; fall back to mouse_click for those.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "windowTitle": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Partial window title of the target window. Use '@active' for the current foreground window."
+          },
+          "hwnd": {
+            "description": "Direct window handle ID (takes precedence over windowTitle). String to avoid 64-bit precision issues.",
+            "type": "string",
+            "maxLength": 20
+          },
+          "name": {
+            "description": "Element name/label (partial match, case-insensitive)",
+            "type": "string",
+            "maxLength": 200
+          },
+          "automationId": {
+            "description": "Exact AutomationId of the element",
+            "type": "string",
+            "maxLength": 200
+          },
+          "controlType": {
+            "description": "Control type filter, e.g. 'Button', 'MenuItem'",
+            "type": "string",
+            "maxLength": 100
+          },
+          "narrate": {
+            "default": "minimal",
+            "description": "Narration level. \"rich\": include UIA diff in post.rich (appeared/disappeared/valueDeltas) — eliminates the need for a verification screenshot. Default: \"minimal\".",
+            "type": "string",
+            "enum": [
+              "minimal",
+              "rich"
+            ]
+          },
+          "lensId": {
+            "description": "Optional perception lens ID. Guards (safe.keyboardTarget, target.identityStable) are evaluated before clicking, and a perception envelope is attached to post.perception on success.",
+            "type": "string"
+          },
+          "fixId": {
+            "description": "Approve a pending suggestedFix (one-shot, 15s TTL).",
+            "type": "string"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "windowTitle"
+        ]
+      }
+    },
+    {
+      "name": "workspace_snapshot",
+      "description": "Purpose: Orient fully in one call — returns display layouts, all window thumbnails (WebP), and per-window actionable element lists with clickAt coords.\nDetails: uiSummary.actionable[] per window includes: action ('click'|'type'|'expand'|'select'), clickAt {x,y} (pass directly to mouse_click), value (current text for editable fields). Runs parallel internally; latency ≈ max(single screenshot), not N×screenshots. Also resets the diffMode buffer so subsequent screenshot(diffMode=true) returns only changes (P-frame).\nPrefer: Use at session start or after major workspace changes. Use screenshot(detail='meta') for cheap re-orientation within a session. Use screenshot(detail='text', windowTitle=X) for a single-window update.\nCaveats: Thumbnails are scaled, not 1:1 — use screenshot(dotByDot=true, windowTitle=X) for pixel-accurate coords on a specific window after snapshot. Also: this call resets the screenshot diff baseline (I-frame) and identity tracker as a side effect, so subsequent screenshot(diffMode=true) starts fresh from this snapshot. The reset is not currently exposed in causal/working memory — record an explicit 'workspace_snapshot' step if you need to track the reset point in your causal trail (ADR-010 §11 OQ carry-over for full visibility).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "thumbnailMaxDimension": {
+            "default": 400,
+            "description": "Max size of per-window thumbnail images (default 400px)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "includeUiSummary": {
+            "description": "Whether to include UI element summaries for each window",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "workspace_launch",
+      "description": "Purpose: Launch an application and wait for its new window to appear, returning title, HWND, and PID.\nDetails: Runs the command via ShellExecute, snapshots the window list before launch, then polls until a new HWND appears (compared by HWND, not title). Returns {windowTitle, hwnd, pid, elapsedMs}. Works for localized window titles (e.g. '電卓' for calc.exe) because detection is HWND-based, not title-based. timeoutMs default 10000. detach=true fires without waiting and returns no window info.\nPrefer: Use instead of run_macro({exec, sleep, desktop_discover}) combos. Follow with focus_window(windowTitle) to interact with the launched app.\nCaveats: Single-instance apps that reuse an existing window will not register as a new HWND — call desktop_discover first to check if the window is already open. detach=true returns immediately with no window title or hwnd.\nExamples:\n  workspace_launch({command:'notepad.exe'}) → {windowTitle:'<localized title>', hwnd:'...', pid:...}\n  workspace_launch({command:'calc.exe', timeoutMs:15000})",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "maxLength": 260,
+            "description": "Executable name or full path (e.g. 'notepad.exe', 'calc.exe'). Shell interpreters (cmd.exe, powershell.exe, etc.) are blocked."
+          },
+          "args": {
+            "default": [],
+            "description": "Command-line arguments (max 20). Shell metacharacters (; & | ` $() ${}) are not allowed.",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "waitMs": {
+            "default": 2000,
+            "description": "Milliseconds to wait for the window to appear (default 2000)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30000
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "run_macro",
+      "description": "Purpose: Execute multiple tools sequentially in one MCP call — eliminates round-trip latency for predictable multi-step workflows.\nDetails: steps[] is an array of {tool, params} objects. Accepts all desktop-touch tools plus a special sleep pseudo-step: {tool:\"sleep\", params:{ms:N}} (max 10000ms per step). stop_on_error=true (default) halts on first failure. Max 50 steps. The LLM cannot inspect intermediate results during execution — all steps run to completion (or first error) before any output is returned.\nPrefer: Use for predictable fixed sequences (focus → sleep → type → screenshot). Do not use for conditional logic — return to the LLM between branches so it can inspect intermediate state.\nCaveats: If any step may fail conditionally (e.g. a dialog that may or may not appear), split the macro at that point. Each screenshot step within a macro incurs the same token cost as a standalone call.\nExamples:\n  [{tool:'focus_window',params:{windowTitle:'Notepad'}},{tool:'sleep',params:{ms:300}},{tool:'keyboard',params:{action:'type',text:'Hello'}},{tool:'screenshot',params:{detail:'text',windowTitle:'Notepad'}}]\n  [{tool:'browser_navigate',params:{url:'https://example.com'}},{tool:'wait_until',params:{condition:'element_matches',target:{by:'text',pattern:'Example Domain'}}}]",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "steps": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool": {
+                  "type": "string",
+                  "description": "Tool name to call. One of: desktop_state, screenshot, mouse_click, mouse_drag, click_element, focus_window, keyboard, clipboard, window_dock, scroll, terminal, browser_open, browser_eval, browser_search, browser_overview, browser_locate, browser_click, browser_navigate, browser_fill, browser_form, workspace_snapshot, workspace_launch, wait_until, notification_show, desktop_discover, desktop_act, get_windows, get_ui_elements, set_element_value, or the special pseudo-command \"sleep\"."
+                },
+                "params": {
+                  "default": {},
+                  "description": "Parameters for the tool (same as calling it directly). Omit for tools with no params.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "tool"
+              ]
+            },
+            "description": "Ordered list of tool calls to execute sequentially (max 50 steps)."
+          },
+          "stop_on_error": {
+            "description": "Stop execution on the first error (default true). Set false to collect all results.",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "steps"
+        ]
+      }
+    },
+    {
+      "name": "scroll",
+      "description": "Purpose: Scroll a window or page. 5 strategies via action: 'raw' (wheel notches), 'to_element' (UIA name/automationId or CSS selector), 'smart' (auto-detect target with multi-strategy fallback), 'capture' (full-page stitched image), 'read' (scroll+OCR+dedupe → stitched text).\nDetails: action='raw': send raw mouse-wheel notches at (x,y) or current cursor, optional window focus. Scroll scale — UIA Tier 1 (ScrollPattern apps): empirically ≈1 text line per notch; amount:3 (default) ≈ 3 lines (small nudge), amount:10 ≈ 10 lines (~½ visible area). Legacy SendInput: each amount unit = 3 wheel ticks; ≈9 text lines per unit at Windows default (app/OS-setting dependent). action='to_element': scroll a named element into viewport (UIA or CDP). action='smart': handles nested scroll layers, virtualised lists, sticky-header occlusion. action='capture': stitches full-page images (caps at ~700KB raw); sizeReduced=true means downscaled. action='read': scrolls page-by-page, OCRs each viewport, deduplicates overlapping lines, returns stitched text; language auto-detected from OS locale if omitted.\nPrefer: Use action='to_element' or action='smart' for click target out-of-viewport recovery (entity_outside_viewport). Use action='capture' for reading long pages as images. Use action='read' for extracting text from long native-app documents (PDF readers, text editors, terminals) where copy-paste is unavailable. For simple scroll without target, use action='raw'.\nCaveats: action='capture' returns stitched image — pixels do NOT match screen coords when sizeReduced=true, use for reading only, not mouse_click. action='smart' CDP path requires browser_open. action='to_element' native path requires element to implement UIA ScrollItemPattern. action='read' uses OCR (imperfect accuracy) and requires the window to be visible; for browser pages prefer browser_eval or browser_overview for accurate DOM text. action='raw' typed errors: code:'ScrollNotDelivered' on silent drop (overlay / non-scrollable / UIPI low-IL); already-at-boundary is success via pre/post-percent disambiguation. hints.verifyDelivery.{channel,reason} per ADR-018 §2.6 (Phase 1b: Tier 1 UIA dispatch for HWNDs exposing ScrollPattern; other apps use legacy SendInput). action='smart' typed errors: code:'OverflowHiddenAncestor' (retry with expandHidden:true), code:'VirtualScrollExhausted' (provide virtualIndex).\nExamples:\n  scroll({action:'raw', direction:'down', amount:5, windowTitle:'Chrome'})\n  scroll({action:'to_element', name:'OK', windowTitle:'Dialog'})\n  scroll({action:'smart', target:'#create-release-btn'})\n  scroll({action:'capture', windowTitle:'Chrome', maxScrolls:10})\n  scroll({action:'read', windowTitle:'Acrobat', maxPages:15}) // OCR + dedupe long PDF",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "to_element",
+              "smart",
+              "capture",
+              "read"
+            ],
+            "description": "Action selector — one of: raw, to_element, smart, capture, read. Per-action required fields are enforced at call time (see the tool description); this flat schema lists every action's fields as optional."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right",
+              "into-view"
+            ],
+            "description": "Scroll direction"
+          },
+          "amount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "speed": {
+            "type": "number"
+          },
+          "homing": {
+            "type": "boolean"
+          },
+          "windowTitle": {
+            "type": "string"
+          },
+          "hwnd": {
+            "type": "string"
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "block": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "nearest"
+            ]
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "target": {
+            "type": "string",
+            "description": "CSS selector (Chrome/Edge) or partial UIA name (native apps). For CDP path, must be a valid CSS selector (starts with #, ., tag, or [ ). For UIA path, a partial name match against element Name property."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "cdp",
+              "uia",
+              "image"
+            ]
+          },
+          "inline": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "nearest"
+            ]
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "retryCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "verifyWithHash": {
+            "type": "boolean"
+          },
+          "virtualIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "virtualTotal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expandHidden": {
+            "type": "boolean"
+          },
+          "hint": {
+            "type": "string",
+            "enum": [
+              "above",
+              "below",
+              "left",
+              "right"
+            ]
+          },
+          "maxScrolls": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "scrollDelayMs": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 3000
+          },
+          "maxWidth": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxPages": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "scrollKey": {
+            "type": "string",
+            "enum": [
+              "PageDown",
+              "Space",
+              "ArrowDown"
+            ]
+          },
+          "stopWhenNoChange": {
+            "type": "boolean"
+          },
+          "language": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "browser_search",
+      "description": "Grep-like element search across the current page. by: 'text' (literal substring), 'regex', 'role', 'ariaLabel', 'selector' (CSS). Returns results[] sorted by confidence descending — pass results[0].selector to browser_click. Pagination via offset/maxResults. Caveats: Use browser_overview for broad discovery; use browser_search when you know specific text or role to target. Typed errors: code:'BrowserSearchNoResults' (broaden the by:'text' substring or relax the by:'regex' pattern; switch to browser_overview to enumerate selectors), code:'BrowserSearchTimeout' (reduce maxResults / narrow scope), code:'ScopeNotFound' (the scope CSS selector did not match — verify the selector or omit scope), code:'BrowserNotConnected' (call browser_open first, or browser_open({launch:{}}) to auto-spawn).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "by": {
+            "type": "string",
+            "enum": [
+              "text",
+              "regex",
+              "role",
+              "ariaLabel",
+              "selector"
+            ],
+            "description": "Search axis: text/regex/role/ariaLabel/selector"
+          },
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Pattern to match against the chosen axis."
+          },
+          "scope": {
+            "description": "CSS selector to limit the search scope.",
+            "type": "string"
+          },
+          "maxResults": {
+            "default": 50,
+            "description": "Max results returned (default 50).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "offset": {
+            "default": 0,
+            "description": "Offset into the result set (default 0).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "visibleOnly": {
+            "description": "Only visible elements (default true). Set false to include hidden ones with confidence penalty.",
+            "type": "boolean"
+          },
+          "inViewportOnly": {
+            "description": "Only currently-in-viewport elements (default false).",
+            "type": "boolean"
+          },
+          "caseSensitive": {
+            "description": "Case-sensitive matching for text/regex (default false).",
+            "type": "boolean"
+          },
+          "tabId": {
+            "description": "Tab ID from browser_open. Omit to use the first page tab.",
+            "type": "string"
+          },
+          "port": {
+            "default": 9222,
+            "description": "Chrome/Edge CDP remote debugging port (default 9222; configurable via desktop-touch-config.json)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "by",
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "browser_overview",
+      "description": "List all interactive elements (links, buttons, inputs, ARIA controls) on the current page with CSS selectors, visible text or value for inputs, and viewport status — use before browser_click to discover stable selectors, and prefer this over screenshot when verifying button/toggle state after submission (no image tokens, structured output). scope limits to a CSS subsection (e.g. '.sidebar'). Returns state (checked/pressed/selected/expanded) for ARIA custom controls. Caveats: Selectors are CDP-generated snapshots — re-call after page navigates or re-renders. Input text reflects the empty-field hint text when defined (takes priority over typed value) — use browser_eval('document.querySelector(sel).value') to read actual typed content. Typed errors: code:'BrowserNotConnected' (CDP not attached — call browser_open or browser_open({launch:{}})). Note: a non-matching scope CSS selector silently falls back to the full document (does not raise an error) — verify the selector via browser_eval if scoped enumeration is required.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scope": {
+            "description": "CSS selector to limit the search scope (e.g. '.s-main-slot', '#nav-search-form'). Omit to scan the full page.",
+            "type": "string"
+          },
+          "types": {
+            "default": [
+              "all"
+            ],
+            "description": "Element types to include. Default 'all' returns links, buttons, and inputs.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "link",
+                "button",
+                "input",
+                "all"
+              ]
+            }
+          },
+          "inViewportOnly": {
+            "description": "When true, only return elements currently visible in the viewport.",
+            "type": "boolean"
+          },
+          "maxResults": {
+            "default": 50,
+            "description": "Maximum number of elements to return (default 50).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "tabId": {
+            "description": "Tab ID from browser_open. Omit to use the first page tab.",
+            "type": "string"
+          },
+          "port": {
+            "default": 9222,
+            "description": "Chrome/Edge CDP remote debugging port (default 9222; configurable via desktop-touch-config.json)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "includeContext": {
+            "description": "When true (default), append `activeTab` + `readyState` lines to the response. Set false to skip — saves ~150 tokens per call when chaining several browser_* calls in the same tab.",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "browser_open",
+      "description": "Connect to Chrome/Edge running with --remote-debugging-port and return open tab IDs — required before all other browser_* tools. Pass launch:{} (or with overrides) to auto-spawn a debug-mode browser when no CDP endpoint is live (idempotent: an already-running endpoint is preferred). Returns tabs[] with id, url, title, active — pass tabId to browser_* tools to target a specific tab. Caveats: CDP connection is per-process; if Chrome restarts, call browser_open again to get fresh tab IDs. A Chrome session started without --remote-debugging-port cannot be taken over — close it first or use a separate userDataDir. If the CDP endpoint is unreachable and launch is omitted, returns ok:false (typically code:'BrowserNotConnected' when the fetch surfaces ECONNREFUSED, otherwise code:'ToolError' with error 'Cannot reach Chrome/Edge CDP...'); re-call with launch:{} (idempotent) to auto-spawn or start Chrome manually with --remote-debugging-port=9222.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "port": {
+            "default": 9222,
+            "description": "Chrome/Edge CDP remote debugging port (default 9222; configurable via desktop-touch-config.json)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "launch": {
+            "description": "If set, spawn a debug-mode browser when no CDP endpoint is live on the target port (idempotent: an already-running endpoint is preferred and the spawn step is skipped). Pass {} to use defaults (chrome, C:\\tmp\\cdp, no initial URL). Omit to perform pure connect.",
+            "type": "object",
+            "properties": {
+              "browser": {
+                "default": "auto",
+                "description": "Which browser to spawn. 'auto' tries chrome → edge → brave. Ignored when a CDP endpoint is already live.",
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "chrome",
+                  "edge",
+                  "brave"
+                ]
+              },
+              "userDataDir": {
+                "default": "C:\\tmp\\cdp",
+                "description": "Path for --user-data-dir. A dedicated profile avoids conflicts with the main browser session.",
+                "type": "string"
+              },
+              "url": {
+                "description": "Optional URL to open in the new browser.",
+                "type": "string"
+              },
+              "waitMs": {
+                "default": 10000,
+                "description": "Max ms to wait for the CDP endpoint to become ready (default 10000).",
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 30000
+              },
+              "killExisting": {
+                "description": "When true, terminate existing browser processes before launch. Use when a browser is already running WITHOUT --remote-debugging-port. WARNING: unsaved input in the existing session will be lost.",
+                "type": "boolean"
+              }
+            }
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "browser_locate",
+      "description": "Find a DOM element by CSS selector and return its physical screen coordinates — compatible directly with mouse_click. Prefer browser_click to find+click in one step. Prefer browser_overview to discover selectors. Caveats: Coordinates are captured at call time; if the page reflows before mouse_click, coords may be stale. Typed errors: code:'BrowserNotConnected' (call browser_open first), code:'ElementNotFound' (selector did not match — re-discover via browser_overview / browser_search).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector for the target element (e.g. '#submit', '.btn', 'button[type=submit]')"
+          },
+          "tabId": {
+            "description": "Tab ID from browser_open. Omit to use the first page tab.",
+            "type": "string"
+          },
+          "port": {
+            "default": 9222,
+            "description": "Chrome/Edge CDP remote debugging port (default 9222; configurable via desktop-touch-config.json)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "includeContext": {
+            "description": "When true (default), append `activeTab` + `readyState` lines to the response. Set false to skip — saves ~150 tokens per call when chaining several browser_* calls in the same tab.",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "selector"
+        ]
+      }
+    },
+    {
+      "name": "browser_click",
+      "description": "Find a DOM element by CSS selector and click it (combines browser_locate + mouse_click in one step). Prefer over mouse_click for Chrome — selector-based clicking is stable across repaints. Pass tabId+port so the server auto-guards (verifies tab readyState and identity) and returns post.perception.status. lensId is optional for advanced pinned-tab workflows. Caveats: Fails if the element is outside the visible viewport — scroll it into view with browser_eval(\"document.querySelector('sel').scrollIntoView()\") first. hints.verifyDelivery:{status:'delivered'|'unverifiable', reason, observedSignals:{mutationCount,urlChanged,activeElementChanged}} reports the post-click observation in 2 values: 'delivered' fires only when mutationCount>0 OR urlChanged (activeElementChanged is recorded in observedSignals but intentionally NOT a delivery signal — plain clicks on focusable controls always update focus, treating that as 'delivered' would mask silent-fail regressions); 'unverifiable' reason ∈ {'iframe_context_mismatch','no_dom_mutation','probe_install_failed','probe_read_failed'}. CDP emits 2 values only (focus_only is a UIA-path concept, N/A here). BrowserClickNotDelivered is reserved-only (false-positive risk too high to emit) — degradation reads from 'unverifiable' status.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector for the target element (e.g. '#submit', '.btn', 'button[type=submit]')"
+          },
+          "narrate": {
+            "default": "minimal",
+            "description": "Narration level. \"rich\": include UIA diff in post.rich (appeared/disappeared/valueDeltas) — eliminates the need for a verification screenshot. Default: \"minimal\".",
+            "type": "string",
+            "enum": [
+              "minimal",
+              "rich"
+            ]
+          },
+          "tabId": {
+            "description": "Tab ID from browser_open. Omit to use the first page tab.",
+            "type": "string"
+          },
+          "port": {
+            "default": 9222,
+            "description": "Chrome/Edge CDP remote debugging port (default 9222; configurable via desktop-touch-config.json)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "lensId": {
+            "description": "Optional perception lens ID. Guards (target.identityStable) are evaluated before clicking, and a perception envelope is attached to post.perception on success.",
+            "type": "string"
+          },
+          "fixId": {
+            "description": "Approve a pending suggestedFix (one-shot, 15s TTL).",
+            "type": "string"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "selector"
+        ]
+      }
+    },
+    {
+      "name": "browser_eval",
+      "description": "Purpose: Inspect or operate on a browser tab via 3 actions: 'js' (evaluate JS), 'dom' (get HTML), 'appState' (extract SSR-injected SPA state).\nDetails: action='js' — Run a JS expression. withPerception:true wraps in {ok, result, post}. action='dom' — Return outerHTML of selector (or document.body), truncated to maxLength. action='appState' — Scan Next/Nuxt/Remix/Apollo/GitHub/Redux SSR injected JSON; pass selectors to override defaults.\nPrefer: Use action='appState' BEFORE 'dom' or 'js' on SPAs where rendered HTML is sparse — single CDP call. Use 'dom' when 'appState' is empty and you need page structure. Use 'js' as the escape hatch for arbitrary scripting.\nCaveats: DOM nodes cannot be returned from action='js' directly (circular refs are serialized safely). React/Vue/Svelte controlled inputs cannot be set via element.value — use keyboard(action='type') / browser_fill instead. readyState is strictly checked; guard blocks if page is still loading. Typed errors: code:'BrowserNotConnected' on CDP disconnect (re-attach via browser_open); code:'AutoGuardBlocked' when the auto-guard refuses (e.g. page still loading) — the error message preserves the guard's 1-sentence recommended next step (most often wait_until({condition:'ready_state'}) or browser_eval readyState polling, then retry).\nExamples:\n  browser_eval({action:'js', expression:'document.title'}) → page title\n  browser_eval({action:'dom', selector:'#main', maxLength:5000}) → outerHTML\n  browser_eval({action:'appState'}) → default SPA state probes",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "js",
+              "dom",
+              "appState"
+            ],
+            "description": "Action selector — one of: js, dom, appState. Per-action required fields are enforced at call time (see the tool description); this flat schema lists every action's fields as optional."
+          },
+          "expression": {
+            "type": "string",
+            "description": "JavaScript expression to evaluate. The server automatically wraps snippets in an async IIFE to avoid repeated const/let collisions. For multi-statement snippets, use an explicit final return value. Declarations (const/let/var) are scoped per snippet — use window.* / globalThis.* for persistence."
+          },
+          "withPerception": {
+            "type": "boolean"
+          },
+          "lensId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "includeContext": {
+            "type": "boolean"
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selector": {
+            "type": "string"
+          },
+          "maxLength": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 100000
+          },
+          "selectors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxBytes": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 64000
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "browser_navigate",
+      "description": "Navigate a browser tab to a URL via CDP Page.navigate — more reliable than clicking the address bar. Pass tabId+port so the server auto-guards (verifies tab readyState) and returns post.perception.status. lensId is optional for advanced pinned-tab workflows. Caveats: Does not block until page load completes — the Page.navigate ack confirms only that the navigation request was accepted (frameStoppedLoading / loaderId observation is internal). Follow with wait_until({condition:'ready_state' or 'element_matches'}) or repeated browser_eval polling for slow pages. Typed errors: code:'NavigateFailed' (Page.navigate rejected — DNS failure, malformed URL, network unreachable; check URL + connectivity), code:'BrowserNotConnected' (CDP disconnect — re-attach via browser_open), code:'AutoGuardBlocked' when the auto-guard refuses (e.g. tab still loading) — the error message preserves the guard's 1-sentence recommended next step (most often wait_until({condition:'ready_state'}) then retry).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to navigate to"
+          },
+          "narrate": {
+            "default": "minimal",
+            "description": "Narration level. \"rich\": include UIA diff in post.rich (appeared/disappeared/valueDeltas) — eliminates the need for a verification screenshot. Default: \"minimal\".",
+            "type": "string",
+            "enum": [
+              "minimal",
+              "rich"
+            ]
+          },
+          "tabId": {
+            "description": "Tab ID from browser_open. Omit to use the first page tab.",
+            "type": "string"
+          },
+          "port": {
+            "default": 9222,
+            "description": "Chrome/Edge CDP remote debugging port (default 9222; configurable via desktop-touch-config.json)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "waitForLoad": {
+            "description": "When true (default), wait for document.readyState === 'complete' before returning. Use waitForLoad:false for the legacy behavior (return immediately after Page.navigate). Accepts the strings \"true\"/\"false\".",
+            "type": "boolean"
+          },
+          "loadTimeoutMs": {
+            "default": 15000,
+            "description": "Max milliseconds to wait for page load when waitForLoad=true (default 15000). On timeout, returns ok:true with readyState set to current state and hints.warnings=['NavigateTimeout'].",
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 30000
+          },
+          "lensId": {
+            "description": "Optional perception lens ID. Guards (target.identityStable) are evaluated before navigating, and a perception envelope is attached to post.perception on success.",
+            "type": "string"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "browser_fill",
+      "description": "Fill a form input with a value via CDP — works on React/Vue/Svelte controlled inputs that reject browser_eval value assignment. Use browser_overview or browser_locate first to obtain a stable selector. Use this over browser_eval when setting a controlled input's value via JS does not update the framework state. Caveats: Requires browser_open (CDP active). Does not work on contenteditable rich-text editors — use keyboard(action='type') for those. actual in response shows what the element's value property reads after fill; verify it matches the intended value. Typed errors: code:'BrowserFillNotDelivered' on post-fill value mismatch — note the false-positive case where a React controlled input's onChange transforms the value (delivery actually succeeded; SUGGESTS context surfaces hints.verifyDelivery.subReason:'controlled_input_transform' for that case). When detected, the actual value in the response is authoritative.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector for the target element (e.g. '#submit', '.btn', 'button[type=submit]')"
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 10000,
+            "description": "Text to fill into the input element"
+          },
+          "tabId": {
+            "description": "Tab ID from browser_open. Omit to use the first page tab.",
+            "type": "string"
+          },
+          "port": {
+            "default": 9222,
+            "description": "Chrome/Edge CDP remote debugging port (default 9222; configurable via desktop-touch-config.json)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "includeContext": {
+            "description": "When true (default), append `activeTab` + `readyState` lines to the response. Set false to skip — saves ~150 tokens per call when chaining several browser_* calls in the same tab.",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "selector",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "browser_form",
+      "description": "Inspect all form fields (input, select, textarea, button) within a CSS-selector-specified container and return their name, type, id, current value, hint text, disabled/readOnly state, and associated label text (resolved via for[id], ancestor LABEL, aria-labelledby, aria-label in that order). Use this before browser_fill to discover exact field selectors and avoid accidentally targeting the wrong input (e.g. a global search bar). Caveats: Requires browser_open (CDP active). Hidden inputs (type=hidden) are excluded by default — set includeHidden:true if needed. Value text is truncated at 200 chars.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector for the form or container element to inspect (e.g. '#login-form', '.search-bar'). All input, select, textarea, and button descendants are returned."
+          },
+          "includeHidden": {
+            "description": "When true, include hidden inputs (type=hidden). Default false to avoid CSRF-token / serialized-state clutter.",
+            "type": "boolean"
+          },
+          "maxResults": {
+            "default": 100,
+            "description": "Maximum number of form fields to return (default 100).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "tabId": {
+            "description": "Tab ID from browser_open. Omit to use the first page tab.",
+            "type": "string"
+          },
+          "port": {
+            "default": 9222,
+            "description": "Chrome/Edge CDP remote debugging port (default 9222; configurable via desktop-touch-config.json)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "includeContext": {
+            "description": "When true (default), append `activeTab` + `readyState` lines to the response. Set false to skip — saves ~150 tokens per call when chaining several browser_* calls in the same tab.",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "selector"
+        ]
+      }
+    },
+    {
+      "name": "window_dock",
+      "description": "Purpose: Decorate a window: pin (always-on-top), unpin, or dock (move + resize + optional pin).\nDetails: action='pin' makes window always-on-top until unpin/duration_ms. action='unpin' removes always-on-top. action='dock' positions to corner with width/height (default 480×360 bottom-right) and optionally pins. Minimized windows are automatically restored before docking.\nPrefer: Use action='dock' for terminal/CLI window auto-positioning at session start. Use action='pin' alone when you only need always-on-top without moving or resizing.\nCaveats: Pin survives minimize/restore; explicit action='unpin' needed to release. Dock fails on elevated processes. Dock overrides any existing Win+Arrow snap arrangement.\nExamples:\n  window_dock({action:'dock', title:'PowerShell', corner:'bottom-right', width:480, height:360})\n  window_dock({action:'pin', title:'Settings', duration_ms:5000})\n  window_dock({action:'unpin', title:'Settings'})",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "pin",
+              "unpin",
+              "dock"
+            ],
+            "description": "Action selector — one of: pin, unpin, dock. Per-action required fields are enforced at call time (see the tool description); this flat schema lists every action's fields as optional."
+          },
+          "title": {
+            "type": "string",
+            "description": "Partial window title (case-insensitive)"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60000
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "corner": {
+            "type": "string",
+            "enum": [
+              "top-left",
+              "top-right",
+              "bottom-left",
+              "bottom-right"
+            ]
+          },
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "pin": {
+            "type": "boolean"
+          },
+          "monitorId": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "margin": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "wait_until",
+      "description": "Purpose: Server-side poll for an observable condition — eliminates screenshot-polling loops when waiting for state changes.\nDetails: condition selects what to watch: window_appears/window_disappears (target.windowTitle required), focus_changes (optional target.fromHwnd), element_appears/value_changes (target.windowTitle + target.elementName required, UIA; min 500ms interval), ready_state (target.windowTitle; visible + not minimized), terminal_output_contains (target.windowTitle + target.pattern required [+target.regex:true], needs terminal tools loaded), element_matches (target.by + target.pattern required, needs browser tools loaded), url_matches (target.pattern required [+target.regex:true]; matches the active tab's location.href via CDP — use for SPA route changes, redirects, OAuth flows). Returns {ok:true, elapsedMs, observed} on success, or WaitTimeout error with suggest hints. timeoutMs default 5000 (max 60000).\nPrefer: Use instead of run_macro({sleep:N}) + screenshot loops. Use terminal_output_contains to detect CLI command completion. Use element_matches for browser DOM readiness after navigation. Use url_matches when the URL is the most reliable signal (SPA routing / redirect cascades).\nCaveats: terminal_output_contains, element_matches, and url_matches require a browser CDP connection (open --remote-debugging-port=9222 first). element_appears/value_changes spawn a UIA process per poll — interval clamped to 500ms minimum. On elapsed-timeout the response is {ok:false, code:'WaitTimeout', error, suggest:[...]}; the suggest[] array lists three fixed actions: 'Increase timeoutMs', 'Verify the target is correct', 'Inspect intermediate state with screenshot(detail=\\'meta\\')'. Non-timeout failures also occur — pre-poll validation and missing-hook errors classify as code:'ToolError' (read the descriptive error message), and CDP probe errors (url_matches / element_matches conditions) surface as code:'BrowserNotConnected' (re-attach via browser_open). Branch on code rather than assume WaitTimeout.\nExamples:\n  wait_until({condition:'window_appears', target:{windowTitle:'Save As'}, timeoutMs:10000})\n  wait_until({condition:'terminal_output_contains', target:{windowTitle:'Terminal', pattern:'$ '}, timeoutMs:30000})\n  wait_until({condition:'element_matches', target:{by:'text', pattern:'Submit', scope:'#checkout-form'}})\n  wait_until({condition:'url_matches', target:{pattern:'/dashboard'}, timeoutMs:15000})\n  wait_until({condition:'url_matches', target:{pattern:'^https://app\\\\.example\\\\.com/orders/[0-9]+$', regex:true}})",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "condition": {
+            "type": "string",
+            "enum": [
+              "window_appears",
+              "window_disappears",
+              "focus_changes",
+              "value_changes",
+              "element_appears",
+              "ready_state",
+              "terminal_output_contains",
+              "element_matches",
+              "url_matches"
+            ],
+            "description": "Condition to wait for. See per-condition target requirements."
+          },
+          "target": {
+            "description": "Target descriptor — fields used depend on condition. Accepts an object literal or a JSON-stringified object.",
+            "type": "object",
+            "properties": {
+              "windowTitle": {
+                "type": "string"
+              },
+              "elementName": {
+                "type": "string"
+              },
+              "elementSelector": {
+                "type": "string"
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "regex": {
+                "type": "boolean"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "port": {
+                "type": "number"
+              },
+              "tabId": {
+                "type": "string"
+              },
+              "by": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "regex",
+                  "role",
+                  "ariaLabel"
+                ]
+              },
+              "fromHwnd": {
+                "type": "string"
+              }
+            }
+          },
+          "timeoutMs": {
+            "default": 5000,
+            "description": "Maximum time to wait (default 5000ms)",
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 60000
+          },
+          "intervalMs": {
+            "default": 200,
+            "description": "Poll interval (default 200ms — terminal_output_contains uses 500 internally)",
+            "type": "integer",
+            "minimum": 50,
+            "maximum": 5000
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "condition"
+        ]
+      }
+    },
+    {
+      "name": "desktop_state",
+      "description": "Purpose: Read-only observation of the current desktop state. Returns focused window/element, modal flag, attention signal from Auto Perception. Phase 4 absorbs former get_active_window / get_cursor_position / get_screen_info / get_document_state via include* flags.\nDetails: Always returns: focusedWindow (title, hwnd, processName), focusedElement (name, type, value, automationId), cursorPos {x,y}, cursorOverElement (name, type), cursorOverWindow, hasModal (boolean), pageState ('ready'|'loading'|'dialog'), attention, visibleWindows count. Optional fields (default off): includeCursor:true → cursor {x,y,monitorId} (richer than cursorPos). includeScreen:true → screen {virtualScreen, displays[], displayCount, primaryIndex}. includeDocument:true → document {url, title, readyState, selection, scroll, viewport} via CDP (silently omitted on non-Chromium foreground). includeSessionContext:true (or include:['sessionContext']) → sessionContext {origin, consoleSessionId, sessionLabel, sessionState, ownWinStation} for Terminal Services session classification (ADR-017, observability-only). Chromium: cursorOverElement is null (UIA sparse); focusedElement may fall back to CDP document.activeElement; hints.focusedElementSource reports which path produced the row ('view' = engine-perception latest_focus, 'uia' = direct UIA query, 'cdp' = document.activeElement). Does NOT enumerate descendants — use desktop_discover for actionable entity list and window list.\nPrefer: Use after each action to confirm state. Cheapest observation tool — cheaper than any screenshot. attention='ok' means safe to proceed; other values require recovery (see suggest[]). Set include* flags only when you need the extra data (each adds one syscall or CDP round-trip).\nCaveats: Cannot detect non-UIA elements (custom-drawn UIs, game overlays). hasModal only detects modal dialogs exposed via UIA — browser alert/confirm dialogs may not appear here. includeDocument requires browser_open (CDP active); silently omitted otherwise with hints.documentUnavailable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "includeCursor": {
+            "description": "When true, add a richer `cursor` field with monitor index alongside the lightweight `cursorPos`. Phase 4: absorbs former get_cursor_position. Default false.",
+            "type": "boolean"
+          },
+          "includeScreen": {
+            "description": "When true, add a `screen` field with all connected display info (resolution, position, DPI, scale). Phase 4: absorbs former get_screen_info. Default false. Use the displayId values returned here in screenshot / window_dock(action='dock').",
+            "type": "boolean"
+          },
+          "includeDocument": {
+            "description": "When true, add a `document` field with the focused Chrome tab's url, title, readyState, selection, and scroll position via CDP. Phase 4: absorbs former get_document_state. Default false. Requires browser_open (CDP active); silently omitted on non-Chromium foreground.",
+            "type": "boolean"
+          },
+          "includeSessionContext": {
+            "description": "When true, add a `sessionContext` field with the Terminal Services session classification (origin, consoleSessionId, sessionLabel: 'console'|'rdp'|'other', sessionState: 'active'|'connected'|'disconnected'|'locked'|'unknown', ownWinStation). Default false. Equivalent to `include: ['sessionContext']`. Per ADR-017: observability-only — does not gate input. `sessionState: 'locked'` is a heuristic (active + foreground=null + previous sample within 60s saw a non-null foreground); treat it as a generic input-pause signal — it can also fire on secure-desktop transitions (UAC prompt, Credential UI), where the user-visible state is not strictly 'locked' but input is equally unavailable to this session.",
+            "type": "boolean"
+          },
+          "port": {
+            "default": 9222,
+            "description": "CDP port for includeDocument (default 9222).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "tabId": {
+            "description": "Optional CDP tab id for includeDocument; omit for the focused tab.",
+            "type": "string"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "terminal",
+      "description": "Purpose: Interact with a terminal window: read output, send input, or run+wait+read in one call. action='read' / action='send' absorb the formerly-standalone read/send tools (Phase 4).\nDetails: action='run' is the recommended high-level workflow: send command → wait until quiet/pattern/timeout → read output. The command text is passed as `input` (the legacy parameter name `command` is also accepted as a deprecated alias — see issue #245). Returns completion={reason, elapsedMs} first-class plus outputIntegrity:'ok'|'baseline_lost' so callers can detect when scrollback could not be anchored to the pre-send buffer. action='read' reads current text via UIA TextPattern (falls back to OCR); use sinceMarker for incremental diff. action='send' sends a command with focus management.\nPrefer: action='run' for command execution + result. For long-running commands (test runners, builds, deploys) use until:{mode:'pattern', pattern:'<final marker>'} — the default quiet mode is tuned for short interactive commands and may complete prematurely on multi-second silent gaps mid-run. Use action='read'/'send' for fine-grained control or when you need to interleave other actions.\nCaveats: Do not screenshot the terminal — action='read' is cheaper and structured. action='run' supports completion reasons: quiet | pattern_matched | timeout | window_closed | window_not_found | send_failed (send rejected on a live window — see warnings for the underlying error code). When outputIntegrity:'baseline_lost' is returned, output is forced to '' and readError.code='BaselineMarkerLost' is set: rerun with until:{mode:'pattern',...} or longer timeoutMs. action='run' may also emit warnings prefixed FileLockCollision: when output reveals an EBUSY/Windows-lock/EAGAIN-EDEADLK file collision (e.g. shell '>' redirect colliding with the script's own writer — issue #236). Default quietMs=1500 (issue #196); long silences require pattern mode. preferClipboard=true (send default) overwrites clipboard. Hidden-input prompts emit verifyDelivery.unverifiable (reason:'hidden_input_prompt') — use method:'foreground'. action='read' typed errors: TerminalWindowNotFound, TerminalTextPatternUnavailable (force source:'ocr'); stale sinceMarker → hints.terminalMarker.previousMatched:false on ok:true (omit sinceMarker). FG-path Win11 foreground refusal returns code:'ForegroundRestricted' — switch to method:'background' or DTM_BG_AUTO=1. BG path auto-engages only when (a) the target window class is `ConsoleWindowClass` (conhost: cmd / PowerShell / pwsh classic hosts) OR (b) env DTM_BG_AUTO=1 is set globally. Windows Terminal (`CASCADIA_HOSTING_WINDOW_CLASS`) is intentionally EXCLUDED from auto-engage (issue #173): WT runs on WinUI/XAML and silently drops WM_CHAR posted to its HWND, so the FG path is used by default — pass sendOptions:{method:'background'} only if you have verified your WT build accepts BG input.\nExamples:\n  terminal({action:'run', windowTitle:'PowerShell', input:'npm test', until:{mode:'pattern', pattern:'Test Files'}}) → recommended for test runners; matches when vitest summary appears\n  terminal({action:'run', windowTitle:'pwsh', input:'ls'}) → quiet 1500ms wait, returns output (short interactive)\n  terminal({action:'run', windowTitle:'pwsh', command:'ls'}) → identical to the above; `command` is a deprecated alias of `input` (issue #245)\n  terminal({action:'read', windowTitle:'PowerShell', sinceMarker:'...'}) → incremental diff using the read action\n  terminal({action:'send', windowTitle:'PowerShell', input:'echo hello'}) → sends text + Enter using the send action",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "read",
+              "send",
+              "run"
+            ],
+            "description": "Action selector — one of: read, send, run. Per-action required fields are enforced at call time (see the tool description); this flat schema lists every action's fields as optional."
+          },
+          "windowTitle": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Partial title of the terminal window (e.g. 'PowerShell', 'pwsh', 'WindowsTerminal')."
+          },
+          "lines": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "sinceMarker": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "stripAnsi": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "uia",
+              "ocr"
+            ]
+          },
+          "ocrLanguage": {
+            "type": "string",
+            "maxLength": 20
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "input": {
+            "type": "string",
+            "maxLength": 10000,
+            "description": "Text to send (max 10,000 chars)."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "background",
+              "foreground",
+              "foreground_flash"
+            ]
+          },
+          "chunkSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "pressEnter": {
+            "type": "boolean"
+          },
+          "focusFirst": {
+            "type": "boolean"
+          },
+          "restoreFocus": {
+            "type": "boolean"
+          },
+          "preferClipboard": {
+            "type": "boolean"
+          },
+          "pasteKey": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "ctrl+v",
+              "ctrl+shift+v"
+            ]
+          },
+          "forceFocus": {
+            "type": "boolean"
+          },
+          "trackFocus": {
+            "type": "boolean"
+          },
+          "settleMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "command": {
+            "type": "string",
+            "maxLength": 10000
+          },
+          "until": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "const": "quiet"
+                  },
+                  "quietMs": {
+                    "default": 1500,
+                    "description": "Stop when output is silent for this many ms (default 1500).",
+                    "type": "integer",
+                    "minimum": 50,
+                    "maximum": 30000
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "const": "pattern"
+                  },
+                  "pattern": {
+                    "type": "string",
+                    "description": "Stop when output matches this string (or regex if regex:true)"
+                  },
+                  "regex": {
+                    "description": "If true, treat pattern as a regex",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "pattern"
+                ]
+              }
+            ]
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 600000
+          },
+          "sendOptions": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "readOptions": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "clipboard",
+      "description": "Read or write the Windows clipboard. action='read' returns current text content (empty string if non-text). action='write' replaces clipboard with given text and verifies delivery via Get-Clipboard -Raw read-back, comparing the bytes (UTF-16LE) for exact equality. Caveats: Non-text clipboard payloads (images, files) return empty string on read. Overwrites existing clipboard content on write. action='write' delivery-verification failure returns code:'ClipboardWriteNotDelivered' — typical causes: a third-party clipboard manager intercepts SetClipboardData, DLP / endpoint protection blocks the payload, RDP / Citrix clipboard transcoding strips the text, or another process clears the clipboard between Set and the read-back. Recovery: retry the write, or fall back to keyboard(action='type', use_clipboard=false) for short text. Examples: clipboard({action:'write', text:'hello'}) → write+verify; clipboard({action:'read'}) → returns current text.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "read",
+              "write"
+            ],
+            "description": "Action selector — one of: read, write. Per-action required fields are enforced at call time (see the tool description); this flat schema lists every action's fields as optional."
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "Text to place on the clipboard"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "notification_show",
+      "description": "Show a Windows system tray balloon notification to alert the user. Use at the end of a long-running task so the user knows it finished without watching the screen. Caveats: toast の user reach は原理的に観測不能 (matrix §3.1 line 158 規範整合)。Focus Assist (Do Not Disturb) / Notifications-off setting / consent UI sink いずれも tool 側からは判別不能のため、successful response は常に hints.verifyDelivery を含む (status=\"unverifiable\", reason=\"user_visible_side_effect_uninspectable\", channel=\"win32_balloon_tip\" — 全 double-quoted JSON literal)。caller は user 側の post-notification behavior (例: wait_until(focus_changes)) で間接観測することが望ましい。Uses System.Windows.Forms — no external modules needed.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Notification title"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Notification body text"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "title",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "excel",
+      "description": "Purpose: Author and run VBA macros against Excel via COM late binding (ADR-015). Headline differentiator against Claude for Excel which writes formulas but cannot run VBA.\nDetails: action='run_vba' authors a Sub in a fresh workbook, saves into the managed Trusted Location (%LOCALAPPDATA%\\desktop-touch-mcp\\trusted-vba), and Application.Run the macro. Requires HKCU AccessVBOM=1 + VBAWarnings=1 + a registered Trusted Location (all configured by `node scripts/enable-access-vbom.mjs`). Trust setup: Excel must restart after the CLI runs (values cached at process start). action='check_access_vbom' is a read-only preflight returning {trusted, lockedByPolicy, scope}.\nPrefer: Run check_access_vbom first when a workflow depends on macro execution; the remediation hint pre-empts an opaque HRESULT 0x800a03ec failure inside run_vba.\nCaveats: macroName MUST appear as `Sub <name>(...)` in `code` (else VbaMacroNotFound). VBA Editor UI is structurally bypassed — no UIA tree walk needed. Excel COM is STA: each call serialises through the bridge's worker thread, so long-running macros block subsequent excel() calls on the same MCP server.\nExamples:\n  excel({action:'check_access_vbom'}) → {trusted:true, scope:'hkcu'}\n  excel({action:'run_vba', code:'Sub DesktopTouchAdHoc()\\n  Range(\"A1\").Value = \"Hello\"\\nEnd Sub'}) → {ok:true, workbookPath:'...\\\\trusted-vba\\\\dt_vba_<ts>.xlsm'}\n  excel({action:'run_vba', code:'Sub Demo()\\n  MsgBox \"hi\"\\nEnd Sub', macroName:'Demo', visible:true}) → demo recording path",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "run_vba",
+              "check_access_vbom"
+            ],
+            "description": "Action selector — one of: run_vba, check_access_vbom. Per-action required fields are enforced at call time (see the tool description); this flat schema lists every action's fields as optional."
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "VBA source. MUST declare at least one Sub matching `macroName` (default `DesktopTouchAdHoc`). Example: \n\"Sub DesktopTouchAdHoc()\\r\\n    Range(\\\"A1\\\").Value = \\\"Hello\\\"\\r\\nEnd Sub\""
+          },
+          "macroName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "visible": {
+            "type": "boolean"
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "server_status",
+      "description": "Return MCP server status: version / native engine availability / Auto Perception state / v2 activation. uia: 'native' = Rust UIA addon (fast, ~2 ms focus / ~100 ms tree); 'powershell' = PS fallback (~366 ms focus). imageDiff: 'native' = Rust SSE2 SIMD (0.26 ms @ 1080p); 'typescript' = TS fallback (~3.8 ms). Diagnostic metadata — do not surface these values to the user unless they ask about performance or troubleshooting. Call once per session if you need to know which path is active; the result is stable for the lifetime of the server process.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop_discover",
+      "description": "[EXPERIMENTAL] Find actionable entities and emit leases for desktop_act. Observe a window or browser tab and return interactive entities as structured data. Supports multiple source lanes: UIA (native), CDP (browser), terminal buffer, and visual GPU. Returns entities with leases — pass a lease to desktop_act to interact. Raw screen coordinates are NOT returned in normal mode (debug=true only). If response.warnings[] is non-empty, results may be partial. response.constraints (when present) is a structured summary of provider limitations — use it to decide fallback without parsing warnings[] strings. constraints.entityZeroReason (when entities is empty) explains WHY: foreground_unresolved → add target.windowTitle; uia_blind_visual_unready → retry when visual backend is ready or use screenshot(ocrFallback=always); uia_blind_visual_empty → use screenshot(ocrFallback=always) or V1 click_element; cdp_failed_visual_empty → check --remote-debugging-port=9222 and retry; all_providers_failed → use V1 tools (click_element / terminal(action='read') / screenshot); constraints.uia=blind_single_pane → PWA/Electron/canvas; try view=debug or screenshot(ocrFallback=always); constraints.cdp=provider_failed → check --remote-debugging-port=9222; constraints.terminal=provider_failed → use V1 terminal(action='read'/'send'); Recovery: no_provider_matched → add target.windowTitle or retry; partial_results_only → compare with V1 click_element; cdp_provider_failed → check --remote-debugging-port=9222; visual_provider_unavailable / visual_provider_warming → server retried once (~200ms); if still warned, continue with structured lane or retry later; uia/terminal_provider_failed → use V1 tools (click_element / terminal(action='read')); uia_blind_single_pane / uia_blind_too_few_elements → target is PWA/Electron/canvas; try view=debug for visual lane hints, or fall back to screenshot(ocrFallback=always); visual_not_attempted → GPU backend unavailable; use V1 screenshot+mouse_click or wait and retry; visual_attempted_empty → visual lane ran but produced no stable candidates; consider screenshot(ocrFallback=always) or V1 tools; visual_attempted_empty_cdp_fallback → CDP failed and visual also empty (browser); check --remote-debugging-port=9222 and retry; dialog_resolved_via_owner_chain → common dialog (Save As/Open) found via owner chain; targeting is now hwnd-based; parent_disabled_prefer_popup → parent window blocked by a modal; switched to targeting the active popup dialog. response.softExpiresAtMs is an advisory timestamp at ~60% of the lease TTL window — past it the LLM should consider re-calling desktop_discover even though leases are still technically valid; lease.expiresAtMs remains the only correctness wall. Issue #296: entities[].capabilities (when present) advises executor selection. preferredExecutors[0] is the executor most likely to succeed; if unsupportedExecutors contains 'uia', go straight to mouse_click instead of click_element (saves a InvokePatternNotSupported round-trip on ListItem / TabItem / custom-drawn controls).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "target": {
+            "description": "Target window (windowTitle / hwnd) or browser tab (tabId). Omit for foreground window.",
+            "type": "object",
+            "properties": {
+              "windowTitle": {
+                "type": "string"
+              },
+              "hwnd": {
+                "type": "string"
+              },
+              "tabId": {
+                "type": "string"
+              }
+            }
+          },
+          "view": {
+            "description": "action (default, ≤20 entities), explore (≤50), debug (includes raw rect)",
+            "type": "string",
+            "enum": [
+              "action",
+              "explore",
+              "debug"
+            ]
+          },
+          "query": {
+            "description": "Filter entities by label substring (case-insensitive)",
+            "type": "string"
+          },
+          "maxEntities": {
+            "description": "Override entity count limit",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "debug": {
+            "description": "Include raw screen coordinates in response (debug only — never relay to end-users)",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop_act",
+      "description": "[EXPERIMENTAL] Act on a discovered entity (click/type/setValue/scroll). Use desktop_act. Validates the lease before executing — rejects stale, expired, or mismatched leases. Returns a semantic diff (entity_disappeared, modal_appeared, etc.) and a 'next' hint. If ok=false, read 'reason':   lease_expired / lease_generation_mismatch / lease_digest_mismatch / entity_not_found → re-call desktop_discover;   modal_blocking → response.blockingElement (when present) names the blocker — dismiss via V1 click_element(name=blockingElement.name) then retry;   entity_outside_viewport → scroll via V1 scroll(action='raw'/'to_element') then retry;   executor_failed → fall back to V1 tools (click_element / mouse_click / browser_click);   executor_failed on terminal textbox (action=type) → use V1 terminal(action='send') instead. Check desktop_discover response.constraints for pre-emptive fallback hints before calling desktop_act.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "lease": {
+            "type": "object",
+            "properties": {
+              "entityId": {
+                "type": "string"
+              },
+              "viewId": {
+                "type": "string"
+              },
+              "targetGeneration": {
+                "type": "string"
+              },
+              "expiresAtMs": {
+                "type": "number"
+              },
+              "evidenceDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entityId",
+              "viewId",
+              "targetGeneration",
+              "expiresAtMs",
+              "evidenceDigest"
+            ],
+            "description": "Lease returned by desktop_discover. Expires after TTL; re-call desktop_discover if desktop_act fails with lease_expired."
+          },
+          "action": {
+            "description": "Action to perform. 'auto' selects the best affordance from the entity. 'setValue' (Phase 4: absorbs former set_element_value) sets a UIA ValuePattern value or fills a CDP controlled input — pass the new value via text.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "invoke",
+              "click",
+              "type",
+              "setValue",
+              "select"
+            ]
+          },
+          "text": {
+            "description": "Text to type or set (required when action='type' or action='setValue').",
+            "type": "string"
+          },
+          "include": {
+            "description": "Optional response-shape opt-in. `['envelope']` returns the self-documenting envelope (`_version` / `data` / `as_of` / `confidence`). `['raw']` forces raw shape (overrides DESKTOP_TOUCH_ENVELOPE=1 server default). Default behaviour is raw shape (compat with existing clients).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "lease"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,514 @@
+{
+  "package": "socraticode",
+  "tools": [
+    {
+      "name": "codebase_index",
+      "description": "Start indexing a codebase in the background. Returns immediately. Call codebase_status to poll progress until 100%. Do NOT search until indexing is complete. If already indexing, returns current progress.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory. If omitted, uses the current working directory."
+          },
+          "extraExtensions": {
+            "type": "string",
+            "description": "Comma-separated list of additional file extensions to index beyond the built-in set (e.g. '.tpl,.blade,.hbs'). Useful for projects with non-standard file extensions. Can also be set globally via EXTRA_EXTENSIONS env var."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_update",
+      "description": "Incrementally update an existing codebase index. Only re-indexes changed files. Runs synchronously. Usually not needed if file watcher is active.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "extraExtensions": {
+            "type": "string",
+            "description": "Comma-separated list of additional file extensions to index (e.g. '.tpl,.blade')."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_remove",
+      "description": "Remove a project's codebase index entirely from the vector database. Safely stops the file watcher, cancels any in-progress indexing/update (with drain), and waits for any in-flight graph build before deleting.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          }
+        },
+        "required": [
+          "projectPath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_stop",
+      "description": "Gracefully stop an in-progress indexing operation. The current batch will finish and checkpoint, preserving all progress. Re-run codebase_index to resume from where it left off.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory. If omitted, uses the current working directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_watch",
+      "description": "Start/stop watching a project directory for file changes and automatically update the index. When starting, first runs an incremental update to catch any changes made since the last session, then keeps the index up to date via debounced file system watching.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop",
+              "status"
+            ],
+            "description": "start/stop watching, or get status of watchers."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_search",
+      "description": "Semantic search across an indexed codebase. Only use after codebase_index is complete (check codebase_status first). Returns relevant code chunks matching a natural language query.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language search query (e.g. 'authentication middleware', 'database connection setup')."
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Maximum number of results to return. Default: 10 (override globally via SEARCH_DEFAULT_LIMIT env var)."
+          },
+          "fileFilter": {
+            "type": "string",
+            "description": "Filter results to a specific file path (relative)."
+          },
+          "languageFilter": {
+            "type": "string",
+            "description": "Filter results to a specific language (e.g. 'typescript', 'python')."
+          },
+          "minScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Minimum RRF score threshold (0-1). Results below this are filtered out. Default: 0.10 (override globally via SEARCH_MIN_SCORE env var). Set to 0 to disable filtering."
+          },
+          "includeLinked": {
+            "type": "boolean",
+            "description": "When true, also search across linked projects defined in .socraticode.json or SOCRATICODE_LINKED_PROJECTS env var. Results include a project label showing which project each result came from. Default: false."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_status",
+      "description": "Check index status: chunk count, indexing progress (%), last completed operation, file watcher state. Call after codebase_index to poll until 100% complete.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_graph_build",
+      "description": "Build a dependency graph of the codebase using static analysis (ast-grep). Maps import/require/export relationships between files. Runs in the background — call codebase_graph_status to poll progress until complete.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "extraExtensions": {
+            "type": "string",
+            "description": "Comma-separated list of additional file extensions to include in the graph (e.g. '.tpl,.blade'). Files with non-standard extensions are included as leaf nodes (dependency targets). Can also be set globally via EXTRA_EXTENSIONS env var."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_graph_query",
+      "description": "Query the code dependency graph for a specific file. Returns what the file imports and what files depend on it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Relative path of the file to query (e.g. 'src/index.ts')."
+          }
+        },
+        "required": [
+          "filePath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_graph_stats",
+      "description": "Get statistics about the code dependency graph: total files, edges, most connected files, orphan files, circular dependencies.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_graph_circular",
+      "description": "Find circular dependencies in the codebase.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_graph_visualize",
+      "description": "Visualise the code dependency graph. Two modes:\n  • mode=\"mermaid\" (default) — returns a Mermaid diagram (text) colour-coded by language, circular deps highlighted. Best for inline rendering inside chat, GitHub, or editors that render Mermaid.\n  • mode=\"interactive\" — writes a self-contained HTML page (vendored Cytoscape.js + Dagre, works offline) and opens it in the user's default browser. Shows the file graph and, when a symbol graph is available and fits, a Symbols toggle with the symbol-level call graph. Interactions: click node for sidebar with imports/dependents/symbols list; right-click node to highlight its blast radius (reverse-transitive closure); live search; layout switcher (Dagre / force / concentric / breadth-first / grid / circle); PNG export. Use this when the user asks for a visual/interactive view, wants to explore visually, or needs a shareable diagram.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "mermaid",
+              "interactive"
+            ],
+            "description": "\"mermaid\" (default — text diagram) or \"interactive\" (browser-based explorer)."
+          },
+          "open": {
+            "type": "boolean",
+            "description": "In interactive mode, whether to auto-open the browser. Default true. Set false to just get the file path (useful in headless environments)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_graph_remove",
+      "description": "Remove a project's persisted code graph. Waits for any in-flight graph build to finish first. The graph can be rebuilt with codebase_graph_build or will be rebuilt automatically on the next codebase_index.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          }
+        },
+        "required": [
+          "projectPath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_graph_status",
+      "description": "Check the status of the code dependency graph: build progress (if building), node/edge count, when it was last built, whether it's cached in memory. Use this to poll progress after calling codebase_graph_build.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_impact",
+      "description": "Impact Analysis — return the BLAST RADIUS for a file or symbol. Lists every file (and, where helpful, function) that could break if you change the target. Polymorphic on target: a path-like string ('src/foo.ts') triggers file-mode; a name-like string ('validateUser') triggers symbol-mode. Use this BEFORE refactoring, renaming, or deleting code to know what depends on it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "target": {
+            "type": "string",
+            "description": "Target file path (relative) OR symbol name."
+          },
+          "depth": {
+            "type": "number",
+            "description": "How many hops back to walk (default 3, max 10)."
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_flow",
+      "description": "Trace the EXECUTION FLOW forward from an entry point — what does this code call into? With NO args, returns a ranked list of auto-detected entry points (orphans with outgoing calls, conventional names like main(), framework routes, tests). With an entrypoint argument, returns the call tree.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "entrypoint": {
+            "type": "string",
+            "description": "Symbol name to trace from. Omit to list auto-detected entry points."
+          },
+          "file": {
+            "type": "string",
+            "description": "Optional file hint to disambiguate the symbol."
+          },
+          "depth": {
+            "type": "number",
+            "description": "Maximum DFS depth (default 5, max 10)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_symbol",
+      "description": "360° view of a symbol: definition, kind, callers, callees, confidence levels. Use to understand a function or class before changing it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "name": {
+            "type": "string",
+            "description": "Symbol name (e.g. 'validateUser')."
+          },
+          "file": {
+            "type": "string",
+            "description": "Optional file hint to disambiguate when the name is not unique."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_symbols",
+      "description": "List symbols in a file, or search by name across the project. Use to discover what exists before drilling into a single symbol with codebase_symbol.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "file": {
+            "type": "string",
+            "description": "Relative file path — list all symbols in this file."
+          },
+          "query": {
+            "type": "string",
+            "description": "Substring to match against symbol names project-wide."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum results (default 200)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_context",
+      "description": "List all context artifacts defined in .socraticodecontextartifacts.json — database schemas, API specs, infra configs, architecture docs, etc. Shows each artifact's name, description, path, and index status. Use this to discover what project knowledge is available beyond source code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory. If omitted, uses the current working directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_context_search",
+      "description": "Semantic search across context artifacts (database schemas, API specs, infra configs, etc.) defined in .socraticodecontextartifacts.json. Auto-indexes on first use and auto-detects stale artifacts. Use this to find relevant infrastructure or domain knowledge.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language search query (e.g. 'tables related to billing', 'authentication endpoints', 'deployment resource limits')."
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          },
+          "artifactName": {
+            "type": "string",
+            "description": "Filter search to a specific artifact by name (e.g. 'database-schema'). Omit to search across all artifacts."
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Maximum number of results to return. Default: 10."
+          },
+          "minScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Minimum RRF score threshold (0-1). Results below this are filtered out. Default: 0.10 (override globally via SEARCH_MIN_SCORE env var). Set to 0 to disable filtering."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_context_index",
+      "description": "Index or re-index all context artifacts defined in .socraticodecontextartifacts.json. Chunks and embeds artifact content into the vector database for semantic search. Usually not needed — codebase_context_search auto-indexes on first use.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_context_remove",
+      "description": "Remove all indexed context artifacts for a project from the vector database. Blocked while indexing is in progress — use codebase_stop or wait for the operation to finish first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory."
+          }
+        },
+        "required": [
+          "projectPath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codebase_health",
+      "description": "Check the health of all infrastructure: Docker, Qdrant container, Ollama, and embedding model. Use this to diagnose setup issues.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "codebase_list_projects",
+      "description": "List all projects that have been indexed (have collections in Qdrant).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "codebase_about",
+      "description": "Display information about SocratiCode — what it is, its tools and how to use it. Use this to get a quick overview of the MCP tools and their purpose.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

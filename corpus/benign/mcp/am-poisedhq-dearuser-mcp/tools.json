@@ -1,0 +1,352 @@
+{
+  "package": "@poisedhq/dearuser-mcp",
+  "tools": [
+    {
+      "name": "collab",
+      "description": "Analyze your human-agent collaboration. Scans your agent contract (CLAUDE.md or AGENTS.md), memory files, hooks, skills, and more to produce a collaboration report with persona detection, scoring, friction analysis, and recommendations.\n\nReturns a pre-formatted markdown report. Use the format parameter to control detail level:\n- \"text\" (default): concise, plain-language report designed for non-technical users\n- \"detailed\": full technical report with stats, session patterns, injection findings, feedback loop\n- \"json\": raw structured data for programmatic use\n\nEverything runs locally — no data leaves the machine, no API keys needed, files are only read (never modified).\n\nIMPORTANT — Presenting results:\nThe user cannot see raw tool results. You MUST output the full report as your response text — do NOT summarize, shorten, or add commentary around it. The report is pre-formatted for direct display. After showing the report, offer to implement any recommendation marked \"Actionable\". Tool recommendations with a \"whoActs\" line indicate whether you (the agent) can install it or the user needs to act — present accordingly.\n\nExample prompts that should trigger this tool:\n- \"Analyze my collaboration with Claude\"\n- \"How good is my Claude setup?\"\n- \"What should I improve in my CLAUDE.md or AGENTS.md?\"\n- \"Score my agent configuration\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string",
+            "description": "Project root to analyze when scope=\"project\". Defaults to current working directory. Ignored for scope=\"global\"."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ],
+            "description": "\"global\" (default) aggregates across every project in ~/.claude/projects/. \"project\" narrows to a single directory."
+          },
+          "includeGit": {
+            "type": "boolean",
+            "description": "Scan local .git directories for commit activity, stale repos, and revert-signal patterns. Defaults to true. Set false for faster runs."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "detailed",
+              "json"
+            ],
+            "description": "\"text\" (default): concise plain-language report. \"detailed\": full technical report with stats, sessions, injection findings. \"json\": raw structured data."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "health",
+      "description": "Check the health of your AI stack. Returns a 0-100 system-sundhed score with category breakdown, plus findings ranked by severity. Complement to collab: where collab scores how well you and the agent communicate, health scores whether your skills, hooks, scheduled tasks, and MCP servers are still hanging together or have started drifting apart.\n\nDetects:\n- **Orphan scheduled jobs** — task produces output nothing reads\n- **Stale schedules** — jobs that stopped firing silently despite being enabled\n- **Expected jobs missing** — jobs declared in ~/.dearuser/expected-jobs.json that aren't registered\n- **Overlap** — skills/tasks/commands with similar purpose or same output path\n- **Missing closure** — non-scheduled producers with no downstream reader\n- **Substrate mismatch** — memory files that look like databases in disguise\n- **Unregistered MCP tools** — skills calling tools whose server isn't registered\n- **Unbacked-up substrate** — active ~/.claude/ files outside version control\n- **Reconciliation gap** — findings open in the ledger for 14+ days (closed-loop failure)\n\nWhat this tool does NOT do:\n- Does NOT fix problems — it identifies them for you to decide\n- Does NOT delete or modify any files, skills, or hooks\n- Does NOT contact external services — pure local filesystem analysis\n\nIMPORTANT — Presenting results:\nThe user cannot see raw tool results. You MUST output the full report as your response text — do NOT summarize, shorten, or add commentary around it. The report is pre-formatted for direct display. Show the score and ceiling prominently. Lead with critical findings, then recommended, then nice-to-have. Each finding has a stable id users can reference to dismiss. Heuristic-based detection has some false positives — frame findings as \"likely\" not \"definitely\".\n\nExample prompts that should trigger this tool:\n- \"Check my system's health\"\n- \"Are any of my scheduled tasks orphaned?\"\n- \"Run dearuser health\"\n- \"Is my agent substrate well-structured?\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string",
+            "description": "Project root (e.g., \"/Users/me/my-project\"). Defaults to cwd. Audit is most useful in global scope."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ],
+            "description": "Default global."
+          },
+          "focus": {
+            "type": "string",
+            "enum": [
+              "orphan",
+              "overlap",
+              "closure",
+              "substrate",
+              "mcp_refs",
+              "backup",
+              "stale_schedule",
+              "expected_jobs",
+              "reconciliation_gap",
+              "all"
+            ],
+            "description": "Narrow to one finding type, or \"all\" (default). `stale_schedule` = jobs that stopped firing; `expected_jobs` = jobs declared in ~/.dearuser/expected-jobs.json but not registered; `mcp_refs` = tools calling unregistered MCP servers; `backup` = ~/.claude/ not in version control; `reconciliation_gap` = findings sitting open for 14+ days."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "history",
+      "description": "Retrieve past Dear User reports without re-running the scan. Reads from local SQLite (~/.dearuser/dearuser.db) — no network, no fresh scan. Use when the user wants to see their latest score, how scores have changed over time, or what got better/worse since the last run. A fresh scan takes ~30s; this returns instantly. Call `collab`/`health`/`security` instead if the user explicitly asks for a new scan.\n\nThree formats:\n- **\"summary\"** (default): latest stored report per scope. Fast, no re-scan. Use when the user asks what the previous/overnight report said.\n- **\"trend\"**: score sparkline over time per scope, with delta from oldest to newest. Use for \"is it getting better?\" questions.\n- **\"regression\"**: delta vs prior run — score change + new/resolved findings by stable ID. Use for \"what changed?\" / \"what's new?\" questions.\n\nScope narrows to one area: \"collab\", \"health\", \"security\", or \"all\" (default).\n\nPass `run_id` to fetch a specific historical report by its ID (printed at the bottom of every Dear User report).\n\nWhat this tool does NOT do:\n- Does NOT run any new scans — pure read of stored reports\n- Does NOT delete or modify stored history\n- Does NOT contact any external service — everything stays on your machine\n\nIMPORTANT — Presenting results:\nThe user cannot see raw tool results. You MUST output the full report as your response text — do NOT summarize or add commentary. Output is pre-formatted markdown with a \"What to do next\" section.\n\nExample prompts that should trigger this tool:\n- \"Vis seneste rapport\"\n- \"Show me the latest collab score\"\n- \"Er sikkerheden blevet bedre?\"\n- \"Hvad fandt nattens scan?\"\n- \"What changed since last run?\"\n- \"Vis trend\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "collab",
+              "health",
+              "security",
+              "wrapped",
+              "all"
+            ],
+            "description": "Which tool to fetch history for. Default \"all\" returns latest from each of collab, health, security. \"wrapped\" is only valid with format \"json\" or \"summary\"."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "trend",
+              "regression",
+              "json"
+            ],
+            "description": "\"summary\" (default) = latest run per scope. \"trend\" = score sparkline over time. \"regression\" = delta vs prior run. \"json\" = raw report_json for the latest run in a specific scope (used by share_report)."
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 90,
+            "description": "For trend: number of runs to include (default 14, max 90). Ignored for summary/regression."
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Fetch a specific run by ID (shown at the bottom of every report). When set, other params are ignored."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "onboard",
+      "description": "Conversational setup. Walks the user through 5 steps (intro → goals → stack+pains → substrate → plan) and produces a tailored setup plan — tailored agent-contract template (CLAUDE.md or AGENTS.md), skill recommendations, hook recommendations, and next 3 steps.\n\nHow to use (for the agent):\n1. First call: no arguments. The tool returns an intro question + nextStep.\n2. Present the question to the user and collect their answer.\n3. Call again with step=<nextStep from previous>, answer=<user answer>, state=<state from previous>.\n4. Continue until done=true, then show the plan.\n\nIMPORTANT — Presenting results:\nThe user cannot see raw tool results. You MUST output each step's response text as your response — do NOT summarize, rephrase, or wrap it in your own words. The questions and final plan are pre-formatted for direct display. Just show what the tool returns, then collect the user's answer for the next step.\n\nIMPORTANT: The `state` parameter is opaque. Pass it back verbatim. Do not parse or modify it.\n\nWhat this tool does NOT do:\n- Does NOT write files automatically — it produces a plan for the user/agent to apply\n- Does NOT require prior Claude Code experience — designed for first-time users\n- Does NOT collect or transmit any answers — state is a local opaque blob passed between calls\n\nGood for: new users, non-technical professionals, anyone setting up Claude Code for the first time, or someone revisiting goals after a while.\n\nExample prompts that should trigger this tool:\n- \"Set up Dear User for me\"\n- \"I'm new to Claude Code, help me configure it\"\n- \"Onboard me\"\n- \"Help me create a CLAUDE.md\"\n- \"Help me create an AGENTS.md\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "step": {
+            "type": "string",
+            "description": "Current step (e.g., \"role\", \"goals\", \"stack\"). Omit to start from intro."
+          },
+          "answer": {
+            "type": "string",
+            "description": "User answer from the previous step (e.g., \"I'm a solo developer building SaaS products\"). Required for all steps after intro."
+          },
+          "state": {
+            "type": "string",
+            "description": "Opaque state blob from the previous call. Pass back unchanged — do not parse or modify."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "security",
+      "description": "Security audit of your AI setup. Scans for:\n\n- **Leaked secrets** — API keys, tokens, credentials in CLAUDE.md / AGENTS.md, memory, skills, or settings\n- **Prompt-injection surfaces** — hooks/skills that pass user input to shell unsafely\n- **Rule conflicts** — your agent contract says one thing but a hook/skill does another (e.g., \"never force-push\" but a hook runs `git push --force`)\n\nPresents findings sorted by severity (critical → recommended → nice-to-have). Secrets and rule conflicts are the highest-trust signals because false positives are rare; injection findings are pattern-based and may warrant manual review.\n\nWhat this tool does NOT do:\n- Does NOT access your passwords, keychains, or browser saved credentials\n- Does NOT send findings to any external service — everything stays local\n- Does NOT auto-rotate or revoke credentials — it reports, you act\n- Does NOT scan source code repositories — only your agent config files (~/.claude/, memory, skills, hooks)\n\nIMPORTANT — Presenting results:\nThe user cannot see raw tool results. You MUST output the full report as your response text — do NOT summarize, shorten, or add commentary around it. The report is pre-formatted for direct display. Lead with secrets (rotate any found credentials immediately). Be precise about rule conflicts — show the rule AND the conflicting action. Don't minimize: \"no findings\" is a REAL signal of clean setup, not evidence of a broken scanner.\n\nExample prompts that should trigger this tool:\n- \"Scan my Claude setup for security issues\"\n- \"Are there any leaked API keys in my config?\"\n- \"Check my hooks for prompt injection risks\"\n- \"Security audit of my agent setup\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string",
+            "description": "Project root (e.g., \"/Users/me/my-project\"). Defaults to cwd."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ],
+            "description": "\"global\" (default) scans ~/.claude/ agent setup; \"project\" scans a single directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "wrapped",
+      "description": "Generate your Dear User — shareable stats about your human-agent collaboration in a fun, Spotify Wrapped-style format.\n\nWhat this tool does NOT do:\n- Does NOT share anything automatically — it generates text you can copy/paste if you choose\n- Does NOT access external accounts or profiles\n- Does NOT store or upload the generated stats anywhere\n\nIMPORTANT — Presenting results:\nThe user cannot see raw tool results. You MUST output the full report as your response text — do NOT summarize, shorten, or add commentary around it. The report is pre-formatted for direct display.\n\nExample prompts that should trigger this tool:\n- \"Give me my Dear User Wrapped\"\n- \"Show my collaboration stats\"\n- \"Generate shareable stats about my Claude usage\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string",
+            "description": "Project root when scope=\"project\" (e.g., \"/Users/me/my-project\"). Ignored for scope=\"global\"."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ],
+            "description": "\"global\" (default) aggregates across all projects; \"project\" narrows to one directory."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format. \"text\" (default) for terminal-friendly ASCII art, \"json\" for raw analysis data."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "implement_recommendation",
+      "description": "Apply a Dear User recommendation to the user's setup — automatically if safe, or by returning the exact command/instruction for the agent to run.\n\nAfter a collab/health/security report runs, the result text contains a \"Three things to fix\" menu with up to 3 recommendation_ids plus \"Take all of them\" and \"Skip for now\" options. Present those options to the user via AskUserQuestion (or as a numbered list if AskUserQuestion isn't available). When the user picks an item: call this tool with that recommendation_id. When the user picks \"Take all\": call this tool once per id, in order. When the user picks \"Skip\" or dismisses an item: call mcp__dearuser__dismiss_recommendation instead.\n\nBehavior by action_type:\n- **claude_md_append** — appends the markdown rule to ~/.claude/CLAUDE.md (with timestamped backup). Idempotent.\n- **settings_merge** — merges a JSON snippet into ~/.claude/settings.json (with backup, arrays deduped). Idempotent.\n- **shell_exec** — returns the shell command for YOU (the agent) to run via the Bash tool. Do NOT paraphrase; run it verbatim.\n- **manual** — returns instructions that need human judgment; present them to the user.\n\nAfter a successful implementation, the recommendation's status is marked \"implemented\" so Dear User won't suggest it again.\n\nIMPORTANT: Present the ImplementResult back to the user in plain Danish — confirm what changed, show any backup paths, and if there's a `command` field, run it via Bash and report the result. If `ok:false`, tell the user why and suggest they try again or do it manually.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "recommendation_id": {
+            "type": "string",
+            "description": "The id of the recommendation to implement — surfaced in the action menu of the latest report."
+          }
+        },
+        "required": [
+          "recommendation_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dismiss_recommendation",
+      "description": "Mark a Dear User recommendation as dismissed so it won't be suggested again. Call this when the user picks \"drop\"/\"ikke for mig\"/\"skip\" for a specific recommendation from the action menu.\n\nUse recommendation_id from the latest report's menu. For security/health findings, the dismissal propagates to the underlying finding in the ledger so future scans won't re-surface it (unless dismiss_expires_at elapses).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "recommendation_id": {
+            "type": "string",
+            "description": "The id of the recommendation to dismiss."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "false_positive",
+              "wont_fix",
+              "accepted_risk",
+              "used_in_tests"
+            ],
+            "description": "Why this is dismissed. Required for ledger-linked recs (security/health findings). Defaults to wont_fix for collab recs."
+          },
+          "comment": {
+            "type": "string",
+            "description": "Free-text context for the audit trail."
+          },
+          "expires_in_days": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "If set, the dismissal auto-expires after N days and the finding returns to open. Useful for accepted_risk with a review window."
+          }
+        },
+        "required": [
+          "recommendation_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "feedback",
+      "description": "Send a short note to the Dear User team — a bug, a request, a \"this score feels wrong\", or anything you want the founder to read. Zero friction: one tool call and you're done.\n\nBehavior:\n- POSTs your message to the Dear User feedback inbox (Supabase) over HTTPS.\n- Respects Dear User's local-first guarantee — this is the one place data leaves the machine.\n- Email is only attached when opt_in_followup=true AND an email is provided.\n- No retries — if the network fails, you get a clear message and the payload is logged locally.\n- For public questions/ideas, point to GitHub Discussions: https://github.com/bleedmode/dearuser/discussions\n\nWhat this tool does NOT do:\n- Does NOT send anything automatically — the agent must have called this tool with an explicit message from the user.\n- Does NOT read past feedback — it is write-only from this side. The founder reads the inbox directly in Supabase.\n- Does NOT upload anything about your setup, files, or reports. Only what you put in the message.\n\nContext options: \"collab\" | \"security\" | \"health\" | \"wrapped\" | \"general\" — pick the tool the user just ran so the founder can slice the inbox.\n\nLength guidance: keep the confirmation you show the user short. If the user typed a one-liner, the reply can be one line.\n\nExample prompts that should trigger this tool:\n- \"This score feels wrong — send feedback: the collab score is too low for a brand new project\"\n- \"Send feedback to Dear User: loving it, but the health findings could be shorter\"\n- \"Tell them I want Windows support\"\n- \"Send a bug report: health tool crashed on me\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "The feedback text itself — 1 to 4000 characters, plain language. Whatever the user said; do not rewrite or summarise."
+          },
+          "context": {
+            "type": "string",
+            "enum": [
+              "collab",
+              "security",
+              "health",
+              "wrapped",
+              "general"
+            ],
+            "description": "Which surface the user just came from. Use the tool they last ran; fall back to \"general\" when unclear."
+          },
+          "rating": {
+            "type": "number",
+            "enum": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "description": "Optional 1–5 rating. Only include when the user actually stated a number — do not infer from text."
+          },
+          "opt_in_followup": {
+            "type": "boolean",
+            "description": "Set true only when the user explicitly said they want a reply. Default false."
+          },
+          "email": {
+            "type": "string",
+            "description": "Email for follow-up. Ignored unless opt_in_followup=true AND the string contains an @."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "\"text\" (default): friendly Danish confirmation. \"json\": raw result payload for programmatic consumers."
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "help",
+      "description": "Show Dear User's capabilities to the user. Call this whenever the user asks \"what can Dear User do?\", \"hvad kan DearUser?\", \"show me the options\", \"help\", or seems uncertain about which tool fits their need. Also call proactively the first time a user mentions Dear User if they haven't used it before.\n\nWhat this tool does NOT do:\n- Does NOT run any analysis — it only describes what Dear User can do\n- Does NOT access or read any user files\n\nWhen presenting: return the text verbatim. Do NOT summarize or re-wrap — the formatting is designed for direct chat display.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "share_report",
+      "description": "Generate a public shareable link for your Dear User Wrapped card. Uploads an anonymized copy to dearuser.ai and returns a URL you can paste anywhere (X, LinkedIn, Slack).\n\nOnly Wrapped reports are shareable. Collab/health/security reports stay local.\n\nPrivacy contract:\n- Absolute filesystem paths are collapsed to basenames.\n- Email addresses are stripped.\n- Anything matching our secret-scanner patterns (API keys, tokens, JWTs, private keys) is redacted before upload.\n- The user's local ~/.dearuser/ database is NOT modified.\n\nWorks out of the box — uploads through the public dearuser.ai Supabase endpoint with an RLS-protected anon key. Forks/staging deployments can override with DEARUSER_SUPABASE_URL + DEARUSER_SUPABASE_ANON_KEY.\n\nIMPORTANT — Presenting results:\nShow the returned URL prominently and tell the user it's public. Do NOT auto-paste it anywhere on their behalf.\n\nExample prompts that should trigger this tool:\n- \"Share my Wrapped\"\n- \"Lav et delbart link til min Wrapped\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "report_type": {
+            "type": "string",
+            "enum": [
+              "wrapped"
+            ],
+            "description": "Only \"wrapped\" is accepted. Collab/health/security sharing is disabled pre-launch to avoid leaking business context."
+          },
+          "report_json": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "The full structured Wrapped report object."
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "ISO-8601 timestamp after which the link stops working. Omit for a permanent link."
+          }
+        },
+        "required": [
+          "report_type",
+          "report_json"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

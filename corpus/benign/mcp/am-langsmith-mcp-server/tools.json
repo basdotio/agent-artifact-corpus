@@ -1,0 +1,408 @@
+{
+  "package": "langsmith-mcp-server",
+  "tools": [
+    {
+      "name": "list_prompts",
+      "description": "Fetch prompts from LangSmith with optional filtering.\n\nArgs:\n  is_public (str): Filter by prompt visibility - \"true\" for public prompts, \"false\" for private prompts (default: \"false\")\n  limit (int): Maximum number of prompts to return (default: 20)\n\nReturns:\n  Dict with prompts and metadata",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "is_public": {
+            "default": "false",
+            "description": "Filter by prompt visibility - \"true\" for public prompts, \"false\" for private prompts",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Maximum number of prompts to return",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_prompt_by_name",
+      "description": "Get a specific prompt by its exact name.\n\nArgs:\n  prompt_name (str): The exact name of the prompt to retrieve\n\nReturns:\n  Dict containing the prompt details and template, or an error message",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "prompt_name": {
+            "type": "string",
+            "description": "The exact name of the prompt to retrieve"
+          }
+        },
+        "required": [
+          "prompt_name"
+        ]
+      }
+    },
+    {
+      "name": "push_prompt",
+      "description": "Call this tool when you need to understand how to create and push prompts to LangSmith.\n\nThis is a documentation-only tool that explains how to:\n- Create prompts using LangChain's prompt templates\n- Push prompts to LangSmith for version control and management\n- Handle prompt creation vs. version updates\n\nUse the LangSmith Client's push_prompt() method. See LangSmith documentation for details.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_thread_history",
+      "description": "Retrieve one page of message history for a specific conversation thread.\n\nUses char-based pagination: pages are built by character budget (max_chars_per_page).\nLong strings are truncated to preview_chars. Supply page_number (1-based) on every call;\nuse the returned total_pages to request further pages.\n\nArgs:\n  thread_id (str): The unique ID of the thread to fetch history for\n  project_name (str): The name of the project containing the thread\n  page_number (int): 1-based page index (required)\n  max_chars_per_page (int): Max character count per page, capped at 30000 (default: 25000)\n  preview_chars (int): Truncate long strings to this length (default: 150)\n\nReturns:\n  Dict with result (list of messages), page_number, total_pages, etc.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "description": "The unique ID of the thread to fetch history for"
+          },
+          "project_name": {
+            "type": "string",
+            "description": "The name of the project containing the thread"
+          },
+          "page_number": {
+            "type": "number",
+            "description": "1-based page index (required)"
+          },
+          "max_chars_per_page": {
+            "default": 25000,
+            "description": "Max character count per page, capped at 30000",
+            "type": "number"
+          },
+          "preview_chars": {
+            "default": 150,
+            "description": "Truncate long strings to this length",
+            "type": "number"
+          }
+        },
+        "required": [
+          "thread_id",
+          "project_name",
+          "page_number"
+        ]
+      }
+    },
+    {
+      "name": "fetch_runs",
+      "description": "Fetch LangSmith runs from one or more projects with flexible filters and automatic pagination.\n\nAll results are paginated by character budget to keep responses manageable. Use page_number\nand total_pages from the response to iterate through multiple pages.\n\nArgs:\n  project_name (str): The project name. For multiple projects, use JSON array string.\n  limit (int): Max runs to fetch from LangSmith API (capped at 100). These runs are then paginated by character budget into pages.\n  page_number (int): 1-based page index. Use with total_pages from response to iterate through pages.\n  trace_id (str, optional): Return only runs that belong to this trace.\n  run_type (str, optional): Filter by type: \"llm\", \"chain\", \"tool\", \"retriever\".\n  error (str, optional): \"true\" for errored runs, \"false\" for successful.\n  is_root (str, optional): \"true\" for only top-level traces.\n  filter (str, optional): Filter Query Language (FQL) expression.\n  trace_filter (str, optional): Filter applied to the root run.\n  tree_filter (str, optional): Filter applied to any run in the trace tree.\n  order_by (str, optional): Sort field; prefix with \"-\" for descending. Default \"-start_time\".\n  reference_example_id (str, optional): Filter runs by reference example ID.\n  max_chars_per_page (int): Max chars per page, capped at 30000. Default 25000.\n  preview_chars (int): Truncate long strings to this length. Default 150.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_name": {
+            "type": "string",
+            "description": "The project name to fetch runs from"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of runs to fetch from LangSmith API (capped at 100)"
+          },
+          "page_number": {
+            "default": 1,
+            "description": "1-based page index",
+            "type": "number"
+          },
+          "trace_id": {
+            "description": "Return only runs belonging to this trace UUID",
+            "type": "string"
+          },
+          "run_type": {
+            "description": "Filter by type: \"llm\", \"chain\", \"tool\", \"retriever\"",
+            "type": "string"
+          },
+          "error": {
+            "description": "\"true\" for errored runs, \"false\" for successful",
+            "type": "string"
+          },
+          "is_root": {
+            "description": "\"true\" for only top-level traces",
+            "type": "string"
+          },
+          "filter": {
+            "description": "Filter Query Language (FQL) expression",
+            "type": "string"
+          },
+          "trace_filter": {
+            "description": "Filter applied to the root run in each trace tree",
+            "type": "string"
+          },
+          "tree_filter": {
+            "description": "Filter applied to any run in the trace tree",
+            "type": "string"
+          },
+          "order_by": {
+            "default": "-start_time",
+            "description": "Sort field; prefix with '-' for descending",
+            "type": "string"
+          },
+          "reference_example_id": {
+            "description": "Filter runs by reference example ID",
+            "type": "string"
+          },
+          "max_chars_per_page": {
+            "default": 25000,
+            "description": "Max character count per page, capped at 30000",
+            "type": "number"
+          },
+          "preview_chars": {
+            "default": 150,
+            "description": "Truncate long strings to this length",
+            "type": "number"
+          }
+        },
+        "required": [
+          "project_name",
+          "limit"
+        ]
+      }
+    },
+    {
+      "name": "list_projects",
+      "description": "List LangSmith projects with optional filtering and detail level control.\n\nArgs:\n  limit (int): Maximum number of projects to return (default: 5)\n  project_name (str, optional): Filter projects by name (partial match)\n  more_info (str): \"true\" for full details, \"false\" for simplified (default: \"false\")\n  reference_dataset_id (str, optional): Filter by reference dataset ID\n  reference_dataset_name (str, optional): Filter by reference dataset name",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 5,
+            "description": "Maximum number of projects to return",
+            "type": "number"
+          },
+          "project_name": {
+            "description": "Filter projects by name using partial matching",
+            "type": "string"
+          },
+          "more_info": {
+            "default": "false",
+            "description": "\"true\" for full details, \"false\" for simplified",
+            "type": "string"
+          },
+          "reference_dataset_id": {
+            "description": "Filter by reference dataset ID",
+            "type": "string"
+          },
+          "reference_dataset_name": {
+            "description": "Filter by reference dataset name",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_billing_usage",
+      "description": "Fetch organization billing usage (trace counts) with workspace names inline.\n\nArgs:\n  starting_on (str): Start of date range (ISO 8601)\n  ending_before (str): End of date range (ISO 8601)\n  workspace (str, optional): Optional workspace UUID or display name to filter\n  on_current_plan (str): \"true\" to include only usage on current plan (default: \"true\")",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "starting_on": {
+            "type": "string",
+            "description": "Start of date range (ISO 8601)"
+          },
+          "ending_before": {
+            "type": "string",
+            "description": "End of date range (ISO 8601)"
+          },
+          "workspace": {
+            "description": "Optional workspace UUID or display name to filter",
+            "type": "string"
+          },
+          "on_current_plan": {
+            "default": "true",
+            "description": "\"true\" to include only usage on current plan",
+            "type": "string"
+          }
+        },
+        "required": [
+          "starting_on",
+          "ending_before"
+        ]
+      }
+    },
+    {
+      "name": "list_experiments",
+      "description": "List LangSmith experiment projects (reference projects) with mandatory dataset filtering.\n\nRequires either reference_dataset_id or reference_dataset_name.\n\nArgs:\n  reference_dataset_id (str, optional): Dataset ID to filter experiments by\n  reference_dataset_name (str, optional): Dataset name to filter experiments by\n  limit (int): Maximum number of experiments to return (default: 5)\n  project_name (str, optional): Filter by name (partial match)",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "reference_dataset_id": {
+            "description": "The ID of the reference dataset to filter experiments by",
+            "type": "string"
+          },
+          "reference_dataset_name": {
+            "description": "The name of the reference dataset to filter experiments by",
+            "type": "string"
+          },
+          "limit": {
+            "default": 5,
+            "description": "Maximum number of experiments to return",
+            "type": "number"
+          },
+          "project_name": {
+            "description": "Filter projects by name using partial matching",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_datasets",
+      "description": "Fetch LangSmith datasets.\n\nIf no arguments are provided, all datasets will be returned.\n\nArgs:\n  dataset_ids (str, optional): Dataset IDs as JSON array string or single ID\n  data_type (str, optional): Filter by dataset data type (e.g., 'chat', 'kv')\n  dataset_name (str, optional): Filter by exact dataset name\n  dataset_name_contains (str, optional): Filter by substring in dataset name\n  metadata (str, optional): Filter by metadata as JSON object string\n  limit (int): Max number of datasets to return (default: 20)",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "dataset_ids": {
+            "description": "Dataset IDs as JSON array string or single ID",
+            "type": "string"
+          },
+          "data_type": {
+            "description": "Filter by dataset data type",
+            "type": "string"
+          },
+          "dataset_name": {
+            "description": "Filter by exact dataset name",
+            "type": "string"
+          },
+          "dataset_name_contains": {
+            "description": "Filter by substring in dataset name",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Filter by metadata as JSON object string",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Max number of datasets to return",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_examples",
+      "description": "Fetch examples from a LangSmith dataset with advanced filtering options.\n\nEither dataset_id, dataset_name, or example_ids must be provided.\n\nArgs:\n  dataset_id (str, optional): Dataset ID to retrieve examples from\n  dataset_name (str, optional): Dataset name to retrieve examples from\n  example_ids (str, optional): Example IDs as JSON array string or single ID\n  filter (str, optional): Filter string using LangSmith query syntax\n  metadata (str, optional): Metadata filter as JSON object string\n  splits (str, optional): Dataset splits as JSON array string or single split\n  inline_s3_urls (str, optional): \"true\" or \"false\"\n  include_attachments (str, optional): \"true\" or \"false\"\n  as_of (str, optional): Dataset version tag or ISO timestamp\n  limit (int): Max examples to return (default: 10)\n  offset (str, optional): Number of examples to skip",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "description": "Dataset ID to retrieve examples from",
+            "type": "string"
+          },
+          "dataset_name": {
+            "description": "Dataset name to retrieve examples from",
+            "type": "string"
+          },
+          "example_ids": {
+            "description": "Example IDs as JSON array string or single ID",
+            "type": "string"
+          },
+          "filter": {
+            "description": "Filter string using LangSmith query syntax",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Metadata filter as JSON object string",
+            "type": "string"
+          },
+          "splits": {
+            "description": "Dataset splits as JSON array string or single split",
+            "type": "string"
+          },
+          "inline_s3_urls": {
+            "description": "\"true\" or \"false\"",
+            "type": "string"
+          },
+          "include_attachments": {
+            "description": "\"true\" or \"false\"",
+            "type": "string"
+          },
+          "as_of": {
+            "description": "Dataset version tag or ISO timestamp",
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "description": "Maximum number of examples to return",
+            "type": "number"
+          },
+          "offset": {
+            "description": "Number of examples to skip",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "read_dataset",
+      "description": "Read a specific dataset from LangSmith.\n\nEither dataset_id or dataset_name must be provided.\n\nArgs:\n  dataset_id (str, optional): Dataset ID to retrieve\n  dataset_name (str, optional): Dataset name to retrieve",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "description": "Dataset ID to retrieve",
+            "type": "string"
+          },
+          "dataset_name": {
+            "description": "Dataset name to retrieve",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "read_example",
+      "description": "Read a specific example from LangSmith.\n\nArgs:\n  example_id (str): Example ID to retrieve\n  as_of (str, optional): Dataset version tag or ISO timestamp",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "example_id": {
+            "type": "string",
+            "description": "Example ID to retrieve"
+          },
+          "as_of": {
+            "description": "Dataset version tag or ISO timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "example_id"
+        ]
+      }
+    },
+    {
+      "name": "create_dataset",
+      "description": "Call this tool when you need to understand how to create datasets in LangSmith.\nThis is a documentation-only tool.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "update_examples",
+      "description": "Call this tool when you need to understand how to update dataset examples in LangSmith.\nThis is a documentation-only tool.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "run_experiment",
+      "description": "Call this tool when you need to understand how to run experiments and evaluations in LangSmith.\nThis is a documentation-only tool.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

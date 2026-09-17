@@ -1,0 +1,1368 @@
+{
+  "package": "nexus-agents",
+  "tools": [
+    {
+      "name": "delegate_to_model",
+      "description": "Pick which EXISTING model should handle a task. Inspects task complexity and returns the best-fit model from the routing registry — does NOT add a new model. Read-only. (For drafting a registry entry for a new model, use `registry_import`.)",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50000,
+            "description": "Task to execute or analyze"
+          },
+          "preferred_capability": {
+            "description": "Preferred capability for routing",
+            "type": "string",
+            "enum": [
+              "reasoning",
+              "context",
+              "speed",
+              "code"
+            ]
+          },
+          "model_hint": {
+            "description": "Explicit model preference",
+            "type": "string",
+            "maxLength": 100
+          },
+          "billing_mode": {
+            "description": "Billing mode for cost handling",
+            "type": "string",
+            "enum": [
+              "plan",
+              "api"
+            ]
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    },
+    {
+      "name": "orchestrate",
+      "description": "Orchestrate a task by analyzing it, breaking it into subtasks if needed, and coordinating expert agents",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50000,
+            "description": "Task description to orchestrate"
+          },
+          "context": {
+            "description": "Additional context for the task",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "maxIterations": {
+            "description": "Maximum iterations for orchestration (default: 10)",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "timeout": {
+            "description": "Timeout in milliseconds for orchestration (default: 300000)",
+            "type": "number",
+            "minimum": 1000,
+            "maximum": 600000
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    },
+    {
+      "name": "create_expert",
+      "description": "Create a specialized expert agent for code, architecture, security, documentation, testing, devops, research, product management, UX, or infrastructure tasks",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "code_expert",
+              "architecture_expert",
+              "security_expert",
+              "documentation_expert",
+              "testing_expert",
+              "devops_expert",
+              "research_expert",
+              "pm_expert",
+              "ux_expert",
+              "infrastructure_expert"
+            ],
+            "description": "Expert role to create"
+          },
+          "modelPreference": {
+            "description": "Preferred model (e.g., claude-sonnet-4)",
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "role"
+        ]
+      }
+    },
+    {
+      "name": "execute_expert",
+      "description": "Run a task through an expert YOU PREVIOUSLY CREATED via `create_expert`. Requires the expertId returned by create_expert; not for ad-hoc execution. Returns the expert analysis including output, confidence, and token usage.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "expertId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Expert ID from create_expert tool"
+          },
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50000,
+            "description": "Task description for the expert to execute"
+          },
+          "context": {
+            "description": "Additional context metadata for the task",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "timeoutMs": {
+            "description": "Optional timeout in ms (120s-900s). Overrides auto-detected timeout.",
+            "type": "integer",
+            "minimum": 120000,
+            "maximum": 900000
+          }
+        },
+        "required": [
+          "expertId",
+          "task"
+        ]
+      }
+    },
+    {
+      "name": "run_workflow",
+      "description": "Run a LINEAR (single-path) workflow template by name with typed inputs. For DAG-shaped workflows with branching, checkpoints, or rollback, use `run_graph_workflow` instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Workflow template name (e.g., code-review) or file path"
+          },
+          "inputs": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "additionalProperties": {},
+            "description": "Workflow inputs as key-value pairs"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Validate workflow without executing",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "template",
+          "inputs"
+        ]
+      }
+    },
+    {
+      "name": "list_workflows",
+      "description": "Inventory of multi-step TEMPLATES available to `run_workflow` (code-review, security-audit, etc.). Use this BEFORE run_workflow to pick a template; returns template name, version, description, category, and required inputs.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "category": {
+            "description": "Filter by category (e.g., development, security)",
+            "type": "string"
+          },
+          "format": {
+            "description": "Output format: full (with details) or names (just template names)",
+            "type": "string",
+            "enum": [
+              "full",
+              "names"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "research_query",
+      "description": "Query the research registry for technique status, overlaps, statistics, or text search. Provides read-only access to the research tracking system.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "status",
+              "overlap",
+              "stats",
+              "search"
+            ],
+            "description": "Query action: status, overlap, stats, or search"
+          },
+          "techniqueId": {
+            "description": "Technique ID for status/overlap queries",
+            "type": "string"
+          },
+          "query": {
+            "description": "Search query string for search action",
+            "type": "string"
+          },
+          "status": {
+            "description": "Filter by technique status",
+            "type": "string",
+            "enum": [
+              "implemented",
+              "planned",
+              "not-started",
+              "rejected",
+              "all"
+            ]
+          },
+          "threshold": {
+            "description": "Overlap threshold (0-1) for overlap action",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "research_add",
+      "description": "PAPER-only: add an arXiv preprint to the research registry by arXiv ID. Fetches metadata from arxiv.org and persists to the registry. For non-paper sources (GitHub repos, tools, blogs) use `research_add_source` instead. Use dryRun=true to preview without saving.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "arxivId": {
+            "type": "string",
+            "pattern": "^\\d{4}\\.\\d{4,5}$",
+            "description": "arXiv paper ID (e.g., \"2401.12345\")"
+          },
+          "topic": {
+            "description": "Research topic to categorize the paper under",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Priority level",
+            "type": "string",
+            "enum": [
+              "P1",
+              "P2",
+              "P3",
+              "P4"
+            ]
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Preview without persisting",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "arxivId"
+        ]
+      }
+    },
+    {
+      "name": "research_add_source",
+      "description": "NON-PAPER source: add a GitHub repo / tool / blog URL to the research registry. Auto-computes quality_score from provided quality_signals. For arXiv papers use `research_add` instead. Use dryRun=true to preview without saving.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Source URL"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Display name"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "product_docs",
+              "specification",
+              "research_blog",
+              "code_analysis",
+              "open_source_repo"
+            ],
+            "description": "Source type"
+          },
+          "vendor": {
+            "description": "Vendor",
+            "type": "string"
+          },
+          "topics": {
+            "description": "Topics",
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "description": "Tags",
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "quality_signals": {
+            "description": "Quality signals",
+            "type": "object",
+            "properties": {
+              "stars_at_review": {
+                "type": "number"
+              },
+              "language": {
+                "type": "string"
+              },
+              "has_tests": {
+                "type": "boolean"
+              },
+              "has_docs": {
+                "type": "boolean"
+              },
+              "has_paper": {
+                "type": "boolean"
+              }
+            }
+          },
+          "techniques_extracted": {
+            "description": "Techniques",
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "verdict": {
+            "description": "Adoption verdict",
+            "type": "string",
+            "enum": [
+              "adopted",
+              "partially_adopted",
+              "rejected",
+              "monitoring",
+              "planned"
+            ]
+          },
+          "verdict_notes": {
+            "description": "Verdict notes",
+            "type": "string",
+            "maxLength": 500
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Preview only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url",
+          "name",
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "research_discover",
+      "description": "Discover new research papers and repositories from external sources. Searches arXiv, GitHub, and other sources. Filters out items already in the registry.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Research topic to search for"
+          },
+          "source": {
+            "description": "Source to search",
+            "type": "string",
+            "enum": [
+              "arxiv",
+              "github",
+              "google_ai",
+              "meta_fair",
+              "microsoft",
+              "deepmind",
+              "semantic_scholar",
+              "papers_with_code",
+              "openalex",
+              "all"
+            ]
+          },
+          "maxResults": {
+            "description": "Max results",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "sinceDate": {
+            "description": "Only results after this date (YYYY-MM-DD)",
+            "type": "string"
+          },
+          "relevanceThreshold": {
+            "description": "Minimum relevance score (0-1) to include results. Higher = stricter filtering.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      }
+    },
+    {
+      "name": "research_analyze",
+      "description": "Analyze the research registry for gaps, trends, priorities, stale entries, or coverage. Returns structured analysis with recommendations.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "focus": {
+            "type": "string",
+            "enum": [
+              "gaps",
+              "trends",
+              "priorities",
+              "stale",
+              "coverage"
+            ],
+            "description": "Analysis focus area"
+          },
+          "topic": {
+            "description": "Optional topic filter",
+            "type": "string"
+          }
+        },
+        "required": [
+          "focus"
+        ]
+      }
+    },
+    {
+      "name": "research_catalog_review",
+      "description": "Review auto-cataloged research references found during tool execution. List pending references, approve them for registry addition, dismiss, or clear all.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "approve",
+              "dismiss",
+              "flush"
+            ],
+            "description": "Action to perform on cataloged references"
+          },
+          "identifier": {
+            "description": "Reference identifier for approve/dismiss",
+            "type": "string"
+          },
+          "topic": {
+            "description": "Topic for approved papers",
+            "type": "string"
+          },
+          "createIssue": {
+            "description": "Create GitHub issue when approving",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "research_synthesize",
+      "description": "Synthesize the research registry by grouping papers into topic clusters. Returns structured summaries with common themes, key insights, techniques, implementation opportunities, and cross-cutting themes across clusters.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "topic": {
+            "description": "Optional topic filter for single-cluster synthesis",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "survey_oss_landscape",
+      "description": "Transient OSS project search. Returns a ranked list of GitHub repositories with license, last-commit, star-count, and one-line description. Does NOT persist to the research registry — use `research_add_source` for that. Best for one-off engineering decisions like \"what tools exist in this space?\".",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Free-text search query, e.g. \"cargo nextest replacement\" or \"OSS SBOM tools\""
+          },
+          "maxResults": {
+            "default": 10,
+            "description": "Maximum candidates to return (1-50; default 10)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "minStars": {
+            "default": 0,
+            "description": "Minimum star count to include (default 0; useful for filtering noise)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "language": {
+            "description": "GitHub language filter, e.g. \"rust\" or \"typescript\"",
+            "type": "string",
+            "maxLength": 50
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "vendor_publishing_audit",
+      "description": "Look up a vendor's published-artifact signing infrastructure: GPG key fingerprints, SHA256SUMS URL pattern, signature shape (clearsigned / detached / detached-on-iso), release cadence, key rotation notes, and the vendor doc citation. Static lookup against a curated seed dataset; the vendor doc URL is the authoritative source. Returns `{known: false, knownVendors: [...]}` for vendors without a seed entry. v1 covers ubuntu, debian, fedora.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "vendor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50,
+            "description": "Vendor identifier, lowercase. e.g. \"ubuntu\", \"debian\", \"fedora\""
+          }
+        },
+        "required": [
+          "vendor"
+        ]
+      }
+    },
+    {
+      "name": "compare_data_feeds",
+      "description": "Diff two upstream data feeds (YAML or JSON files) along coverage and per-field axes. Returns which entries exist in A, B, both, plus optional field-level diffs across matched entries. v1 takes file paths only (no URL fetch — that needs an SSRF design pass). Both feeds must be a top-level array OR a top-level object with exactly one array field.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "feedAPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Filesystem path to feed A (YAML or JSON, auto-detected by extension)"
+          },
+          "feedBPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Filesystem path to feed B"
+          },
+          "keyPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Dotted path to the entry key, e.g. \"id\" or \"name\". Each entry must have this field."
+          },
+          "compareFields": {
+            "description": "Optional dotted field paths to compare across matched entries (e.g. [\"license\", \"sha256\"])",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        },
+        "required": [
+          "feedAPath",
+          "feedBPath",
+          "keyPath"
+        ]
+      }
+    },
+    {
+      "name": "memory_query",
+      "description": "Query across all memory backends (session, belief, agentic, adaptive, typed) with unified results. Returns memories matching the query with source attribution and relevance scores.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Search query to match against memory contents"
+          },
+          "limit": {
+            "description": "Maximum results to return (default: 10, max: 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "source": {
+            "description": "Filter by memory source (default: all)",
+            "type": "string",
+            "enum": [
+              "session",
+              "belief",
+              "agentic",
+              "typed",
+              "adaptive",
+              "all"
+            ]
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "memory_stats",
+      "description": "Get memory system statistics dashboard. Shows backend availability, entry counts, and decay stats across all 7 memory backends.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "includeDecay": {
+            "description": "Include decay statistics (default: true)",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_write",
+      "description": "Write a memory entry to a specific backend. Supports session (learnings), belief (subject-predicate-object triples), agentic (knowledge with attributes), adaptive (priority-scored), and typed (MIRIX-style semantic) backends.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Memory identifier or subject"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000,
+            "description": "Memory content to store"
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "session",
+              "belief",
+              "agentic",
+              "adaptive",
+              "typed"
+            ],
+            "description": "Target memory backend: session (learnings), belief (triples), agentic (knowledge), adaptive (priority-scored), typed (MIRIX-style semantic)"
+          },
+          "confidence": {
+            "description": "Confidence level (default: medium)",
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "metadata": {
+            "description": "Optional key-value metadata tags",
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        },
+        "required": [
+          "key",
+          "content",
+          "backend"
+        ]
+      }
+    },
+    {
+      "name": "consensus_vote",
+      "description": "Execute multi-model consensus voting on a proposal. Uses 7 specialized agent roles (architect, security, devex, ai_ml, pm, catfish, scope_steward) to vote on proposals with configurable strategies. Supports higher_order strategy for Bayesian-optimal aggregation with correlation awareness (Issue #514).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "proposal": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Proposal text to vote on"
+          },
+          "threshold": {
+            "description": "Voting threshold (legacy). Use strategy instead.",
+            "type": "string",
+            "enum": [
+              "majority",
+              "supermajority",
+              "unanimous"
+            ]
+          },
+          "strategy": {
+            "description": "Voting strategy: simple_majority (default), supermajority, unanimous, proof_of_learning, or higher_order",
+            "type": "string",
+            "enum": [
+              "simple_majority",
+              "supermajority",
+              "unanimous",
+              "proof_of_learning",
+              "higher_order",
+              "opinion_wise"
+            ]
+          },
+          "quickMode": {
+            "default": false,
+            "description": "Use 3 agents instead of 7",
+            "type": "boolean"
+          },
+          "simulateVotes": {
+            "default": false,
+            "description": "TESTS ONLY — random output, must not be used for real decisions (#2319)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "proposal"
+        ]
+      }
+    },
+    {
+      "name": "weather_report",
+      "description": "Get multi-CLI performance weather report. Shows per-CLI success rates, per-category breakdowns, and adaptive routing bonus recommendations based on observed task outcomes.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "cli": {
+            "description": "Filter by CLI",
+            "type": "string",
+            "enum": [
+              "claude",
+              "gemini",
+              "codex",
+              "opencode"
+            ]
+          },
+          "category": {
+            "description": "Filter by task category",
+            "type": "string",
+            "enum": [
+              "architecture",
+              "code_generation",
+              "code_review",
+              "research",
+              "security_review",
+              "planning",
+              "documentation",
+              "testing",
+              "devops",
+              "exploration"
+            ]
+          },
+          "includeAdaptive": {
+            "description": "Include adaptive routing bonuses (default: true)",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "improvement_review",
+      "description": "Periodic threshold-gated observability-driven improvement loop. Reads OutcomeStore + fitness audit, surfaces patterns crossing documented thresholds as candidate findings. When fileIssues=true, files candidate GitHub issues via `gh issue create` (rate-limited to 5 per run, deduped against open issues). Never auto-merges. Replaces the deleted self-development engine (#2402).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "lookbackDays": {
+            "description": "Lookback window for outcome data, in days. Default 7.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90
+          },
+          "fileIssues": {
+            "description": "When true, file candidate issues for crossed thresholds (default false — return signals only)",
+            "type": "boolean"
+          },
+          "minSampleSize": {
+            "description": "Minimum sample size before a CLI/category signal fires (default 5).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "fitnessFloor": {
+            "description": "Fitness score below this threshold triggers a tech-debt signal (default 90).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "registry_import",
+      "description": "Draft a registry ENTRY for a NEW model so routing can consider it later. Generates a ModelCapability YAML with conservative quality scores (5/10) for human review. For picking among ALREADY-registered models, use `delegate_to_model`. Use dryRun=true (default) to preview the entry without saving.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "google",
+              "openai"
+            ],
+            "description": "Model provider (anthropic, google, openai)"
+          },
+          "modelId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider model identifier"
+          },
+          "dryRun": {
+            "description": "Preview without persisting (default: true)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider",
+          "modelId"
+        ]
+      }
+    },
+    {
+      "name": "repo_analyze",
+      "description": "Analyze a GitHub repository structure. Returns language, framework, package manager, CI provider, security tooling, Dockerfile/Helm/Makefile detection, and gap identification. Replaces multi-step manual inspection with a single structured query.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "description": "GitHub repository in \"owner/name\" format or full URL"
+          },
+          "depth": {
+            "description": "Analysis depth: shallow (tree + README) or deep",
+            "type": "string",
+            "enum": [
+              "shallow",
+              "deep"
+            ]
+          }
+        },
+        "required": [
+          "repo"
+        ]
+      }
+    },
+    {
+      "name": "repo_security_plan",
+      "description": "Generate a security scanning pipeline recommendation for a GitHub repository. Analyzes repo structure, detects languages/frameworks, and recommends specific vulnerability scanners with CI config snippets. Powered by the vulnerability scanner registry with provenance-tracked metrics.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "description": "GitHub repository in \"owner/name\" format or full URL"
+          },
+          "categories": {
+            "description": "Filter to specific categories (e.g., [\"sast\", \"sca\", \"secrets\"])",
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "maxScanners": {
+            "description": "Maximum scanners to recommend (default: 10)",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "repo"
+        ]
+      }
+    },
+    {
+      "name": "issue_triage",
+      "description": "Triage a GitHub issue using the full security pipeline. Classifies the issue, assesses author trust and reputation, proposes labels and actions, and validates all outputs through policy gate and corroboration checks. Read-only by default. Requires GITHUB_TOKEN or GH_TOKEN environment variable, or gh CLI auth.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "issueUrl": {
+            "type": "string",
+            "minLength": 1,
+            "description": "GitHub issue URL (e.g., https://github.com/owner/repo/issues/123)"
+          },
+          "dryRun": {
+            "default": true,
+            "description": "Read-only mode (default: true)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "issueUrl"
+        ]
+      }
+    },
+    {
+      "name": "run_graph_workflow",
+      "description": "Run a DAG-shaped workflow with per-node checkpoints, rollback, event streaming, and audit trail. Use for multi-step pipelines where intermediate state must survive failures. For straight linear templates, use `run_workflow` instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "workflow": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Workflow name: echo, pipeline, code-review, security-scan. Use \"list\" for available workflows."
+          },
+          "inputs": {
+            "description": "Input values for the workflow",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "enableCheckpointing": {
+            "description": "Enable checkpoint saving",
+            "type": "boolean"
+          },
+          "enableAuditTrail": {
+            "description": "Enable audit trail logging",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "workflow"
+        ]
+      }
+    },
+    {
+      "name": "execute_spec",
+      "description": "Execute a markdown specification through the full pipeline: parse, decompose into task DAG, compile to graph, execute, validate against acceptance criteria, and analyze failures.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50000,
+            "description": "Markdown specification to execute. Must contain \"## Requirements\" and \"## Acceptance Criteria\" sections."
+          },
+          "dryRun": {
+            "description": "Parse and decompose only (no execution)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "spec"
+        ]
+      }
+    },
+    {
+      "name": "list_experts",
+      "description": "Inventory of expert ROLES available to `create_expert` (architect, security, devex, etc.). Use this BEFORE create_expert to pick a role; returns role name, capability summary, default model.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "format": {
+            "description": "Output format: full (with details) or names (just role names)",
+            "type": "string",
+            "enum": [
+              "full",
+              "names"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "query_trace",
+      "description": "Query execution traces by run ID. Returns agent and model attribution for pipeline runs including decision paths, error taxonomy, and timing data.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Run ID to query traces for"
+          },
+          "eventType": {
+            "description": "Filter by event type (e.g., model.called)",
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "limit": {
+            "description": "Max events to return (default: 100)",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "runId"
+        ]
+      }
+    },
+    {
+      "name": "query_task_state",
+      "description": "Read the structured state log for a task ID and return the current snapshot. Includes Magentic-One Task Ledger (facts/guesses/openQuestions) and Progress Ledger (per-step reflections with suggestedAction) when orchestrators have written them. Structured state is only written when NEXUS_TASK_STATE_ENABLED=1 was set during the orchestrate invocation.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Task ID whose structured state log should be read"
+          }
+        },
+        "required": [
+          "taskId"
+        ]
+      }
+    },
+    {
+      "name": "verify_audit_chain",
+      "description": "Verify the hash chain of a persisted FileAuditStorage audit log. Reads all `audit-*.jsonl` files in the given directory, parses events, and runs `verifyChain()` to detect tampering. Returns a structured result with eventCount, fileCount, and one of three tamper signals if detected (hash_mismatch, previous_hash_mismatch, missing_hash). Read-only — never writes or deletes events.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "logDir": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Filesystem path to the FileAuditStorage log directory. Tool reads all `audit-*.jsonl` files and verifies the combined hash chain."
+          }
+        },
+        "required": [
+          "logDir"
+        ]
+      }
+    },
+    {
+      "name": "extract_symbols",
+      "description": "Parse a SINGLE TypeScript/JavaScript file with tree-sitter and return its structural AST symbols. Use when you need the structure of one file — function/class/method/interface/type definitions. Not a cross-file search; for that use `search_codebase`. Output is 80%+ smaller than reading the full file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Path to TypeScript/JavaScript file"
+          },
+          "mode": {
+            "description": "index (default): names+lines. full: includes source text",
+            "type": "string",
+            "enum": [
+              "index",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "filePath"
+        ]
+      }
+    },
+    {
+      "name": "search_codebase",
+      "description": "Cross-file ripgrep-style search across the working directory. Builds an in-memory symbol index and ranks matches with relevance scoring. Use when you need usages of a symbol or pattern across MANY files. For the AST of a single file, use `extract_symbols` instead. Modes: search (find by keyword), summary (per-file overview), list (all indexed files).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Search query or file path"
+          },
+          "directory": {
+            "description": "Directory to index",
+            "type": "string",
+            "maxLength": 500
+          },
+          "limit": {
+            "description": "Max results",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "mode": {
+            "description": "search/summary/list",
+            "type": "string",
+            "enum": [
+              "search",
+              "summary",
+              "list"
+            ]
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "run_dev_pipeline",
+      "description": "Run the multi-agent development pipeline. Accepts direct task instructions, a plan file, or a spec file. Supports dry-run (plan+vote only).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "task": {
+            "description": "Direct task instructions (what to build)",
+            "type": "string",
+            "maxLength": 10000
+          },
+          "planFile": {
+            "description": "Path to a plan/spec file to use as input",
+            "type": "string",
+            "maxLength": 500
+          },
+          "dryRun": {
+            "default": false,
+            "description": "If true, stop after plan+vote (no implementation)",
+            "type": "boolean"
+          },
+          "maxVoteIterations": {
+            "default": 3,
+            "description": "Max plan→vote iterations",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "maxQaIterations": {
+            "default": 3,
+            "description": "Max QA review iterations per task",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "workingDir": {
+            "description": "Working directory (default: cwd)",
+            "type": "string",
+            "maxLength": 500
+          },
+          "issueNumber": {
+            "description": "GitHub issue to post progress to",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "repo": {
+            "description": "GitHub repo for issue tracking (e.g., owner/repo)",
+            "type": "string",
+            "maxLength": 200
+          },
+          "trackerBackend": {
+            "default": "json",
+            "description": "Task tracking backend for issue creation",
+            "type": "string",
+            "enum": [
+              "github",
+              "gitlab",
+              "json"
+            ]
+          },
+          "labels": {
+            "description": "Labels for created issues",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sessionId": {
+            "description": "Session ID for checkpoint/resume (crash recovery)",
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "simulateVotes": {
+            "default": false,
+            "description": "TESTS ONLY — random output, must not be used for real decisions (#2319)",
+            "type": "boolean"
+          },
+          "votingStrategy": {
+            "description": "Voting strategy for plan approval (default: higher_order)",
+            "type": "string",
+            "enum": [
+              "simple_majority",
+              "supermajority",
+              "unanimous",
+              "higher_order",
+              "proof_of_learning",
+              "opinion_wise"
+            ]
+          },
+          "quickMode": {
+            "default": false,
+            "description": "Use 3 agents instead of 6 for faster consensus voting",
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "description": "Max time per stage in ms (30000-600000). Default: varies by stage complexity",
+            "type": "integer",
+            "minimum": 30000,
+            "maximum": 600000
+          },
+          "mode": {
+            "default": "autonomous",
+            "description": "'autonomous': full pipeline. 'harness': stops after decompose, returns tasks for caller to implement.",
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "harness"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "run_pipeline",
+      "description": "Single unified entry point for all pipeline templates (dev/research/audit/greenfield/general). Auto-detects template from task content or accepts an explicit override.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 10000,
+            "description": "Task description — pipeline template auto-selected based on content"
+          },
+          "specFile": {
+            "description": "Path to a spec file — content prepended to task for greenfield projects",
+            "type": "string",
+            "maxLength": 500
+          },
+          "template": {
+            "description": "Pipeline template override. Available: dev, research, audit, greenfield, general",
+            "type": "string",
+            "maxLength": 50
+          },
+          "votingStrategy": {
+            "description": "Voting strategy for plan approval. simple_majority (default), supermajority (67%), unanimous, higher_order (Bayesian), proof_of_learning, opinion_wise",
+            "type": "string",
+            "enum": [
+              "simple_majority",
+              "supermajority",
+              "unanimous",
+              "higher_order",
+              "proof_of_learning",
+              "opinion_wise"
+            ]
+          },
+          "quickMode": {
+            "default": false,
+            "description": "Use 3 agents instead of 6 for faster consensus voting",
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "description": "Max time per stage in ms (30000-600000). Default: varies by stage complexity",
+            "type": "integer",
+            "minimum": 30000,
+            "maximum": 600000
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Stop after vote stage (no implementation)",
+            "type": "boolean"
+          },
+          "simulateVotes": {
+            "default": false,
+            "description": "TESTS ONLY — random output, must not be used for real decisions (#2319)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    }
+  ]
+}

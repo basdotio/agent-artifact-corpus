@@ -1,0 +1,237 @@
+{
+  "package": "mova-mcp",
+  "tools": [
+    {
+      "name": "mova_run",
+      "description": "Start a MOVA contract execution. Before calling, read the manifest resource mova://contracts/{contract_type}/manifest to understand required inputs (DataSpec) and available decision options. Built-in contract types: invoice, po, trade, aml, complaint, compliance, credit, supply_chain, churn, contract_gen. For custom registered contracts use mova_contract with action=run.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contract_type": {
+            "type": "string",
+            "description": "Built-in type: invoice | po | trade | aml | complaint | compliance | credit | supply_chain | churn | contract_gen"
+          },
+          "inputs": {
+            "type": "object",
+            "description": "Contract inputs per the DataSpec in the manifest. Read mova://contracts/{contract_type}/manifest first."
+          }
+        },
+        "required": [
+          "contract_type",
+          "inputs"
+        ]
+      }
+    },
+    {
+      "name": "mova_decide",
+      "description": "Submit a human decision at a contract gate. Uses ENV kind env.decision.submit_v0. contract_id comes from the mova_run response, not from business IDs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contract_id": {
+            "type": "string",
+            "description": "Contract ID from mova_run response"
+          },
+          "option": {
+            "type": "string",
+            "description": "Decision option_id from the decision gate (e.g. approve, reject, escalate)"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Human reasoning for the decision"
+          }
+        },
+        "required": [
+          "contract_id",
+          "option"
+        ]
+      }
+    },
+    {
+      "name": "mova_query",
+      "description": "Query contract state or retrieve the signed audit trail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contract_id": {
+            "type": "string"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "status",
+              "audit",
+              "audit_compact"
+            ],
+            "description": "status = current state | audit = signed receipt | audit_compact = full event journal"
+          }
+        },
+        "required": [
+          "contract_id",
+          "view"
+        ]
+      }
+    },
+    {
+      "name": "mova_registry",
+      "description": "Browse the MOVA contract marketplace, connector catalogue, or your own contracts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "contracts",
+              "connectors",
+              "my_contracts"
+            ],
+            "description": "contracts = public marketplace | connectors = available connectors | my_contracts = your registered contracts"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "Optional filter keyword"
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      }
+    },
+    {
+      "name": "mova_connector",
+      "description": "Manage connector overrides for your org. Overrides replace the sandbox mock with your real endpoint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list_overrides",
+              "register",
+              "delete"
+            ]
+          },
+          "connector_id": {
+            "type": "string",
+            "description": "e.g. connector.ocr.document_extract_v1"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Your HTTPS endpoint URL"
+          },
+          "label": {
+            "type": "string"
+          },
+          "auth_header": {
+            "type": "string",
+            "description": "Auth header name, e.g. X-Api-Key"
+          },
+          "auth_value": {
+            "type": "string",
+            "description": "Secret value — never echoed back in the response"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "mova_contract",
+      "description": "Manage your own registered MOVA contracts: list, register, set visibility, delete, run, check run status, report step completion, or approve/reject a human gate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "register",
+              "set_visibility",
+              "delete",
+              "run",
+              "run_status",
+              "step_complete",
+              "gate_approve",
+              "gate_reject"
+            ]
+          },
+          "contract_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string",
+            "description": "run_id from a previous run action"
+          },
+          "step_id": {
+            "type": "string",
+            "description": "step_id being completed or approved/rejected (from flow.json step.id)"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "Step outcome key matching flow.next map. Common values: ok | default | invalid | approved"
+          },
+          "output": {
+            "type": "object",
+            "description": "Structured output produced by the completed step (for step_complete)"
+          },
+          "source_url": {
+            "type": "string",
+            "description": "HTTPS URL to the contract JSON"
+          },
+          "source_path": {
+            "type": "string",
+            "description": "Local filesystem path to a contract flow JSON. mova-mcp reads it locally and sends inline flow payload to the backend."
+          },
+          "title": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "execution_mode": {
+            "type": "string",
+            "description": "deterministic | bounded_variance | ai_assisted | human_gated"
+          },
+          "execution_type": {
+            "type": "string",
+            "description": "agent = executed locally by Claude Code (flow.json returned) | server = executed server-side via HITL engine"
+          },
+          "description": {
+            "type": "string"
+          },
+          "required_connectors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "visibility": {
+            "type": "string",
+            "description": "private or public"
+          },
+          "inputs": {
+            "type": "object",
+            "description": "Input key-value pairs for run action"
+          },
+          "connector_overrides": {
+            "type": "object",
+            "description": "Per-run connector overrides"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "mova_health",
+      "description": "Check MOVA runner health: config completeness, API connectivity, registered validator count, version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  ]
+}

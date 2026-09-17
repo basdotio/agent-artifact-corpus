@@ -1,0 +1,184 @@
+{
+  "package": "@nexusforgetools/eu-finance",
+  "tools": [
+    {
+      "name": "get_ecb_rates",
+      "description": "Fetches the three ECB key interest rates from the ECB Statistical Data Warehouse (SDMX). Returns a JSON object with `rates` containing three entries — `deposit_facility`, `main_refinancing`, and `marginal_lending` — each with `date` (YYYY-MM-DD of the last rate change) and `value` (percentage as a number). Also includes `source` and `retrieved_at` as ISO 8601. Results are cached for 1 hour. USAGE: These are ECB policy rates, not real-time market rates — they only change at Governing Council meetings (roughly every 6 weeks). The `date` field indicates when the current rate was set, not today's date. For currency conversion use get_euro_exchange; these rates are not applicable for forex calculations. Use get_eu_inflation alongside this tool to assess the real interest rate (nominal rate minus inflation).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_euro_exchange",
+      "description": "Fetches EUR exchange rates against other currencies from the ECB via Frankfurter API. Returns a JSON object with: `base` (\"EUR\"), `date` (YYYY-MM-DD of the rate), `rates` (object mapping 3-letter currency codes to numeric values representing how many units of that currency equal 1 EUR), `source`, and `retrieved_at` as ISO 8601. Latest rates are cached 1 hour; historical rates are cached permanently. USAGE: Supports 33 currencies including USD, GBP, JPY, CHF, CNY, SEK, PLN, and others. Omit `date` for the latest available rates. Provide `date` in YYYY-MM-DD format for historical rates (available from 1999-01-04). These are ECB reference rates published at ~16:00 CET — not real-time mid-market rates; expect small spreads vs live quotes. Requests for weekends or ECB holidays return the previous business day's rates. Returns an error for dates before 1999-01-04 or future dates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "currencies": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 3
+            },
+            "description": "List of 3-letter currency codes (e.g. [\"USD\", \"GBP\", \"JPY\"]). Omit for all available currencies."
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Historical date in YYYY-MM-DD format. Omit for latest rates."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_eu_inflation",
+      "description": "Fetches HICP (Harmonised Index of Consumer Prices) annual inflation rates for EU countries from Eurostat (dataset: prc_hicp_manr). Returns a JSON object with: `data` (array of objects containing `country` as full name, `period` in YYYY-MM format, and `rate` as a numeric annual percentage change), `unit` (\"Annual rate of change (%)\"), `source`, and `retrieved_at` as ISO 8601. Defaults to the latest single month for all 29 EU members and aggregates. Data is cached 24 hours. USAGE: HICP is the EU-harmonised inflation standard used by the ECB for monetary policy — use it (not national CPI) for cross-country comparisons. Use country code EA for the Eurozone aggregate or EU27_2020 for the full EU-27 aggregate. Typical data lag is 30-45 days after the reference month. Set periods=12 to retrieve a 12-month trend. Pair with get_ecb_rates to contextualize how the ECB policy rate relates to current inflation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 12
+            },
+            "description": "List of EU country codes (e.g. [\"DE\", \"FR\", \"ES\"]) or \"EA\" for Eurozone / \"EU27_2020\" for EU-27. Omit for all EU countries."
+          },
+          "periods": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 24,
+            "default": 1,
+            "description": "Number of recent months to return per country (1-24). Default: 1 (latest only)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_eu_gdp",
+      "description": "Fetches quarterly GDP data for EU/Eurozone countries from Eurostat (dataset: namq_10_gdp). Returns a JSON object with: `data` (array of objects, each containing `country` as a full name string, `period` in YYYY-Qq format e.g. \"2024-Q3\", `value` as a number, and `unit` as a string label), `source`, and `retrieved_at` as ISO 8601. Defaults to year-on-year growth rate (%) for EA20, EU27_2020, DE, FR, IT, ES over the last 4 quarters. Data is cached 24 hours. Missing periods are omitted from the array (not returned as null). USAGE: Use unit=CLV_PCH_SM (default) for cross-country growth comparisons. Use unit=CP_MEUR to compare absolute GDP size. Use unit=CLV_PCH_PRE for quarter-on-quarter momentum. Use unit=CLV10_MEUR for real GDP volume excluding price effects. Typical Eurostat data lag is 60-90 days after quarter end — the most recent quarter may be absent. Request quarters=8 or more for recession analysis or multi-year trend charts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 12
+            },
+            "description": "List of EU country codes (e.g. [\"DE\", \"FR\"]). Use \"EA20\" for Eurozone, \"EU27_2020\" for EU-27."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "CLV_PCH_PRE",
+              "CLV_PCH_SM",
+              "CP_MEUR",
+              "CLV10_MEUR"
+            ],
+            "default": "CLV_PCH_SM",
+            "description": "Unit: CLV_PCH_SM = growth rate vs same quarter previous year (default), CLV_PCH_PRE = growth rate vs previous quarter, CP_MEUR = current prices in million EUR, CLV10_MEUR = chain-linked volumes in million EUR"
+          },
+          "quarters": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 4,
+            "description": "Number of recent quarters to return (1-20). Default: 4 (1 year)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_eu_unemployment",
+      "description": "Fetches monthly unemployment rates for EU countries from Eurostat (dataset: une_rt_m), seasonally adjusted, as a percentage of the active population. Returns a JSON object with: `data` (array of objects containing `country` as full name, `period` in YYYY-MM format, `rate` as a numeric percentage, `age_group`, and `sex`), `unit` (\"Percentage of active population (%)\"), `source`, and `retrieved_at` as ISO 8601. Defaults to TOTAL age group for EA20, EU27_2020, DE, FR, IT, ES, PL, NL over the last 3 months. Data is cached 24 hours. USAGE: Use age=Y15-24 for youth unemployment, which is typically 2-3x the overall rate. Data is seasonally adjusted (SA) — do not apply additional seasonal correction. Typical Eurostat lag is 30-60 days after the reference month. Set months=12 or more for trend and cyclical analysis. Non-EU countries (e.g. US, UK) are not available — use this tool only for EU member states and EA20/EU27_2020 aggregates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 12
+            },
+            "description": "List of EU country codes (e.g. [\"DE\", \"FR\", \"ES\"]). Use \"EA20\" for Eurozone. Omit for main EU countries."
+          },
+          "months": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 24,
+            "default": 3,
+            "description": "Number of recent months to return (1-24). Default: 3."
+          },
+          "age": {
+            "type": "string",
+            "enum": [
+              "TOTAL",
+              "Y15-74",
+              "Y15-24",
+              "Y25-74"
+            ],
+            "default": "TOTAL",
+            "description": "Age group: TOTAL (all ages), Y15-24 (youth), Y25-74 (adults). Default: TOTAL."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compare_eu_economies",
+      "description": "Fetches the latest inflation, GDP growth, and unemployment for 2-10 EU countries in a single parallel call to Eurostat. Returns a JSON object with: `countries` (array of per-country snapshots, each containing `country` as full name, `country_code`, `inflation` as `{rate, period}` or null, `gdp_growth` as `{rate, period}` or null, `unemployment` as `{rate, period}` or null), `source`, and `retrieved_at` as ISO 8601. Each indicator returns the single most recent available value. Inflation period is YYYY-MM; GDP period is YYYY-Qq; unemployment period is YYYY-MM. Data is cached 24 hours. USAGE: Prefer this tool over calling get_eu_inflation, get_eu_gdp, and get_eu_unemployment separately when building dashboards or running multi-indicator comparisons — it reduces latency by parallelizing the three Eurostat requests. Each indicator's period may differ due to different Eurostat release schedules (inflation lags ~30 days, GDP ~90 days). An indicator field is null when Eurostat has not published recent data — always handle null gracefully. Use the `indicators` parameter to skip unneeded metrics and reduce API calls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 12
+            },
+            "minItems": 2,
+            "maxItems": 10,
+            "description": "2-10 EU country codes to compare (e.g. [\"DE\", \"FR\", \"ES\", \"IT\"]). Use \"EA20\" for Eurozone."
+          },
+          "indicators": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "inflation",
+                "gdp_growth",
+                "unemployment"
+              ]
+            },
+            "default": [
+              "inflation",
+              "gdp_growth",
+              "unemployment"
+            ],
+            "description": "Which indicators to include. Default: all three."
+          }
+        },
+        "required": [
+          "countries"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

@@ -1,0 +1,1762 @@
+{
+  "package": "@ohah/react-native-mcp-server",
+  "tools": [
+    {
+      "name": "evaluate_script",
+      "description": "Run JS in React Native app context (not WebView). Returns JSON result. For WebView JS, use webview_evaluate_script. Use measureView(uid) for coords.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "function": {
+            "type": "string",
+            "description": "JS function string. E.g. \"() => measureView(uid)\". require() not available."
+          },
+          "args": {
+            "type": "array",
+            "items": {},
+            "description": "Arguments array for the function."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "function"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "take_snapshot",
+      "description": "Capture component tree. Compact text output. uid = testID or path for tap/swipe. Use interactive=true for minimal token usage.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Max tree depth. Default 30."
+          },
+          "interactive": {
+            "type": "boolean",
+            "description": "If true, show only interactive elements (Touchable, Button, TextInput, Switch, etc.)."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "take_screenshot",
+      "description": "Capture device screen as JPEG. EXPENSIVE: consumes large image tokens. Prefer text-based tools first: query_selector/assert_text for native UI, webview_evaluate_script for WebView DOM. Use screenshot only when visual layout check is needed or text tools cannot verify the state. After one screenshot, switch back to text-based tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios"
+            ],
+            "description": "android: adb. ios: simctl (simulator only)."
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Path to save screenshot."
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "accessibility_audit",
+      "description": "Run accessibility audit on component tree. Returns violations with rule, selector, and severity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Max tree depth. Default 999."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "webview_evaluate_script",
+      "description": "Run JS inside a WebView (DOM query, click, read text, etc). Use this instead of tap for any WebView content — tap cannot target DOM elements. Get webViewId via evaluate_script with getRegisteredWebViewIds().",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webViewId": {
+            "type": "string",
+            "description": "WebView id. Use evaluate_script getRegisteredWebViewIds() to discover."
+          },
+          "script": {
+            "type": "string",
+            "description": "JS to run in WebView (DOM query, click, etc). Must evaluate to value for result."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "webViewId",
+          "script"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "type_text",
+      "description": "Type text into TextInput by uid (from query_selector). Supports Unicode. Use instead of input_text for non-ASCII.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string",
+            "description": "testID or path of TextInput. Get from query_selector first."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text to type."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "uid",
+          "text"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "query_selector",
+      "description": "Find first RN element matching selector. Returns uid, type, and position (pageX, pageY, width, height) in points — use these coordinates directly with tap. For WebView inner elements, use webview_evaluate_script instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector for RN Fiber tree. Read resource docs://guides/query-selector-syntax for full syntax (type, #testID, :text, hierarchy, etc.)."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "query_selector_all",
+      "description": "Find all RN elements matching selector. Returns array with positions (pageX, pageY, width, height) in points. Use query_selector for single element.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector for RN Fiber tree. Read resource docs://guides/query-selector-syntax for full syntax (type, #testID, :text, hierarchy, etc.)."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_component_source",
+      "description": "Get source file location (file, line, column) for a component. Use selector or uid from take_snapshot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector to find the component. If omitted, uid is required."
+          },
+          "uid": {
+            "type": "string",
+            "description": "uid from take_snapshot (testID or path like \"0.1.2\"). If omitted, selector is required."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assert_text",
+      "description": "Assert text exists on screen. Supports polling via timeoutMs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text substring to assert exists on screen"
+          },
+          "selector": {
+            "type": "string",
+            "description": "Optional selector to narrow scope."
+          },
+          "timeoutMs": {
+            "type": "number",
+            "default": 0,
+            "description": "Max wait ms. 0 = single check; >0 = poll until pass or timeout."
+          },
+          "intervalMs": {
+            "type": "number",
+            "default": 300,
+            "description": "Poll interval ms. Used only when timeoutMs > 0."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assert_visible",
+      "description": "Assert element matching selector is visible. Supports polling via timeoutMs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector to check visibility."
+          },
+          "timeoutMs": {
+            "type": "number",
+            "default": 0,
+            "description": "Max wait ms. 0 = single check; >0 = poll until pass or timeout."
+          },
+          "intervalMs": {
+            "type": "number",
+            "default": 300,
+            "description": "Poll interval ms. Used only when timeoutMs > 0."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assert_not_visible",
+      "description": "Assert element matching selector is NOT visible. Supports polling via timeoutMs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector of element that must not be visible."
+          },
+          "timeoutMs": {
+            "type": "number",
+            "default": 0,
+            "description": "Max wait ms. 0 = single check; >0 = poll until pass or timeout."
+          },
+          "intervalMs": {
+            "type": "number",
+            "default": 300,
+            "description": "Poll interval ms. Used only when timeoutMs > 0."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assert_element_count",
+      "description": "Assert element count matching selector. Use expectedCount or minCount/maxCount range.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector to count matching elements."
+          },
+          "expectedCount": {
+            "type": "number",
+            "description": "Exact count. Mutually exclusive with min/maxCount."
+          },
+          "minCount": {
+            "type": "number",
+            "description": "Min count (inclusive)."
+          },
+          "maxCount": {
+            "type": "number",
+            "description": "Max count (inclusive)."
+          },
+          "timeoutMs": {
+            "type": "number",
+            "default": 0,
+            "description": "Max wait ms. 0 = single check; >0 = poll until pass or timeout."
+          },
+          "intervalMs": {
+            "type": "number",
+            "default": 300,
+            "description": "Poll interval ms. Used only when timeoutMs > 0."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_debugger_status",
+      "description": "MCP connection status. appConnected, devices list (deviceId, platform). Call first to see connected devices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topInsetDp": {
+            "type": "number",
+            "description": "Set Android top inset override (dp). Overrides ADB auto-detect. Persists for the connection."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device for topInsetDp override."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_console_messages",
+      "description": "List captured console logs. Filter by level, since, limit. Levels: log, info, warn, error.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "log",
+              "info",
+              "warn",
+              "error"
+            ],
+            "description": "Filter by level. Omit for all."
+          },
+          "since": {
+            "type": "number",
+            "description": "Only logs after timestamp (ms)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max logs. Default 100."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_network_requests",
+      "description": "List captured network requests. Filter by url, method, status, since, limit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL substring filter."
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method filter."
+          },
+          "status": {
+            "type": "number",
+            "description": "Status code filter."
+          },
+          "since": {
+            "type": "number",
+            "description": "Only requests after timestamp (ms)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max requests. Default 50."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "clear",
+      "description": "Clear one buffer: console logs, network requests, network mocks, state changes, or render profile. Use target param. App data reset is clear_state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "console",
+              "network_requests",
+              "network_mocks",
+              "state_changes",
+              "render_profile"
+            ],
+            "description": "Which buffer to clear: console logs, network requests, network mocks, state changes, or render profile data."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "tap",
+      "description": "Tap at (x,y) in points. Get coordinates from query_selector (pageX/pageY). For WebView DOM elements, use webview_evaluate_script instead. Long press via duration param.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "ios or android."
+          },
+          "x": {
+            "type": "number",
+            "description": "X in points (dp). Pixels auto on Android."
+          },
+          "y": {
+            "type": "number",
+            "description": "Y in points (dp). Pixels auto on Android."
+          },
+          "duration": {
+            "type": "number",
+            "description": "Hold ms for long press. Omit for tap."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single. list_devices to find."
+          },
+          "iosOrientation": {
+            "type": "number",
+            "description": "iOS orientation 1-4. Portrait=1,2; Landscape=3,4. Skips auto-detect."
+          }
+        },
+        "required": [
+          "platform",
+          "x",
+          "y"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "swipe",
+      "description": "Swipe from (x1,y1) to (x2,y2) in points. Get coordinates from query_selector. For scrolling and drawers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "x1": {
+            "type": "number",
+            "description": "Start X in points (dp). Auto-converted to pixels on Android."
+          },
+          "y1": {
+            "type": "number",
+            "description": "Start Y in points (dp). Auto-converted to pixels on Android."
+          },
+          "x2": {
+            "type": "number",
+            "description": "End X in points (dp). Auto-converted to pixels on Android."
+          },
+          "y2": {
+            "type": "number",
+            "description": "End Y in points (dp). Auto-converted to pixels on Android."
+          },
+          "duration": {
+            "type": "number",
+            "default": 300,
+            "description": "Swipe duration ms. Default 300."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single. list_devices to find."
+          },
+          "iosOrientation": {
+            "type": "number",
+            "description": "iOS orientation 1-4. Skips auto-detect."
+          }
+        },
+        "required": [
+          "platform",
+          "x1",
+          "y1",
+          "x2",
+          "y2"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "input_text",
+      "description": "Type into focused input. ASCII only. Use type_text for Korean/Unicode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text to type. ASCII only. Use type_text for Unicode."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single. list_devices to find."
+          }
+        },
+        "required": [
+          "platform",
+          "text"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "input_key",
+      "description": "Send key event to device (Return, Backspace, ENTER, BACK, etc.).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "keycode": {
+            "type": "number",
+            "description": "Keycode. iOS: 40=Return, 42=Backspace, 44=Space, 41=Escape. Android: 4=BACK, 66=ENTER, 67=DEL."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single. list_devices to find."
+          }
+        },
+        "required": [
+          "platform",
+          "keycode"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "press_button",
+      "description": "Press hardware button (HOME, BACK, LOCK, VOLUME, etc.).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "button": {
+            "type": "string",
+            "description": "Android: HOME, BACK, MENU, APP_SWITCH, POWER, VOLUME_UP/DOWN, ENTER, DEL. iOS: HOME, LOCK, SIDE_BUTTON."
+          },
+          "duration": {
+            "type": "number",
+            "description": "Hold seconds. iOS only."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single. list_devices to find."
+          }
+        },
+        "required": [
+          "platform",
+          "button"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "describe_ui",
+      "description": "Query native UI/accessibility tree. Large payload. Cannot see inside WebView content. Prefer query_selector for RN elements, webview_evaluate_script for WebView DOM.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "point"
+            ],
+            "default": "all",
+            "description": "iOS: \"all\" or \"point\" at (x,y). Android: ignored."
+          },
+          "x": {
+            "type": "number",
+            "description": "X in points. iOS, required for mode=point."
+          },
+          "y": {
+            "type": "number",
+            "description": "Y in points. iOS, required for mode=point."
+          },
+          "nested": {
+            "type": "boolean",
+            "default": false,
+            "description": "iOS: hierarchical tree. Android: ignored."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single. list_devices to find."
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "file_push",
+      "description": "Push local file to device. iOS requires bundleId.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "localPath": {
+            "type": "string",
+            "description": "Absolute path to the local file to push."
+          },
+          "remotePath": {
+            "type": "string",
+            "description": "Destination. iOS: in app container. Android: e.g. /sdcard/Download/file.txt."
+          },
+          "bundleId": {
+            "type": "string",
+            "description": "Bundle ID. iOS only, required."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single. list_devices to find."
+          }
+        },
+        "required": [
+          "platform",
+          "localPath",
+          "remotePath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "add_media",
+      "description": "Add images/videos to simulator photo library or device gallery.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "filePaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Absolute paths to images/videos for gallery."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single. list_devices to find."
+          }
+        },
+        "required": [
+          "platform",
+          "filePaths"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_devices",
+      "description": "List connected simulators/devices. Returns deviceId, state, model. Use for other tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "ios: idb simulators. android: adb devices."
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_apps",
+      "description": "List installed apps. No app connection required. Returns bundle IDs or package names.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. list_devices for deviceId."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Optional. iOS: UDID. Android: serial. Auto if single device."
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "terminate_app",
+      "description": "Terminate app by bundle ID or package name. No app connection required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "appId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[a-zA-Z0-9._-]+$",
+            "description": "iOS bundle ID or Android package name (e.g. com.example.app). Use list_apps to find IDs."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Optional. iOS: UDID. Android: serial. Auto if single device."
+          }
+        },
+        "required": [
+          "platform",
+          "appId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_orientation",
+      "description": "Get current device orientation (portrait/landscape). No app connection required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Optional. iOS: UDID. Android: serial. Auto if single device."
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_orientation",
+      "description": "Set device orientation to portrait or landscape. iOS: simulator only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "orientation": {
+            "type": "string",
+            "enum": [
+              "portrait",
+              "landscape"
+            ],
+            "description": "Desired orientation. Android: 0 or 1. iOS: one rotation toggles."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Optional. iOS: UDID. Android: serial. Auto if single device."
+          }
+        },
+        "required": [
+          "platform",
+          "orientation"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_screen_size",
+      "description": "Get screen size (width/height in px). iOS requires app connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Optional. iOS: UDID. Android: serial. Auto if single device."
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "switch_keyboard",
+      "description": "Switch keyboard language on simulator/emulator. Use before input_text for correct layout.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "switch"
+            ],
+            "description": "list: available keyboards. get: current. switch: toggle (iOS) or set IME (Android)."
+          },
+          "keyboard_id": {
+            "type": "string",
+            "description": "Android switch only. IME ID. Use action=list to see IDs."
+          }
+        },
+        "required": [
+          "platform",
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "open_deeplink",
+      "description": "Open deep link on simulator/device. Navigate to screens via URL scheme.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Deep link URL (e.g. myapp://product/123)."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single. list_devices to find."
+          }
+        },
+        "required": [
+          "url",
+          "platform"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "clear_state",
+      "description": "Clear app data (Android) or reset permissions (iOS). iOS full reset needs uninstall+reinstall.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "appId": {
+            "type": "string",
+            "description": "Bundle ID (iOS) or package name (Android)."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Optional. iOS: UDID. Android: serial. Auto if single device."
+          }
+        },
+        "required": [
+          "platform",
+          "appId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_location",
+      "description": "Set GPS on iOS simulator or Android emulator. Android: emulator only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90,
+            "description": "Latitude (-90–90)."
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180,
+            "description": "Longitude (-180–180)."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Optional. iOS: UDID. Android: serial. Auto if single device."
+          }
+        },
+        "required": [
+          "platform",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scroll_until_visible",
+      "description": "Scroll until RN element matching selector becomes visible. For long lists and off-screen elements. After scrolling, use query_selector to get the element position for tap.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector of element to find."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right"
+            ],
+            "default": "down",
+            "description": "Scroll direction. Default \"down\"."
+          },
+          "maxScrolls": {
+            "type": "number",
+            "default": 10,
+            "description": "Max scroll attempts. Default 10."
+          },
+          "scrollableSelector": {
+            "type": "string",
+            "description": "Selector for scroll container. Omit to use center."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. Auto if single."
+          },
+          "iosOrientation": {
+            "type": "number",
+            "description": "iOS orientation 1-4. Skips auto-detect."
+          }
+        },
+        "required": [
+          "selector",
+          "platform"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "inspect_state",
+      "description": "Inspect React state hooks by selector. Works with useState, Zustand, etc.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector for component (e.g. CartScreen, #cart-view)."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_state_changes",
+      "description": "List captured state changes. Filter by component, since, limit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string",
+            "description": "Filter by component name. Omit for all."
+          },
+          "since": {
+            "type": "number",
+            "description": "Only changes after timestamp (ms)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max changes to return. Default 100."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assert_state",
+      "description": "Assert React state hook value matches expected. Use with selector and hookIndex.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector for component (e.g. #cart-view, CartScreen)."
+          },
+          "hookIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Zero-based hook index. Default 0."
+          },
+          "path": {
+            "type": "string",
+            "description": "Dot-notation path into hook value (e.g. \"items.length\"). Omit to compare whole value."
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ],
+            "description": "Expected value. Number, string, boolean, or JSON object/array."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "selector",
+          "expected"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_network_mock",
+      "description": "Add network mock. Matching XHR/fetch return mock without hitting network.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urlPattern": {
+            "type": "string",
+            "description": "URL pattern (substring or regex)."
+          },
+          "isRegex": {
+            "type": "boolean",
+            "description": "urlPattern is regex."
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method. Omit to match all."
+          },
+          "status": {
+            "type": "number",
+            "description": "Mock status. Default 200."
+          },
+          "statusText": {
+            "type": "string",
+            "description": "Mock status text."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Mock headers."
+          },
+          "body": {
+            "type": "string",
+            "description": "Mock body."
+          },
+          "delay": {
+            "type": "number",
+            "description": "Delay ms before mock."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "urlPattern"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_network_mocks",
+      "description": "List all active network mock rules.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "remove_network_mock",
+      "description": "Remove a specific network mock rule by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Mock rule ID to remove."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "visual_compare",
+      "description": "Visual regression: capture current screen (or crop by selector), pixel-diff against baseline PNG; use to verify UI didn’t change or to update baseline.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios"
+            ],
+            "description": "Target platform."
+          },
+          "baseline": {
+            "type": "string",
+            "description": "Absolute path to baseline PNG file."
+          },
+          "selector": {
+            "type": "string",
+            "description": "CSS-like selector to crop a specific element. If omitted, compares full screen."
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "pixelmatch threshold (0~1). Default 0.1."
+          },
+          "updateBaseline": {
+            "type": "boolean",
+            "description": "If true, save current screenshot as new baseline and skip comparison."
+          },
+          "saveDiff": {
+            "type": "string",
+            "description": "Path to save diff image PNG."
+          },
+          "saveCurrent": {
+            "type": "string",
+            "description": "Path to save current screenshot PNG."
+          },
+          "deviceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "baseline"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "start_render_profile",
+      "description": "Start render profiling. Tracks mounts, re-renders, and unnecessary renders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Whitelist: track only these components. Overrides ignore."
+          },
+          "ignore": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Blacklist: skip these components (added to default ignore list). Ignored when components is set."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_render_report",
+      "description": "Get render profile report. Shows hot components, unnecessary renders, and trigger analysis.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "start_render_highlight",
+      "description": "Show visual re-render overlay on device. Highlights re-rendering components with count badges.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Whitelist: highlight only these components. Overrides ignore."
+          },
+          "ignore": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Blacklist: skip these components (added to default ignore list)."
+          },
+          "showLabels": {
+            "type": "boolean",
+            "description": "Show component name labels on each highlight rect. Default: false."
+          },
+          "fadeTimeout": {
+            "type": "number",
+            "description": "Milliseconds before highlights fade out. Default: 500 (react-scan native align)."
+          },
+          "maxHighlights": {
+            "type": "number",
+            "description": "Maximum simultaneous highlights on screen. Default: 100."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "stop_render_highlight",
+      "description": "Stop React component render overlay. Removes highlight rects and resets counts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "description": "Target device ID. Auto if single device. Use get_debugger_status to list."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Target platform. Auto when single device of that platform."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "start_video_recording",
+      "description": "Start screen recording. Call stop_video_recording to save.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "ios or android."
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Host path to save the recording (must be under e2e-artifacts or cwd)."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Device ID. iOS: udid, Android: serial. Omit for single device."
+          }
+        },
+        "required": [
+          "platform",
+          "filePath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "stop_video_recording",
+      "description": "Stop the current screen recording and return the saved file path.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "description": "Platform to stop. Omit when only one recording."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

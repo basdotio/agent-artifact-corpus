@@ -1,0 +1,1389 @@
+{
+  "package": "@phantom/mcp-server",
+  "tools": [
+    {
+      "name": "buy",
+      "description": "Phantom Wallet — Fetches an optimized swap quote from Phantom's routing engine and can optionally execute it. Supports same-chain Solana swaps, same-chain EVM swaps (Ethereum, Base, Polygon, Arbitrum, Monad), and cross-chain swaps between Solana and EVM chains. Cross-chain flows work in both directions, including EVM to Solana and Solana to EVM, and can also target Hypercore/Hyperliquid when supported. Both sellChainId and buyChainId must be a Solana chain (solana:*), EVM chain (eip155:*), or Hypercore/Hyperliquid (hypercore:*); other namespaces are not supported. Use this for ALL swap/exchange operations (e.g. 'swap USDC to SOL', 'buy ETH on Base', 'bridge SOL to ETH'). Use sellChainId to specify the source chain and buyChainId for the destination (omit both for Solana, same as before). For native tokens (SOL, ETH, MATIC) always use sellTokenIsNative/buyTokenIsNative — never use magic addresses like 0xeeee...eeee. EVM token contract addresses must be lowercase (e.g. \"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48\"). Two modes: (1) execute: false (default) — returns quote only; (2) execute: true — signs and broadcasts immediately. For cross-chain swaps, execute: true sends the sell-side initiation transaction right away — the bridge completes the buy side automatically. IMPORTANT: The wallet must hold native tokens for fees on the source chain (SOL for Solana, ETH/native for EVM). Use get_token_balances to verify balances before executing. Success response (execute: false): {quoteRequest, quoteResponse}. Success response (execute: true): {quoteRequest, quoteResponse, execution: {signature, rawTransaction}}.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "sellChainId": {
+            "default": "solana:mainnet",
+            "description": "CAIP-2 chain ID for the sell token (e.g. \"solana:mainnet\", \"eip155:1\" for Ethereum, \"eip155:8453\" for Base, \"eip155:137\" for Polygon). Defaults to \"solana:mainnet\".",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$"
+          },
+          "buyChainId": {
+            "description": "CAIP-2 chain ID for the buy token. Defaults to sellChainId (same-chain swap). Set a different value for cross-chain (e.g. sell on Solana, buy on Ethereum).",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$"
+          },
+          "buyTokenMint": {
+            "description": "ERC-20/SPL contract address of the token to buy. Solana: base58 mint address. EVM: lowercase 0x-prefixed contract address (e.g. \"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48\" for USDC). IMPORTANT: Do NOT use magic addresses like 0xeeee...eeee for native tokens — use buyTokenIsNative: true instead.",
+            "type": "string"
+          },
+          "buyTokenIsNative": {
+            "default": false,
+            "description": "Set true to buy the native token of buyChainId (SOL on Solana, ETH on Base/Ethereum/Arbitrum, MATIC on Polygon). Use this instead of buyTokenMint for native tokens. Default: false.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "sellTokenMint": {
+            "description": "ERC-20/SPL contract address of the token to sell. Solana: base58 mint address. EVM: lowercase 0x-prefixed contract address. IMPORTANT: Do NOT use magic addresses like 0xeeee...eeee for native tokens — use sellTokenIsNative: true instead.",
+            "type": "string"
+          },
+          "sellTokenIsNative": {
+            "description": "Set true to sell the native token of sellChainId (SOL on Solana, ETH on EVM chains). Default: true if sellTokenMint not provided.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Amount to swap. When exactOut is false (default) this is the sell amount; when exactOut is true this is the buy amount. Interpretation depends on amountUnit."
+          },
+          "amountUnit": {
+            "default": "base",
+            "description": "Amount unit: 'ui' for human-readable token units, 'base' for atomic units (default: 'base')",
+            "type": "string",
+            "enum": [
+              "ui",
+              "base"
+            ]
+          },
+          "buyTokenDecimals": {
+            "description": "Decimals for the buy token. Required when amountUnit is 'ui' and exactOut is true for EVM tokens.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sellTokenDecimals": {
+            "description": "Decimals for the sell token. Required when amountUnit is 'ui' for EVM tokens.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "slippageTolerance": {
+            "description": "Slippage tolerance in percent (0–100, default: auto)",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "exactOut": {
+            "default": false,
+            "description": "If true, amount is treated as the buy amount instead of sell amount. Default: false.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "autoSlippage": {
+            "default": true,
+            "description": "Enable auto slippage calculation. Default: true.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "base64EncodedTx": {
+            "default": false,
+            "description": "Request base64-encoded transaction data in the quote response (Solana only). Default: false.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "execute": {
+            "default": false,
+            "description": "If false (default), returns the quote only. If true, signs and broadcasts immediately. For cross-chain swaps this sends the sell-side transaction; the bridge completes the rest automatically.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "taker": {
+            "description": "Override taker address (defaults to the wallet address for the sell chain)",
+            "type": "string"
+          },
+          "rpcUrl": {
+            "description": "Optional Solana RPC URL (for mint decimals lookup when amountUnit is 'ui' on Solana)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the taker address (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount"
+        ]
+      }
+    },
+    {
+      "name": "evm_allowance",
+      "description": "Returns the ERC-20 token allowance granted by an owner address to a spender address on a supported EVM chain. Use this before a swap to check whether an approval transaction is needed. If ownerAddress is omitted, the authenticated wallet address for the chain is used.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "chainId": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "EVM chain ID (e.g. 8453 for Base, 1 for Ethereum, 137 for Polygon). Accepts a number, decimal string, or hex string (e.g. \"0x2105\")."
+          },
+          "tokenAddress": {
+            "description": "ERC-20 token contract address (0x-prefixed, checksummed).",
+            "type": "string"
+          },
+          "spenderAddress": {
+            "description": "Address of the spender to check allowance for (e.g. a swap router).",
+            "type": "string"
+          },
+          "ownerAddress": {
+            "description": "Address of the token owner. If omitted, the authenticated wallet address for the chain is used.",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the wallet address (default: 0). Only used when ownerAddress is omitted.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "rpcUrl": {
+            "description": "Optional EVM RPC URL override.",
+            "type": "string"
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chainId",
+          "tokenAddress",
+          "spenderAddress"
+        ]
+      }
+    },
+    {
+      "name": "evm_send",
+      "description": "Signs and broadcasts an EVM transaction using the authenticated embedded wallet. Accepts the standard EVM transaction object format (the same fields used by eth_sendTransaction and returned by DeFi aggregators). Use the chainId field directly from the aggregator response (e.g. 1 for Ethereum mainnet, 8453 for Base, 137 for Polygon). Missing fields such as nonce and gas are automatically fetched from the network. SAFETY: By default (no confirmed flag), this tool runs a simulation and returns expected asset changes and warnings WITHOUT sending anything — use this to show the user what will happen and ask for approval. Pass confirmed: true only after the user explicitly approves the preview to actually sign and send. If the user wants to skip simulation and execute immediately, pass confirmed: true directly — but the two-step flow is recommended for safety. Response WITHOUT confirmed: {status: 'pending_confirmation', simulation: {expectedChanges, warnings, block?, advancedDetails?} | null}. Response WITH confirmed: true: {hash, networkId, from, to}.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "chainId": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "EVM chain ID as a number or string (e.g. 8453, \"8453\", or \"0x2105\" for Base). This is the chainId field returned directly by DeFi aggregators."
+          },
+          "to": {
+            "description": "Recipient address (checksummed EVM address)",
+            "type": "string"
+          },
+          "value": {
+            "default": "0x0",
+            "description": "Amount to send in wei as a hex string (e.g., \"0x38D7EA4C68000\" for 0.001 ETH). If omitted, defaults to 0.",
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]*$"
+          },
+          "data": {
+            "description": "Encoded contract call data (0x-prefixed hex). Omit for plain ETH transfers.",
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]*$"
+          },
+          "gas": {
+            "description": "Gas limit as a hex string (e.g., \"0x5208\" for 21000). If omitted, estimated automatically from the network with a 20% buffer.",
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]*$"
+          },
+          "gasLimit": {
+            "description": "Gas limit as a hex string — alias for gas, accepted directly from DeFi aggregator responses. If both gas and gasLimit are provided, gas takes precedence.",
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]*$"
+          },
+          "gasPrice": {
+            "description": "Gas price in wei as a hex string (legacy transactions). Use maxFeePerGas + maxPriorityFeePerGas for EIP-1559 transactions. If neither gasPrice nor maxFeePerGas is provided, gasPrice is fetched automatically.",
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]*$"
+          },
+          "maxFeePerGas": {
+            "description": "Maximum total fee per gas in wei (EIP-1559, hex string)",
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]*$"
+          },
+          "maxPriorityFeePerGas": {
+            "description": "Maximum priority fee (tip) per gas in wei (EIP-1559, hex string)",
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]*$"
+          },
+          "nonce": {
+            "description": "Transaction nonce as a hex string. If omitted, fetched automatically via eth_getTransactionCount.",
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]*$"
+          },
+          "type": {
+            "description": "Hex-encoded transaction type (e.g. \"0x0\" for legacy, \"0x2\" for EIP-1559, \"0x3\" for blob). Inferred automatically if omitted.",
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]*$"
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the account (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "rpcUrl": {
+            "description": "Optional EVM RPC URL override. Defaults are provided for common networks.",
+            "type": "string"
+          },
+          "confirmed": {
+            "default": false,
+            "description": "Set to true only after the user has reviewed and approved the simulation results. Omit (or false) on the first call to get a simulation preview without submitting.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "chainId"
+        ]
+      }
+    },
+    {
+      "name": "evm_sign",
+      "description": "Signs a UTF-8 message using EIP-191 personal_sign with the authenticated EVM embedded wallet. Use this for authentication challenges, proof-of-ownership flows, or any off-chain EVM signature request. Returns a hex-encoded signature. Use the chainId number directly (e.g. 1 for Ethereum, 8453 for Base, 137 for Polygon, 42161 for Arbitrum, 143 for Monad). For Solana message signing use sign_solana_message instead. Success response: {signature: string}.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The UTF-8 message to sign"
+          },
+          "chainId": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "EVM chain ID (e.g. 1 for Ethereum mainnet, 8453 for Base, 137 for Polygon, 42161 for Arbitrum, 143 for Monad). Matches the chainId field from DeFi aggregators."
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the account (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "chainId"
+        ]
+      }
+    },
+    {
+      "name": "evm_sign-typed",
+      "description": "Signs EIP-712 typed structured data using the authenticated EVM embedded wallet. Returns a hex-encoded signature. Used for DeFi permit signatures, order signing (e.g. 0x, Seaport), and other structured off-chain approvals. The typedData parameter must follow the EIP-712 structure with types, primaryType, domain, and message fields. Use the chainId number directly (e.g. 1 for Ethereum, 8453 for Base, 137 for Polygon, 42161 for Arbitrum, 143 for Monad).",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "typedData": {
+            "type": "object",
+            "properties": {
+              "types": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {},
+                "description": "Type definitions mapping type names to arrays of {name, type} fields"
+              },
+              "primaryType": {
+                "type": "string",
+                "description": "The primary type name to sign (must be a key in types)"
+              },
+              "domain": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {},
+                "description": "EIP-712 domain separator values (e.g. name, version, chainId, verifyingContract)"
+              },
+              "message": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {},
+                "description": "The structured data to sign, conforming to primaryType"
+              }
+            },
+            "required": [
+              "types",
+              "primaryType",
+              "domain",
+              "message"
+            ],
+            "description": "EIP-712 typed data object. Must contain: types (object), primaryType (string), domain (object), message (object). See https://eips.ethereum.org/EIPS/eip-712 for the full specification."
+          },
+          "chainId": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "EVM chain ID (e.g. 1 for Ethereum mainnet, 8453 for Base, 137 for Polygon, 42161 for Arbitrum, 143 for Monad). Matches the chainId field from DeFi aggregators."
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the account (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "typedData",
+          "chainId"
+        ]
+      }
+    },
+    {
+      "name": "login",
+      "description": "Re-authenticate with Phantom. Use this to log in for the first time, switch accounts, or refresh an expired session. Set displayMode to 'text' if you want the login prompt returned as text instead of trying to open a browser automatically.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "displayMode": {
+            "default": "browser",
+            "description": "'browser' (default) tries to open the browser automatically. 'text' returns the login prompt text instead.",
+            "type": "string",
+            "enum": [
+              "browser",
+              "text"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "logout",
+      "description": "Phantom Wallet — Log out by clearing the stored session and credentials from disk. Does not require an active session. The next tool call will require re-authentication.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "pay",
+      "description": "Phantom Wallet — Pays for daily API access by signing and broadcasting the CASH token transfer transaction included in an PaymentRequiredError error response. Call this when any tool returns error code PaymentRequiredError, passing the preparedTx from that response. On success, the payment signature is stored and API calls are unlocked until the purchased quota is consumed. After calling this, retry the original tool that triggered the payment requirement.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "preparedTx": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+            "description": "Validates that the transaction is a valid payment transaction for API access"
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "preparedTx"
+        ]
+      }
+    },
+    {
+      "name": "perps_account",
+      "description": "Returns the perpetuals account balance including total account value, available balance, and withdrawable amount. The account is on Hyperliquid (funded with USDC).",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
+    {
+      "name": "perps_cancel",
+      "description": "Cancels an open perpetual order on Hyperliquid. Use get_perp_orders to retrieve the order ID before cancelling.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "market": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Market symbol (e.g. \"BTC\")"
+          },
+          "orderId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The numeric order ID to cancel (from get_perp_orders)"
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "market",
+          "orderId"
+        ]
+      }
+    },
+    {
+      "name": "perps_close",
+      "description": "Closes an open perpetual position on Hyperliquid. By default closes 100% of the position. Use sizePercent to partially close (e.g. 50 to close half). Uses a market IOC order with 10% slippage buffer.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "market": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Market symbol of the position to close (e.g. \"BTC\")"
+          },
+          "sizePercent": {
+            "default": 100,
+            "description": "Percentage of position to close (1–100, default: 100 for full close)",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "market"
+        ]
+      }
+    },
+    {
+      "name": "perps_deposit",
+      "description": "Bridges tokens from an external chain (Solana, Arbitrum, Base, Ethereum, Polygon) into Hyperliquid as USDC via a cross-chain swap. By default sells USDC on the source chain (or native SOL if sellTokenIsNative: true). The bridge delivers USDC directly to your Hyperliquid perps account. Use execute: false (default) to preview the quote first.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "sourceChainId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$",
+            "description": "Source chain CAIP-2 ID. Examples: \"solana:mainnet\", \"eip155:42161\" (Arbitrum), \"eip155:8453\" (Base), \"eip155:1\" (Ethereum), \"eip155:137\" (Polygon)."
+          },
+          "amount": {
+            "type": "string",
+            "description": "Amount to send in human-readable units (e.g. \"100\" for 100 USDC, \"0.5\" for 0.5 SOL)."
+          },
+          "sellTokenMint": {
+            "description": "Token contract/mint address to sell on the source chain. Defaults to USDC on the source chain if omitted. Solana: base58 SPL mint. EVM: lowercase 0x-prefixed ERC-20 address.",
+            "type": "string"
+          },
+          "sellTokenIsNative": {
+            "default": false,
+            "description": "Set true to sell the native token (SOL on Solana, ETH on EVM chains). Default: false.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "sellTokenDecimals": {
+            "description": "Decimals of the sell token. Required for EVM ERC-20 tokens when amountUnit is 'ui'.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "execute": {
+            "default": false,
+            "description": "If false (default), returns the quote only. If true, signs and broadcasts immediately.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "sourceChainId",
+          "amount"
+        ]
+      }
+    },
+    {
+      "name": "perps_history",
+      "description": "Returns historical perpetual trades for the wallet. Each entry includes trade ID, coin, type (open/close/liquidation), timestamp, price, size, trade value, fee, and closed PnL.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
+    {
+      "name": "perps_leverage",
+      "description": "Updates the leverage and margin type (cross or isolated) for a perpetual market. This takes effect for new orders on that market. Cross margin shares account balance across positions; isolated margin limits risk to the margin allocated to that position.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "market": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Market symbol (e.g. \"BTC\")"
+          },
+          "leverage": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Leverage multiplier (e.g. 1 for 1x, 10 for 10x)"
+          },
+          "marginType": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ],
+            "description": "Margin type: 'cross' shares balance, 'isolated' caps risk per-position"
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "market",
+          "leverage",
+          "marginType"
+        ]
+      }
+    },
+    {
+      "name": "perps_markets",
+      "description": "Returns all available perpetual markets on Hyperliquid with current prices, funding rates, open interest, 24h volume, max leverage, and asset IDs. Use this to discover tradeable markets and get current prices before opening positions.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "perps_open",
+      "description": "Opens a perpetual position on Hyperliquid. Supports market and limit orders in either long or short direction. The position size is specified in USD. For market orders, a 10% slippage buffer is applied automatically. Use get_perp_markets first to verify the market symbol and current price. Requires the wallet to have USDC deposited in the perps account (use deposit_to_perps if needed).",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "market": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Market symbol (e.g. \"BTC\", \"ETH\", \"SOL\")"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ],
+            "description": "Position direction"
+          },
+          "sizeUsd": {
+            "type": "number",
+            "description": "Position size in USD (e.g. \"100\" for $100 notional value)"
+          },
+          "leverage": {
+            "type": "number",
+            "description": "Leverage multiplier (e.g. 1 for 1x, 10 for 10x)"
+          },
+          "orderType": {
+            "type": "string",
+            "enum": [
+              "market",
+              "limit"
+            ],
+            "description": "Order type. Market orders execute immediately; limit orders rest on the book"
+          },
+          "limitPrice": {
+            "description": "Required for limit orders: the limit price (e.g. \"50000\")",
+            "type": "number"
+          },
+          "marginType": {
+            "default": "isolated",
+            "description": "Margin type: 'isolated' (default) limits risk to this position; 'cross' shares account balance",
+            "type": "string",
+            "enum": [
+              "isolated",
+              "cross"
+            ]
+          },
+          "reduceOnly": {
+            "default": false,
+            "description": "If true, the order can only reduce an existing position (default: false)",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the account (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "market",
+          "direction",
+          "sizeUsd",
+          "leverage",
+          "orderType"
+        ]
+      }
+    },
+    {
+      "name": "perps_orders",
+      "description": "Returns all open perpetual orders (limit orders, take-profit, stop-loss) for the wallet. Each order includes ID, coin, side, type, limit/trigger price, size, and whether it is reduce-only.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
+    {
+      "name": "perps_positions",
+      "description": "Returns all open perpetual positions for the wallet. Each position includes coin, direction (long/short), size, margin, entry price, leverage, unrealized PnL, and liquidation price.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
+    {
+      "name": "perps_transfer",
+      "description": "Moves USDC from the Hyperliquid spot account into the perpetuals account. Both accounts live on Hypercore (Hyperliquid's own chain) — this is an internal transfer, not a cross-chain bridge. IMPORTANT: This only works if USDC is already in your Hyperliquid spot account. If your USDC is on Solana, Ethereum, Base, or Arbitrum you need to bridge it to Hyperliquid first (the Phantom app handles this via the dedicated Hyperliquid deposit flow). Use get_perp_account to verify the perp balance after transferring.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "amountUsdc": {
+            "type": "string",
+            "description": "Amount of USDC to move from spot to perps (e.g. \"100\" for 100 USDC)"
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "amountUsdc"
+        ]
+      }
+    },
+    {
+      "name": "perps_withdraw",
+      "description": "Bridges USDC from the Hyperliquid perpetuals account to an external chain (Solana, Base, Ethereum, Arbitrum, Polygon) via the Relay bridge. By default receives USDC on the destination chain; pass buyToken to receive a different asset. Use get_perp_account to check the available balance before withdrawing.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "amountUsdc": {
+            "type": "string",
+            "description": "Amount of USDC to withdraw (e.g. \"50\" for 50 USDC)"
+          },
+          "destinationChainId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$",
+            "description": "Destination chain CAIP-2 ID. Examples: \"solana:mainnet\", \"eip155:8453\" (Base), \"eip155:1\" (Ethereum), \"eip155:42161\" (Arbitrum), \"eip155:137\" (Polygon)."
+          },
+          "buyToken": {
+            "description": "CAIP-19 token to receive on the destination chain (e.g. \"solana:101/token:EPjFWdd5...\"). Defaults to USDC on the destination chain if omitted.",
+            "type": "string"
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "amountUsdc",
+          "destinationChainId"
+        ]
+      }
+    },
+    {
+      "name": "perps_withdraw-hl-spot",
+      "description": "Bridges USDC from the Hyperliquid spot wallet to an external chain (Solana, Base, Ethereum, Arbitrum, Polygon) via the Relay bridge. Funds must be in the Hyperliquid spot account — use withdraw_from_perps first if they are in the perp account. By default receives USDC on the destination chain; pass buyToken to receive a different asset. Use execute: false (default) to preview the quote first.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "amountUsdc": {
+            "type": "string",
+            "description": "Amount of USDC to bridge out (e.g. \"8.0\" for 8 USDC)"
+          },
+          "destinationChainId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$",
+            "description": "Destination chain CAIP-2 ID. Examples: \"solana:mainnet\", \"eip155:8453\" (Base), \"eip155:1\" (Ethereum), \"eip155:42161\" (Arbitrum), \"eip155:137\" (Polygon)."
+          },
+          "buyToken": {
+            "description": "CAIP-19 token to receive on the destination chain (e.g. \"solana:101/token:EPjFWdd5...\"). Defaults to USDC on the destination chain if omitted.",
+            "type": "string"
+          },
+          "execute": {
+            "default": false,
+            "description": "If false (default), returns the quote only. If true, signs and broadcasts immediately.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "amountUsdc",
+          "destinationChainId"
+        ]
+      }
+    },
+    {
+      "name": "price",
+      "description": "Phantom Wallet — Fetches the current price of a specific token by its address and chain. Pass address='native' for the chain's native token (SOL, ETH, MATIC, etc.). For any other token, pass its mint address (Solana) or contract address (EVM). Returns price in USD (or the requested currency if supported) with 24h change and market cap. Response: {name, symbol, caip19, price, priceChange24h, currency, lastUpdatedAt?, marketCap}.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Token contract or mint address. Pass 'native' to get the chain's native token price (e.g. SOL, ETH, MATIC). For SPL tokens use the Solana mint address; for EVM tokens use the contract address."
+          },
+          "chain": {
+            "type": "string",
+            "enum": [
+              "solana",
+              "ethereum",
+              "base",
+              "polygon",
+              "arbitrum",
+              "monad",
+              "bitcoin",
+              "sui"
+            ],
+            "description": "Chain the token lives on. One of: solana, ethereum, base, polygon, arbitrum, bitcoin, sui, monad."
+          },
+          "currency": {
+            "description": "ISO 4217 currency code for the returned price. (Default: USD)",
+            "default": "USD",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "chain"
+        ]
+      }
+    },
+    {
+      "name": "simulate",
+      "description": "Phantom Wallet — Simulates a transaction and returns expected asset changes, security warnings, and blocking conditions — without submitting it on-chain. Use this to preview what a transaction will do before signing or sending. Supports Solana, EVM (Ethereum, Base, Polygon, Arbitrum, Monad), Sui, and Bitcoin. Built on top of Phantom's transaction simulation service. The `userAccount` wallet address is auto-derived from the authenticated session for Solana and EVM chains; supply it explicitly for Sui and Bitcoin. Chain-specific `params` shapes: Solana transaction — { transactions: ['<base58>'], method?, simulatorConfig?: { decodeAccounts?, decodeInstructions? } }; EVM transaction — { transactions: [{ from, to, value, data, chainId, type }] }; Sui transaction — { rawTransaction: '<bytes>' }; Bitcoin transaction — { transaction: '<raw>', userAddresses?: ['bc1q...'] }; EVM message signing — { message: '0x...' }. Response: { type, expectedChanges: [{ type, changeSign: PLUS|MINUS|EQUAL, changeText, asset: { type, amount, decimals, symbol, usdValue } }], warnings: [{ message, severity: 1-5 }], block?: { message, severity }, advancedDetails?: { chainId, totalFee, feePayers, gas, contractAddresses } }.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "chainId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$",
+            "description": "CAIP-2 chain ID for the transaction. Solana: 'solana:mainnet' | 'solana:devnet'. EVM: 'eip155:1' (Ethereum), 'eip155:8453' (Base), 'eip155:137' (Polygon), 'eip155:42161' (Arbitrum), 'eip155:143' (Monad). Sui: 'sui:mainnet'. Bitcoin: 'bip122:000000000019d6689c085ae165831e93'."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "transaction",
+              "message"
+            ],
+            "description": "Whether this is a transaction or a message signing request."
+          },
+          "params": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Chain-specific transaction parameters. Shape varies by chain — see tool description for details."
+          },
+          "url": {
+            "description": "dApp origin URL where the transaction originates (e.g. 'https://jup.ag'). Optional.",
+            "type": "string"
+          },
+          "context": {
+            "description": "Optional transaction context hint for more accurate simulation.",
+            "type": "string",
+            "enum": [
+              "swap",
+              "bridge",
+              "send",
+              "gaslessSwap"
+            ]
+          },
+          "userAccount": {
+            "description": "Wallet address to simulate for. Auto-derived from the authenticated session for Solana and EVM chains. Required for Sui and Bitcoin if not determinable from session.",
+            "type": "string"
+          },
+          "language": {
+            "default": "en",
+            "description": "Response language code (e.g. 'en', 'es', 'ja'). Defaults to 'en'.",
+            "type": "string"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "HD wallet derivation index for address lookup (default: 0).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chainId",
+          "type",
+          "params"
+        ]
+      }
+    },
+    {
+      "name": "solana_send",
+      "description": "Signs and broadcasts a Solana transaction using the authenticated embedded wallet. Accepts a standard base64-encoded serialized transaction (the format returned by Solana DeFi APIs such as Jupiter, Phantom swap, and others). SAFETY: By default (no confirmed flag), this tool runs a simulation and returns expected asset changes and warnings WITHOUT sending anything — use this to show the user what will happen and ask for approval. Pass confirmed: true only after the user explicitly approves the preview to actually sign and send. If the user wants to skip simulation and execute immediately, pass confirmed: true directly — but the two-step flow is recommended for safety. Response WITHOUT confirmed: {status: 'pending_confirmation', simulation: {expectedChanges, warnings, block?, advancedDetails?} | null}. Response WITH confirmed: true: {signature, networkId, account}.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "transaction": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+            "description": "The serialized Solana transaction encoded as standard base64 (the format used by Solana JSON-RPC and DeFi APIs). Do not base58-encode — use base64."
+          },
+          "networkId": {
+            "default": "solana:mainnet",
+            "description": "Solana network identifier (e.g., \"solana:mainnet\", \"solana:devnet\"). Defaults to \"solana:mainnet\".",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the account (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "confirmed": {
+            "default": false,
+            "description": "Set to true only after the user has reviewed and approved the simulation results. Omit (or false) on the first call to get a simulation preview without submitting.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction"
+        ]
+      }
+    },
+    {
+      "name": "solana_sign",
+      "description": "Signs a UTF-8 message using the authenticated Solana embedded wallet. Returns a base58-encoded signature. Use this for off-chain signature proofs, authentication challenges, and message attestation on Solana.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The UTF-8 message to sign"
+          },
+          "networkId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$",
+            "description": "Solana network identifier (e.g., \"solana:mainnet\", \"solana:devnet\")"
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the account (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "networkId"
+        ]
+      }
+    },
+    {
+      "name": "transfer",
+      "description": "Transfers native tokens or fungible tokens on Solana and EVM chains. Use this for direct token sends (e.g. 'send 1 SOL to X', 'send 0.01 ETH to Y', 'transfer 100 USDC on Base'). For swaps/exchanges (e.g. 'swap USDC for SOL'), use buy_token instead. Solana: supports SOL and SPL tokens. EVM: supports native tokens (ETH, MATIC, etc.) and ERC-20 tokens. IMPORTANT: The sending wallet must hold enough native token for fees (SOL on Solana, ETH/native on EVM). For ERC-20 transfers, provide decimals when using amountUnit: 'ui'. TWO-STEP FLOW — always call this tool twice: (1) First call WITHOUT confirmed (or confirmed: false): builds the transaction, runs a simulation, and returns the preview showing expected asset changes, warnings, and any blocking conditions. Present these results to the user and ask 'Does this look correct? Shall I proceed with the transfer?' If the simulation is blocked (block field is set), inform the user and do NOT proceed. (2) Second call WITH confirmed: true (only after explicit user approval): builds and submits the transaction. Response WITHOUT confirmed: {simulation: {expectedChanges, warnings, block?, advancedDetails?}, status: 'pending_confirmation'}. Response WITH confirmed: true: {walletId, networkId, from, to, tokenMint: string|null, signature: string|null, rawTransaction: string}.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "networkId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$",
+            "description": "Network identifier. Solana: \"solana:mainnet\", \"solana:devnet\". EVM: \"eip155:1\" (Ethereum), \"eip155:8453\" (Base), \"eip155:137\" (Polygon), \"eip155:42161\" (Arbitrum), \"eip155:143\" (Monad)."
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Recipient address — Solana base58 address or EVM 0x-prefixed checksummed address"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Transfer amount (e.g., \"0.5\", 0.5, \"1000000\", or 1000000)"
+          },
+          "amountUnit": {
+            "default": "ui",
+            "description": "Amount unit: 'ui' for human-readable units (SOL, ETH, token units), 'base' for atomic units (lamports, wei). Default: 'ui'",
+            "type": "string",
+            "enum": [
+              "ui",
+              "base"
+            ]
+          },
+          "tokenMint": {
+            "description": "Token contract address — Solana SPL mint address or EVM ERC-20 contract address (0x-prefixed). Omit for native token transfers.",
+            "type": "string"
+          },
+          "decimals": {
+            "description": "Token decimals — optional for Solana (fetched from chain if omitted); required for ERC-20 tokens when amountUnit is 'ui'.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the account (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "rpcUrl": {
+            "description": "Optional RPC URL override (Solana or EVM, defaults based on networkId)",
+            "type": "string"
+          },
+          "createAssociatedTokenAccount": {
+            "default": true,
+            "description": "Solana only: create destination associated token account if missing (default: true)",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "confirmed": {
+            "default": false,
+            "description": "Set to true only after the user has reviewed and approved the simulation results. Omit (or false) on the first call to get a simulation preview without submitting.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "networkId",
+          "to",
+          "amount"
+        ]
+      }
+    },
+    {
+      "name": "wallet_addresses",
+      "description": "Returns all blockchain addresses (Solana, Ethereum, Bitcoin, Sui) for the authenticated Phantom embedded wallet. Call this first to confirm the user is connected and to get their wallet addresses before any transfer or swap. Response format: {walletId: string, organizationId: string, addresses: [{addressType: string, address: string}]} where addressType is one of 'solana', 'ethereum', 'bitcoin', 'sui'. Use the Solana address with send_solana_transaction, sign_solana_message, and transfer_tokens; use the Ethereum address with send_evm_transaction, sign_evm_personal_message, and sign_evm_typed_data. If this returns an auth error (session expired or revoked), call phantom_login to re-authenticate.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "derivationIndex": {
+            "default": 0,
+            "description": "Optional derivation index for the addresses (default: 0)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
+    {
+      "name": "wallet_balances",
+      "description": "Phantom Wallet — Returns fungible token balances across all supported chains (Solana, Ethereum, Base, Polygon, Arbitrum, Bitcoin, Sui) with live USD prices and 24h price change. Use the `networks` parameter to filter by chain — omit it to fetch all chains at once. Examples: pass [\"base\"] when user asks about Base tokens; [\"solana\"] for Solana only; omit for all. Use this to check if the user has enough funds before a transfer or swap. This does not include Hyperliquid perpetuals account balances; if the user asks for Hyperliquid/perps funds or total exposure, also call get_perp_account. Response: {items: [{name, symbol, decimals, caip19, totalQuantity, totalQuantityString, spamStatus, logoUri, price?: {price, priceChange24h}, queriedWalletBalances: [{address, quantity, quantityString}]}]}. Key fields: totalQuantity = human-readable balance (e.g. 1.5 for 1.5 SOL), totalQuantityString = raw base units (e.g. '1500000000' lamports), price.price = current USD price per token, caip19 = token identifier (parse after '/token:' to get the Solana mint address; SOL is 'slip44:501'). Non-spam tokens have spamStatus 'VERIFIED'. Filter out spamStatus 'SPAM' tokens for cleaner output.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "networks": {
+            "description": "Networks to fetch balances for. Omit to fetch all supported networks. Use a subset when the user asks about a specific chain — e.g. [\"base\"] for \"what are my Base tokens?\", [\"solana\", \"ethereum\"] for \"what are my Solana and Ethereum tokens?\".",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "solana",
+                "ethereum",
+                "base",
+                "polygon",
+                "arbitrum",
+                "monad",
+                "bitcoin",
+                "sui"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "wallet_rebalance",
+      "description": "Phantom Wallet — Analyzes your portfolio allocation and rebalances it to target percentages via token swaps. Two-phase flow: (1) Call with phase 'analyze' to see current token balances, USD values, and allocation percentages. (2) After the user specifies desired target percentages, call with phase 'execute' and targetAllocations to compute and perform the swaps. Use dryRun: true in the execute phase to preview the swap plan without executing. Currently supports Solana network only. Percentages in targetAllocations must sum to 100. The tool uses direct token-to-token swaps via Phantom's routing engine for optimal execution.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": [
+              "analyze",
+              "execute"
+            ],
+            "description": "'analyze' returns current portfolio with allocations. 'execute' takes target allocations and performs swaps to rebalance."
+          },
+          "network": {
+            "default": "solana",
+            "description": "Network to rebalance on. Currently only 'solana' is supported. Default: 'solana'.",
+            "type": "string",
+            "enum": [
+              "solana"
+            ]
+          },
+          "targetAllocations": {
+            "description": "Required for 'execute' phase. Array of tokens with target percentage allocations. Percentages must sum to 100. Use caip19 identifiers from the 'analyze' phase response.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "symbol": {
+                  "description": "Token symbol (informational, for readability).",
+                  "type": "string"
+                },
+                "caip19": {
+                  "type": "string",
+                  "description": "CAIP-19 identifier for the token, from the analyze phase response. Example: 'solana:101/slip44:501' for SOL, 'solana:101/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' for USDC."
+                },
+                "targetPercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Target allocation percentage for this token."
+                }
+              },
+              "required": [
+                "caip19",
+                "targetPercent"
+              ]
+            }
+          },
+          "slippageTolerance": {
+            "default": 1,
+            "description": "Slippage tolerance in percent for each swap (default: 1).",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "minTradeUsd": {
+            "default": 1,
+            "description": "Minimum USD value for a trade to be worth executing (default: 1.0). Trades below this threshold are skipped to avoid dust.",
+            "type": "number",
+            "minimum": 0
+          },
+          "dryRun": {
+            "default": false,
+            "description": "If true during 'execute' phase, calculate and return the swap plan without executing. Default: false.",
+            "type": "string"
+          },
+          "walletId": {
+            "description": "Optional wallet ID (defaults to authenticated wallet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      }
+    },
+    {
+      "name": "wallet_status",
+      "description": "Phantom Wallet — Returns the current Phantom embedded wallet connection status. Use this as a lightweight check before other operations to confirm the user is authenticated. Unlike get_wallet_addresses, this does NOT make an API call and cannot trigger re-authentication; it simply reports whether a local session exists. Response when connected: {connected: true, walletId: string, organizationId: string, mcpServerVersion: string}. Response when not connected: {connected: false, reason: string, mcpServerVersion: string}. If connected is false, call get_wallet_addresses to trigger the Phantom Connect browser sign-in flow. If connected is true but subsequent tool calls fail with AUTH_EXPIRED, the server-side session was revoked — any tool call will automatically re-trigger authentication.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

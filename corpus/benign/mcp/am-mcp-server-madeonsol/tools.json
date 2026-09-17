@@ -1,0 +1,541 @@
+{
+  "package": "mcp-server-madeonsol",
+  "tools": [
+    {
+      "name": "madeonsol_kol_feed",
+      "description": "Get real-time Solana KOL trades from 1,000+ tracked wallets. Each trade includes the token's market cap (USD) at the moment of trade — sourced from our in-memory price tracker, accurate to the millisecond, faster than Dexscreener spot. PRO+ adds size/age/strategy/winrate filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "Number of trades to return (1-100)"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor — ISO 8601 timestamp; returns trades strictly older than this. Pass next_before from the previous response for polling."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "description": "Filter by trade type: buy or sell"
+          },
+          "kol": {
+            "type": "string",
+            "description": "Filter by specific KOL wallet address (base58)"
+          },
+          "min_sol": {
+            "type": "number",
+            "description": "PRO+: minimum SOL size per trade"
+          },
+          "token_age_max_min": {
+            "type": "number",
+            "description": "PRO+: max token age in minutes at time of trade"
+          },
+          "exclude_sells": {
+            "type": "boolean",
+            "description": "PRO+: drop sell-side trades"
+          },
+          "min_kol_winrate": {
+            "type": "number",
+            "description": "PRO+: minimum 7d winrate of the KOL (0-100)"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "scalper",
+              "day_trader",
+              "swing_trader",
+              "hodler",
+              "mixed"
+            ],
+            "description": "PRO+: filter by auto-tagged strategy"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_coordination",
+      "description": "KOL convergence signals (v1.2) — tokens being accumulated by multiple KOLs. Response includes peak_kols/peak_buys (busiest window slice), exited_count (net-flow-negative wallets), 0-100 coordination_score, and (v1.2 / 2026-05-06) market_cap_usd_at_first_buy + market_cap_usd + last_price_usd so you can see whether the cluster formed at micro-cap or after the chart was already running. Blacklist filters WIF/BONK/stables by default.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "6h",
+              "24h",
+              "7d"
+            ],
+            "default": "24h",
+            "description": "Time period for coordination analysis"
+          },
+          "min_kols": {
+            "type": "number",
+            "minimum": 2,
+            "maximum": 50,
+            "default": 3,
+            "description": "Minimum number of KOLs converging on the same token"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "Number of coordination signals to return"
+          },
+          "min_avg_winrate": {
+            "type": "number",
+            "description": "PRO+: require cluster avg winrate_7d >= N (0-100)"
+          },
+          "unique_strategies": {
+            "type": "number",
+            "description": "PRO+: require >= N distinct strategies in cluster"
+          },
+          "include_majors": {
+            "type": "boolean",
+            "description": "v1.1: include major memecoins (WIF/BONK/POPCAT). Default false."
+          },
+          "window_minutes": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "v1.1: peak-density window (1-60). Default 15."
+          },
+          "min_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "v1.1: minimum composite coordination_score (0-100)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_leaderboard",
+      "description": "Get KOL performance rankings by PnL and win rate. PRO+ can sort by alternative axes (winrate/roi/profit_factor/early_entry).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "today",
+              "7d",
+              "30d",
+              "90d",
+              "180d"
+            ],
+            "default": "7d",
+            "description": "Time period (trade retention is 180d)"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "Number of KOLs to return in ranking"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "pnl",
+              "winrate",
+              "profit_factor",
+              "roi",
+              "early_entry"
+            ],
+            "description": "PRO+: sort axis (default 'pnl')"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "sniper",
+              "flipper",
+              "swinger",
+              "holder",
+              "mixed"
+            ],
+            "description": "PRO+: filter by strategy tag"
+          },
+          "min_winrate": {
+            "type": "number",
+            "description": "PRO+: minimum winrate cutoff (0-100)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_deployer_alerts",
+      "description": "Get real-time alerts from Pump.fun deployers with KOL buy enrichment. Filters: deployer tier, alert_type, priority, and min_kol_buys to gate out noise. Cursor-paginated via 'before' (preferred over 'offset' at scale).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "Number of deployer alerts to return (1-100)"
+          },
+          "offset": {
+            "type": "number",
+            "minimum": 0,
+            "default": 0,
+            "description": "Legacy offset pagination (prefer 'before' for polling)"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor — ISO 8601 timestamp; returns alerts strictly older than this. Pass next_before from the previous response."
+          },
+          "since": {
+            "type": "string",
+            "description": "Only alerts after this ISO 8601 timestamp."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "elite",
+              "good",
+              "moderate",
+              "rising",
+              "cold"
+            ],
+            "description": "Filter by deployer tier. PRO/ULTRA only — BASIC callers receive HTTP 403."
+          },
+          "alert_type": {
+            "type": "string",
+            "description": "Filter by alert_type (e.g. 'new_deploy', 'bonded')."
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "Filter by alert priority."
+          },
+          "min_kol_buys": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Only alerts where at least N KOLs bought the token (1-100)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_pairs",
+      "description": "KOL affinity matrix — discover which KOLs frequently co-trade the same tokens within a time window.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d"
+            ],
+            "default": "7d",
+            "description": "Time period: 7d or 30d"
+          },
+          "min_shared": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 3,
+            "description": "Minimum number of shared tokens to qualify as a pair"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "Number of KOL pairs to return"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_timing",
+      "description": "KOL entry/exit timing profile — hold duration, exit speed, and activity patterns for a specific KOL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "KOL wallet address (base58)"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d"
+            ],
+            "default": "30d",
+            "description": "Time period: 7d or 30d"
+          }
+        },
+        "required": [
+          "wallet"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_deployer_trajectory",
+      "description": "Deployer skill curve — streaks, rolling bond rate, improvement trend, and deployment cadence for a Pump.fun deployer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "Deployer wallet address (base58)"
+          }
+        },
+        "required": [
+          "wallet"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_hot_tokens",
+      "description": "KOL momentum tokens — tokens with accelerating KOL buy interest, early signals before coordination triggers. PRO+ adds buyer-quality filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "6h"
+            ],
+            "default": "6h",
+            "description": "Time period: 1h or 6h"
+          },
+          "min_kols": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 1,
+            "description": "Minimum KOL buyers to include a token"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "Number of hot tokens to return"
+          },
+          "min_avg_winrate": {
+            "type": "number",
+            "description": "PRO+: require avg winrate_7d of buyers >= N (0-100)"
+          },
+          "unique_strategies": {
+            "type": "number",
+            "description": "PRO+: require >= N distinct strategies among buyers"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_token_entry_order",
+      "description": "Ranked KOL first-buyers for a specific token, ordered by entry timestamp. PRO+ adds percentile_pnl_7d per entry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mint": {
+            "type": "string",
+            "description": "Token mint address (base58)"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50,
+            "description": "Max ranked entries to return"
+          }
+        },
+        "required": [
+          "mint"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_compare_wallets",
+      "description": "Side-by-side comparison of 2-5 KOL wallets — strategy, winrates, ROI, percentile. PRO+ adds 30d overlap tokens (bought by 2+ of the wallets).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "maxItems": 5,
+            "description": "2-5 wallet addresses. BASIC=2, PRO=4, ULTRA=5."
+          }
+        },
+        "required": [
+          "wallets"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_alerts_recent",
+      "description": "Live KOL alert feed — consensus clusters, fresh-token KOL buys, and heating-up wallets in one unified stream.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "1h",
+              "6h",
+              "24h"
+            ],
+            "default": "15m",
+            "description": "Lookback window"
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "consensus_cluster",
+                "fresh_token_kol_buy",
+                "heating_up"
+              ]
+            },
+            "description": "Filter to specific alert types"
+          },
+          "min_severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "description": "Minimum severity to include"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50,
+            "description": "Max alerts to return"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_pnl",
+      "description": "Deep per-wallet PnL breakdown — realized PnL, win rate, profit factor, max drawdown, daily equity curve, closed/open positions. BASIC: summary only. PRO: + curve + closed. ULTRA: + open positions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "KOL wallet address (base58)"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d",
+              "90d",
+              "180d"
+            ],
+            "default": "30d",
+            "description": "Time period for PnL calculation"
+          }
+        },
+        "required": [
+          "wallet"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_kol_trending_tokens",
+      "description": "Tokens ranked by KOL buy volume — pure capital-flow signal. Sub-hour periods (5m/15m/30m) require PRO/ULTRA.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "2h",
+              "4h",
+              "12h"
+            ],
+            "default": "1h",
+            "description": "Time window"
+          },
+          "min_kols": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 1,
+            "description": "Minimum KOL buyers"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "Number of trending tokens to return"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "madeonsol_discovery",
+      "description": "List all available MadeOnSol API endpoints with prices and parameter docs. Free, no auth required.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

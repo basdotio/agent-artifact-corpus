@@ -1,0 +1,232 @@
+{
+  "package": "@aashari/mcp-server-atlassian-confluence",
+  "tools": [
+    {
+      "name": "conf_get",
+      "description": "Read any Confluence data. Returns TOON format by default (30-60% fewer tokens than JSON).\n\n**IMPORTANT - Cost Optimization:**\n- ALWAYS use `jq` param to filter response fields. Unfiltered responses are very expensive!\n- Use `limit` query param to restrict result count (e.g., `limit: \"5\"`)\n- If unsure about available fields, first fetch ONE item with `limit: \"1\"` and NO jq filter to explore the schema, then use jq in subsequent calls\n\n**Schema Discovery Pattern:**\n1. First call: `path: \"/wiki/api/v2/spaces\", queryParams: {\"limit\": \"1\"}` (no jq) - explore available fields\n2. Then use: `jq: \"results[*].{id: id, key: key, name: name}\"` - extract only what you need\n\n**Output format:** TOON (default, token-efficient) or JSON (`outputFormat: \"json\"`)\n\n**Common paths:**\n- `/wiki/api/v2/spaces` - list spaces\n- `/wiki/api/v2/pages` - list pages (use `space-id` query param)\n- `/wiki/api/v2/pages/{id}` - get page details\n- `/wiki/api/v2/pages/{id}/body` - get page body (`body-format`: storage, atlas_doc_format, view)\n- `/wiki/rest/api/search` - search content (`cql` query param)\n\n**JQ examples:** `results[*].id`, `results[0]`, `results[*].{id: id, title: title}`\n\nAPI reference: https://developer.atlassian.com/cloud/confluence/rest/v2/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Confluence API endpoint path (without base URL). Must start with \"/\". Examples: \"/wiki/api/v2/spaces\", \"/wiki/api/v2/pages\", \"/wiki/api/v2/pages/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"limit\": \"25\", \"cursor\": \"...\", \"space-id\": \"123\", \"body-format\": \"storage\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"results[*].{id: id, title: title}\" (extract specific fields), \"results[0]\" (first result), \"results[*].id\" (IDs only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "conf_post",
+      "description": "Create Confluence resources. Returns TOON format by default (token-efficient).\n\n**IMPORTANT - Cost Optimization:**\n- Use `jq` param to extract only needed fields from response (e.g., `jq: \"{id: id, title: title}\"`)\n- Unfiltered responses include all metadata and are expensive!\n\n**Output format:** TOON (default) or JSON (`outputFormat: \"json\"`)\n\n**Common operations:**\n\n1. **Create page:** `/wiki/api/v2/pages`\n   body: `{\"spaceId\": \"123456\", \"status\": \"current\", \"title\": \"Page Title\", \"parentId\": \"789\", \"body\": {\"representation\": \"storage\", \"value\": \"<p>Content</p>\"}}`\n\n2. **Create blog post:** `/wiki/api/v2/blogposts`\n   body: `{\"spaceId\": \"123456\", \"status\": \"current\", \"title\": \"Blog Title\", \"body\": {\"representation\": \"storage\", \"value\": \"<p>Content</p>\"}}`\n\n3. **Add label:** `/wiki/api/v2/pages/{id}/labels` - body: `{\"name\": \"label-name\"}`\n\n4. **Add comment:** `/wiki/api/v2/pages/{id}/footer-comments`\n\nAPI reference: https://developer.atlassian.com/cloud/confluence/rest/v2/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Confluence API endpoint path (without base URL). Must start with \"/\". Examples: \"/wiki/api/v2/spaces\", \"/wiki/api/v2/pages\", \"/wiki/api/v2/pages/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"limit\": \"25\", \"cursor\": \"...\", \"space-id\": \"123\", \"body-format\": \"storage\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"results[*].{id: id, title: title}\" (extract specific fields), \"results[0]\" (first result), \"results[*].id\" (IDs only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          },
+          "body": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Request body as a JSON object. Structure depends on the endpoint. Example for page: {\"spaceId\": \"123\", \"title\": \"Page Title\", \"body\": {\"representation\": \"storage\", \"value\": \"<p>Content</p>\"}}"
+          }
+        },
+        "required": [
+          "path",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "conf_put",
+      "description": "Replace Confluence resources (full update). Returns TOON format by default.\n\n**IMPORTANT - Cost Optimization:**\n- Use `jq` param to extract only needed fields from response\n- Example: `jq: \"{id: id, version: version.number}\"`\n\n**Output format:** TOON (default) or JSON (`outputFormat: \"json\"`)\n\n**Common operations:**\n\n1. **Update page:** `/wiki/api/v2/pages/{id}`\n   body: `{\"id\": \"123\", \"status\": \"current\", \"title\": \"Updated Title\", \"spaceId\": \"456\", \"body\": {\"representation\": \"storage\", \"value\": \"<p>Content</p>\"}, \"version\": {\"number\": 2}}`\n   Note: version.number must be incremented\n\n2. **Update blog post:** `/wiki/api/v2/blogposts/{id}`\n\nNote: PUT replaces entire resource. Version number must be incremented.\n\nAPI reference: https://developer.atlassian.com/cloud/confluence/rest/v2/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Confluence API endpoint path (without base URL). Must start with \"/\". Examples: \"/wiki/api/v2/spaces\", \"/wiki/api/v2/pages\", \"/wiki/api/v2/pages/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"limit\": \"25\", \"cursor\": \"...\", \"space-id\": \"123\", \"body-format\": \"storage\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"results[*].{id: id, title: title}\" (extract specific fields), \"results[0]\" (first result), \"results[*].id\" (IDs only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          },
+          "body": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Request body as a JSON object. Structure depends on the endpoint. Example for page: {\"spaceId\": \"123\", \"title\": \"Page Title\", \"body\": {\"representation\": \"storage\", \"value\": \"<p>Content</p>\"}}"
+          }
+        },
+        "required": [
+          "path",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "conf_patch",
+      "description": "Partially update Confluence resources. Returns TOON format by default.\n\n**IMPORTANT - Cost Optimization:** Use `jq` param to filter response fields.\n\n**Output format:** TOON (default) or JSON (`outputFormat: \"json\"`)\n\n**Common operations:**\n\n1. **Update space:** `/wiki/api/v2/spaces/{id}`\n   body: `{\"name\": \"New Name\", \"description\": {\"plain\": {\"value\": \"Desc\", \"representation\": \"plain\"}}}`\n\n2. **Update comment:** `/wiki/api/v2/footer-comments/{id}`\n\nNote: Confluence v2 API primarily uses PUT for updates.\n\nAPI reference: https://developer.atlassian.com/cloud/confluence/rest/v2/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Confluence API endpoint path (without base URL). Must start with \"/\". Examples: \"/wiki/api/v2/spaces\", \"/wiki/api/v2/pages\", \"/wiki/api/v2/pages/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"limit\": \"25\", \"cursor\": \"...\", \"space-id\": \"123\", \"body-format\": \"storage\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"results[*].{id: id, title: title}\" (extract specific fields), \"results[0]\" (first result), \"results[*].id\" (IDs only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          },
+          "body": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Request body as a JSON object. Structure depends on the endpoint. Example for page: {\"spaceId\": \"123\", \"title\": \"Page Title\", \"body\": {\"representation\": \"storage\", \"value\": \"<p>Content</p>\"}}"
+          }
+        },
+        "required": [
+          "path",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "conf_delete",
+      "description": "Delete Confluence resources. Returns TOON format by default.\n\n**Output format:** TOON (default) or JSON (`outputFormat: \"json\"`)\n\n**Common operations:**\n- `/wiki/api/v2/pages/{id}` - Delete page\n- `/wiki/api/v2/blogposts/{id}` - Delete blog post\n- `/wiki/api/v2/pages/{id}/labels/{label-id}` - Remove label\n- `/wiki/api/v2/footer-comments/{id}` - Delete comment\n- `/wiki/api/v2/attachments/{id}` - Delete attachment\n\nNote: Most DELETE endpoints return 204 No Content on success.\n\nAPI reference: https://developer.atlassian.com/cloud/confluence/rest/v2/",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Confluence API endpoint path (without base URL). Must start with \"/\". Examples: \"/wiki/api/v2/spaces\", \"/wiki/api/v2/pages\", \"/wiki/api/v2/pages/{id}\""
+          },
+          "queryParams": {
+            "description": "Optional query parameters as key-value pairs. Examples: {\"limit\": \"25\", \"cursor\": \"...\", \"space-id\": \"123\", \"body-format\": \"storage\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jq": {
+            "description": "JMESPath expression to filter/transform the response. IMPORTANT: Always use this to extract only needed fields and reduce token costs. Examples: \"results[*].{id: id, title: title}\" (extract specific fields), \"results[0]\" (first result), \"results[*].id\" (IDs only). See https://jmespath.org",
+            "type": "string"
+          },
+          "outputFormat": {
+            "description": "Output format: \"toon\" (default, 30-60% fewer tokens) or \"json\". TOON is optimized for LLMs with tabular arrays and minimal syntax.",
+            "type": "string",
+            "enum": [
+              "toon",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  ]
+}

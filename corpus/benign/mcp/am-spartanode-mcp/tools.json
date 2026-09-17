@@ -1,0 +1,1229 @@
+{
+  "package": "spartanode-mcp",
+  "tools": [
+    {
+      "name": "spartanode_create_project",
+      "description": "Create a new project in SpartaNode. Returns the project slug which you'll need for subsequent tool calls (list_tasks, sync_gantt, etc.).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Project name (e.g. 'ai-fund')"
+          },
+          "gitUrl": {
+            "description": "Git repository URL. If omitted, a public repo is auto-created under the spartanode-community GitHub org.",
+            "type": "string"
+          },
+          "defaultBranch": {
+            "description": "Default branch (default: 'main')",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_list_projects",
+      "description": "List all SpartaNode projects the user has access to",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "spartanode_list_tasks",
+      "description": "List all tasks in a project's development roadmap (Gantt chart) with their status, steps, and position",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug (e.g. 'domain-finder')"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_get_task",
+      "description": "Get full context for a specific task: prompt, plan (PLAN.md), steps, branch, status. Use this before working on a task locally.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug"
+          },
+          "taskNumber": {
+            "type": "number",
+            "description": "Task number (e.g. 7)"
+          }
+        },
+        "required": [
+          "project",
+          "taskNumber"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_get_gantt_context",
+      "description": "Get the full development roadmap context (GANTT_CONTEXT.md) showing all tasks and their status. Useful for understanding what other tasks exist before planning.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_export_gantt",
+      "description": "Export the current Gantt chart as a GANTT.md file. This is the source of truth for the project roadmap. You can edit this markdown, then re-sync it with spartanode_sync_gantt to update the chart.\n\nExternal IDs (G-xxx) track task identity across edits — don't remove them. Add new tasks without an ID and they'll get one on sync.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug"
+          },
+          "writeToDisk": {
+            "description": "If true, write GANTT.md to the current working directory. Default false (return content only).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_import_gantt",
+      "description": "Import a GANTT.md file from the current working directory (or a specified path) into a project's roadmap. Parses the markdown format with G-xxx external IDs, phases, tags, steps, and syncs to the control plane. Use this after editing GANTT.md locally.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug"
+          },
+          "path": {
+            "description": "Path to GANTT.md file. Defaults to ./GANTT.md in the current directory.",
+            "type": "string"
+          },
+          "clearExisting": {
+            "description": "If true, clear existing idea/planned tasks before importing. Default false (diff-based merge).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_update_task_status",
+      "description": "Update the status of a task or a specific step within a task. Use after completing work locally.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug"
+          },
+          "taskNumber": {
+            "type": "number",
+            "description": "Task number"
+          },
+          "status": {
+            "description": "New task status: 'ready-to-merge' or 'crashed'",
+            "type": "string"
+          },
+          "stepNumber": {
+            "description": "Step number to update (if updating a step)",
+            "type": "number"
+          },
+          "stepStatus": {
+            "description": "New step status: 'done', 'failed', or 'skipped'",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "taskNumber"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_start_task",
+      "description": "Start working on a task locally: fetches the latest branch, checks it out, writes PLAN.md and GANTT_CONTEXT.md to the repo root, and shows the current step to work on. Run this from the project's git repo directory.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug"
+          },
+          "taskNumber": {
+            "type": "number",
+            "description": "Task number (e.g. 7)"
+          }
+        },
+        "required": [
+          "project",
+          "taskNumber"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_complete_step",
+      "description": "Complete the current step: stages all changes, commits with a descriptive message, pushes the branch, marks the step as done in the Gantt, and shows the next step. Run from the project's git repo directory.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug"
+          },
+          "taskNumber": {
+            "type": "number",
+            "description": "Task number"
+          },
+          "commitMessage": {
+            "type": "string",
+            "description": "Commit message for the completed step"
+          }
+        },
+        "required": [
+          "project",
+          "taskNumber",
+          "commitMessage"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_sync_gantt",
+      "description": "Generate or update a project's Gantt chart from a structured development plan. Use this when you've discussed a project plan with the user and want to materialize it as tasks in the roadmap.\n\nIf the project doesn't exist yet, it will be auto-created. Provide gitUrl and defaultBranch if you want to link a repo.\n\n**Diff-aware sync:** Tasks with external IDs (G-xxx from GANTT.md) are matched against existing tasks:\n- New tasks (no matching ID) → created\n- Existing idea/planned tasks → updated (replaced)\n- Running/done/merged tasks → PROTECTED, never touched. Conflicts reported.\n- Tasks removed from the plan but still in idea/planned → deleted\n- Tasks removed but running/done → kept, reported as protected\n\nSet clearExisting=true to replace ALL idea/planned tasks (ignores external ID matching).\n\nTags: frontend, backend, infra, bugfix, design, docs, test, data, trading, risk, research, executive, reporting, execution, compliance (or any custom tag).\nColumn values determine execution order: same column = parallel, sequential = in order.\nSpan = bar width in columns (default 1).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug (e.g. 'ai-fund'). Will be auto-created if it doesn't exist."
+          },
+          "gitUrl": {
+            "description": "Git repository URL — used only when auto-creating the project.",
+            "type": "string"
+          },
+          "defaultBranch": {
+            "description": "Default branch (default: 'main') — used only when auto-creating the project.",
+            "type": "string"
+          },
+          "clearExisting": {
+            "description": "If true, remove ALL existing idea/planned tasks before creating. Default false (diff-based sync using external IDs).",
+            "type": "boolean"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "externalId": {
+                  "description": "Stable ID from GANTT.md (e.g. 'G-001'). Used to match against existing tasks for diff-based sync.",
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Short task title (shown on Gantt bar)"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Detailed task prompt — what Claude should implement"
+                },
+                "column": {
+                  "description": "Gantt column position (0-based). Same column = parallel, sequential = in order.",
+                  "type": "number"
+                },
+                "span": {
+                  "description": "Bar width in columns (default 1). Wider = more steps/effort.",
+                  "type": "number"
+                },
+                "tags": {
+                  "description": "Tags for color-coding",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "steps": {
+                  "description": "Ordered implementation steps. Each step becomes a container run.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "description": "Step title"
+                      },
+                      "description": {
+                        "type": "string",
+                        "description": "What to implement in this step"
+                      }
+                    },
+                    "required": [
+                      "title",
+                      "description"
+                    ]
+                  }
+                },
+                "humanTimeMin": {
+                  "description": "Estimated human time in minutes",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "title",
+                "description"
+              ]
+            },
+            "description": "Tasks to create/update in the Gantt chart"
+          }
+        },
+        "required": [
+          "project",
+          "tasks"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_spawn_task",
+      "description": "Trigger the automated container pipeline for a task (same as clicking 'Run Gantt' in the browser). The task will be built and executed by Claude in a Docker container on the connected node. Use this when you want the AI to handle the task autonomously instead of working on it locally.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug"
+          },
+          "taskNumber": {
+            "type": "number",
+            "description": "Task number"
+          }
+        },
+        "required": [
+          "project",
+          "taskNumber"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_propose_gantt",
+      "description": "Analyze the current codebase and propose a Gantt chart (development roadmap).\n\n**Two modes (auto-detected):**\n1. **CREATE** — No Gantt exists yet. Scans the codebase (file tree, TODOs, README, dependencies, test gaps, git history) and produces a full task proposal.\n2. **UPDATE** — Gantt already exists. Compares codebase state against existing tasks. Identifies new work needed, stale tasks, and gaps. Produces a diff proposal showing what to add/update/remove.\n\nThe output includes:\n- Codebase analysis summary (languages, frameworks, structure, TODOs found)\n- Current Gantt state (if UPDATE mode)\n- Proposed tasks as a ready-to-use JSON array for `spartanode_sync_gantt`\n- A human-readable summary of proposed changes\n\nAfter reviewing the proposal, call `spartanode_sync_gantt` with the proposed tasks to apply them.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project slug (e.g. 'my-app'). Used to check for existing Gantt."
+          },
+          "repoPath": {
+            "description": "Path to the git repo root. Defaults to current working directory.",
+            "type": "string"
+          },
+          "focus": {
+            "description": "Optional focus area to guide the analysis (e.g. 'testing', 'backend API', 'security', 'performance'). If omitted, a general analysis is performed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_screenshot_preview",
+      "description": "Take a screenshot of the live preview pane in your workspace browser. Returns the rendered page as an image. Use this after making visual/UI changes to verify they look correct.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "spartanode_select_port",
+      "description": "Switch the live preview pane to show a different dev server port. Use this after starting a dev server to see it in the preview.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "number",
+            "description": "Port number to show in the preview pane (e.g. 3000, 5173, 8000)"
+          }
+        },
+        "required": [
+          "port"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_resize_split",
+      "description": "Resize the editor/preview split pane in the workspace. Ratio is the editor width as a fraction (0.2 = mostly preview, 0.8 = mostly editor).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ratio": {
+            "type": "number",
+            "minimum": 0.2,
+            "maximum": 0.8,
+            "description": "Editor pane width as a fraction (0.5 = equal split)"
+          }
+        },
+        "required": [
+          "ratio"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_web_scrape",
+      "description": "Fetch a URL and extract clean, readable text content. Runs in the desktop app's main process (no CORS issues, no browser needed).\n\nBest for: documentation sites, API references, static pages, markdown files, JSON endpoints, RSS feeds — anything where the content is in the HTML source.\n\nReturns: extracted text (markdown-formatted with headings, links, code blocks, tables), page title, description. Optionally includes raw HTML and structured link/heading arrays.\n\nFor JavaScript-heavy SPAs where content is rendered client-side, use spartanode_browser_open + spartanode_browser_action instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to fetch and extract content from"
+          },
+          "raw": {
+            "description": "Include raw HTML in the response (default false — saves context)",
+            "type": "boolean"
+          },
+          "metadata": {
+            "description": "Include structured links[] and headings[] arrays (default false)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_browser_open",
+      "description": "Open a persistent browser session on a URL. The session runs in a hidden Chromium webview with full JavaScript execution — it's a real browser.\n\nUse this for:\n- Testing the app you're building (open localhost:3000, click through flows)\n- Scraping JS-heavy SPAs where spartanode_web_scrape returns empty content\n- Filling forms, testing login flows, verifying UI state\n- Any multi-step browser interaction\n\nAfter opening, use spartanode_browser_action to interact with the page. Sessions persist across actions until you close them. Max 4 concurrent sessions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "A unique name for this session (e.g. 'app', 'docs', 'login-test')"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL to open"
+          },
+          "waitMs": {
+            "description": "Milliseconds to wait after page load for JS rendering (default 1000). Increase for slow SPAs.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sessionId",
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_browser_close",
+      "description": "Close a browser session and free its resources.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Session name to close"
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_browser_action",
+      "description": "Execute an action in a browser session. The session must be opened first with spartanode_browser_open.\n\nAvailable actions:\n\n**Reading page content:**\n- `text` — Get page text (or text of a specific element with `selector`)\n- `source` — Get full HTML source\n- `title` — Get page title\n- `url` — Get current URL\n- `screenshot` — Capture page as an image\n- `getElements` — Query elements by CSS selector, returns tag, text, href, bounds, visibility\n- `getAttribute` — Get a specific attribute from an element\n\n**Interacting with the page:**\n- `click` — Click an element by CSS selector\n- `type` — Type text into an input field (appends; use `clear: true` to clear first)\n- `setValue` — Set input value directly (works with React controlled inputs)\n- `select` — Set dropdown/select value\n- `check` — Toggle a checkbox (set `checked: true/false`)\n- `hover` — Hover over an element\n- `focus` — Focus an element\n- `scroll` — Scroll to coordinates (`x`, `y`) or to an element (`selector`)\n\n**Navigation:**\n- `navigate` — Go to a new URL (waits for page load)\n- `back` / `forward` / `reload` — Browser history navigation\n\n**Waiting:**\n- `waitFor` — Wait for a CSS selector to appear in the DOM (uses MutationObserver, `timeoutMs` default 10s)\n\n**Advanced:**\n- `evaluate` — Run arbitrary JavaScript in the page context (`js` parameter)\n- `cookies` — Get document.cookie\n- `setCookie` — Set a cookie (`name`, `value`, optional `domain`, `path`)",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Session name"
+          },
+          "action": {
+            "type": "string",
+            "description": "Action to perform (click, type, screenshot, text, navigate, etc.)"
+          },
+          "selector": {
+            "description": "CSS selector for element-targeting actions (click, type, text, hover, focus, etc.)",
+            "type": "string"
+          },
+          "text": {
+            "description": "Text to type (for 'type' action)",
+            "type": "string"
+          },
+          "value": {
+            "description": "Value to set (for 'setValue', 'select' actions)",
+            "type": "string"
+          },
+          "url": {
+            "description": "URL for 'navigate' action",
+            "type": "string"
+          },
+          "js": {
+            "description": "JavaScript code for 'evaluate' action",
+            "type": "string"
+          },
+          "attribute": {
+            "description": "Attribute name for 'getAttribute' action",
+            "type": "string"
+          },
+          "clear": {
+            "description": "Clear input before typing (for 'type' action)",
+            "type": "boolean"
+          },
+          "checked": {
+            "description": "Desired checked state (for 'check' action, default true)",
+            "type": "boolean"
+          },
+          "x": {
+            "description": "X coordinate for 'scroll' action",
+            "type": "number"
+          },
+          "y": {
+            "description": "Y coordinate for 'scroll' action",
+            "type": "number"
+          },
+          "timeoutMs": {
+            "description": "Timeout for 'waitFor' action (default 10000ms)",
+            "type": "number"
+          },
+          "limit": {
+            "description": "Max elements to return for 'getElements' (default 50)",
+            "type": "number"
+          },
+          "name": {
+            "description": "Cookie name for 'setCookie' action",
+            "type": "string"
+          },
+          "domain": {
+            "description": "Cookie domain for 'setCookie' action",
+            "type": "string"
+          },
+          "path": {
+            "description": "Cookie path for 'setCookie' action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_browser_screenshot",
+      "description": "One-shot screenshot: opens a URL, waits for rendering, captures a screenshot, and closes the session. Convenient shortcut when you just need to see what a page looks like without multi-step interaction.\n\nFor interactive testing (click, type, verify), use spartanode_browser_open + spartanode_browser_action instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to screenshot"
+          },
+          "waitMs": {
+            "description": "Milliseconds to wait for JS rendering (default 2000)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_browser_list",
+      "description": "List all open browser sessions. Shows session IDs, URLs, and whether each session is ready for commands.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "spartanode_fetch_url",
+      "description": "Fetch a URL and return readable text content using raw HTTP fetch (fast, no JavaScript rendering).\n\nBest for: documentation, API endpoints, static pages, markdown files, RSS feeds. Returns clean text with markdown formatting.\n\nFor JavaScript-heavy SPAs, use spartanode_scrape_page instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to fetch"
+          },
+          "includeLinks": {
+            "description": "Include extracted links in the response (default false)",
+            "type": "boolean"
+          },
+          "includeHeadings": {
+            "description": "Include heading structure (default false)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_scrape_page",
+      "description": "Scrape a page with full JavaScript rendering. Creates a hidden browser, loads the page, waits for JS to finish, then extracts text. Optionally returns a screenshot.\n\nUse for SPAs (React, Vue, etc.) or pages that load content dynamically. Slower than spartanode_fetch_url but gets the fully rendered content.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to scrape"
+          },
+          "screenshot": {
+            "description": "Include a screenshot of the rendered page (default false)",
+            "type": "boolean"
+          },
+          "waitMs": {
+            "description": "Milliseconds to wait for JS rendering (default 2000)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_read_active_page",
+      "description": "Read the content of the currently active preview tab. No URL needed — reads whatever page is currently displayed in the browser pane.\n\nReturns the page text, title, URL, and optionally a screenshot and raw HTML.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "screenshot": {
+            "description": "Include a screenshot (default true)",
+            "type": "boolean"
+          },
+          "includeHtml": {
+            "description": "Include raw HTML source (default false)",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "spartanode_navigate",
+      "description": "Navigate the active preview tab to a URL. Waits for the page to load by default.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to navigate to"
+          },
+          "tabId": {
+            "description": "Specific tab ID (defaults to active tab)",
+            "type": "string"
+          },
+          "waitForLoad": {
+            "description": "Wait for page load to complete (default true)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_go_back",
+      "description": "Navigate back in the active preview tab's history.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "spartanode_go_forward",
+      "description": "Navigate forward in the active preview tab's history.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "spartanode_open_tab",
+      "description": "Open a new browser tab in the right pane with a URL.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to open"
+          },
+          "activate": {
+            "description": "Switch to this tab (default true)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_close_tab",
+      "description": "Close a browser tab in the right pane.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string",
+            "description": "Tab ID to close (get IDs from spartanode_list_tabs)"
+          }
+        },
+        "required": [
+          "tabId"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_list_tabs",
+      "description": "List all open browser tabs in the right pane. Shows tab IDs, URLs, titles, and which is active.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "spartanode_get_console_logs",
+      "description": "Get recent console output from the active preview tab. Captures console.log, console.warn, console.error, etc.\n\nUse this to check for JavaScript errors, API call logs, React warnings, or any runtime output from the app you're developing.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "level": {
+            "description": "Filter by level: \"all\", \"error\", \"warning\", \"info\", \"verbose\" (default \"all\")",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max entries to return (default 50)",
+            "type": "number"
+          },
+          "clear": {
+            "description": "Clear the console buffer after reading (default false)",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "spartanode_run_js",
+      "description": "Execute JavaScript in the active preview tab and return the result. The code runs in the page's context — same as typing in Chrome DevTools console.\n\nUse for: DOM inspection, reading state, checking values, counting elements, reading localStorage/cookies, or any custom query.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "JavaScript code to execute. Can be async. Return value is JSON-serialized."
+          },
+          "tabId": {
+            "description": "Specific tab ID (defaults to active tab)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_click_element",
+      "description": "Click an element on the page by CSS selector. The element is scrolled into view before clicking. Optionally waits after clicking and takes a screenshot.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector for the element to click"
+          },
+          "waitAfterMs": {
+            "description": "Milliseconds to wait after clicking (default: none)",
+            "type": "number"
+          },
+          "screenshot": {
+            "description": "Take a screenshot after clicking (default false)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "selector"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_fill_input",
+      "description": "Type text into an input field. Uses the native input setter to trigger React/Vue change detection. Optionally clears the field first and submits the form.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector for the input field"
+          },
+          "value": {
+            "type": "string",
+            "description": "Text to enter"
+          },
+          "clear": {
+            "description": "Clear existing value first (default true)",
+            "type": "boolean"
+          },
+          "submit": {
+            "description": "Submit the form after filling (default false)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "selector",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_get_elements",
+      "description": "Query the page for interactive elements. Returns a structured list with CSS selectors you can use with click/fill tools.\n\nDefault selector finds all links, buttons, inputs, selects, textareas, and elements with role=\"button\" or onclick.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "description": "CSS selector to query (default: \"a, button, input, select, textarea, [role=button], [onclick]\")",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max elements to return (default 50)",
+            "type": "number"
+          },
+          "visibleOnly": {
+            "description": "Only return visible elements (default true)",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "spartanode_select_option",
+      "description": "Select an option from a <select> dropdown by value or visible text.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector for the <select> element"
+          },
+          "value": {
+            "description": "Option value to select",
+            "type": "string"
+          },
+          "text": {
+            "description": "Option visible text to select (used if value not provided)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_scroll",
+      "description": "Scroll the page or a specific element.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "top",
+              "bottom"
+            ],
+            "description": "Scroll direction"
+          },
+          "amount": {
+            "description": "Pixels to scroll for up/down (default 500)",
+            "type": "number"
+          },
+          "selector": {
+            "description": "Scroll inside a specific element instead of the page",
+            "type": "string"
+          },
+          "screenshot": {
+            "description": "Take a screenshot after scrolling (default false)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "direction"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_active_tab_info",
+      "description": "Report what's currently visible in the active right-pane tab (native app, webview URL, or SpartaNode itself). Use this to know what kind of context the unified tools (screenshot/click_at/type) will operate on. Cheap — no screenshot taken.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "spartanode_screenshot",
+      "description": "Take a screenshot of the active right-pane tab. Works for both webview and native apps. Use for visual verification AFTER an action, or for canvas apps where spartanode_inspect_app returns no elements. For native apps, prefer spartanode_inspect_app first — it's faster and gives structured data. Don't screenshot just to find button names; inspect gives those directly.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "description": "Webview only: CSS selector to screenshot a specific element. Ignored for native tabs.",
+            "type": "string"
+          },
+          "fullPage": {
+            "description": "Webview only: capture the entire page by scrolling. Ignored for native tabs.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "spartanode_click_at",
+      "description": "Click at pixel coordinates. Last resort for native apps — prefer spartanode_click_by_name (clicks by accessibility name, headless) or spartanode_shortcut (keyboard shortcuts like Ctrl+S). Only use click_at for canvas-rendered apps where inspect_app returns no elements and you must visually identify coordinates from a screenshot.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number",
+            "description": "X coordinate in screenshot-frame pixels (left-to-right)"
+          },
+          "y": {
+            "type": "number",
+            "description": "Y coordinate in screenshot-frame pixels (top-to-bottom)"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_type",
+      "description": "Type text into the focused element of the active right-pane tab. For webview tabs, the active element receives the text via the input/change event chain (works with React/Vue). For native tabs, the text is sent as keystrokes to the focused control. Click/focus an input first if needed.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "string",
+            "description": "Text to type. Treated as literal characters — not a key sequence with shortcuts."
+          }
+        },
+        "required": [
+          "keys"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_shortcut",
+      "description": "THE PRIMARY WAY to interact with native apps. Send keyboard shortcuts — much faster and more reliable than clicking buttons or navigating menus. Works in every app, every locale. Use for: save (Ctrl+S), undo (Ctrl+Z), copy/paste (Ctrl+C/V), bold (Ctrl+B), italic (Ctrl+I), find (Ctrl+F), close (Alt+F4), new (Ctrl+N), print (Ctrl+P), select all (Ctrl+A), confirm dialogs (Enter), cancel (Escape), navigate fields (Tab). IMPORTANT: For saving files, prefer Ctrl+S (save to existing path) over Ctrl+Shift+S (Save As dialog). If the file doesn't exist yet and you need to save to a specific path, use the Bash/Write tool to write the file directly — do NOT try to automate the Save As dialog, it's unreliable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "string",
+            "description": "Key combination. Use '+' to combine modifiers. Examples: 'Ctrl+S', 'Ctrl+Shift+S', 'Alt+F4', 'Enter', 'Tab', 'Escape', 'Ctrl+A', 'Ctrl+Z', 'Ctrl+B', 'F5', 'Ctrl+Shift+N'. Single keys like 'Enter' or 'Escape' work too."
+          }
+        },
+        "required": [
+          "keys"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_inspect_app",
+      "description": "List interactive UI elements in the active app. Use for DISCOVERY — learning what's on screen (button names, menu items, text fields). Do NOT use repeatedly in a loop to \"check state\" — that's slow (~1s per call). After discovering element names, interact via spartanode_shortcut (preferred for common operations) or spartanode_click_by_name. IMPORTANT: Do not try to automate native file dialogs (Save As, Open, Print) via inspect+click — they are unreliable. Use filesystem tools (Bash/Write) for file I/O instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "filter": {
+            "description": "Optional substring filter on element names (case-insensitive). E.g. 'save' to find Save buttons.",
+            "type": "string"
+          },
+          "role": {
+            "description": "Optional role filter: Button, MenuItem, ListItem, Edit, ComboBox, CheckBox, Tab, etc.",
+            "type": "string"
+          },
+          "maxItems": {
+            "description": "Cap on returned items (default 200). Sorted by size — largest elements first.",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "spartanode_click_by_name",
+      "description": "Click a UI element by its accessibility name. Works headlessly (no focus needed). Good for clicking specific buttons, menu items, checkboxes, tabs. But for COMMON operations (save, bold, undo, copy, close), prefer spartanode_shortcut — it's faster and works without knowing the localized button name. Use click_by_name when there's no keyboard shortcut for the action (e.g. clicking a specific toolbar button, selecting a list item, toggling a checkbox).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Accessibility name to match. Case-insensitive substring. E.g. 'Blank presentation', 'Save', 'File'."
+          },
+          "role": {
+            "description": "Optionally narrow by role to disambiguate. E.g. 'Button' vs 'MenuItem'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_type_into",
+      "description": "Type text into a UI element by its accessibility name. Works headlessly — the app doesn't need to be focused or visible. Uses UIA ValuePattern.SetValue on Windows, AXValue on macOS, AT-SPI2 EditableText on Linux. For text editors, this directly sets the content without keystroke simulation. Use spartanode_inspect_app first to find the element name (e.g. \"Text Editor\", \"Search box\", \"URL bar\"). For webview tabs, falls back to filling the input via DOM.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "element": {
+            "type": "string",
+            "description": "Accessibility name of the text field to type into (case-insensitive substring match). Use spartanode_inspect_app to find element names."
+          },
+          "value": {
+            "type": "string",
+            "description": "Text to type / set as the element's value."
+          },
+          "role": {
+            "description": "Optionally narrow by role to disambiguate (e.g. 'Edit', 'Document').",
+            "type": "string"
+          }
+        },
+        "required": [
+          "element",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_select_text",
+      "description": "Select a specific text string within a text element in the active native app. Uses UIA TextPattern to find and highlight the text. Useful for applying formatting: first select the text, then click the formatting button (e.g. Bold, Italic) with spartanode_click_by_name. The element parameter is the accessibility name of the text area (use spartanode_inspect_app to find it).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "element": {
+            "type": "string",
+            "description": "Accessibility name of the text element containing the text (e.g. 'Text Editor', 'Document'). Use spartanode_inspect_app to find it."
+          },
+          "text": {
+            "type": "string",
+            "description": "The exact text string to find and select within the element."
+          }
+        },
+        "required": [
+          "element",
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_office_action",
+      "description": "Execute an action on the active Microsoft Office document via COM automation. Works headlessly — much faster and more reliable than UIA for Office-specific operations. The target app (Word, Excel, PowerPoint) must already be running with a document open.\n\nWORD actions: get_info, get_text, set_text, insert_text (at cursor), bold_selection, italic_selection, find_and_replace ({find, replace}), save, save_as ({path})\nEXCEL actions: get_info, get_cell ({cell: \"A1\"}), set_cell ({cell: \"A1\", value: \"hello\"}), set_range ({start: \"A1\", data: [[\"a\",\"b\"],[\"c\",\"d\"]]}), get_range ({range: \"A1:C10\"}), save, save_as ({path})\nPOWERPOINT actions: get_info, add_slide ({title?, layout?}), set_slide_text ({slide: 1, shape: 1, text: \"hello\"}), save, save_as ({path})\n\nUse this instead of UIA inspect+click for any Office data manipulation. For formatting that doesn't have a COM action here, use spartanode_shortcut (Ctrl+B, Ctrl+I, etc.).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "string",
+            "enum": [
+              "word",
+              "excel",
+              "powerpoint"
+            ],
+            "description": "Which Office app to target"
+          },
+          "action": {
+            "type": "string",
+            "description": "The action to perform (see list above)"
+          },
+          "params": {
+            "description": "Action-specific parameters (see list above)",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "app",
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_open_document",
+      "description": "Open a local document in a viewer tab in the right pane. Supports PDF, images (png/jpg/gif/svg/webp), Markdown, text, JSON, YAML, CSV, Word (.docx), and Excel (.xlsx).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute file path to open. If omitted, shows a file picker dialog."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_read_document",
+      "description": "Extract text content from a local document file. Returns plain text for text-based files, extracted text for Word, structured JSON for Excel. For PDFs and images, use spartanode_open_document + spartanode_screenshot instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute file path to read"
+          },
+          "format": {
+            "description": "Output format (default: text)",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_list_native_apps",
+      "description": "List all embedded native desktop applications. Shows app IDs, names, and process info.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "spartanode_open_app",
+      "description": "Open an installed Windows desktop application by name (e.g. \"powerpoint\", \"slack\", \"notepad\", \"vscode\") and embed it as a right-pane tab. Resolves the name against an index of Start Menu shortcuts. If multiple apps match, picks the most specific (shortest name); other candidates are returned in case the user wanted a different one. Use spartanode_list_installed_apps if you want to see what's available before picking.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "App name or alias (e.g. 'powerpoint', 'ppt', 'slack', 'vscode'). Case-insensitive."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "spartanode_list_installed_apps",
+      "description": "List installed Windows desktop applications discovered via the Start Menu shortcut scan. Use this to find the exact name of an app before calling spartanode_open_app, or to see what's available.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "filter": {
+            "description": "Optional substring filter (case-insensitive) to narrow the list.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "spartanode_refresh_installed_apps",
+      "description": "Force a re-scan of Start Menu shortcuts to refresh the installed-apps index. Run this if the user just installed a new app and spartanode_open_app says it can't find it.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

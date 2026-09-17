@@ -1,0 +1,452 @@
+{
+  "package": "claude-video-vision",
+  "tools": [
+    {
+      "name": "video_watch",
+      "description": "Extract frames and process audio from a local video file or YouTube URL. Returns frames (as base64 images or text descriptions) + transcription + audio analysis for Claude to understand the video content. IMPORTANT: For videos longer than 30 seconds, call video_analyze FIRST to get structural data (scene changes, silence, transcription) before calling this tool — use that data to set smart segments with variable FPS. When the video is long enough to trigger audio chunking, the result's `audio.warnings` array (if present) reports chunk-boundary decisions and any per-chunk retries or failures — surface these to the user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute/relative path to the video file, or a YouTube URL"
+          },
+          "fps": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "string",
+                "const": "auto"
+              }
+            ],
+            "default": "auto",
+            "description": "Frames per second to extract"
+          },
+          "resolution": {
+            "type": "number",
+            "minimum": 128,
+            "maximum": 2048,
+            "description": "Frame width in px (maintains aspect ratio)"
+          },
+          "frame_mode": {
+            "type": "string",
+            "enum": [
+              "images",
+              "descriptions"
+            ],
+            "description": "Return frames as base64 images or text descriptions"
+          },
+          "frame_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "Frame image format for extraction"
+          },
+          "describer_model": {
+            "type": "string",
+            "enum": [
+              "opus",
+              "sonnet",
+              "haiku"
+            ],
+            "description": "Model for frame-describer agent"
+          },
+          "start_time": {
+            "type": "string",
+            "pattern": "^\\d{2}:\\d{2}:\\d{2}$",
+            "description": "Start time (e.g. '00:01:30')"
+          },
+          "end_time": {
+            "type": "string",
+            "pattern": "^\\d{2}:\\d{2}:\\d{2}$",
+            "description": "End time (e.g. '00:05:00')"
+          },
+          "skip_audio": {
+            "type": "boolean",
+            "default": false,
+            "description": "Skip audio extraction and transcription — frames only"
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "type": "string",
+                  "pattern": "^\\d{2}:\\d{2}:\\d{2}$"
+                },
+                "end": {
+                  "type": "string",
+                  "pattern": "^\\d{2}:\\d{2}:\\d{2}$"
+                },
+                "fps": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "resolution": {
+                  "type": "number",
+                  "minimum": 128,
+                  "maximum": 2048
+                }
+              },
+              "required": [
+                "start",
+                "end",
+                "fps"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Variable FPS/resolution segments — overrides global fps/start_time/end_time"
+          },
+          "view_sample": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Return only N evenly spaced frames"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "video_info",
+      "description": "Get metadata about a local video file or YouTube URL without processing it (duration, resolution, codec, etc.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute/relative path to the video file, or a YouTube URL"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "video_setup",
+      "description": "Check dependencies for video perception (ffmpeg, whisper, gemini api, optional yt-dlp for YouTube URLs).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "backend": {
+            "type": "string",
+            "enum": [
+              "gemini-api",
+              "local",
+              "openai"
+            ],
+            "description": "Audio processing backend"
+          },
+          "whisper_engine": {
+            "type": "string",
+            "enum": [
+              "cpp",
+              "python"
+            ],
+            "default": "cpp"
+          },
+          "whisper_model": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "base",
+              "small",
+              "medium",
+              "large-v3-turbo",
+              "large-v3",
+              "auto"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "backend"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "video_configure",
+      "description": "Configure video perception preferences (backend, resolution, fps, whisper model, etc.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "backend": {
+            "type": "string",
+            "enum": [
+              "gemini-api",
+              "local",
+              "openai"
+            ]
+          },
+          "whisper_engine": {
+            "type": "string",
+            "enum": [
+              "cpp",
+              "python"
+            ]
+          },
+          "whisper_model": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "base",
+              "small",
+              "medium",
+              "large-v3-turbo",
+              "large-v3",
+              "auto"
+            ]
+          },
+          "whisper_at": {
+            "type": "boolean"
+          },
+          "frame_mode": {
+            "type": "string",
+            "enum": [
+              "images",
+              "descriptions"
+            ]
+          },
+          "frame_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ]
+          },
+          "frame_resolution": {
+            "type": "number",
+            "minimum": 128,
+            "maximum": 2048
+          },
+          "default_fps": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "string",
+                "const": "auto"
+              }
+            ]
+          },
+          "max_frames": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "frame_describer_model": {
+            "type": "string",
+            "enum": [
+              "opus",
+              "sonnet",
+              "haiku"
+            ]
+          },
+          "enable_index": {
+            "type": "boolean"
+          },
+          "session_max_age_days": {
+            "type": "number",
+            "minimum": 1
+          },
+          "downloads_max_age_days": {
+            "type": "number",
+            "minimum": 1
+          },
+          "clear_sessions": {
+            "type": "boolean"
+          },
+          "audio_model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "audio_max_output_tokens": {
+            "type": "number",
+            "minimum": 1024,
+            "maximum": 200000
+          },
+          "audio_chunk_trigger_seconds": {
+            "type": "number",
+            "minimum": 60
+          },
+          "audio_chunk_size_seconds": {
+            "type": "number",
+            "minimum": 60
+          },
+          "audio_chunk_overlap_seconds": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 60
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "video_analyze",
+      "description": "Analyze local video file or YouTube URL structure using ffmpeg filters. Returns scene changes, silence intervals, motion levels, and more. Use this before video_watch to plan which segments need detailed frame extraction. Does not extract frames. When transcription is enabled and the video is longer than the configured chunk trigger, the audio is chunked and transcribed in parallel; the result's `analysis.audio_warnings` array (when present) describes chunk-boundary decisions, retries, or failures — surface these to the user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute/relative path to the video file, or a YouTube URL"
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "scene_changes": {
+                "type": "boolean",
+                "default": false,
+                "description": "Detect scene cuts (scdet)"
+              },
+              "black_intervals": {
+                "type": "boolean",
+                "default": false,
+                "description": "Detect black frames/transitions (blackdetect)"
+              },
+              "silence": {
+                "type": "boolean",
+                "default": false,
+                "description": "Detect silence intervals (silencedetect)"
+              },
+              "freeze": {
+                "type": "boolean",
+                "default": false,
+                "description": "Detect frozen/still segments (freezedetect)"
+              },
+              "motion": {
+                "type": "boolean",
+                "default": false,
+                "description": "Measure visual complexity and motion level (siti)"
+              },
+              "blur": {
+                "type": "boolean",
+                "default": false,
+                "description": "Measure blur/sharpness per frame (blurdetect)"
+              },
+              "exposure": {
+                "type": "boolean",
+                "default": false,
+                "description": "Measure brightness and saturation per frame (signalstats)"
+              },
+              "loudness": {
+                "type": "boolean",
+                "default": false,
+                "description": "Measure audio loudness — speech vs music (ebur128)"
+              },
+              "transcription": {
+                "type": "boolean",
+                "default": false,
+                "description": "Transcribe audio using configured backend"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "path",
+          "filters"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "video_detail",
+      "description": "Drill into specific segments of a local video file or YouTube URL. Extracts frames at variable FPS/resolution per segment. Separates extraction from viewing: use segments to extract, view/view_sample to control which frames are returned as images. When enable_index is on, frames are cached and deduplicated across calls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute/relative path to the video file, or a YouTube URL"
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "type": "string",
+                  "pattern": "^\\d{2}:\\d{2}:\\d{2}$"
+                },
+                "end": {
+                  "type": "string",
+                  "pattern": "^\\d{2}:\\d{2}:\\d{2}$"
+                },
+                "fps": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "resolution": {
+                  "type": "number",
+                  "minimum": 128,
+                  "maximum": 2048
+                }
+              },
+              "required": [
+                "start",
+                "end",
+                "fps"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Segments to extract frames from"
+          },
+          "view": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{2}:\\d{2}:\\d{2}$"
+            },
+            "description": "Specific timestamps to return as images from the session cache"
+          },
+          "view_sample": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Return N evenly spaced frames from the extracted set"
+          },
+          "frame_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "Frame image format for extraction"
+          },
+          "skip_cached": {
+            "type": "boolean",
+            "default": true,
+            "description": "Skip re-writing of frames already cached at the same resolution"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

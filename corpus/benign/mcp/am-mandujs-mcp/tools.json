@@ -1,0 +1,225 @@
+{
+  "package": "@mandujs/mcp",
+  "tools": [
+    {
+      "name": "mandu.agent.context",
+      "description": "Official agent-core entry point. Returns one structured project context for Codex/Claude/Gemini: project metadata, routes/APIs, partials/islands, slots/contracts, guard summary, diagnostics, git state, and the canonical context -> plan -> apply -> verify -> repair workflow.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string",
+            "description": "Project directory to inspect. Defaults to the MCP project root."
+          },
+          "includeDiagnose": {
+            "type": "boolean",
+            "description": "Include diagnose summary and normalized diagnostics. Defaults to true."
+          },
+          "includeGit": {
+            "type": "boolean",
+            "description": "Include git branch and changed-file summary. Defaults to true."
+          },
+          "writeManifest": {
+            "type": "boolean",
+            "description": "Write .mandu/agent-manifest.json while building context. Defaults to false."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "mandu.agent.plan",
+      "description": "Official agent-core planning entry point. Converts a natural-language Mandu task into a conservative domain plan with files to inspect, files likely to create, preferred MCP/domain tools, risks, and verification commands.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string",
+            "description": "Project directory to plan against. Defaults to the MCP project root."
+          },
+          "intent": {
+            "type": "string",
+            "description": "Natural-language task request, for example: add authenticated dashboard."
+          },
+          "writePlan": {
+            "type": "boolean",
+            "description": "Write .mandu/agent-plan.json while planning. Defaults to false."
+          }
+        },
+        "required": [
+          "intent"
+        ]
+      }
+    },
+    {
+      "name": "mandu.agent.apply",
+      "description": "Official agent-core apply preview. Reads an agent plan and returns ordered intent-level actions. This initial implementation is dry-run only and does not mutate project files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string",
+            "description": "Project directory. Defaults to the MCP project root."
+          },
+          "from": {
+            "type": "string",
+            "description": "Plan path relative to cwd. Defaults to .mandu/agent-plan.json."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Return a dry-run action report. Defaults to true."
+          },
+          "writeReport": {
+            "type": "boolean",
+            "description": "Write .mandu/agent-apply.json. Defaults to false."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "mandu.agent.verify",
+      "description": "Official agent-core verification entry point. Returns one structured report that combines changed files, diagnose, route manifest, guard, contract consistency, normalized diagnostics, and suggested follow-up commands.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string",
+            "description": "Project directory to verify. Defaults to the MCP project root."
+          },
+          "changedOnly": {
+            "type": "boolean",
+            "description": "Filter guard/contract findings to changed files when git data exists. Defaults to true."
+          },
+          "includeDiagnose": {
+            "type": "boolean",
+            "description": "Run diagnose and include normalized diagnose diagnostics. Defaults to true."
+          },
+          "includeGit": {
+            "type": "boolean",
+            "description": "Collect git changed files. Defaults to true."
+          },
+          "includeGuard": {
+            "type": "boolean",
+            "description": "Run architecture guard if the routes manifest is available. Defaults to true."
+          },
+          "includeContract": {
+            "type": "boolean",
+            "description": "Run contract/slot consistency checks if the routes manifest is available. Defaults to true."
+          },
+          "staged": {
+            "type": "boolean",
+            "description": "Use staged changes only. Defaults to false."
+          },
+          "base": {
+            "type": "string",
+            "description": "Optional git base ref for changed-file detection."
+          },
+          "writeReport": {
+            "type": "boolean",
+            "description": "Write .mandu/agent-verify.json while verifying. Defaults to false."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "mandu.agent.repair",
+      "description": "Official agent-core repair entry point. Reads an agent verify report and returns structured next actions. It does not execute shell commands; apply mode only handles safe typed patch candidates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string",
+            "description": "Project directory. Defaults to the MCP project root."
+          },
+          "from": {
+            "type": "string",
+            "description": "Verify report path relative to cwd. Defaults to .mandu/agent-verify.json."
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply safe typed patch candidates only. Defaults to false."
+          },
+          "writeReport": {
+            "type": "boolean",
+            "description": "Write .mandu/agent-repair.json. Defaults to false."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "mandu.agent.sync",
+      "description": "Official agent sync helper. Writes or previews Codex, Claude Code, and Gemini CLI workflow artifacts under .mandu/agent-sync so each agent follows the same Mandu agent loop and MCP profile guidance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string",
+            "description": "Project directory. Defaults to the MCP project root."
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "codex",
+              "claude",
+              "gemini",
+              "all"
+            ],
+            "description": "Agent target to sync. Defaults to all."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview files without writing. Defaults to false."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "mandu.docs.search",
+      "description": "Search the project's docs/ markdown tree by keyword. Returns ranked slugs + excerpts so agents can ground answers in Mandu documentation instead of hallucinating. Read-only. Pass `scope` (e.g. 'architect' or 'bun') to narrow to a subdirectory; `includeBody:true` returns the full MDX body for each hit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search text. Matches title + body (case-insensitive)."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Restrict search to a `docs/` subdirectory (e.g. 'architect', 'bun'). Default 'all'."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum results returned. Default 5, capped at 25."
+          },
+          "includeBody": {
+            "type": "boolean",
+            "description": "Return the full markdown body for each hit. Default false (excerpt only)."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "mandu.docs.get",
+      "description": "Fetch a single markdown page from the project's docs/ tree by relative slug (e.g. 'architect/rendering-modes.md'). Returns the full body + extracted title. Read-only. Pair with `mandu.docs.search` — search to discover, get to read.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Relative path under docs/ (no leading slash, no '..'). Example: 'architect/rendering-modes.md'."
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    }
+  ]
+}

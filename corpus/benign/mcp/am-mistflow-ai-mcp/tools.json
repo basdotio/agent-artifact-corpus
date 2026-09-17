@@ -1,0 +1,883 @@
+{
+  "package": "@mistflow-ai/mcp",
+  "tools": [
+    {
+      "name": "mist_setup",
+      "description": "Connect the user's Mistflow account. Call this ONLY when: (a) the user has literally never signed in, or (b) a previous tool call returned error code 'auth_missing' or 'auth_revoked'. DO NOT call this tool in response to 500 errors, 404 errors, network errors, or any generic failure — those are backend issues, not auth issues. Running mist_setup when not needed wastes the user's time and creates login fatigue. Once signed in, the MCP persists a long-lived API key and never asks again. Two-phase device code flow: (1) Call without deviceCode — opens browser, returns status 'pending' with deviceCode and userCode. Tell the user the verification code and that they need to approve in the browser. (2) Call again with deviceCode after ~15 seconds — polls for approval. Also accepts an apiKey for headless auth (skips device code entirely).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "description": "API key (mist_...) for headless auth. Skips the device code flow entirely. Generate one at app.mistflow.ai/mcp-keys."
+          },
+          "deviceCode": {
+            "type": "string",
+            "description": "Resume polling for a pending device code. Returned by a previous mist_setup call with status 'pending'. Call mist_setup again with this value after ~15 seconds to check if the user approved."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_project",
+      "description": "Read or inspect Mistflow project state. 'get' (default) loads plan progress, env vars, and deploy info — call before editing. 'update' marks plan steps complete or adds env vars. 'share' creates a forkable template URL. 'integrations' browses the curated integration blueprint catalog (pass integrationId for full details). 'errors' fetches runtime errors from the deployed app. 'logs' fetches deploy logs. 'deployments' lists history. 'version' reports the installed MCP version + any upgrade available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "get",
+              "update",
+              "share",
+              "integrations",
+              "errors",
+              "logs",
+              "deployments",
+              "cron",
+              "cron-logs",
+              "cron-toggle",
+              "cron-trigger",
+              "version"
+            ],
+            "default": "get",
+            "description": "'get' reads current project state. 'update' marks steps complete or adds env vars. 'share' makes the project a shareable template. 'integrations' lists third-party service integration blueprints (Stripe, Resend, ElevenLabs, etc.) with setup guides. 'errors' fetches runtime errors from the deployed app. 'logs' fetches deploy logs for a specific deployment. 'deployments' lists deployment history. 'cron' lists the project's cron jobs and their current status. 'cron-logs' returns recent execution history for one cron job (pass cronJobId). 'cron-toggle' enables or disables a cron job (pass cronJobId + cronEnabled). 'cron-trigger' fires a cron job once now via a QStash one-off publish (pass cronJobId). 'version' reports the installed @mistflow-ai/mcp version and whether an upgrade is available."
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "Path to the project directory (default: cwd)"
+          },
+          "completedStep": {
+            "type": "number",
+            "description": "(update) Mark a plan step as completed by step number"
+          },
+          "addEnvVar": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "setupUrl": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key"
+            ],
+            "additionalProperties": false,
+            "description": "(update) Add a required env var to the project manifest"
+          },
+          "templateDescription": {
+            "type": "string",
+            "description": "(share) Short description of what this template builds"
+          },
+          "category": {
+            "type": "string",
+            "description": "(integrations) Filter integrations by category"
+          },
+          "integrationId": {
+            "type": "string",
+            "description": "(integrations) Get full details for a specific integration preset by ID (e.g. 'stripe-payments', 'resend-email', 'elevenlabs-voice')"
+          },
+          "period": {
+            "type": "string",
+            "description": "(errors) Time period for errors: '1h', '24h', '7d' (default: '7d')"
+          },
+          "deploymentId": {
+            "type": "string",
+            "description": "(logs) Deployment ID to fetch logs for. If omitted, fetches logs for the latest deployment."
+          },
+          "cronJobId": {
+            "type": "string",
+            "description": "(cron-logs / cron-toggle / cron-trigger) UUID of the cron job"
+          },
+          "cronEnabled": {
+            "type": "boolean",
+            "description": "(cron-toggle) true to enable, false to pause"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_browser",
+      "description": "Unified browser tool for navigating, interacting with, and capturing the app. Use 'navigate' to open a URL, interaction actions (click/type/fill/etc.) to test flows, 'snapshot' to inspect the accessibility tree, and 'screenshot' for a visual capture. Use after mist_preview to verify UI, test flows, and iterate on design.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "navigate",
+              "go_back",
+              "go_forward",
+              "click",
+              "type",
+              "fill",
+              "select_option",
+              "press_key",
+              "hover",
+              "screenshot",
+              "snapshot"
+            ],
+            "description": "Action to perform. Navigation: navigate|go_back|go_forward. Interaction: click|type|fill|select_option|press_key|hover. Visual: screenshot (returns image) | snapshot (returns accessibility tree)."
+          },
+          "url": {
+            "type": "string",
+            "description": "URL to navigate to. Required for 'navigate'; optional for 'screenshot' (navigates before capturing)."
+          },
+          "selector": {
+            "type": "string",
+            "description": "CSS selector of the target element. Required for: click, type, fill, select_option, hover. Optional for screenshot (captures just that element)."
+          },
+          "value": {
+            "type": "string",
+            "description": "Text to type/fill, option to select, or key to press (e.g. 'Enter', 'Tab'). Required for: type, fill, select_option, press_key."
+          },
+          "fullPage": {
+            "type": "boolean",
+            "default": false,
+            "description": "For 'screenshot': capture the full scrollable page instead of just the viewport."
+          },
+          "includeScreenshot": {
+            "type": "boolean",
+            "default": false,
+            "description": "For navigate/interact actions: also return a screenshot alongside the accessibility snapshot."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_help",
+      "description": "Returns the full Mistflow MCP tool reference. Call ONCE at session start (or whenever unsure which tool to pick) to learn the 14-tool surface, the fire-and-poll pattern, and how to chain end-to-end from mist_plan through mist_qa. Static — no backend round-trip, safe to call frequently.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Optional: name of a specific tool (e.g. 'mist_plan') to get focused reference for. Omit to get the full catalog."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_docs",
+      "description": "Fetch a per-topic Mistflow methodology doc on demand. Two actions: `list` returns the catalog (id, title, kind, description) so you can discover what's available; `get` returns the full markdown for one topic. Topic kinds: 'stack' (framework patterns — Drizzle, Better Auth, server actions, components, styling), 'skill' (design + structural patterns — auth-design, app-design, admin-panel, blob-storage), 'integration' (third-party services — Stripe, Resend, OpenAI, Anthropic, Twilio, etc.). Call BEFORE writing or modifying code that touches an integration or a stack-specific pattern. Lazy-loaded — pulls only the topic you need instead of paying for the full AGENTS.md monolith every turn. Same content as AGENTS.md / .claude/skills/<topic>/SKILL.md / .cursor/rules/<topic>.mdc on disk; use this tool when those aren't auto-discovered by your host.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get"
+            ],
+            "default": "get",
+            "description": "'get' (default) returns the full markdown for one topic — pass `topic`. 'list' returns the topic catalog so you can discover what's available — use to answer 'is there a doc for X?' before falling back to web search."
+          },
+          "topic": {
+            "type": "string",
+            "description": "Required for action='get'. Stable topic id (e.g. 'auth-design', 'stripe-integration', 'better-auth'). Call action='list' to discover ids."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "stack",
+              "skill",
+              "integration"
+            ],
+            "description": "Optional filter for action='list'. 'stack' = framework methodology, 'skill' = design + structural patterns, 'integration' = third-party services."
+          },
+          "stack": {
+            "type": "string",
+            "default": "nextjs",
+            "description": "Stack slug. Defaults to 'nextjs' (currently the only supported stack)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_plan",
+      "description": "ENTRY POINT for creating a NEW web app, website, internal tool, dashboard, landing page, marketplace, content site, or browser game. Mistflow scaffolds a complete Next.js project. It does NOT edit existing codebases.\n\nWHEN TO CALL THIS — route here automatically on natural 'build me X' intent. The user does NOT need to say 'mist' or 'mistflow'. Examples that MUST route here:\n• 'build me a habit tracker'\n• 'make a site for my bakery'\n• 'I want an app where users log workouts'\n• 'create a dashboard that shows sales'\n• 'build a Wordle clone'\n• 'build me a CRM using mist' / 'make a todo app with mistflow' (explicit brand invocation)\n\nPASSING THE DESCRIPTION: Pass the user's words EXACTLY. Do NOT expand, elaborate, add features, rewrite, or strip anything (including 'using mist' / 'with mistflow'). 'build me a habit tracker using mist' becomes description: 'build me a habit tracker using mist'. The description is preserved verbatim.\n\nBRAND MENTIONED FLAG: If the user's original request literally contained the word 'mist' or 'mistflow' as an explicit invocation (e.g. 'build me a CRM using mist', 'use mistflow to make a todo app'), set brandMentioned: true. If the user did NOT mention the brand by name, omit brandMentioned (do not set it). Only set brandMentioned when the user literally typed the brand name — never infer it. Do NOT set brandMentioned for the common English noun 'mist' used in other contexts (e.g. 'app about morning mist'). Clear new-app requests inside an existing non-Mistflow repo are scaffolded into a remembered child directory; Mistflow does not edit the surrounding codebase.\n\nDESIGN REFERENCES (screenshots, Figma, brand names): if the user drags a screenshot, pastes a Figma URL, or names a brand to match (\"make it feel like Linear\"), use your native vision/knowledge to extract design tokens and submit them via designDirection: { custom: '<your description>', ...extracted_tokens } with userConfirmedCustom: true. The flag is required because the user supplied the reference; without it the server rejects the submission to stop AIs from inventing custom directions. Full flow at docs/design-references.md.\n\nSAFETY GATE — the handler walks up the directory tree to detect if you're inside an existing non-Mistflow codebase (package.json found anywhere up the tree, no mistflow.json). For clear new-app requests it automatically creates and remembers a child scaffold directory. For ambiguous requests, it returns status 'confirm_new_project' with a signed confirmToken and an askUserQuestion. On that response:\n• MANDATORY: use the AskUserQuestion tool with the provided askUserQuestion to ask the user.\n• If the user picks 'Scaffold a new Mistflow app in a subdirectory', call mist_plan again with the SAME description, SAME projectPath, and confirmToken set to the token from the response. Do not change projectPath to the suggested child path; Mistflow stores that target for mist_init.\n• If the user picks 'Edit this existing codebase directly', DO NOT call mist_plan again. Fulfill their request by editing files directly.\n• The confirmToken is bound to the projectPath and description. If either changes, you'll get a fresh token and must ask again.\n• You do not need to pre-check the directory yourself. The handler handles detection.\n\nFOLLOW-UP FLOW (after the plan is being generated):\n• status 'clarify' → use AskUserQuestion with the provided askUserQuestions, then call mist_plan again with conversationId + answers + the same description.\n• You may receive MULTIPLE 'clarify' rounds — if the user's answers reveal new ambiguity, the planner will ask follow-up questions. Keep relaying questions until you get status 'ready'. This is normal and produces better plans.\n• status 'ready' → IMMEDIATELY call mist_init with the returned planId. If the response includes scaffoldTargetPath you do not need to pass path; mist_init loads it from the cached plan. Do not ask permission.\n• NEVER skip the clarifying questions. The discovery process ensures the right thing gets built.\n\nSESSIONID FLOW (dumb-ai-proof, when the response includes sessionId): keep the sessionId and pass it on every subsequent mist_* call. Calling mist_plan with just { sessionId, projectPath } polls GET /api/sessions/{id}/next and returns the next instruction (wait | ask_user | pick_design | review_mockup | call_mist_init | call_mist_install | call_mist_implement | call_mist_build | call_mist_deploy | call_mist_qa | done). Do exactly what the instruction says — don't branch on raw state. The backend owns routing; the host relays.\n\nEXISTING MISTFLOW PROJECTS (mistflow.json present anywhere up the tree): call this for changes that need a new data model, third-party integration, or multi-step structural change (pass existingPlan or existingPlanId). For simpler features (new pages, UI additions), do NOT call mist_plan, but DO ask the user product questions before building (what fields, what layout, what constraints). Get the spec right, build once. For cosmetic changes and bug fixes, skip questions and edit directly. Use mist_project action='get' for context.\n\nOTHER MODES: Pass templateToken to fork from a mistflow.ai/t/... shared template. The aesthetic (fonts, colors, motion) is decided by the design-direction picker step — the host AI doesn't pick a catalog ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "App description or modification request. Required for the first call; omit on follow-up polls where only conversationId is passed. "
+          },
+          "projectPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "REQUIRED. Absolute path to the user's current working directory — where the Mistflow app will be scaffolded. Pass the directory the user is actually working in (e.g. /Users/alice/projects). Do NOT pass '/', '~', $HOME, Desktop, Documents, Downloads, or /tmp — the tool will refuse to scaffold at those locations. If you are unsure of the user's working directory, ask them before calling this tool."
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Backend-owned session ID. When present, mist_plan polls GET /api/sessions/{id}/next and returns the next instruction (wait, ask_user, pick_design, call_mist_init, etc.). Pass it on every subsequent mist_* call to keep the same session."
+          },
+          "conversationId": {
+            "type": "string",
+            "description": "Returned by a previous mist_plan call with status 'clarify' or 'running'. Pass it back alone (no description) to poll an in-flight discovery call; pass with answers to submit responses."
+          },
+          "answers": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "question": {
+                      "type": "string"
+                    },
+                    "decisionKey": {
+                      "type": "string"
+                    },
+                    "answer": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "answer"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            ],
+            "description": "User's answers to the clarifying questions. Pass an ARRAY of { question, decisionKey, answer } objects directly — do NOT stringify it as JSON. The schema also accepts a { '<question text>': '<answer label>' } object map for one-question-per-decisionKey rounds. Strings that look like JSON arrays/objects are auto-parsed for resilience."
+          },
+          "existingPlan": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "If provided, modifies this existing plan instead of creating a new one. Pass the current plan object from mistflow.json."
+          },
+          "existingPlanId": {
+            "type": "string",
+            "description": "Alternative to existingPlan — pass the planId from a previous mist_plan call to modify that plan."
+          },
+          "templateToken": {
+            "type": "string",
+            "description": "Fork from a shared template. Pass the share token (from a mistflow.ai/t/... URL) to clone that project's plan into your workspace."
+          },
+          "remixDescription": {
+            "type": "string",
+            "description": "Optional remix request when forking a template. Describes how you want the template to be different. E.g. 'Make it for tracking books instead of habits, add a search feature.' Only used with templateToken."
+          },
+          "autonomous": {
+            "type": "boolean",
+            "description": "DANGER — only set this to `true` when the user has EXPLICITLY asked to skip discovery questions (phrases like 'no questions', 'just build it', 'autonomous mode', 'don't ask'). Default is `false` and should stay that way in every other case. Do NOT set autonomous=true as a retry strategy after a plan-gen failure — it doesn't make things more reliable, it just removes the user's control over discovery answers (roles, integrations, auth model, etc.) and Sonnet ends up guessing. If a plan call fails, retry the SAME call with the same parameters, not a more aggressive one. Do NOT set autonomous=true to speed things up — the server already runs plan-gen in the background and polls, so there is no speed benefit. When set, skips the clarify round and generates the plan straight from the description. The user loses the chance to pick any option."
+          },
+          "language": {
+            "type": "string",
+            "description": "UI language for the app. All user-facing text, labels, buttons, and content will be generated in this language. Use the language name in English (e.g. 'Spanish', 'French', 'Arabic', 'Japanese'). Defaults to English if not specified."
+          },
+          "brandMentioned": {
+            "type": "boolean",
+            "description": "Set to true ONLY when the user's original request explicitly invoked Mistflow by name (e.g. 'build me a CRM using mist', 'make a todo app with mistflow'). Skips the existing-project confirmation gate because the user clearly wants Mistflow. Do NOT set this for generic 'build me X' requests. Do NOT infer this — only set it when the user literally typed 'mist' or 'mistflow'."
+          },
+          "confirmToken": {
+            "type": "string",
+            "description": "The token returned in a previous mist_plan response with status 'confirm_new_project'. Only pass this AFTER asking the user via AskUserQuestion and they chose to scaffold a new Mistflow app in an existing-project directory. The token is bound to the projectPath and description — you must pass the SAME description AND projectPath on the retry."
+          },
+          "urlChoice": {
+            "type": "string",
+            "description": "The user's answer to the 'Your app URL' question from a previous mist_plan response. Pass JUST the subdomain (e.g. 'nutrition-tracker'), not the full URL or the option label. If the user kept the default suggestion, pass the suggested subdomain verbatim. If they typed a custom URL like 'myapp.mistflow.app', pass just 'myapp'. Pass this as a top-level parameter — do NOT nest it inside answers."
+          },
+          "designConversationId": {
+            "type": "string",
+            "description": "Returned by a previous mist_plan call with status 'design_clarify'. Pass this ONLY on the SUBMIT call after the user has picked a direction — i.e. ALWAYS together with `designDirection`. Do NOT include it on polling calls (status: 'rendering_directions' / 'design_clarify_pending') — for polling, send only `{ projectPath, conversationId }`. Including `designConversationId` without `designDirection` makes the backend respond 'you passed designConversationId but no designDirection' and wastes a round-trip. Decision rule: if the user has not yet typed/clicked a pick, omit this field; if they have, include both this field AND designDirection together in the same call."
+          },
+          "designDirection": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "heroHeadline": {
+                "type": "string"
+              },
+              "ctaText": {
+                "type": "string"
+              },
+              "bodySample": {
+                "type": "string"
+              },
+              "fontsHint": {
+                "type": "string"
+              },
+              "fonts": {
+                "type": "object",
+                "properties": {
+                  "display": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "colorMood": {
+                "type": "string"
+              },
+              "colors": {
+                "type": "object",
+                "properties": {
+                  "bg": {
+                    "type": "string"
+                  },
+                  "fg": {
+                    "type": "string"
+                  },
+                  "accent": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "heroTreatment": {
+                "type": "string"
+              },
+              "shapeLang": {
+                "type": "string"
+              },
+              "texture": {
+                "type": "string"
+              },
+              "decorationHint": {
+                "type": "string"
+              },
+              "custom": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true,
+            "description": "The creative direction the user picked from a previous 'design_clarify' response. Pass ONLY the minimal shape: (a) `{ id: '<short-kebab-id-from-directionRefs>' }` when the user picked one of the proposed options — copy the id verbatim from `directionRefs[].id`, e.g. 'morning-paper' or 'quiet-utility'; or (b) `{ custom: '<the user\\'s exact words>' }` + `userConfirmedCustom: true` when the user typed their own description. Do NOT pass the full direction object (name, summary, fonts, colors, hero_headline, body_sample, etc.) — those fields are ignored and may exceed backend length limits, causing 422 rejections. ID values are short kebab-case strings (≤256 chars). Custom descriptions are user-typed prose (≤4000 chars). Anything longer is wrong."
+          },
+          "userConfirmedCustom": {
+            "type": "boolean",
+            "description": "Set true ONLY when the user themselves typed a custom direction (via AskUserQuestion 'Other' or by explicitly describing the look in the chat). Required when submitting designDirection: { custom: ... } if the backend has real directions cached — the server rejects custom submissions otherwise to stop the AI from silently bypassing the picker. NEVER set this true unless the words in `custom` came directly from the user."
+          },
+          "forceNew": {
+            "type": "boolean",
+            "description": "Set to true ONLY after the user has explicitly chosen 'start fresh' from a previous mist_plan response with status 'resume_offer'. Suppresses the resume-offer check and lets a new session start even when this machine has unfinished work in flight. Do NOT set this preemptively on the first call — the resume-offer check needs to run so the user gets the chance to pick up where they left off."
+          }
+        },
+        "required": [
+          "projectPath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_init",
+      "description": "Initialize a new Next.js project using the Mistflow stack. Downloads templates from the Mistflow registry, installs dependencies, sets up auth, and initializes git. Use this after mist_plan to create the project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable app name (e.g. 'Task Flow'). Optional when planId is provided — the cached plan's name is used."
+          },
+          "plan": {
+            "description": "Full plan object. Optional when planId is provided — the tool loads the cached plan from ~/.mistflow/plans/<planId>.json."
+          },
+          "path": {
+            "type": "string",
+            "description": "Absolute path where the project should be scaffolded."
+          },
+          "planId": {
+            "type": "string",
+            "description": "Plan ID from a prior mist_plan call. When present, the full plan is loaded from disk if 'plan' is omitted."
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Backend session ID. Pass through from mist_plan response so state guards apply and session state advances as the tool runs."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_mockup",
+      "description": "Generate a grayscale wireframe sketch of the planned app so the user can review layout + information hierarchy before any code is written. The server returns a structured spec + a wireframePrompt — the host AI writes the HTML file to .mistflow/mockups/mockup-<planId>.html and opens it. Pass { planId } for the first iteration, { planId, feedback: '...' } to iterate, { planId, approved: true } to lock the design before mist_init. Iterative by design — expect 1-3 rounds of feedback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Plan ID from mist_plan. Required."
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "Project directory (default: cwd). The mockup is written to <projectPath>/.mistflow/mockups/."
+          },
+          "feedback": {
+            "type": "string",
+            "description": "User feedback to apply to the next iteration."
+          },
+          "approved": {
+            "type": "boolean",
+            "description": "Mark the wireframe as approved (terminal — unlocks scaffolding)."
+          }
+        },
+        "required": [
+          "planId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_implement",
+      "description": "Execute the next step (or a specific step) from the app plan. Reads mistflow.json, finds the target step, and returns rich context and detailed implementation instructions for the host AI. Auto-commits a checkpoint before changes for safe undo. Use when the user says 'mist implement' or 'mist next step'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Path to the project directory (default: cwd)"
+          },
+          "step": {
+            "type": "number",
+            "description": "Specific step number to implement (default: next incomplete step)"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Backend session ID. Pass through from mist_plan response so state guards apply and session state advances as the tool runs."
+          },
+          "envVarsRequired": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "SHOUTING_SNAKE_CASE env var name, e.g. OPENAI_API_KEY"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Plain-English description, e.g. 'OpenAI API key for AI features'"
+                },
+                "setupUrl": {
+                  "type": "string",
+                  "description": "URL where the user can obtain this key, e.g. https://platform.openai.com/api-keys"
+                },
+                "integration": {
+                  "type": "string",
+                  "description": "Optional integration name this key belongs to, e.g. 'OpenAI'"
+                }
+              },
+              "required": [
+                "key",
+                "description"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Declare any env vars the code you just wrote uses (process.env.X) that aren't already in mistflow.json env.required. Server merges these into the manifest so missing values surface as warnings on deploy. Skip keys already covered by integration presets (Stripe, Resend, etc. — those are pre-declared). Only declare ad-hoc keys you introduced. First declaration wins; re-declaring is a no-op."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_debug",
+      "description": "Analyze build errors from a Next.js / TypeScript project. Extracts structured errors with file, line, a human-readable message for the user, and an actionable suggestion. Call with { projectPath } to run `npm run build` and parse the failure; call with { buildOutput } to parse output captured elsewhere (e.g. from a failed mist_build job).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project directory. Defaults to cwd."
+          },
+          "buildOutput": {
+            "type": "string",
+            "description": "Build output to parse. If omitted, the tool runs `npm run build` in projectPath."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_config",
+      "description": "Manage project configuration: app secrets and custom domains. Set resource='env' to manage encrypted app secrets (set, list, delete). Set resource='domain' to manage custom domains (add, list, verify, remove). Use when the user says 'mist env' or 'mist domain'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string",
+            "enum": [
+              "env",
+              "domain",
+              "mcp-caller"
+            ],
+            "description": "'env' manages app secrets and configuration values. 'domain' manages custom domains. 'mcp-caller' manages bearer tokens for the app's MCP endpoint (create/list/revoke)."
+          },
+          "action": {
+            "type": "string",
+            "description": "Action to perform. env: 'set', 'list', 'delete'. domain: 'add', 'list', 'verify', 'remove'. mcp-caller: 'create', 'list', 'revoke'."
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "Path to the project directory (default: cwd)"
+          },
+          "key": {
+            "type": "string",
+            "description": "(env) Variable name"
+          },
+          "value": {
+            "type": "string",
+            "description": "(env set) Variable value"
+          },
+          "category": {
+            "type": "string",
+            "description": "(env set) Category"
+          },
+          "description": {
+            "type": "string",
+            "description": "(env set) Description"
+          },
+          "setupUrl": {
+            "type": "string",
+            "description": "(env set) URL to obtain the value"
+          },
+          "domain": {
+            "type": "string",
+            "description": "(domain) Domain name"
+          },
+          "domainId": {
+            "type": "string",
+            "description": "(domain) Domain ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "(mcp-caller create) Human-readable name"
+          },
+          "callerId": {
+            "type": "string",
+            "description": "(mcp-caller revoke) The caller id to revoke"
+          },
+          "monthlyBudgetCents": {
+            "type": "string",
+            "description": "(mcp-caller create) Budget cap in cents as a string. '0' means unlimited."
+          },
+          "toolAllowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "(mcp-caller create) Restrict the caller to these MCP tool names. Omit for unrestricted."
+          },
+          "rateLimitPerMin": {
+            "type": "number",
+            "description": "(mcp-caller create) Per-minute rate limit on this caller's tool calls."
+          }
+        },
+        "required": [
+          "resource",
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_install",
+      "description": "Install a Mistflow project's npm dependencies with the fire-and-poll pattern. First call with { projectPath } starts the install and returns a jobId. Subsequent calls with { jobId } poll for progress (status: 'running' | 'complete' | 'failed'). Re-call while status is 'running' — each response is <1s so there is no 60s timeout risk.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project. Required for the first call (to start the install)."
+          },
+          "jobId": {
+            "type": "string",
+            "description": "Job ID returned from a previous call. Present means poll; absent means start."
+          },
+          "waitSeconds": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 50,
+            "description": "On poll calls: long-poll for up to N seconds before returning, so a typical install fits in 2 round-trips instead of 5-6. Default 20. Set 0 to disable."
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Backend session ID. Pass through from mist_plan response so state guards apply and session state advances as the tool runs."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_build",
+      "description": "Run a Mistflow project's production build with the fire-and-poll pattern. First call with { projectPath } starts `npm run build` and returns a jobId. Subsequent calls with { jobId } poll status. On failure, the response surfaces structured errors (from parseBuildErrors) and any missingModules[] — chain into mist_install with those modules, then mist_build again, without asking the user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project. Required for the first call."
+          },
+          "jobId": {
+            "type": "string",
+            "description": "Job ID from a previous call. Present means poll; absent means start."
+          },
+          "script": {
+            "type": "string",
+            "description": "Optional override: run `npm run <script>` instead of the Cloudflare adapter. Default behavior is `npx @opennextjs/cloudflare build` when open-next.config.ts exists, else `npm run build`. Ignored on poll calls."
+          },
+          "waitSeconds": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 50,
+            "description": "On poll calls: long-poll for up to N seconds before returning, so a typical build fits in 2 round-trips instead of 6-8. Default 20. Set 0 to disable."
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Backend session ID. Pass through from mist_plan response so state guards apply and session state advances as the tool runs."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_qa",
+      "description": "Post-deploy QA: drives Playwright in-process against the live deploy URL. Checks health + auth endpoints, logs in with a seeded admin account, walks the dashboard and sidebar pages, and runs design-quality audits (typography, color, layout, slop patterns). Returns pass/fail + screenshots inline. Call ONCE after mist_deploy completes. Do NOT surface the deploy URL to the user until mist_qa returns status: 'pass'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the Mistflow project. Defaults to the current working directory. Used to read mistflow.json for the deploy URL + projectId."
+          },
+          "url": {
+            "type": "string",
+            "description": "Override the deploy URL to QA. Useful for previews or when mistflow.json doesn't yet have the URL recorded. Defaults to mistflow.json's deploy.url."
+          },
+          "deploymentId": {
+            "type": "string",
+            "description": "Deployment ID to associate QA results with. When set, results are uploaded to the backend and surfaced on the dashboard deployment card."
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Backend session ID. Pass through from mist_plan response so state guards apply and session state advances as the tool runs."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "full",
+              "acceptance"
+            ],
+            "default": "full",
+            "description": "'full' (default) runs the standard post-deploy QA suite: HTTP pre-flight, landing render, login, sidebar pages, design audits. 'acceptance' runs only the per-criterion Playwright probes from .mistflow/acceptance/<criterion-id>.spec.ts against the deploy URL and uploads pass/fail results to the backend. Requires sessionId."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_deploy",
+      "description": "Deploy a Mistflow project. action='deploy' (default) tars + uploads + starts backend orchestration; action='status' polls an in-flight deployment; action='promote' ships a staging preview to prod; action='rollback' reverts to a previous deployment. Fire-and-poll: deploy/promote/rollback return a jobId immediately; poll with { action: 'status', deploymentId }. Do NOT show the deploy URL to the user until mist_qa passes — qaRequired=true is returned on completion.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "deploy",
+              "promote",
+              "rollback",
+              "status"
+            ],
+            "default": "deploy",
+            "description": "'deploy' (default) tars + uploads + starts a deployment. 'promote' promotes a staging preview to production. 'rollback' rolls back to a specific deployment. 'status' polls an in-flight deployment by id."
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project. Required for 'deploy' and 'promote'."
+          },
+          "deploymentId": {
+            "type": "string",
+            "description": "Deployment id — required for 'rollback' and 'status'; the preview id for 'promote'."
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "production",
+              "preview"
+            ],
+            "description": "Deploy target. Defaults to 'production'; auto-redirects to 'preview' when the project uses staging mode."
+          },
+          "adminEmail": {
+            "type": "string",
+            "description": "Optional override for the owner email. Defaults to the email of whoever ran mist_setup (read from ~/.mistflow/credentials.json). Multi-role apps auto-promote this email to admin on first signup; single-role apps just attach it to the project for the dashboard's Owner Access card. Pass explicitly only when the deploying user is not the intended owner."
+          },
+          "waitSeconds": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 20,
+            "description": "On action='status' calls: long-poll the backend for up to N seconds (0-20) before returning, so a typical deploy fits in 1-2 round-trips instead of 6-12. Default 20. Ignored for non-status actions."
+          },
+          "envVarsRequired": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "SHOUTING_SNAKE_CASE env var name, e.g. OPENAI_API_KEY"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Plain-English description, e.g. 'OpenAI API key for AI features'"
+                },
+                "setupUrl": {
+                  "type": "string",
+                  "description": "URL where the user can obtain this key, e.g. https://platform.openai.com/api-keys"
+                },
+                "integration": {
+                  "type": "string",
+                  "description": "Optional integration name this key belongs to, e.g. 'OpenAI'"
+                }
+              },
+              "required": [
+                "key",
+                "description"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Last chance to declare env vars introduced since the last implement call. Merged into mistflow.json env.required before the build is tarred, so the backend's deploy-time check picks them up. Skip keys covered by integration presets (Stripe, Resend, etc.). Only used for action='deploy'."
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Backend session ID. Pass through from mist_plan response so state guards apply and session state advances as the tool runs."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_session",
+      "description": "Read or correct a Mistflow session. Actions: status (current state + criteria), cancel (terminal), resume (bind this machine to a session for multi-machine work), list (sessions this machine has worked on). All state changes go through the backend so the host AI never directly mutates session state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "status",
+              "cancel",
+              "resume",
+              "list"
+            ],
+            "description": "status = read current state + acceptance criteria; cancel = terminal CANCELLED transition; resume = bind this machine + path to a session; list = sessions this machine has bound (no sessionId needed)."
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Required for status / cancel / resume. Omit for list."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Optional cancellation reason (used with action=cancel)."
+          },
+          "projectPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the project directory on this machine. Required for action=resume."
+          },
+          "includeIdle": {
+            "type": "boolean",
+            "description": "For action=list. Default false: only active sessions touched in the last 24h are returned. Set true to see every session ever bound on this machine, including cancelled / completed / stale ones."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mist_runtime",
+      "description": "Run a read-only SQL query against a Mistflow project's PRODUCTION database. Use this for: inspecting data, debugging production behavior, counting rows, auditing user state. DO NOT use this for: implementing features, schema changes, or recurring workflows — those go through mist_plan / mist_implement. Writes (INSERT/UPDATE/DELETE/DDL) are rejected at the backend with a clear error. Set confirmProduction=true to acknowledge production access; every call is audited.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "query",
+            "description": "Always 'query' in v1.0. Other actions reserved for future versions."
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "Path to the Mistflow project (containing mistflow.json). Defaults to cwd."
+          },
+          "sql": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000,
+            "description": "Read-only SQL to execute. Must be a single SELECT / WITH / UNION query. INSERT/UPDATE/DELETE/DDL all rejected at the backend with a clear error."
+          },
+          "confirmProduction": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be exactly `true`. Explicit acknowledgment that the query runs against the project's production database. Every call is audited and visible in the dashboard."
+          }
+        },
+        "required": [
+          "action",
+          "sql",
+          "confirmProduction"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

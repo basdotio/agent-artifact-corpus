@@ -1,0 +1,2117 @@
+{
+  "package": "octocode-mcp",
+  "tools": [
+    {
+      "name": "githubSearchCode",
+      "description": "## Search GitHub code [EXTERNAL: GitHub API]\n  <when>\n  - Find code patterns | Locate files by path\n  - match=\"file\" -> content | match=\"path\" -> file names\n  - External research | Cross-repo patterns\n  </when>\n  <fromTool>\n  - githubSearchRepositories: After finding repo\n  - githubViewRepoStructure: After understanding layout\n  - packageSearch: After finding package\n  - self: Refine query | Switch match=file<->path\n  </fromTool>\n  <toTool>\n  - githubGetFileContent: Read matched files (text_matches for matchString)\n  - githubViewRepoStructure: Explore around matches\n  - githubSearchPullRequests: Find history\n  </toTool>\n  <gotchas>\n  - 1-2 filters safe. NEVER combine extension+filename+path\n  - path is strict prefix: \"pkg\" finds pkg/file, NOT parent/pkg/file\n  - Start lean: single filter -> verify -> add filters\n  - Prefer owner+repo for precision\n  - For packages: packageSearch first\n  </gotchas>\n  <examples>\n  - owner=\"facebook\", repo=\"react\", match=\"path\", keywordsToSearch=[\"utils\"]\n  - keywordsToSearch=[\"useState\"], match=\"file\"\n  - path=\"src/api\", extension=\"ts\", keywordsToSearch=[\"export\"]\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Research queries for githubSearchCode (1-3 queries per call for optimal resource management). Review schema before use for optimal results",
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "mainResearchGoal": {
+                  "description": "Main research objective (multiple queries can share the same main goal for semantic grouping and session tracking)",
+                  "type": "string"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "keywordsToSearch": {
+                  "description": "Search terms (1-5, AND logic). match=file returns text_matches[]",
+                  "minItems": 1,
+                  "maxItems": 5,
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "owner": {
+                  "description": "Repo owner (omit for cross-repo)",
+                  "type": "string"
+                },
+                "repo": {
+                  "description": "Repo name (use with owner)",
+                  "type": "string"
+                },
+                "extension": {
+                  "description": "Extension without dot (ts, js, py)",
+                  "type": "string"
+                },
+                "filename": {
+                  "description": "Filename pattern (case-insensitive)",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Directory path (strict prefix match)",
+                  "type": "string"
+                },
+                "match": {
+                  "description": "\"file\" (content) | \"path\" (names). Omit for both",
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "path"
+                  ]
+                },
+                "limit": {
+                  "description": "Max results (1-100). Default: 10",
+                  "default": 10,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "page": {
+                  "description": "Page (1-10). Default: 1",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "charOffset": {
+                  "description": "Character offset for output pagination after domain pagination has been applied.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Character budget for output pagination after domain pagination has been applied.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                }
+              },
+              "required": [
+                "id",
+                "mainResearchGoal",
+                "researchGoal",
+                "reasoning",
+                "keywordsToSearch"
+              ]
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "githubGetFileContent",
+      "description": "## Read GitHub file or download directory [EXTERNAL: GitHub API]\n  <when>\n  - Read file from known path (after discovery/search)\n  - External library implementation research\n  - Read configs, docs, or source from GitHub repos\n  - Download entire directory for local analysis (type=\"directory\")\n  </when>\n  <fromTool>\n  - githubSearchCode: Read from results (use text_matches for matchString)\n  - githubViewRepoStructure: Read discovered paths\n  - packageSearch: Read package source\n  - self: Expand context\n  </fromTool>\n  <toTool>\n  - githubSearchCode: Search imports/patterns\n  - githubSearchPullRequests: Find file history\n  - packageSearch: Look up imports\n  - localSearchCode/localViewStructure: After type=\"directory\" download\n  </toTool>\n  <modes>\n  - type=\"file\" (default): Returns content inline. Use matchString/startLine/fullContent\n  - type=\"directory\": Downloads all files to disk, returns localPath for local tools\n  </modes>\n  <gotchas>\n  - Choose ONE: matchString OR startLine+endLine OR fullContent (file mode only)\n  - Large files: Use matchString for token efficiency\n  - 300KB max (FILE_TOO_LARGE error)\n  - Branch: Use NAME (e.g., \"main\"), not SHA\n  - type=\"directory\" ignores content params (startLine, matchString, etc.)\n  </gotchas>\n  <examples>\n  - matchString=\"export function\", matchStringContextLines=20\n  - startLine=1, endLine=50\n  - fullContent=true (small configs only)\n  - type=\"directory\", path=\"src/utils\" (downloads dir for local analysis)\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Research queries for githubGetFileContent (1-3 queries per call for optimal resource management). Review schema before use for optimal results",
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "mainResearchGoal": {
+                  "description": "Main research objective (multiple queries can share the same main goal for semantic grouping and session tracking)",
+                  "type": "string"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "owner": {
+                  "description": "Repo owner",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "repo": {
+                  "description": "Repo name",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 150
+                },
+                "path": {
+                  "description": "File or directory path from root, no leading slash, exact case",
+                  "type": "string"
+                },
+                "branch": {
+                  "description": "Branch/tag/SHA (optional, defaults to default branch)",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "type": {
+                  "description": "Choose ONE: \"file\" (default) returns content inline; \"directory\" saves all files to disk and returns localPath. Directory mode requires ENABLE_LOCAL=true and ENABLE_CLONE=true, and is only available with the GitHub provider (not GitLab).",
+                  "default": "file",
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "directory"
+                  ]
+                },
+                "fullContent": {
+                  "description": "Return entire file (default: false). File mode only",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "startLine": {
+                  "description": "Start line (with endLine). File mode only",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "endLine": {
+                  "description": "End line (with startLine). File mode only",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "matchString": {
+                  "description": "Search pattern to extract. File mode only",
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "matchStringContextLines": {
+                  "description": "Context around matches (1-50). Default: 5",
+                  "default": 5,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "charOffset": {
+                  "description": "Pagination offset. Default: 0",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Max chars per page. Default: 20000",
+                  "type": "integer",
+                  "minimum": 50,
+                  "maximum": 50000
+                },
+                "forceRefresh": {
+                  "description": "When true, bypass the cache and force a fresh fetch even if a valid cached copy exists. Only relevant for type \"directory\".",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "mainResearchGoal",
+                "researchGoal",
+                "reasoning",
+                "owner",
+                "repo",
+                "path"
+              ]
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "githubViewRepoStructure",
+      "description": "## Display GitHub repo structure [EXTERNAL: GitHub API]\n  <when>\n  - Understand layout | Discover paths | Entry point\n  - Workflow: Root (depth=1) -> Drill (path+depth=2) -> Search/Read\n  </when>\n  <fromTool>\n  - githubSearchRepositories: After finding repo\n  - packageSearch: After finding package\n  - self: Drill into subdirectory\n  </fromTool>\n  <toTool>\n  - githubSearchCode: Search in discovered dirs\n  - githubGetFileContent: Read discovered files\n  - githubSearchPullRequests: Find changes\n  </toTool>\n  <gotchas>\n  - Start at root (path=\"\", depth=1) first\n  - depth=2 slow on large dirs - use on subdirs\n  - Monorepos: Check packages/, apps/, libs/\n  - Auto-filters noisy dirs (.git, node_modules, dist)\n  - Max 200 items - check summary.truncated\n  </gotchas>\n  <examples>\n  - path=\"\", depth=1 (root)\n  - path=\"src\", depth=2 (drill into source)\n  - path=\"packages/core\", depth=1 (monorepo)\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Research queries for githubViewRepoStructure (1-3 queries per call for optimal resource management). Review schema before use for optimal results",
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "mainResearchGoal": {
+                  "description": "Main research objective (multiple queries can share the same main goal for semantic grouping and session tracking)",
+                  "type": "string"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "owner": {
+                  "description": "Repo owner",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "repo": {
+                  "description": "Repo name",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 150
+                },
+                "branch": {
+                  "description": "Branch/tag/SHA (optional, defaults to default branch). Use main/master or get from githubSearchRepositories",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "path": {
+                  "description": "Directory path (empty for root)",
+                  "default": "",
+                  "type": "string"
+                },
+                "depth": {
+                  "description": "1 (current) or 2 (subdirs). Default: 1",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2
+                },
+                "entriesPerPage": {
+                  "description": "Entries per page (default: 50, max: 200)",
+                  "default": 50,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 200
+                },
+                "entryPageNumber": {
+                  "description": "Page number (1-based). Default: 1",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "charOffset": {
+                  "description": "Character offset for output pagination after entry pagination has been applied.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Character budget for output pagination after entry pagination has been applied.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                }
+              },
+              "required": [
+                "id",
+                "mainResearchGoal",
+                "researchGoal",
+                "reasoning",
+                "owner",
+                "repo"
+              ]
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "githubSearchRepositories",
+      "description": "## Search GitHub repositories [EXTERNAL: GitHub API]\n  <when>\n  - External research | Finding repos | Discovering projects\n  - Keywords for org repos, topics for open-source\n  - Known packages: use packageSearch first (faster)\n  </when>\n  <fromTool>\n  - packageSearch: After finding package, explore repo\n  - githubSearchCode: Found code? Find origin repo\n  - self: Refine query | Switch topics<->keywords\n  </fromTool>\n  <toTool>\n  - githubViewRepoStructure: Explore structure\n  - githubSearchCode: Search code\n  - githubGetFileContent: Read files\n  - githubSearchPullRequests: Find changes\n  </toTool>\n  <gotchas>\n  - Check pushedAt (code change) > updatedAt (meta change)\n  - stars >1000 filters noise (may hide new projects)\n  - Try synonyms: auth<->authentication, plugin<->extension\n  - Archived repos auto-excluded\n  </gotchas>\n  <examples>\n  - topicsToSearch=[\"typescript\", \"cli\"], stars=\">1000\"\n  - owner=\"bgauryy\", keywordsToSearch=[\"auth-service\"]\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Research queries for githubSearchRepositories (1-3 queries per call for optimal resource management). Review schema before use for optimal results",
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "mainResearchGoal": {
+                  "description": "Main research objective (multiple queries can share the same main goal for semantic grouping and session tracking)",
+                  "type": "string"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "keywordsToSearch": {
+                  "description": "Keywords (AND logic) across name, description, README",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "topicsToSearch": {
+                  "description": "GitHub topic tags",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "owner": {
+                  "description": "Repo owner/org to scope results",
+                  "type": "string"
+                },
+                "stars": {
+                  "description": "Stars filter: \">500\", \"100..500\"",
+                  "type": "string"
+                },
+                "size": {
+                  "description": "Repo size in KB with operators",
+                  "type": "string"
+                },
+                "created": {
+                  "description": "Date: \">=YYYY-MM-DD\" or \"YYYY-MM-DD..YYYY-MM-DD\"",
+                  "type": "string"
+                },
+                "updated": {
+                  "description": "Last metadata update (not code pushes)",
+                  "type": "string"
+                },
+                "match": {
+                  "description": "[\"name\"|\"description\"|\"readme\"]. Very restrictive",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "name",
+                      "description",
+                      "readme"
+                    ]
+                  }
+                },
+                "sort": {
+                  "description": "stars | forks | updated | best-match",
+                  "type": "string",
+                  "enum": [
+                    "forks",
+                    "stars",
+                    "updated",
+                    "best-match"
+                  ]
+                },
+                "limit": {
+                  "description": "Max repos (1-100). Default: 10",
+                  "default": 10,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "page": {
+                  "description": "Page (1-10). Default: 1",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "charOffset": {
+                  "description": "Character offset for output pagination after domain pagination has been applied.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Character budget for output pagination after domain pagination has been applied.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                }
+              },
+              "required": [
+                "id",
+                "mainResearchGoal",
+                "researchGoal",
+                "reasoning"
+              ]
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "githubSearchPullRequests",
+      "description": "## Search GitHub Pull Requests [EXTERNAL: GitHub API]\n  <when>\n  - Code archaeology: WHY was code written this way?\n  - Implementation history | Review changes | Find introducing PR\n  - Workflow: type=metadata first -> type=partialContent for files\n  </when>\n  <fromTool>\n  - githubSearchCode: Found code? Find PRs that changed it\n  - githubGetFileContent: Found file? Find change history\n  - self: Refine query | Widen date range\n  </fromTool>\n  <toTool>\n  - githubGetFileContent: Read current state\n  - githubSearchCode: Search patterns from patches\n  - self: Deep dive with prNumber + type=partialContent\n  </toTool>\n  <gotchas>\n  - prNumber ignores ALL other filters\n  - type=metadata first (fast), then partialContent\n  - Avoid fullContent on large PRs (token expensive)\n  - withComments=true for understanding WHY\n  </gotchas>\n  <examples>\n  - prNumber=123, type=\"metadata\"\n  - owner=\"org\", repo=\"repo\", state=\"closed\", merged=true\n  - prNumber=123, type=\"partialContent\", partialContentMetadata=[{\"file\": \"src/app.ts\"}]\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Research queries for githubSearchPullRequests (1-3 queries per call for optimal resource management). Review schema before use for optimal results",
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "mainResearchGoal": {
+                  "description": "Main research objective (multiple queries can share the same main goal for semantic grouping and session tracking)",
+                  "type": "string"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "query": {
+                  "description": "Search across title, body, comments (max 256 chars)",
+                  "type": "string"
+                },
+                "owner": {
+                  "description": "Repo owner",
+                  "type": "string"
+                },
+                "repo": {
+                  "description": "Repo name",
+                  "type": "string"
+                },
+                "prNumber": {
+                  "description": "Direct PR number (ignores other filters)",
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "state": {
+                  "description": "Filter by PR state. \"open\" = open PRs. \"closed\" = closed PRs (includes merged). \"merged\" = merged PRs only (shorthand for closed + merged:true).",
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "closed",
+                    "merged"
+                  ]
+                },
+                "assignee": {
+                  "description": "Assigned user",
+                  "type": "string"
+                },
+                "author": {
+                  "description": "PR author",
+                  "type": "string"
+                },
+                "commenter": {
+                  "description": "User who commented",
+                  "type": "string"
+                },
+                "involves": {
+                  "description": "User involved",
+                  "type": "string"
+                },
+                "mentions": {
+                  "description": "Mentions @user",
+                  "type": "string"
+                },
+                "review-requested": {
+                  "description": "Requested reviewer",
+                  "type": "string"
+                },
+                "reviewed-by": {
+                  "description": "Reviewer",
+                  "type": "string"
+                },
+                "label": {
+                  "description": "Label filter",
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  ]
+                },
+                "no-label": {
+                  "description": "No labels",
+                  "type": "boolean"
+                },
+                "no-milestone": {
+                  "description": "No milestone",
+                  "type": "boolean"
+                },
+                "no-project": {
+                  "description": "Not in project",
+                  "type": "boolean"
+                },
+                "no-assignee": {
+                  "description": "No assignee",
+                  "type": "boolean"
+                },
+                "head": {
+                  "description": "Source branch",
+                  "type": "string"
+                },
+                "base": {
+                  "description": "Target branch",
+                  "type": "string"
+                },
+                "created": {
+                  "description": "Date filter: \">=YYYY-MM-DD\" or \"YYYY-MM-DD..YYYY-MM-DD\"",
+                  "type": "string"
+                },
+                "updated": {
+                  "description": "Last update: \">=YYYY-MM-DD\"",
+                  "type": "string"
+                },
+                "closed": {
+                  "description": "Closed date: \">=YYYY-MM-DD\"",
+                  "type": "string"
+                },
+                "merged-at": {
+                  "description": "Merged date: \">=YYYY-MM-DD\"",
+                  "type": "string"
+                },
+                "comments": {
+                  "description": "Comment count: \">5\", \"10..20\"",
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(>=?\\d+|<=?\\d+|\\d+\\.\\.\\d+|\\d+)$"
+                    }
+                  ]
+                },
+                "reactions": {
+                  "description": "Reaction count filter",
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(>=?\\d+|<=?\\d+|\\d+\\.\\.\\d+|\\d+)$"
+                    }
+                  ]
+                },
+                "interactions": {
+                  "description": "Comments + reactions count",
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(>=?\\d+|<=?\\d+|\\d+\\.\\.\\d+|\\d+)$"
+                    }
+                  ]
+                },
+                "merged": {
+                  "description": "Merged status (requires state=closed)",
+                  "type": "boolean"
+                },
+                "draft": {
+                  "description": "Draft status",
+                  "type": "boolean"
+                },
+                "match": {
+                  "description": "[\"title\"|\"body\"|\"comments\"]. Default: all",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "title",
+                      "body",
+                      "comments"
+                    ]
+                  }
+                },
+                "sort": {
+                  "description": "created | updated | best-match",
+                  "type": "string",
+                  "enum": [
+                    "created",
+                    "updated",
+                    "best-match"
+                  ]
+                },
+                "order": {
+                  "description": "desc (default) | asc",
+                  "default": "desc",
+                  "type": "string",
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ]
+                },
+                "limit": {
+                  "description": "Max PRs (1-10). Default: 5",
+                  "default": 5,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "page": {
+                  "description": "Page (1-10). Default: 1",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "withComments": {
+                  "description": "Include discussions (token expensive)",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "withCommits": {
+                  "description": "Include commit details",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "type": {
+                  "description": "metadata | fullContent | partialContent. Default: metadata",
+                  "default": "metadata",
+                  "type": "string",
+                  "enum": [
+                    "metadata",
+                    "fullContent",
+                    "partialContent"
+                  ]
+                },
+                "partialContentMetadata": {
+                  "description": "[{\"file\": \"path\"}] or [{\"file\": \"path\", \"additions\": [1,2]}]",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "file": {
+                        "description": "File path within the PR diff to fetch partial content for",
+                        "type": "string"
+                      },
+                      "additions": {
+                        "description": "Specific addition line numbers to include from the diff",
+                        "type": "array",
+                        "items": {
+                          "type": "number"
+                        }
+                      },
+                      "deletions": {
+                        "description": "Specific deletion line numbers to include from the diff",
+                        "type": "array",
+                        "items": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "required": [
+                      "file"
+                    ]
+                  }
+                },
+                "charOffset": {
+                  "description": "",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                }
+              },
+              "required": [
+                "id",
+                "mainResearchGoal",
+                "researchGoal",
+                "reasoning"
+              ]
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "localSearchCode",
+      "description": "## Search code patterns [LOCAL: ripgrep] - START HERE for code questions\n  <when>\n  - Code questions, symbol lookups, pattern finding\n  - Find functions, classes, variables, imports, constants\n  - Get lineHint for LSP tools (if available)\n  </when>\n  <fromTool>\n  - localViewStructure: After understanding layout\n  - localFindFiles: After narrowing by metadata\n  - self: Refine pattern | Try variants\n  </fromTool>\n  <toTool>\n  If LSP available:\n  1. This tool gives file + lineHint\n  2. lspGotoDefinition(lineHint) -> locate definition\n  3. lspFindReferences -> all usages\n  4. lspCallHierarchy -> trace call flow\n  5. localGetFileContent -> read impl (last)\n  \n  Without LSP:\n  - localGetFileContent(matchString) for context\n  </toTool>\n  <gotchas>\n  - lineHint is 1-indexed (first line = 1)\n  - filesOnly=true for fast discovery\n  - type filter (ts, js, py) faster than globs\n  </gotchas>\n  <examples>\n  - path=\"/workspace/src\", pattern=\"function handleAuth\", type=\"ts\"\n  - path=\"/workspace\", pattern=\"export.*UserService\", perlRegex=true\n  - path=\"/workspace\", pattern=\"TODO\", filesOnly=true\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Queries for localSearchCode (1–5 per call). Review schema before use.",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "pattern": {
+                  "description": "Pattern/regex to search (required)",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "path": {
+                  "description": "Root directory (required)",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "mode": {
+                  "description": "discovery | paginated | detailed",
+                  "type": "string",
+                  "enum": [
+                    "discovery",
+                    "paginated",
+                    "detailed"
+                  ]
+                },
+                "fixedString": {
+                  "description": "Literal match (fast)",
+                  "type": "boolean"
+                },
+                "perlRegex": {
+                  "description": "PCRE2 (lookahead, backrefs)",
+                  "type": "boolean"
+                },
+                "smartCase": {
+                  "description": "Auto case-sensitivity (default: true)",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "caseInsensitive": {
+                  "description": "Force case-insensitive",
+                  "type": "boolean"
+                },
+                "caseSensitive": {
+                  "description": "Force case-sensitive",
+                  "type": "boolean"
+                },
+                "wholeWord": {
+                  "description": "Whole words only",
+                  "type": "boolean"
+                },
+                "invertMatch": {
+                  "description": "Non-matching lines",
+                  "type": "boolean"
+                },
+                "type": {
+                  "description": "File type (ts, js, py...)",
+                  "type": "string"
+                },
+                "include": {
+                  "description": "Include globs",
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "exclude": {
+                  "description": "Exclude globs",
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "excludeDir": {
+                  "description": "Exclude dirs",
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "noIgnore": {
+                  "description": "Ignore .gitignore",
+                  "type": "boolean"
+                },
+                "hidden": {
+                  "description": "Include hidden",
+                  "type": "boolean"
+                },
+                "followSymlinks": {
+                  "description": "Follow symlinks",
+                  "type": "boolean"
+                },
+                "filesOnly": {
+                  "description": "List files only (fast)",
+                  "type": "boolean"
+                },
+                "filesWithoutMatch": {
+                  "description": "Files without matches",
+                  "type": "boolean"
+                },
+                "count": {
+                  "description": "Count per file",
+                  "type": "boolean"
+                },
+                "countMatches": {
+                  "description": "Total count",
+                  "type": "boolean"
+                },
+                "contextLines": {
+                  "description": "Context (0-50)",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 50
+                },
+                "beforeContext": {
+                  "description": "Lines before",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 50
+                },
+                "afterContext": {
+                  "description": "Lines after",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 50
+                },
+                "matchContentLength": {
+                  "description": "Maximum characters per individual match snippet. Default 200, max 50000. Raise this when matches sit on very long lines (minified code, JSON blobs, generated SQL). Total output size is still bounded by charLength / responseCharLength budgets — prefer paginating via filePageNumber/matchesPerPage over truncating a single match.",
+                  "default": 200,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                },
+                "maxMatchesPerFile": {
+                  "description": "Max per file",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "maxFiles": {
+                  "description": "Max files",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "filesPerPage": {
+                  "description": "Per page (default: 10)",
+                  "default": 10,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "filePageNumber": {
+                  "description": "Page number",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "matchesPerPage": {
+                  "description": "Matches/file (default: 10)",
+                  "default": 10,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "charOffset": {
+                  "description": "Character offset for output pagination after file/match pagination has been applied.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Character budget for output pagination after file/match pagination has been applied.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                },
+                "multiline": {
+                  "description": "Multiline (slow)",
+                  "type": "boolean"
+                },
+                "multilineDotall": {
+                  "description": "Dot matches newlines",
+                  "type": "boolean"
+                },
+                "binaryFiles": {
+                  "description": "Binary handling",
+                  "default": "without-match",
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "without-match",
+                    "binary"
+                  ]
+                },
+                "includeStats": {
+                  "description": "Search stats",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "threads": {
+                  "description": "Thread count",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32
+                },
+                "mmap": {
+                  "description": "Memory mapping",
+                  "type": "boolean"
+                },
+                "noUnicode": {
+                  "description": "Disable Unicode",
+                  "type": "boolean"
+                },
+                "encoding": {
+                  "description": "Text encoding",
+                  "type": "string"
+                },
+                "sort": {
+                  "description": "path | modified | accessed | created",
+                  "default": "path",
+                  "type": "string",
+                  "enum": [
+                    "path",
+                    "modified",
+                    "accessed",
+                    "created"
+                  ]
+                },
+                "sortReverse": {
+                  "description": "Reverse sort",
+                  "type": "boolean"
+                },
+                "noMessages": {
+                  "description": "Suppress errors",
+                  "type": "boolean"
+                },
+                "lineRegexp": {
+                  "description": "Match entire lines",
+                  "type": "boolean"
+                },
+                "passthru": {
+                  "description": "Print all lines",
+                  "type": "boolean"
+                },
+                "debug": {
+                  "description": "Debug info",
+                  "type": "boolean"
+                },
+                "showFileLastModified": {
+                  "description": "Show timestamps",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "verbosity": {
+                  "description": "Choose response size. compact (default): files[] with path:line matches, snippets, match counts, search engine, and pagination; use for normal work and follow-up line hints. ultra: match/file counts plus the top path:line; files[] and match snippets are dropped; use first for broad/large probes when counts or top locations are enough. verbose: currently same as compact; skip it unless future docs say it adds detail. Drill-back from ultra: re-call with verbosity:\"compact\" or scope path/include to the top path.",
+                  "type": "string",
+                  "enum": [
+                    "compact",
+                    "verbose",
+                    "ultra"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "researchGoal",
+                "reasoning",
+                "pattern",
+                "path"
+              ]
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "localViewStructure",
+      "description": "## View directory structure [LOCAL: filesystem]\n  <when>\n  - Understand layout | Discover paths | Entry point\n  - Unfamiliar codebase: Start depth=1\n  - Workflow: Root (depth=1) -> Drill (depth=2) -> Search\n  </when>\n  <fromTool>\n  - self: Drill into subdirs\n  - localFindFiles: Filter by metadata\n  - localSearchCode: Search content\n  </fromTool>\n  <toTool>\n  Source dirs found:\n  1. localSearchCode(pattern) -> lineHint\n  2. lspGotoDefinition (if LSP available)\n  3. lspCallHierarchy/lspFindReferences\n  4. localGetFileContent (last)\n  </toTool>\n  <gotchas>\n  - depth=2 slow on large dirs - use on subdirs\n  - Auto-excludes: node_modules, .git, dist\n  - Monorepos: Check packages/, apps/, libs/\n  </gotchas>\n  <examples>\n  - path=\"/workspace\", depth=1 (root)\n  - path=\"/workspace/src\", depth=2 (drill)\n  - pattern=\"*.ts\", filesOnly=true\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Queries for localViewStructure (1–5 per call). Review schema before use.",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Directory path (required)",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "details": {
+                  "description": "Show perms, size, dates",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "hidden": {
+                  "description": "Show hidden",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "humanReadable": {
+                  "description": "Human sizes (default: true)",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "sortBy": {
+                  "description": "name | size | time | extension",
+                  "default": "time",
+                  "type": "string",
+                  "enum": [
+                    "name",
+                    "size",
+                    "time",
+                    "extension"
+                  ]
+                },
+                "reverse": {
+                  "description": "Reverse sort",
+                  "type": "boolean"
+                },
+                "entriesPerPage": {
+                  "description": "Per page (default: 20)",
+                  "default": 20,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "entryPageNumber": {
+                  "description": "Page number",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "pattern": {
+                  "description": "Name filter (glob/substring)",
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "directoriesOnly": {
+                  "description": "Dirs only",
+                  "type": "boolean"
+                },
+                "filesOnly": {
+                  "description": "Files only",
+                  "type": "boolean"
+                },
+                "extension": {
+                  "description": "Filter by extension",
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "extensions": {
+                  "description": "Multiple extensions",
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "depth": {
+                  "description": "Depth (1-5). Default: 1",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5
+                },
+                "recursive": {
+                  "description": "Recursive tree",
+                  "type": "boolean"
+                },
+                "limit": {
+                  "description": "Max entries",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000
+                },
+                "charOffset": {
+                  "description": "",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Character budget for output pagination of this query. Unified at 50000 across local tools. Pair with charOffset for explicit pagination instead of truncating responses.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                },
+                "showFileLastModified": {
+                  "description": "Show timestamps",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "verbosity": {
+                  "description": "Choose response size. compact (default): entries[] with names, types, size/modified metadata, summary, and pagination; use for normal work and follow-up line hints. ultra: entry/file/dir counts and summary; entries[] is dropped; use first for broad/large probes when counts or top locations are enough. verbose: currently same as compact; skip it unless future docs say it adds detail. Drill-back from ultra: re-call with verbosity:\"compact\" and entryPageNumber/entriesPerPage.",
+                  "type": "string",
+                  "enum": [
+                    "compact",
+                    "verbose",
+                    "ultra"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "researchGoal",
+                "reasoning",
+                "path"
+              ]
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "localFindFiles",
+      "description": "## Find files by metadata [LOCAL: filesystem]\n  <when>\n  - Find by name, time, size, permissions\n  - Scope narrowing before content search\n  - Recent changes: modifiedWithin='7d'\n  - NOT for content - use localSearchCode\n  </when>\n  <fromTool>\n  - localViewStructure: After structure discovery\n  - localSearchCode: Next step for content\n  - self: Refine filters\n  </fromTool>\n  <toTool>\n  Source files found:\n  1. localSearchCode(pattern) -> lineHint\n  2. lspGotoDefinition (if LSP available)\n  3. lspCallHierarchy/lspFindReferences\n  4. localGetFileContent (last)\n  \n  Config/docs: localGetFileContent directly\n  </toTool>\n  <gotchas>\n  - Faster than content search (metadata indexing)\n  - excludeDir for noise (node_modules, dist, .git)\n  - Time: '7d', '2h', '30m'\n  </gotchas>\n  <examples>\n  - path=\"/workspace/src\", name=\"*.ts\", modifiedWithin=\"7d\"\n  - path=\"/workspace\", iname=\"readme\", type=\"f\"\n  - path=\"/workspace\", sizeGreater=\"10M\", excludeDir=[\"node_modules\"]\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Queries for localFindFiles (1–5 per call). Review schema before use.",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Starting directory (required)",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "maxDepth": {
+                  "description": "Max depth (1-10)",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "minDepth": {
+                  "description": "Min depth (0-10)",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10
+                },
+                "name": {
+                  "description": "Name pattern (*.js)",
+                  "type": "string"
+                },
+                "iname": {
+                  "description": "Case-insensitive pattern",
+                  "type": "string"
+                },
+                "names": {
+                  "description": "Multiple patterns (OR)",
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "pathPattern": {
+                  "description": "Path pattern",
+                  "type": "string"
+                },
+                "regex": {
+                  "description": "Regex pattern",
+                  "type": "string"
+                },
+                "regexType": {
+                  "description": "posix-egrep | posix-extended | posix-basic",
+                  "type": "string",
+                  "enum": [
+                    "posix-egrep",
+                    "posix-extended",
+                    "posix-basic"
+                  ]
+                },
+                "type": {
+                  "description": "f | d | l | b | c | p | s",
+                  "type": "string",
+                  "enum": [
+                    "f",
+                    "d",
+                    "l",
+                    "b",
+                    "c",
+                    "p",
+                    "s"
+                  ]
+                },
+                "empty": {
+                  "description": "Empty only",
+                  "type": "boolean"
+                },
+                "modifiedWithin": {
+                  "description": "Modified within (7d, 2h)",
+                  "type": "string"
+                },
+                "modifiedBefore": {
+                  "description": "Modified before",
+                  "type": "string"
+                },
+                "accessedWithin": {
+                  "description": "Accessed within",
+                  "type": "string"
+                },
+                "sizeGreater": {
+                  "description": "Size > (10M)",
+                  "type": "string"
+                },
+                "sizeLess": {
+                  "description": "Size < (1M)",
+                  "type": "string"
+                },
+                "permissions": {
+                  "description": "Permission (755)",
+                  "type": "string"
+                },
+                "executable": {
+                  "description": "Executable only",
+                  "type": "boolean"
+                },
+                "readable": {
+                  "description": "Readable only",
+                  "type": "boolean"
+                },
+                "writable": {
+                  "description": "Writable only",
+                  "type": "boolean"
+                },
+                "excludeDir": {
+                  "description": "Exclude dirs (default: node_modules, dist, .git, coverage, build, .next)",
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "sortBy": {
+                  "description": "Sort results: modified (default) | size | name | path",
+                  "default": "modified",
+                  "type": "string",
+                  "enum": [
+                    "modified",
+                    "size",
+                    "name",
+                    "path"
+                  ]
+                },
+                "limit": {
+                  "description": "Max results",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000
+                },
+                "details": {
+                  "description": "Include details (default: true)",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "filesPerPage": {
+                  "description": "Per page (default: 20)",
+                  "default": 20,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "filePageNumber": {
+                  "description": "Page number",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "charOffset": {
+                  "description": "",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Character budget for output pagination of this query. Unified at 50000 across local tools. Pair with charOffset for explicit pagination instead of truncating responses.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                },
+                "showFileLastModified": {
+                  "description": "Show timestamps",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "verbosity": {
+                  "description": "Choose response size. compact (default): files[] with paths, type, size, permissions, timestamps, and pagination; use for normal work and follow-up line hints. ultra: file/dir counts plus the newest path; files[] is dropped; use first for broad/large probes when counts or top locations are enough. verbose: currently same as compact; skip it unless future docs say it adds detail. Drill-back from ultra: re-call with verbosity:\"compact\" or narrow name/type/time filters.",
+                  "type": "string",
+                  "enum": [
+                    "compact",
+                    "verbose",
+                    "ultra"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "researchGoal",
+                "reasoning",
+                "path"
+              ]
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "localGetFileContent",
+      "description": "## Read file content [LOCAL: filesystem]\n  <when>\n  - Read implementation after locating with search/LSP\n  - Read config/docs/non-code files directly\n  - Get context around specific patterns with matchString\n  </when>\n  <fromTool>\n  - localSearchCode: Found file location\n  - lspGotoDefinition: Located definition (if LSP available)\n  - lspFindReferences/lspCallHierarchy: After analysis\n  - Direct read OK for: configs, docs, .json, .md, .yaml\n  </fromTool>\n  <flow_questions>\n  If LSP available, prefer LSP tools for:\n  - \"Who calls this?\" -> lspCallHierarchy(incoming)\n  - \"Where is X used?\" -> lspFindReferences\n  - \"Trace flow\" -> lspCallHierarchy chain\n  </flow_questions>\n  <gotchas>\n  - Source code: Use localSearchCode first, LSP if available\n  - Large files: Use matchString for token efficiency\n  - Known ranges: Use startLine/endLine\n  - Small configs: fullContent=true is OK\n  </gotchas>\n  <examples>\n  - path=\"/workspace/src/services/user.ts\", matchString=\"class UserService\", matchStringContextLines=10\n  - path=\"/workspace/src/utils.ts\", startLine=50, endLine=100 (known range)\n  - path=\"/workspace/config.json\", fullContent=true (small configs only)\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Queries for localGetFileContent (1–5 per call). Review schema before use.",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "File path (required)",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "fullContent": {
+                  "description": "Return entire file",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "startLine": {
+                  "description": "Start line (1-indexed)",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "endLine": {
+                  "description": "End line (1-indexed)",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "matchString": {
+                  "description": "Search pattern with context",
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "matchStringContextLines": {
+                  "description": "Context lines (default: 5)",
+                  "default": 5,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "matchStringIsRegex": {
+                  "description": "Regex pattern",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "matchStringCaseSensitive": {
+                  "description": "Case-sensitive",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "charOffset": {
+                  "description": "Pagination offset",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Max chars",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000
+                },
+                "verbosity": {
+                  "description": "Choose response size. compact (default): content for the requested file/slice plus line ranges, matchRanges, partial flag, and pagination; use for normal work and follow-up line hints. ultra: line/token estimates and ranges with content set to empty; use first for broad/large probes when counts or top locations are enough. verbose: currently same as compact; skip it unless future docs say it adds detail. Drill-back from ultra: re-call with verbosity:\"compact\", matchString, or a startLine/endLine range.",
+                  "type": "string",
+                  "enum": [
+                    "compact",
+                    "verbose",
+                    "ultra"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "researchGoal",
+                "reasoning",
+                "path"
+              ]
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "lspGotoDefinition",
+      "description": "## Navigate to symbol definition [LOCAL: LSP]\n  REQUIRES lineHint - call localSearchCode FIRST to get line number\n  \n  <when>\n  - Find where function/class/variable/type is DEFINED\n  - Jump from usage to declaration | Trace import to source\n  - Flow: SEARCH -> LOCATE (this) -> ANALYZE -> READ\n  </when>\n  <prerequisite>\n  - Need lineHint from localSearchCode (1-indexed)\n  - symbolName must be EXACT (case-sensitive)\n  </prerequisite>\n  <fromTool>\n  - localSearchCode: Provides lineHint (required)\n  - self: Chain definitions (follow imports)\n  - lspFindReferences/lspCallHierarchy: Jump to locations\n  </fromTool>\n  <toTool>\n  - lspFindReferences: Find ALL usages\n  - lspCallHierarchy(incoming): Find callers\n  - lspCallHierarchy(outgoing): Find callees\n  - localGetFileContent: Read impl (last step)\n  </toTool>\n  <gotchas>\n  - lineHint required (1-indexed from localSearchCode)\n  - symbolName must be EXACT (no parentheses)\n  - Tool searches +/-2 lines if not exact match\n  - External package? packageSearch -> githubGetFileContent\n  </gotchas>\n  <examples>\n  - uri=\"src/services/auth.ts\", symbolName=\"handleLogin\", lineHint=42\n  - uri=\"src/utils/index.ts\", symbolName=\"formatDate\", lineHint=15\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Queries for lspGotoDefinition (1–5 per call). Review schema before use.",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "uri": {
+                  "description": "File path. Example: \"src/utils.ts\"",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "symbolName": {
+                  "description": "EXACT symbol text. No parens, no partial matches",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "lineHint": {
+                  "description": "1-indexed line number. Tool searches +/-2 lines",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "orderHint": {
+                  "description": "0-indexed occurrence if multiple on line. Default: 0 Counts only code occurrences on the exact line (0-indexed); string/comment text is ignored.",
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "contextLines": {
+                  "description": "Context lines (0-20). Default: 5",
+                  "default": 5,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 20
+                },
+                "charOffset": {
+                  "description": "Character offset for query-level output pagination. Use when this LSP result was auto-paginated and you need the next window.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Character budget for query-level output pagination window.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                },
+                "verbosity": {
+                  "description": "Choose response size. compact (default): definition locations with ranges, snippets, resolved position, and semantic/fallback mode; use for normal work and follow-up line hints. ultra: definition count plus top path:line:column; location content is empty; use first for broad/large probes when counts or top locations are enough. verbose: currently same as compact; skip it unless future docs say it adds detail. Drill-back from ultra: re-call with verbosity:\"compact\" for snippets around the location.",
+                  "type": "string",
+                  "enum": [
+                    "compact",
+                    "verbose",
+                    "ultra"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "researchGoal",
+                "reasoning",
+                "uri",
+                "symbolName",
+                "lineHint"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "lspFindReferences",
+      "description": "## Find all usages of a symbol [LOCAL: LSP]\n  REQUIRES lineHint - call localSearchCode FIRST to get line number\n  \n  <when>\n  - \"Where is X used?\" - ALL usages of function/class/variable/type\n  - Impact analysis - what breaks if I change this?\n  - Semantic search (better than text matching)\n  </when>\n  <fromTool>\n  - localSearchCode: Get lineHint first (required)\n  - lspGotoDefinition: After locating, find usages\n  - self: Paginate (page=2,3...)\n  </fromTool>\n  <toTool>\n  - lspCallHierarchy: For call relationships (functions)\n  - lspGotoDefinition: Jump to reference location\n  - localGetFileContent: Read context (last step)\n  </toTool>\n  <vs_lspCallHierarchy>\n  - lspFindReferences: ALL usages (calls, assignments, type refs)\n  - lspCallHierarchy: CALL relationships only (functions)\n  </vs_lspCallHierarchy>\n  <gotchas>\n  - lineHint required (1-indexed from localSearchCode)\n  - symbolName must be EXACT (case-sensitive)\n  - includeDeclaration=false for usages only\n  - Finds dynamic usages text search misses\n  </gotchas>\n  <examples>\n  - uri=\"src/types.ts\", symbolName=\"UserConfig\", lineHint=15\n  - uri=\"src/utils.ts\", symbolName=\"formatDate\", lineHint=42, includeDeclaration=false\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Queries for lspFindReferences (1–5 per call). Review schema before use.",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "uri": {
+                  "description": "File path containing the symbol. Example: \"src/api/client.ts\"",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "symbolName": {
+                  "description": "EXACT symbol text. No parens, no partial matches",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "lineHint": {
+                  "description": "1-indexed line number. Tool searches +/-2 lines",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "orderHint": {
+                  "description": "0-indexed occurrence if multiple on line. Default: 0",
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "includeDeclaration": {
+                  "description": "Include definition in results. Default: true",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "contextLines": {
+                  "description": "Context lines (0-10). Default: 2",
+                  "default": 2,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10
+                },
+                "referencesPerPage": {
+                  "description": "Max references per page (1-50). Default: 20",
+                  "default": 20,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "page": {
+                  "description": "Page number (1-indexed). Default: 1",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "includePattern": {
+                  "description": "Glob patterns to include (e.g. [\"**/*.test.ts\", \"**/src/**\"]). Only matching files returned",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "excludePattern": {
+                  "description": "Glob patterns to exclude (e.g. [\"**/node_modules/**\", \"**/dist/**\"]). Matching files removed",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "verbosity": {
+                  "description": "Choose response size. compact (default): reference locations with ranges, snippets, definition markers, pagination, and semantic/fallback mode; use for normal work and follow-up line hints. ultra: reference counts plus path:line refs, or a per-file rollup with groupByFile; snippets are dropped; use first for broad/large probes when counts or top locations are enough. verbose: currently same as compact; skip it unless future docs say it adds detail. Drill-back from ultra: re-call with verbosity:\"compact\", groupByFile, or includePattern.",
+                  "type": "string",
+                  "enum": [
+                    "compact",
+                    "verbose",
+                    "ultra"
+                  ]
+                },
+                "groupByFile": {
+                  "description": "Roll up references into per-file counts ({ \"src/foo.ts\": 7 }) instead of returning individual locations. Less tokens than the full locations list — use for impact-analysis (\"is this used widely?\"). Drill-back: re-query with `includePattern` scoped to the top file(s).",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "researchGoal",
+                "reasoning",
+                "uri",
+                "symbolName",
+                "lineHint"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "lspCallHierarchy",
+      "description": "## Trace function call relationships [LOCAL: LSP]\n  REQUIRES lineHint - call localSearchCode FIRST to get line number\n  \n  <when>\n  - \"Who calls this?\" -> direction=\"incoming\"\n  - \"What does this call?\" -> direction=\"outgoing\"\n  - Trace code/data flow | Impact analysis\n  </when>\n  <prerequisite>\n  - Need lineHint from localSearchCode (1-indexed)\n  - Symbol must be function/method (for types/variables use lspFindReferences)\n  </prerequisite>\n  <fromTool>\n  - localSearchCode: Provides lineHint (required)\n  - lspGotoDefinition: Locate definition first\n  - self: Chain to trace deeper\n  </fromTool>\n  <toTool>\n  - self: Chain on callers/callees for full flow\n  - lspGotoDefinition: Jump to call site\n  - localGetFileContent: Read impl (last step)\n  </toTool>\n  <flow_pattern>\n  Flow tracing: localSearchCode -> lspGotoDefinition -> lspCallHierarchy(outgoing) -> chain until target\n  INCOMING: A <- [callers] | OUTGOING: A -> [callees]\n  </flow_pattern>\n  <vs_lspFindReferences>\n  - lspCallHierarchy: CALL relationships (function calls)\n  - lspFindReferences: ALL usages (calls, assignments, type refs)\n  </vs_lspFindReferences>\n  <gotchas>\n  - lineHint required (1-indexed from localSearchCode)\n  - depth=1 recommended (chain manually for deeper)\n  - Works cross-file, traces imports automatically\n  - Semantic: actual calls, not string matches\n  </gotchas>\n  <examples>\n  - direction=\"incoming\", uri=\"src/api.ts\", symbolName=\"handleRequest\", lineHint=50\n  - direction=\"outgoing\", uri=\"src/service.ts\", symbolName=\"processData\", lineHint=25\n  </examples>",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "queries": {
+            "description": "Queries for lspCallHierarchy (1–5 per call). Review schema before use.",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Stable query identifier used to match each result to its input query. Required for every query. Use a short meaningful string like \"react_hooks_search\" or \"router_prs\".",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                "researchGoal": {
+                  "description": "Specific information this query seeks",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "description": "Why this query helps achieve the goal",
+                  "type": "string"
+                },
+                "uri": {
+                  "description": "File path containing the function. Example: \"src/api/handler.ts\"",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "symbolName": {
+                  "description": "EXACT function/method name. No parens",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "lineHint": {
+                  "description": "1-indexed line number where function is defined or called",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "orderHint": {
+                  "description": "0-indexed occurrence if multiple on line. Default: 0",
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "direction": {
+                  "description": "\"incoming\" = callers, \"outgoing\" = callees",
+                  "type": "string",
+                  "enum": [
+                    "incoming",
+                    "outgoing"
+                  ]
+                },
+                "depth": {
+                  "description": "Recursion depth (1-3). Default: 1",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3
+                },
+                "contextLines": {
+                  "description": "Context lines (0-10). Default: 2",
+                  "default": 2,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10
+                },
+                "callsPerPage": {
+                  "description": "Max call sites (1-30). Default: 15",
+                  "default": 15,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 30
+                },
+                "page": {
+                  "description": "Page number (1-indexed). Default: 1",
+                  "default": 1,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "charOffset": {
+                  "description": "Character offset for query-level output pagination. Use when this LSP result was auto-paginated and you need the next window.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "charLength": {
+                  "description": "Character budget for query-level output pagination window.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50000
+                },
+                "verbosity": {
+                  "description": "Choose response size. compact (default): target item plus caller/callee nodes, snippets, call ranges, pagination, and semantic/fallback mode; use for normal work and follow-up line hints. ultra: edge counts and a compact A -> B edge list; node content and call arrays are dropped; use first for broad/large probes when counts or top locations are enough. verbose: currently same as compact; skip it unless future docs say it adds detail. Drill-back from ultra: re-call with verbosity:\"compact\" for full per-node context.",
+                  "type": "string",
+                  "enum": [
+                    "compact",
+                    "verbose",
+                    "ultra"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "researchGoal",
+                "reasoning",
+                "uri",
+                "symbolName",
+                "lineHint",
+                "direction"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "responseCharOffset": {
+            "description": "Character offset for top-level bulk response pagination across results[]. Use when a multi-query response was auto-paginated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "responseCharLength": {
+            "description": "Character budget for top-level bulk response pagination across results[]. Overrides the shared default for this call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

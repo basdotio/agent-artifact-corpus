@@ -1,0 +1,1272 @@
+{
+  "package": "guardvibe",
+  "tools": [
+    {
+      "name": "check_code",
+      "description": "Analyze inline code for security vulnerabilities (OWASP Top 10, XSS, SQL injection, insecure patterns). Pass code as a string parameter. For scanning files on disk, use scan_file instead. Example: check_code({code: 'app.get(...)', language: 'javascript'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code snippet to analyze"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "javascript",
+              "typescript",
+              "python",
+              "go",
+              "dockerfile",
+              "html",
+              "sql",
+              "shell",
+              "yaml",
+              "terraform",
+              "firestore"
+            ],
+            "description": "Programming language of the code"
+          },
+          "framework": {
+            "type": "string",
+            "description": "Framework context (e.g. express, nextjs, fastapi, react, django)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format: markdown (human) or json (machine-readable for agents)"
+          }
+        },
+        "required": [
+          "code",
+          "language"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_project",
+      "description": "Scan multiple files for security vulnerabilities and generate a project-wide security report with a security score. Use this for comprehensive security audits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Relative file path (e.g. src/app.ts)"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "File source code"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "description": "List of files to scan: [{path, content}]"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format: markdown (human) or json (machine-readable for agents)"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_security_docs",
+      "description": "Get security best practices and remediation guidance for a specific topic, framework, or vulnerability type. Covers OWASP Top 10, framework-specific hardening (Next.js, Supabase, Stripe), and secure coding patterns. Returns actionable guidance with code examples.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Security topic to look up (e.g. \"express authentication\", \"sql injection prevention\", \"nextjs csrf\", \"react xss\", \"owasp top 10\")"
+          }
+        },
+        "required": [
+          "topic"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_dependencies",
+      "description": "Check npm, PyPI, or Go packages for known security vulnerabilities (CVEs) using the OSV database. Use this before adding new dependencies or to audit existing ones.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Package name (e.g. lodash, express, django)"
+                },
+                "version": {
+                  "type": "string",
+                  "description": "Package version (e.g. 4.17.20)"
+                },
+                "ecosystem": {
+                  "type": "string",
+                  "enum": [
+                    "npm",
+                    "PyPI",
+                    "Go"
+                  ],
+                  "default": "npm",
+                  "description": "Package ecosystem"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "additionalProperties": false
+            },
+            "description": "List of packages to check: [{name, version, ecosystem}]"
+          }
+        },
+        "required": [
+          "packages"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_directory",
+      "description": "Scan all files in a directory on disk for security vulnerabilities. Pass a directory path — reads files from filesystem. Returns security score (A-F) and findings. Results may be truncated for large projects — check fileRanking in JSON output for top files. Example: scan_directory({path: './src'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory path to scan (e.g. './src', '.')"
+          },
+          "recursive": {
+            "type": "boolean",
+            "default": true,
+            "description": "Scan subdirectories"
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Additional directories to exclude"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format: markdown (human) or json (machine-readable for agents)"
+          },
+          "baseline": {
+            "type": "string",
+            "description": "Path to a previous scan JSON output file for baseline comparison (new/fixed/unchanged findings)"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_dependencies",
+      "description": "Parse a lockfile or manifest (package.json, package-lock.json, requirements.txt, go.mod) and check all dependencies for known CVEs via the OSV database. Reads the file directly. Use this after installing dependencies, during CI, or when auditing existing projects for vulnerable packages.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "manifest_path": {
+            "type": "string",
+            "description": "Path to manifest file (e.g. 'package.json', 'requirements.txt', 'go.mod')"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format: markdown (human) or json (machine-readable for agents)"
+          }
+        },
+        "required": [
+          "manifest_path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_secrets",
+      "description": "Scan files and directories for leaked secrets, API keys, tokens, and credentials. Detects high-entropy strings, known API key patterns (AWS, Stripe, OpenAI, GitHub, Supabase), exposed .env files, and missing .gitignore coverage. Returns findings with exact line numbers and remediation steps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path to scan"
+          },
+          "recursive": {
+            "type": "boolean",
+            "default": true,
+            "description": "Scan subdirectories"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format: markdown (human) or json (machine-readable for agents)"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_staged",
+      "description": "Scan git-staged files for security vulnerabilities before committing. Run this before every commit to catch issues early. No input needed — automatically reads staged files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format: markdown (human) or json (machine-readable for agents)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compliance_report",
+      "description": "Map security findings to compliance controls (SOC2, PCI-DSS, HIPAA, GDPR, ISO27001, EUAIACT). Scans a directory and groups issues by control. Output includes a summary section at the top; for large projects, findings are truncated to top 50. Use mode=executive for C-level summary. Example: compliance_report({path: '.', framework: 'SOC2'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory to scan"
+          },
+          "framework": {
+            "type": "string",
+            "enum": [
+              "SOC2",
+              "PCI-DSS",
+              "HIPAA",
+              "GDPR",
+              "ISO27001",
+              "EUAIACT",
+              "all"
+            ],
+            "description": "Compliance framework"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format: markdown (human) or json (machine-readable for agents)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "full",
+              "executive"
+            ],
+            "default": "full",
+            "description": "Report mode: full (detailed) or executive (C-level summary)"
+          }
+        },
+        "required": [
+          "path",
+          "framework"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "export_sarif",
+      "description": "Scan a directory and export results in SARIF v2.1.0 format for CI/CD integration (GitHub, GitLab, Azure DevOps). Returns JSON string.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory to scan"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_package_health",
+      "description": "Check npm packages for typosquat risk, maintenance status, adoption metrics, and deprecation. Use this before adding new dependencies to catch suspicious or risky packages.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of package names to check (e.g. ['lodash', 'expres', 'react-qeury'])"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format: markdown (human) or json (machine-readable for agents)"
+          }
+        },
+        "required": [
+          "packages"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "fix_code",
+      "description": "Pass vulnerable code as a string and get fix suggestions with before/after patches. Returns structured edit instructions (line numbers, severity, confidence). Use verify_fix afterwards to confirm the fix resolved the issue. Example: fix_code({code: '...', language: 'typescript'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code snippet to analyze and fix"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "javascript",
+              "typescript",
+              "python",
+              "go",
+              "dockerfile",
+              "html",
+              "sql",
+              "shell",
+              "yaml",
+              "terraform",
+              "firestore"
+            ],
+            "description": "Programming language of the code"
+          },
+          "framework": {
+            "type": "string",
+            "description": "Framework context (e.g. express, nextjs, fastapi, react, django)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "json",
+            "description": "Output format: json (for agent auto-fix) or markdown (human review)"
+          }
+        },
+        "required": [
+          "code",
+          "language"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "audit_config",
+      "description": "Audit application config files (next.config, middleware, .env, vercel.json) for cross-file security gaps: missing headers, unprotected routes, exposed secrets. NOT the same as guardvibe_doctor which checks AI host security (MCP configs, hooks). Example: audit_config({path: '.'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Project root directory to audit"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "generate_policy",
+      "description": "Auto-detect project stack (Next.js, Supabase, Stripe, Clerk, Prisma, etc.) and generate tailored security policies. Outputs ready-to-use CSP headers, CORS configuration, Supabase RLS policies, rate limiting rules, and security headers based on detected frameworks.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Project root directory to scan"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "review_pr",
+      "description": "Review a pull request for security issues. Scans only changed lines (diff-only mode) and produces output for GitHub Check Runs, PR comments, or inline annotations. Supports severity gating to block PRs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": ".",
+            "description": "Repository root path"
+          },
+          "base": {
+            "type": "string",
+            "default": "main",
+            "description": "Base branch to diff against"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json",
+              "annotations"
+            ],
+            "default": "markdown",
+            "description": "Output: markdown (PR comment), json (structured), annotations (GitHub Check Runs)"
+          },
+          "diff_only": {
+            "type": "boolean",
+            "default": true,
+            "description": "Only report findings in changed lines (true) or all findings in changed files (false)"
+          },
+          "fail_on": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "none"
+            ],
+            "default": "high",
+            "description": "Block PR if findings at this severity or above exist"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_secrets_history",
+      "description": "Scan git history for leaked secrets. Finds secrets that were committed in the past — even if they were later removed. Marks each finding as 'active' (still in code) or 'removed' (in git history only, needs rotation).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Repository root path"
+          },
+          "max_commits": {
+            "type": "number",
+            "default": 100,
+            "description": "Maximum number of commits to scan"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "policy_check",
+      "description": "Check project against compliance policies defined in .guardviberc. Use this in CI/CD pipelines to enforce security gates, or before releases to verify compliance requirements are met. Validates custom framework requirements, severity thresholds, required controls, and risk exceptions. Returns pass/fail status with detailed findings per control.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Project root directory"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "analyze_dataflow",
+      "description": "Track user input (request body, URL params, form data) flowing into dangerous sinks (SQL queries, eval, file operations, redirects). Detects injection vulnerabilities that regex rules miss by following variable assignments through code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Code to analyze for tainted data flows"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "javascript",
+              "typescript"
+            ],
+            "description": "Language (JS/TS only)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "code",
+          "language"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "analyze_cross_file_dataflow",
+      "description": "Track user input flowing across module boundaries — detects injection vulnerabilities spanning multiple files. Pass files array with file contents. For single-file analysis, use analyze_dataflow instead. Example: analyze_cross_file_dataflow({files: [{path: 'src/api.ts', content: '...'}, {path: 'src/db.ts', content: '...'}]})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Project directory path. When provided, auto-discovers all JS/TS files — no need to pass file contents manually."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Relative file path (e.g. src/lib/db.ts)"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "File source code"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "default": [],
+            "description": "List of files to analyze (ignored when path is provided)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_command",
+      "description": "Analyze a shell command for security risks before execution. Returns allow/ask/deny verdict with blast radius, safer alternatives, and context-aware risk assessment. Detects: destructive ops, git history rewrites, secret exposure, data exfiltration, deploy triggers, privilege escalation, database drops.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command to analyze"
+          },
+          "cwd": {
+            "type": "string",
+            "default": ".",
+            "description": "Current working directory"
+          },
+          "branch": {
+            "type": "string",
+            "description": "Current git branch (for branch-specific risk)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "json",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_config_change",
+      "description": "Compare before/after versions of a config file to detect security downgrades: CORS relaxation, CSP weakening, HSTS removal, debug mode, cookie flag changes, TLS disabling, new hardcoded secrets, removed security headers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "before": {
+            "type": "string",
+            "description": "Previous config file content"
+          },
+          "after": {
+            "type": "string",
+            "description": "New config file content"
+          },
+          "file_path": {
+            "type": "string",
+            "default": "config",
+            "description": "Config file path for context"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "json",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "before",
+          "after"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "repo_security_posture",
+      "description": "Analyze a repository's overall security posture. Maps sensitive areas (auth, payments, PII, admin, API, infrastructure), identifies high-risk workflows, recommends guard mode, and lists priority fixes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Repository root path"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "explain_remediation",
+      "description": "Pass a GuardVibe rule ID (e.g. VG154) to get a detailed explanation: risk assessment, exploit scenario, minimum fix, secure alternative, and test strategy. Optionally pass the affected code snippet for context-aware guidance. Example: explain_remediation({rule_id: 'VG402'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "description": "GuardVibe rule ID (e.g. VG001, VG402)"
+          },
+          "code": {
+            "type": "string",
+            "description": "Affected code snippet for context"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "rule_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_file",
+      "description": "Scan a single file on disk by path for security vulnerabilities. Pass a file path — the tool reads the file itself. For inline code snippets, use check_code instead. Example: scan_file({file_path: 'src/api/route.ts'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or relative path to the file to scan"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "json",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_changed_files",
+      "description": "Scan only files that have changed since a given git ref (branch, commit, or HEAD~N). Ideal for PR checks, pre-push hooks, and incremental CI. Returns findings only for modified/added files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": ".",
+            "description": "Repository root path"
+          },
+          "base": {
+            "type": "string",
+            "default": "HEAD~1",
+            "description": "Git ref to diff against (e.g. 'main', 'HEAD~3', commit SHA)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "security_stats",
+      "description": "Show cumulative security statistics, grade trend, and vulnerability fix progress for this project. Use this to demonstrate the value of GuardVibe security scanning over time. Data is stored locally in .guardvibe/stats.json.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": ".",
+            "description": "Project root path"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "week",
+              "month",
+              "all"
+            ],
+            "default": "month",
+            "description": "Time period for stats"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "audit_mcp_config",
+      "description": "Scan MCP configuration files (.claude/settings.json, .cursor/mcp.json, .vscode/mcp.json) for security issues: malicious hooks (CVE-2025-59536), suspicious MCP servers, overly permissive tool access, and shell injection patterns. Use this to verify MCP configurations are safe before use.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": ".",
+            "description": "Project root directory to scan"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_host_config",
+      "description": "Scan host environment for AI security issues: API base URL hijacking (CVE-2026-21852), credential exposure in shell profiles, .env file leaks, and environment variable sniffing. Checks .env files at project scope; add scope=host to also check shell profiles and global AI configs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": ".",
+            "description": "Project root directory"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "host",
+              "full"
+            ],
+            "default": "project",
+            "description": "Scan scope: project (.env files only), host (+ shell profiles, global configs), full (+ home dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "guardvibe_doctor",
+      "description": "Check AI host security: MCP configurations, hooks, base URL hijacking, environment variable exposure. NOT the same as audit_config which checks application config files (next.config, .env, headers). Use scope=project (default) for project-only, scope=host to include shell profiles and global AI configs. Example: guardvibe_doctor({scope: 'project'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": ".",
+            "description": "Project root directory"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "host",
+              "full"
+            ],
+            "default": "project",
+            "description": "Scan scope: project (default, .claude.json + .cursor/ + .vscode/ + .env), host (+ shell profiles + global MCP configs), full (+ home dir configs)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format: markdown (human) or json (machine-readable)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_fix",
+      "description": "Verify that a specific security fix was applied correctly. Re-scans the updated code and checks if the target vulnerability (by rule ID) is resolved. Returns 'fixed', 'still_vulnerable', or 'new_issues' status with details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Updated code after applying the fix"
+          },
+          "language": {
+            "type": "string",
+            "description": "Programming language"
+          },
+          "ruleId": {
+            "type": "string",
+            "description": "Rule ID to verify (e.g. VG402)"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "File path for context-aware analysis"
+          }
+        },
+        "required": [
+          "code",
+          "language",
+          "ruleId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "security_workflow",
+      "description": "Get the recommended GuardVibe tool sequence for your current task. Returns which tools to call, in what order, and with what parameters. Use this when unsure which tool to use. Example: security_workflow({task: 'pre_commit'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "enum": [
+              "writing_code",
+              "pre_commit",
+              "pr_review",
+              "new_project",
+              "fix_vulnerabilities",
+              "compliance_mapping",
+              "dependency_check",
+              "merge_to_main",
+              "publish_package",
+              "security_audit",
+              "incident_response",
+              "full_remediation"
+            ],
+            "description": "Current task: writing_code (after edits), pre_commit (before commit), pr_review (reviewing PR), new_project (initial setup), fix_vulnerabilities (fixing known issues), compliance_mapping (audit against framework), dependency_check (check deps), merge_to_main (pre-merge gate), publish_package (pre-publish checks), security_audit (comprehensive audit), incident_response (post-breach investigation), full_remediation (fix ALL security issues across all 6 sections — secrets, code, deps, config, taint, auth)"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "auth_coverage",
+      "description": "Analyze authentication coverage across Next.js App Router routes. Detects auth guards (Clerk, NextAuth, Supabase, custom) and reports protected vs unprotected routes. Pass files array with route file contents and middleware content. Example: auth_coverage({files: [{path: 'app/api/users/route.ts', content: '...'}], middleware: '...'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Project directory path. When provided, auto-discovers all route, page, layout, and middleware files — no need to pass file contents manually."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path relative to project root (e.g. app/api/users/route.ts)"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "File source code"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "default": [],
+            "description": "Route and page files from app/ directory (ignored when path is provided)"
+          },
+          "middleware": {
+            "type": "string",
+            "default": "",
+            "description": "Content of middleware.ts file (ignored when path is provided)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deep_scan",
+      "description": "LLM-powered deep security analysis for vulnerabilities that pattern-matching cannot detect: IDOR, business logic flaws, race conditions, stale auth, mass assignment, privilege escalation. Defaults to Claude Haiku 4.5 (~cents per scan); pass `model: 'sonnet'` for deeper analysis at higher cost. Requires ANTHROPIC_API_KEY or OPENAI_API_KEY env var.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Code to analyze"
+          },
+          "language": {
+            "type": "string",
+            "description": "Programming language"
+          },
+          "context": {
+            "type": "string",
+            "description": "Additional context (e.g., 'This is a payment endpoint')"
+          },
+          "existingFindings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Already-detected findings to avoid duplicating"
+          },
+          "focus": {
+            "type": "string",
+            "enum": [
+              "all",
+              "idor",
+              "business-logic",
+              "auth-bypass",
+              "race-condition"
+            ],
+            "default": "all",
+            "description": "Focus area — narrows the prompt to a specific vulnerability class"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "haiku",
+              "sonnet"
+            ],
+            "default": "haiku",
+            "description": "LLM model. haiku = fast & cheap (default), sonnet = deeper analysis"
+          },
+          "maxBytes": {
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 50000,
+            "default": 10000,
+            "description": "Max prompt size in bytes — caps cost. Code over this limit is truncated."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "code",
+          "language"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "full_audit",
+      "description": "Single command that runs ALL checks: code scan (424 rules), secret detection, dependency CVEs, config audit, taint analysis, and auth coverage. Returns PASS/FAIL/WARN verdict with deterministic hash. IMPORTANT: If verdict is FAIL or WARN, you MUST call remediation_plan next to get a section-by-section fix checklist — do NOT skip any section. After fixing, call verify_remediation to confirm ALL sections are addressed. Example: full_audit({path: '.'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": ".",
+            "description": "Project root directory"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Output format"
+          },
+          "skipDeps": {
+            "type": "boolean",
+            "default": false,
+            "description": "Skip dependency vulnerability check"
+          },
+          "skipSecrets": {
+            "type": "boolean",
+            "default": false,
+            "description": "Skip secret scanning"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "remediation_plan",
+      "description": "Generate a mandatory section-by-section remediation plan from full_audit results. MUST be called after full_audit when verdict is FAIL or WARN. Returns ordered steps for ALL 6 sections (secrets, code, dependencies, config, taint, auth-coverage) with specific tool calls and actions. AI assistants MUST complete every section — skipping sections is not allowed. Example: remediation_plan({path: '.'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": ".",
+            "description": "Project root directory"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "json",
+            "description": "Output format: json for agents (recommended), markdown for humans"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_remediation",
+      "description": "Compare before/after audit results to verify ALL sections were addressed. MUST be called after completing remediation to confirm success. Runs a fresh audit and compares against the before snapshot. Explicitly flags skipped sections and refuses to return 'complete' status unless every section is addressed. Pass the before audit hash or let it re-run. Example: verify_remediation({path: '.', before_hash: 'abc123'})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": ".",
+            "description": "Project root directory"
+          },
+          "before_hash": {
+            "type": "string",
+            "description": "Result hash from the initial full_audit (for tracking)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "json",
+            "description": "Output format"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

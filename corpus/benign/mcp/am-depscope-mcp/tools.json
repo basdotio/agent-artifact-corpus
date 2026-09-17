@@ -1,0 +1,947 @@
+{
+  "package": "depscope-mcp",
+  "tools": [
+    {
+      "name": "check_malicious",
+      "description": "Supply-chain malware check against OpenSSF/OSV. USE WHEN: about to suggest install of an unvetted/unfamiliar package; name came from a blog/tutorial. Call BEFORE check_package for untrusted pkgs. RETURNS: {is_malicious, threat_tier, source}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "check_typosquat",
+      "description": "Typosquat detector. USE WHEN: name differs from a well-known package by 1-2 chars (`lodsh`, `reqeusts`); copy-paste from unreliable source; downloads near zero but name looks familiar. RETURNS: {is_typosquat, likely_target, confidence}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "check_bulk",
+      "description": "Fast pre-flight filter for a batch of (ecosystem, package) pairs. DB-only, <100ms for 100 items. USE WHEN: about to emit `npm install a b c …` or `pip install a b c …` — catches hallucinated names, stdlib, typos, and known-bad in ONE call. NOT a dep-tree audit (use scan_project for that). RETURNS: per-item {status: exists|stdlib|malicious|typosquat_suspect|historical_incident|unknown}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "ecosystem": {
+                  "type": "string",
+                  "enum": [
+                    "npm",
+                    "pypi",
+                    "cargo",
+                    "go",
+                    "composer",
+                    "maven",
+                    "nuget",
+                    "rubygems",
+                    "pub",
+                    "hex",
+                    "swift",
+                    "cocoapods",
+                    "cpan",
+                    "hackage",
+                    "cran",
+                    "conda",
+                    "homebrew",
+                    "jsr",
+                    "julia"
+                  ]
+                },
+                "package": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ecosystem",
+                "package"
+              ]
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    },
+    {
+      "name": "package_exists",
+      "description": "Boolean registry existence check. USE WHEN: about to emit a package name in an install command but unsure it exists; verifying a name generated from training data. RETURNS: {exists}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "get_latest_version",
+      "description": "Latest published version + deprecation flag — the cheapest call. USE WHEN: only a version string matters (pinning a dep, answering 'what version of X'). If you also need health/vulns use check_package. RETURNS: {latest, deprecated, published_at}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "get_health_score",
+      "description": "Single 0-100 health score — cheapest go/no-go gate (>=70 safe). USE WHEN: CI gating or pkg already screened for malware/typos. NOT a first screen — run check_malicious + check_typosquat first. For a verbal verdict use get_package_prompt. RETURNS: {score, verdict}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "install_command",
+      "description": "Canonical install command(s) across every package manager of the ecosystem (npm/pnpm/yarn/bun, pip/uv/poetry, cargo, go, composer, maven+gradle, nuget, …). USE WHEN: emitting an install line and you want correct flags. RETURNS: {primary, variants[]}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string",
+            "description": "Optional explicit version; defaults to latest."
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "get_package_prompt",
+      "description": "LLM-optimised package brief — plain text ~300 tokens (~75% cheaper than JSON). Verdict (SAFE/AVOID/URGENT/MALICIOUS) + health + vulns + alternatives + maintainer alerts. USE WHEN: you want to reason over a package and drop the output directly in context; 'is X safe'. PREFER THIS over check_package in 95% of LLM cases. RETURNS: plain-text brief.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "check_package",
+      "description": "Full machine-readable JSON report (~2k tokens). USE WHEN: you need to programmatically parse specific fields (CI gating, UI, sub-field extraction). Otherwise prefer get_package_prompt. RETURNS: {package, health:{score}, vulnerabilities[], latest, deprecated, maintainers, recommendation}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string",
+            "description": "Package name (e.g. 'express', 'fastapi', 'serde')."
+          },
+          "version": {
+            "type": "string",
+            "description": "Specific version (optional; default = latest)."
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "get_vulnerabilities",
+      "description": "CVE/OSV advisories affecting the latest (or specified) version. USE WHEN: security-sensitive project; user asks 'any CVEs in X'; you already know the pkg exists. RETURNS: {vulnerability_count, vulnerabilities[]: {id, severity, cvss, fixed_in}}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "find_alternatives",
+      "description": "Curated replacements for deprecated/unhealthy packages, including stdlib built-ins (e.g. `fs.rm` for rimraf). USE WHEN: pkg flagged AVOID/URGENT; 'what to use instead of X'; before guessing a replacement name. RETURNS: {alternatives[]: {name, reason, is_stdlib}}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "get_migration_path",
+      "description": "Prescriptive migration plan between DIFFERENT packages — rationale + literal code diff + breaking changes + effort minutes. USE WHEN: replacing `request`→`axios`, `moment`→`dayjs`, `flask`→`fastapi`, etc.; both endpoints known. RETURNS: {rationale, diff, breaking_changes[], estimated_minutes}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "from_package": {
+            "type": "string",
+            "description": "Deprecated/legacy package to migrate away from."
+          },
+          "to_package": {
+            "type": "string",
+            "description": "Modern replacement package."
+          }
+        },
+        "required": [
+          "ecosystem",
+          "from_package",
+          "to_package"
+        ]
+      }
+    },
+    {
+      "name": "get_breaking_changes",
+      "description": "Breaking changes between two majors of the SAME package (`next@14`→`15`). USE WHEN: user is bumping a major; before recommending a major upgrade. Different from get_migration_path (same pkg vs. different pkg). RETURNS: {breaking_changes[]: {area, description, hint}}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          },
+          "from_version": {
+            "type": "string"
+          },
+          "to_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "pin_safe",
+      "description": "Highest version below the chosen CVE severity tier, respecting a semver constraint. USE WHEN: writing a package.json/requirements.txt line; resolving dependabot by lowest-risk patched version. RETURNS: {recommended_version, walk_log[]}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          },
+          "min_severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "Lowest severity to exclude. Default: high (excludes critical+high)."
+          },
+          "constraint": {
+            "type": "string",
+            "description": "npm-style constraint: ^X.Y.Z, ~X.Y.Z, >=X.Y.Z, or exact X.Y.Z."
+          },
+          "include_prerelease": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "scan_project",
+      "description": "Audit a project's dependencies in one shot. Returns a single-sentence `verdict` (e.g. \"DO NOT INSTALL — 1 hallucinated: fastapi-turbo\") that an agent can paste into its reply, plus per-package health/vulns/recommendation. Detects hallucinated packages, deprecated, typosquats, critical vulnerabilities. Accepts EITHER {ecosystem, packages:[name@ver, …]} (up to 100, returns JSON) OR {packages:[{ecosystem, package}, …]} (up to 50, mixed ecosystems, returns text brief). USE WHEN: user pastes package.json/requirements.txt/Cargo.toml; agent generated install command; 'is my stack OK'. RETURNS: JSON with `verdict`, `project_risk`, `summary.hallucinated_packages`, `summary.deprecated_packages`, per-package health.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ],
+            "description": "Required when packages is a string array."
+          },
+          "packages": {
+            "description": "Either ['express','lodash@4.17.0'] (single ecosystem, up to 100) or [{ecosystem, package}, …] (mixed, up to 50)."
+          }
+        },
+        "required": [
+          "packages"
+        ]
+      }
+    },
+    {
+      "name": "compare_packages",
+      "description": "Side-by-side comparison (health, vulns, downloads, maintainers, last release) of 2-10 packages in the same ecosystem. USE WHEN: 'X vs Y' / 'should I pick X or Y'. RETURNS: table-shaped JSON, one row per package.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "maxItems": 10,
+            "description": "Package names to compare, e.g. ['express','fastify','hono']."
+          }
+        },
+        "required": [
+          "ecosystem",
+          "packages"
+        ]
+      }
+    },
+    {
+      "name": "check_compatibility",
+      "description": "Is this specific multi-package version combo verified to work together? USE WHEN: pinning a stack (next@15 + react@19 + node@22); before recommending a version matrix. RETURNS: {compatible, conflicts[], notes}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packages": {
+            "type": "object",
+            "description": "Package -> version map, e.g. {\"next\":\"15\",\"react\":\"19\"}.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "packages"
+        ]
+      }
+    },
+    {
+      "name": "resolve_error",
+      "description": "Map error OR free-text query to a verified fix. USE WHEN: user pastes a concrete error/stack (ENOENT, ImportError, build failure) — pass `error`. OR user describes a symptom ('webpack slow', 'pip stuck') — pass `query`. Always prefer this over guessing a fix. RETURNS: exact-match {status, solution, confidence, source_url} or search results [{title, summary, source_url}].",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Concrete error message / stack trace. Triggers exact-match lookup."
+          },
+          "query": {
+            "type": "string",
+            "description": "Free-text symptom description. Triggers KB search."
+          },
+          "context": {
+            "type": "object",
+            "description": "Optional context for error-mode calls (ecosystem, package, version)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 10,
+            "description": "Max search results (query mode only)."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_known_bugs",
+      "description": "Non-CVE known bugs for a specific package version. USE WHEN: unexpected behavior that is NOT a security issue; a pinned version misbehaves. RETURNS: {bugs[]: {title, fixed_in, workaround}}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "get_trust_signals",
+      "description": "One-call aggregate of ALL non-CVE supply-chain trust signals: maintainer trust (bus factor, ownership changes), OpenSSF Scorecard, quality (criticality, release velocity, publish security), and SLSA/Sigstore provenance. USE WHEN: deep-vetting a package beyond CVEs (hardened/regulated env, SBOM/compliance, small-pkg ownership review, choosing between healthy candidates). Runs 4 backend endpoints in parallel. RETURNS: {maintainer, scorecard, quality, provenance} — each may be null if its backend call failed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ]
+          },
+          "package": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "package"
+        ]
+      }
+    },
+    {
+      "name": "get_trending",
+      "description": "Live trending packages with rank-delta and weekly growth %. USE WHEN: 'what is rising in npm/PyPI/Cargo right now'; recommendation not biased by training-data cutoff. RETURNS: {items[]: {name, rank, rank_delta, weekly_growth_pct}}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "composer",
+              "maven",
+              "nuget",
+              "rubygems",
+              "pub",
+              "hex",
+              "swift",
+              "cocoapods",
+              "cpan",
+              "hackage",
+              "cran",
+              "conda",
+              "homebrew",
+              "jsr",
+              "julia"
+            ],
+            "description": "Optional. If omitted returns cross-ecosystem trending."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "week",
+              "day"
+            ],
+            "description": "Time window. Defaults to week."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results, 1-50. Default 20."
+          }
+        }
+      }
+    },
+    {
+      "name": "contact_depscope",
+      "description": "Inbound ticket: bug/listing/security/anomaly/partnership. USE WHEN: reporting wrong data (`bug`), requesting a new pkg/ecosystem index (`listing`), disclosing a DepScope security issue (`security`), flagging a concrete mismatch in another tool's output vs. authoritative source (`anomaly` — provide tool_called+observed+expected), or partnership/press (`partnership`). RETURNS: {ticket_id} or {anomaly_id}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "bug",
+              "listing",
+              "security",
+              "anomaly",
+              "partnership"
+            ],
+            "description": "Ticket category. `anomaly` routes to structured anomaly triage (requires tool_called/observed/expected)."
+          },
+          "email": {
+            "type": "string",
+            "description": "Reply-to email of the requester (required for bug/listing/security/partnership)."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Short subject line (3-200 chars)."
+          },
+          "body": {
+            "type": "string",
+            "description": "Message body (10-8000 chars). Be specific: include package name, ecosystem, error trace, repro steps when applicable."
+          },
+          "name": {
+            "type": "string",
+            "description": "Sender display name (optional)."
+          },
+          "company": {
+            "type": "string",
+            "description": "Company / organization (optional)."
+          },
+          "tool_called": {
+            "type": "string",
+            "description": "For kind=anomaly: DepScope tool that produced the anomaly (e.g. check_package, get_migration_path)."
+          },
+          "ecosystem": {
+            "type": "string",
+            "description": "For kind=anomaly: ecosystem of the involved package, if any."
+          },
+          "package": {
+            "type": "string",
+            "description": "For kind=anomaly: package name involved, if any."
+          },
+          "version": {
+            "type": "string",
+            "description": "For kind=anomaly: package version involved, if any."
+          },
+          "observed": {
+            "type": "string",
+            "description": "For kind=anomaly: what DepScope returned (1-1500 chars)."
+          },
+          "expected": {
+            "type": "string",
+            "description": "For kind=anomaly: what you expected to see (1-1500 chars). Be concrete."
+          },
+          "evidence_url": {
+            "type": "string",
+            "description": "For kind=anomaly: URL to authoritative source (registry page, GHSA, CVE, repo, ...) supporting your expectation."
+          }
+        }
+      }
+    }
+  ]
+}

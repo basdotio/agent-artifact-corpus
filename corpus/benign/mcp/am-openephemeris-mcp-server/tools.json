@@ -1,0 +1,2677 @@
+{
+  "package": "@openephemeris/mcp-server",
+  "tools": [
+    {
+      "name": "explore_natal_chart",
+      "description": "Generate an interactive natal chart wheel with clickable planets, houses, and aspects. Returns an embedded visual chart explorer that lets you click any planet, house, or aspect line for instant astrological interpretation. Supports house system switching (Placidus, Whole Sign, Equal, Koch). The chart is computed using NASA JPL DE440 ephemerides for sub-arcsecond precision. Use this instead of ephemeris_chart_wheel for a richer, interactive experience in MCP Apps-capable hosts (Claude Desktop). Falls back to static SVG in other hosts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 datetime string, e.g. '1990-04-15T14:30:00'. Include timezone offset if known, e.g. '1990-04-15T14:30:00-05:00'."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone name (e.g. 'America/New_York'). Used if datetime has no UTC offset."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees (positive = North)."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees (positive = East)."
+          },
+          "location": {
+            "type": "string",
+            "description": "Location name for display only (e.g. 'New York, NY')."
+          },
+          "house_system": {
+            "type": "string",
+            "enum": [
+              "placidus",
+              "whole_sign",
+              "equal",
+              "koch",
+              "regiomontanus",
+              "campanus"
+            ],
+            "description": "House system to use (default: placidus)."
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ]
+      }
+    },
+    {
+      "name": "explore_human_design",
+      "description": "Generate an interactive Human Design Bodygraph with clickable centers, gates, and channels. Returns an embedded visual bodygraph explorer that lets you click any center or gate for instant Human Design interpretation. Shows defined/undefined centers, active gates, channels, Type, Profile, Authority, and Incarnation Cross. The chart is calculated using NASA JPL DE440 ephemerides for both Personality and Design positions. Use this for a rich, interactive HD experience in MCP Apps-capable hosts (Claude Desktop). Falls back to a text summary in other hosts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth datetime in UTC, e.g. '1990-04-15T19:30:00Z'. Human Design is time-sensitive â€” accuracy to the minute matters. Include 'Z' or a timezone offset."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees (positive = North). Optional for HD charts."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees (positive = East). Optional for HD charts."
+          },
+          "location": {
+            "type": "string",
+            "description": "Location name for display only (e.g. 'New York, NY')."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone name for the birth location (e.g. 'America/New_York'). Highly recommended for accuracy if providing local birth time without a UTC offset. Enables correct UTC conversion for precise Personality and Design positions."
+          }
+        },
+        "required": [
+          "datetime"
+        ]
+      }
+    },
+    {
+      "name": "explore_bi_wheel",
+      "description": "Generate an interactive bi-wheel chart comparing two astrological chart positions. The inner wheel is always Person 1's natal chart. The outer ring depends on mode:\n• synastry     — Person 2's natal chart (two-person compatibility). 1 credit.\n• transit      — Transiting planets for a given date. 1 credit.\n• progressed   — Secondary progressed positions (person2_datetime = target date). 1 credit.\n• solar_return — Nearest solar return chart (person2_datetime = year to return for). 5 credits.\n• lunar_return — Nearest lunar return chart (person2_datetime = target month). 5 credits.\n• solar_arc    — Solar arc directed positions (person2_datetime = target date). 1 credit.\nCross-aspects between both wheels are computed and displayed as coloured dashed lines. Click any planet, aspect line, or house cusp for interpretation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "person1_datetime": {
+            "type": "string",
+            "description": "ISO 8601 datetime for Person 1 / Natal chart (e.g. '1990-04-15T14:30:00-05:00')."
+          },
+          "person1_latitude": {
+            "type": "number",
+            "description": "Birth latitude for Person 1 (decimal degrees, positive = North)."
+          },
+          "person1_longitude": {
+            "type": "number",
+            "description": "Birth longitude for Person 1 (decimal degrees, positive = East)."
+          },
+          "person1_timezone": {
+            "type": "string",
+            "description": "IANA timezone for Person 1 (e.g. 'America/New_York')."
+          },
+          "person1_name": {
+            "type": "string",
+            "description": "Display name for Person 1 / Natal chart (e.g. 'Alice'). Used in the badge and summary."
+          },
+          "person2_datetime": {
+            "type": "string",
+            "description": "ISO 8601 datetime for the outer wheel. Meaning depends on mode: synastry = Person 2 birth datetime; transit/progressed/solar_arc = target date; solar_return/lunar_return = any date within the target year/month."
+          },
+          "person2_latitude": {
+            "type": "number",
+            "description": "Birth latitude for Person 2 (synastry) or return/transit location. Defaults to Person 1 coords for single-person modes."
+          },
+          "person2_longitude": {
+            "type": "number",
+            "description": "Birth longitude for Person 2 (synastry) or return/transit location. Defaults to Person 1 coords for single-person modes."
+          },
+          "person2_timezone": {
+            "type": "string",
+            "description": "IANA timezone for Person 2 / outer chart (e.g. 'America/Chicago')."
+          },
+          "person2_name": {
+            "type": "string",
+            "description": "Display name for Person 2 (synastry mode). Used in the badge and summary."
+          },
+          "location": {
+            "type": "string",
+            "description": "Label for Person 1 / Natal location (display only, e.g. 'New York, NY')."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "synastry",
+              "transit",
+              "progressed",
+              "solar_return",
+              "lunar_return",
+              "solar_arc"
+            ],
+            "description": "Chart comparison mode. Defaults to 'synastry'."
+          }
+        },
+        "required": [
+          "person1_datetime",
+          "person2_datetime",
+          "person1_latitude",
+          "person1_longitude"
+        ]
+      }
+    },
+    {
+      "name": "bi_wheel_synopsis",
+      "description": "Generate a master-astrologer-grade overview of the entire bi-wheel configuration — summarising the mode (synastry or transit), key cross-aspects by quality, dominant themes, stationing or slow-moving outer planet influences, and an interpretive narrative. Use this when the user asks for a full reading, a relationship overview, or a transit overview rather than clicking a specific element. Accepts the cross-aspect data from the chart payload.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "synastry",
+              "transit",
+              "progressed",
+              "solar_return",
+              "lunar_return",
+              "solar_arc"
+            ],
+            "description": "Chart mode"
+          },
+          "person1_name": {
+            "type": "string",
+            "description": "Name or label for the inner wheel (natal / person 1)"
+          },
+          "person2_name": {
+            "type": "string",
+            "description": "Name or label for the outer wheel (person 2, transit date, progression target, etc.)"
+          },
+          "cross_aspects": {
+            "type": "array",
+            "description": "Array of cross-aspects from the bi-wheel payload (up to 30, sorted by orb)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "planet1": {
+                  "type": "string"
+                },
+                "planet2": {
+                  "type": "string"
+                },
+                "aspect_type": {
+                  "type": "string"
+                },
+                "orb": {
+                  "type": "number"
+                },
+                "applying": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "top_n": {
+            "type": "number",
+            "description": "Number of top aspects to highlight (default 8)"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      }
+    },
+    {
+      "name": "explore_transit_timeline",
+      "description": "Generate an interactive transit timeline visualization showing astrological transit events as a visual Gantt chart. Each transit appears as a colored bar on a time axis, grouped by transiting planet, with markers at exact aspect moments.\n\nThis tool first calculates the natal chart to extract planetary longitudes, then searches for transiting planets crossing those degrees during the specified date range.\n\nSUPPORTED BODIES: Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, Chiron, Pholus, Ceres, Pallas, Juno, Vesta, MeanNode.\n\nASPECT ANGLES: 0 = conjunction/return (default), 180 = opposition, 90 = square, 120 = trine.\n\nUse this for a rich, interactive transit visualization in MCP Apps-capable hosts (Claude Desktop). Falls back to a text summary in other hosts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "natal_datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth datetime for the natal chart."
+          },
+          "natal_latitude": {
+            "type": "number",
+            "description": "Latitude of birth location in decimal degrees."
+          },
+          "natal_longitude": {
+            "type": "number",
+            "description": "Longitude of birth location in decimal degrees."
+          },
+          "start_date": {
+            "type": "string",
+            "description": "Start of the transit search window, ISO 8601 date or datetime."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "End of the transit search window, ISO 8601 date or datetime."
+          },
+          "transiting_planets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of transiting planet IDs to search. Omit to search all outer planets."
+          },
+          "natal_points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Natal point IDs whose longitudes should be targeted. Omit for all core points."
+          },
+          "aspect_angle": {
+            "type": "number",
+            "description": "Aspect angle in degrees. 0 = conjunction (default), 180 = opposition, 90 = square, 120 = trine."
+          }
+        },
+        "required": [
+          "natal_datetime",
+          "natal_latitude",
+          "natal_longitude",
+          "start_date",
+          "end_date"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "explore_moon_phase",
+      "description": "Generate an interactive Moon Phase dial showing the current lunar illumination, phase name, zodiac sign, and void-of-course status as a beautiful circular visualization.\n\nReturns a visual dial with:\n  • SVG crescent Moon showing real-time illumination percentage\n  • Phase name and waxing/waning indicator\n  • Current Moon sign with degree\n  • Void-of-Course status with timing details\n  • Lunar age (days in the synodic cycle)\n  • Upcoming New Moon and Full Moon dates\n\nUse this for a rich, interactive lunar phase experience in MCP Apps-capable hosts (Claude Desktop). Falls back to a text summary in other hosts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 datetime to query. If omitted, returns the current live moon phase (UTC now)."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Observer latitude (optional, used for local void-of-course calculations)."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Observer longitude (optional, used for local void-of-course calculations)."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "explore_bazi_chart",
+      "description": "Generate an interactive BaZi Four Pillars (四柱命盘) visualization. Displays the Year, Month, Day, and Hour pillars with Heavenly Stems, Earthly Branches, Hidden Stems, Ten Gods analysis, and a weighted Wu Xing (Five Elements) balance bar.\n\nReturns a rich interactive chart with:\n  • Four-column pillar grid with Chinese characters and element colours\n  • Day Master emphasis and badge\n  • Hidden Stems with strength indicators (main/secondary/residual)\n  • Ten Gods classification for each pillar\n  • Wu Xing balance bar with percentages and Yong Shen (Useful God)\n  • Click pillars for detailed Ten Gods drawer\n\nCREDIT COST: 3 credits (batches three BaZi endpoints).\n\nUse this for a rich, interactive BaZi experience in MCP Apps-capable hosts (Claude Desktop). Falls back to a markdown table summary in other hosts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "description": "Gregorian birth year, e.g. 1987."
+          },
+          "month": {
+            "type": "integer",
+            "description": "Birth month (1–12)."
+          },
+          "day": {
+            "type": "integer",
+            "description": "Birth day of month (1–31)."
+          },
+          "hour": {
+            "type": "integer",
+            "description": "Birth hour (0–23). Optional, defaults to 12 (noon). Chinese shí hours are 2-hour blocks — precision within a 2-hour window is sufficient."
+          },
+          "datetime": {
+            "type": "string",
+            "description": "Alternative to year/month/day: ISO 8601 datetime (e.g. '1987-07-15T14:00:00Z'). year/month/day/hour are extracted automatically."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "auth_login",
+      "description": "Start the device authorization flow to connect this MCP server to your OpenEphemeris account. Returns a verification URL and code for the user to enter in their browser. The MCP server will then automatically receive credentials and all API calls will be linked to the user's account (tier, credits, rate limits). Only needed if no OPENEPHEMERIS_API_KEY env var is set and no cached credentials exist.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "auth_status",
+      "description": "Check the current authentication status of this MCP server. Shows whether the server is authenticated, which account it's linked to, the authentication method (API key, JWT, device auth), and token expiry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "auth_logout",
+      "description": "Disconnect this MCP server from your OpenEphemeris account by clearing cached credentials. Does NOT revoke the API key if one is set via environment variable — only clears device-auth cached credentials.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "dev_call",
+      "description": "Call any allowlisted Open Ephemeris API endpoint directly. This is the power-user escape hatch — use the typed tools (ephemeris_natal_chart, ephemeris_transits, etc.) first for common operations. Call dev_list_allowed to see all currently available endpoint paths.\n\nAUTH: Set OPENEPHEMERIS_API_KEY in your environment. See openephemeris.com/dashboard for active plan limits.\n\nCREDIT COSTS:\n  • Standard chart math (natal, progressed, bazi, vedic, iching): 1 credit\n  • Human Design: 2 credits\n  • Visualization rendering (chart-wheel, bi-wheel, charts/*): 2 credits\n  • Comparative math (synastry, composite, overlay): 3 credits\n  • Predictive ops (transits/search, returns): 5 credits\n  • Predictive transit-chart: 1 credit\n  • ACG / astrocartography: 10 credits (acg/hits: 15 credits)\n  • Calendar endpoints: 10 credits\n  • Catalog / metadata / health endpoints: 0 credits\n  • Compute surcharge: requests > 30s add 1 credit per 30s (predictive, acg, calendar, electional)\n  • format=llm (token-optimized output): available on all tiers\n\nCOMMON CALLS:\n  POST /ephemeris/natal-chart            — Full natal chart (body: {subject: {name: 'Name', birth_datetime: {iso: '1990-04-15T14:30:00-05:00'}, birth_location: {latitude: {decimal: 40.0}, longitude: {decimal: -70.0}, timezone: {}}}})\n  POST /ephemeris/natal/batch            — Up to 50 natal charts in one request\n  POST /ephemeris/relocation             — Relocated chart (same natal, new location)\n  POST /predictive/transits/search       — Transit event search over a date range\n  POST /predictive/returns/solar         — Solar return chart\n  POST /predictive/returns/lunar         — Lunar return chart\n  POST /comparative/synastry             — Two-person synastry chart\n  POST /comparative/composite            — Composite (midpoint) chart\n  POST /human-design/chart               — Full HD chart (body: {birth_datetime_utc: '1990-04-15T19:30:00Z'}) — lat/lon optional\n  POST /time/julian-day                  — Convert date to JD (body: {year: 1987, month: 7, day: 15, hour: 14, minute: 1})\n  GET  /ephemeris/moon/phase             — Current/queried moon phase\n  GET  /ephemeris/moon/void-of-course    — Next void-of-course period\n  GET  /ephemeris/agro/daily             — Biodynamic farming day quality\n  GET  /ephemeris/agro/calendar          — Multi-day biodynamic calendar\n  GET  /ephemeris/agro/void-of-course    — Biodynamic VoC periods\n  GET  /eclipse/next-visible             — Next eclipse visible from a location (query: lat, lon, type=solar|lunar)\n  GET  /eclipse/solar/global             — Next global solar eclipse (query: date=YYYY-MM-DD)\n  GET  /eclipse/solar/local              — Local solar eclipse (query: lat, lon)\n  GET  /tidal/forcing                    — Gravitational tidal forcing index\n  POST /acg/power-lines                 — Astrocartography power lines (lat/lon GeoJSON)\n  POST /acg/hits                         — ACG power at a specific location\n  GET  /calendar/astrology/moon-phases   — Moon phase calendar for a date range\n  GET  /location/autocomplete            — Geocode a place name (query: q=City Name)\n  POST /timezone/lookup                  — Resolve timezone + UTC offset for a location\n  POST /chinese/bazi                     — Chinese Ba Zi (Four Pillars) chart (body: {year, month, day, hour})\n  GET  /chinese/zodiac                   — Chinese zodiac year element/animal\n  POST /vedic/chart                      — Vedic (Jyotish) natal chart (body: {datetime_utc, latitude, longitude})\n  GET  /catalogs/bodies                  — List all supported celestial bodies\n\nBINARY RESPONSES:\n  • Binary/image endpoints return {content_type, content_length, encoding, data_base64}\n    so callers can decode bytes deterministically.\n\nECLIPSE NOTE: Eclipse endpoints accept format=llm via the query param like other endpoints.\n\nformat=llm NOTE: Add query: {format: 'llm'} to natal/synastry/composite/HD endpoints for compact columnar output optimized for LLM token budgets (availability depends on your current plan).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ],
+            "description": "HTTP method"
+          },
+          "path": {
+            "type": "string",
+            "description": "Absolute API path (e.g., /ephemeris/natal-chart)"
+          },
+          "query": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Query params for GET requests (optional)"
+          },
+          "body": {
+            "description": "JSON body for POST/PUT/PATCH (optional)"
+          },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "full",
+              "simple"
+            ],
+            "description": "Convenience: if provided, set query.preset (optional)."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm",
+              "llm_v2"
+            ],
+            "description": "Convenience: if provided, set query.format (optional). 'llm' is canonical; 'llm_v2' is accepted as a legacy alias."
+          },
+          "output_mode": {
+            "type": "string",
+            "enum": [
+              "full",
+              "simple",
+              "llm",
+              "llm_v2"
+            ],
+            "description": "Legacy convenience (deprecated): if provided, set query.output_mode and also map to query.preset/query.format when possible."
+          }
+        },
+        "required": [
+          "method",
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "dev_list_allowed",
+      "description": "List all API operations (method + path) that this MCP instance is authorized to call. Returns endpoint entries grouped by method, plus the active deny rules. Use this to discover what's available before calling dev_call, or to verify an endpoint path. Typed shortcut tools (ephemeris_natal_chart, ephemeris_transits, etc.) cover the most common operations — check those first before reaching for dev_call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_natal_chart",
+      "description": "Calculate a full natal (birth) chart for a person. Returns planetary positions, house cusps, aspects, and chart patterns. Use format='llm' for a compact, token-efficient output ideal for interpretation (available on all tiers). The result includes all major planets, Chiron and major asteroids like Ceres, angles (ASC/MC/DSC/IC), essential dignities, retrograde status, house system data, and major aspect grid. Asteroids are automatically included.\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Calculate the natal chart for someone born April 15, 1990 at 2:30 PM in Chicago:\n  datetime='1990-04-15T14:30:00', latitude=41.8781, longitude=-87.6298",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 datetime string, e.g. '1990-04-15T14:30:00' (local time at birth location). Include timezone offset if known, e.g. '1990-04-15T14:30:00-05:00'."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone name, e.g. 'America/Denver'. Use this if passing local time without a UTC offset in the datetime string."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Geographic latitude of birth location in decimal degrees (positive = North)."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Geographic longitude of birth location in decimal degrees (positive = East)."
+          },
+          "house_system": {
+            "type": "string",
+            "enum": [
+              "placidus",
+              "whole_sign",
+              "equal",
+              "koch",
+              "campanus",
+              "regiomontanus",
+              "porphyry",
+              "alcabitius",
+              "morinus"
+            ],
+            "description": "House system to use. Defaults to 'placidus' if omitted."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format. 'llm' returns a compact array-based projection optimized for LLM token efficiency (available on all tiers). 'json' returns full verbose JSON."
+          },
+          "include_arabic_parts": {
+            "type": "boolean",
+            "description": "Reserved for future use. Hermetic Lots / Arabic Parts are currently available via the dedicated /ephemeris/hermetic-lots endpoint."
+          },
+          "include_fixed_stars": {
+            "type": "boolean",
+            "description": "Reserved for future use. Fixed star positions are currently available via the dedicated /ephemeris/fixed-stars endpoint."
+          },
+          "include_visual": {
+            "type": "boolean",
+            "description": "When true, renders the natal chart wheel as an SVG and embeds it directly in the response. The chart image will display in the conversation alongside the data. Costs 2 additional credits on top of the base call cost."
+          },
+          "visual_config": {
+            "type": "object",
+            "description": "Optional rendering preferences (only used when include_visual=true).",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark"
+                ],
+                "description": "Color theme. Default: light."
+              },
+              "size": {
+                "type": "number",
+                "description": "Canvas size in pixels, 200–4000. Default: 800."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_transits",
+      "description": "Search for astrological transit events affecting a natal chart over a date range. Returns a list of exact transit moments — when transiting planets form specified aspects to natal planet positions. Ideal for generating horoscope timelines, event forecasting, or finding optimal timing windows.\n\nHOW IT WORKS: This tool first calculates the natal chart to extract your actual planetary ecliptic longitudes, then searches for transiting planets crossing those exact degrees.\n\nASPECT ANGLES: Use aspect_angle to search for specific aspects to natal positions:\n  0 = conjunction/return (default), 180 = opposition, 90 = square, 120 = trine.\n  Example: Saturn Return → transiting_planets=['saturn'], natal_points=['saturn'], aspect_angle=0\n  Example: Uranus Opposition → transiting_planets=['uranus'], natal_points=['uranus'], aspect_angle=180\n  Example: Chiron Return → transiting_planets=['chiron'], natal_points=['chiron'], aspect_angle=0\n\nSUPPORTED BODIES: Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, Chiron, Pholus, Ceres, Pallas, Juno, Vesta, MeanNode.\n\nCREDIT COST: 6 credits per call (1 for natal + 5 for transit search). Requests exceeding 30 seconds incur 1 additional credit per 30s of compute time.\n\nSEARCH RANGE LIMITS: Explorer tier is limited to 1-year windows; Developer to 5 years. Ranges exceeding the limit are silently clamped.\n\nEXAMPLE: Find all Saturn transits to the natal Sun/Moon for the next 6 months:\n  natal_datetime='1990-04-15T14:30:00', natal_latitude=41.8781, natal_longitude=-87.6298,\n  start_date='2026-01-01', end_date='2026-06-30', transiting_planets=['saturn']",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "natal_datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth datetime for the natal chart."
+          },
+          "natal_latitude": {
+            "type": "number",
+            "description": "Latitude of birth location in decimal degrees."
+          },
+          "natal_longitude": {
+            "type": "number",
+            "description": "Longitude of birth location in decimal degrees."
+          },
+          "start_date": {
+            "type": "string",
+            "description": "Start of the transit search window, ISO 8601 date or datetime (e.g. '2026-01-01')."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "End of the transit search window, ISO 8601 date or datetime (e.g. '2026-06-30')."
+          },
+          "transiting_planets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of transiting planet IDs to search. E.g. ['saturn', 'jupiter', 'uranus', 'pluto', 'chiron']. Omit to search all outer planets."
+          },
+          "natal_points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Natal point IDs whose exact longitudes should be targeted. E.g. ['sun', 'moon', 'asc', 'mc', 'saturn', 'chiron']. Omit for all core points."
+          },
+          "aspect_angle": {
+            "type": "number",
+            "description": "Aspect angle in degrees to apply to each natal longitude. 0 = conjunction/return (default), 180 = opposition, 90 = square, 120 = trine. The effective search target becomes (natal_longitude + aspect_angle) mod 360."
+          }
+        },
+        "required": [
+          "natal_datetime",
+          "natal_latitude",
+          "natal_longitude",
+          "start_date",
+          "end_date"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_moon_phase",
+      "description": "Get the Moon's current phase angle, illumination, and void-of-course status AT a specific point in time. Returns phase name (New, Waxing Crescent, First Quarter, etc.), exact angle, illumination %, and next void-of-course period.\n\n⚠️  THIS TOOL ANSWERS: 'What phase is the moon in right now (or at a given datetime)?'\n❌  THIS TOOL DOES NOT ANSWER: 'When is the next new moon / full moon?'\n→   For upcoming phase DATES use ephemeris_next_lunar_phase instead.\n\nCREDIT COST: 1 credit per call.\n\nIf no datetime is provided, returns the current (live) moon phase.\n\nEXAMPLE: Get moon phase for a specific date/time:\n  datetime='2026-03-20T12:00:00Z'\n\nEXAMPLE: Get the current moon phase right now:\n  (call with no arguments)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 datetime to query. If omitted, returns the current live moon phase (UTC now)."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Observer latitude (optional, used for local void-of-course calculations)."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Observer longitude (optional, used for local void-of-course calculations)."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_next_lunar_phase",
+      "description": "Find the next occurrence of a specific Moon phase after a given date. Returns the exact UTC datetime, zodiac sign, and degree.\n\n✅  USE THIS TOOL FOR: 'When is the next new moon?', 'When is the next full moon?', 'What date is the next quarter moon?', or any question about UPCOMING phase dates.\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Find the next new moon:\n  phase='new_moon'\n\nEXAMPLE: Find the next full moon after a specific date:\n  phase='full_moon', after_date='2026-06-01'\n\nEXAMPLE: Find the next 3 full moons:\n  phase='full_moon', count=3",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": [
+              "new_moon",
+              "full_moon",
+              "first_quarter",
+              "last_quarter"
+            ],
+            "description": "The lunar phase to find. 'new_moon' = conjunction (0° Sun-Moon, start of cycle). 'full_moon' = opposition (180°). 'first_quarter' = 90° waxing. 'last_quarter' = 270° waning."
+          },
+          "after_date": {
+            "type": "string",
+            "description": "ISO 8601 date to search from (e.g. '2026-06-01'). Defaults to today (UTC) if omitted."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of upcoming occurrences to return (1-12). Default 1."
+          }
+        },
+        "required": [
+          "phase"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_next_eclipse",
+      "description": "Find the next solar or lunar eclipse. Returns the eclipse type, date/time of maximum, magnitude, and duration of totality (if any).\n\n📍 LOCATION OPTIONAL:\n  • WITH latitude+longitude → returns local contact times and visibility for that specific location.\n  • WITHOUT latitude+longitude → returns the next global eclipse of that type (no location needed).\n\nUSE THIS TOOL FOR: 'When is the next solar eclipse?', 'When is the next total lunar eclipse?', 'Will there be an eclipse visible from Tokyo?'\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Next solar eclipse globally (no location needed):\n  eclipse_type='solar'\n\nEXAMPLE: Next solar eclipse visible from New York:\n  eclipse_type='solar', latitude=40.7128, longitude=-74.006\n\nEXAMPLE: Next lunar eclipse from London:\n  eclipse_type='lunar', latitude=51.5074, longitude=-0.1278",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eclipse_type": {
+            "type": "string",
+            "enum": [
+              "solar",
+              "lunar",
+              "any"
+            ],
+            "description": "Eclipse type to search for. Use 'any' for whichever comes first (solar or lunar)."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Observer latitude in decimal degrees (optional). When provided with longitude, returns local contact times and visibility."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Observer longitude in decimal degrees (optional, pair with latitude)."
+          },
+          "after_date": {
+            "type": "string",
+            "description": "ISO 8601 date to search after (e.g. '2026-01-01'). Defaults to today if omitted."
+          }
+        },
+        "required": [
+          "eclipse_type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "human_design_chart",
+      "description": "Calculate a full Human Design I Ching hexagram chart from birth data. Returns the person's Type (Generator, Manifesting Generator, Projector, Manifestor, Reflector), Strategy, Authority, Profile (e.g. 1/3, 2/4), defined and undefined Centers, activated Gates and Channels, Incarnation Cross, and both Personality (conscious) and Design (unconscious) planetary positions.\n\nCREDIT COST: 2 credits per call.\n\nHuman Design uses two calculation moments: the birth time (Personality) and ~88° of Sun motion before birth (~3 months prior, the Design calculation). The API handles this automatically.\n\nIMPORTANT: The datetime should be in UTC. If you have local birth time, convert to UTC first.\n\nEXAMPLE: Get the Human Design chart for someone born April 15, 1990 at 7:30 PM UTC:\n  datetime='1990-04-15T19:30:00Z', latitude=41.8781, longitude=-87.6298",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth datetime in UTC, e.g. '1990-04-15T19:30:00Z'. Must include 'Z' or timezone offset."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Latitude of birth location in decimal degrees (positive = North)."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Longitude of birth location in decimal degrees (positive = East)."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format. 'llm' returns compact array projection for token efficiency (available on all tiers). 'json' returns verbose full output."
+          },
+          "include_visual": {
+            "type": "boolean",
+            "description": "When true, renders the Human Design bodygraph as an SVG and embeds it in the response. The bodygraph image will display in the conversation alongside the data. Costs 2 additional credits on top of the base call cost."
+          },
+          "visual_config": {
+            "type": "object",
+            "description": "Optional rendering preferences (only used when include_visual=true).",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark"
+                ],
+                "description": "Color theme. Default: dark (HD convention)."
+              },
+              "size": {
+                "type": "number",
+                "description": "Canvas size in pixels, 200–4000. Default: 800."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_synastry",
+      "description": "Calculate a synastry chart comparing two people's natal charts. Returns inter-aspects (planetary connections between the two charts), composite points, and relationship indicators. Use this for compatibility analysis, relationship timing, or partnership insights.\n\nCREDIT COST: 3 credits per call.\n\nEXAMPLE: Compare two people's charts:\n  person_a_datetime='1990-04-15T14:30:00', person_a_latitude=41.8781, person_a_longitude=-87.6298,\n  person_b_datetime='1988-09-22T08:15:00', person_b_latitude=34.0522, person_b_longitude=-118.2437",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "person_a_datetime": {
+            "type": "string",
+            "description": "Person A birth datetime (ISO 8601)."
+          },
+          "person_a_latitude": {
+            "type": "number",
+            "description": "Person A birth latitude."
+          },
+          "person_a_longitude": {
+            "type": "number",
+            "description": "Person A birth longitude."
+          },
+          "person_b_datetime": {
+            "type": "string",
+            "description": "Person B birth datetime (ISO 8601)."
+          },
+          "person_b_latitude": {
+            "type": "number",
+            "description": "Person B birth latitude."
+          },
+          "person_b_longitude": {
+            "type": "number",
+            "description": "Person B birth longitude."
+          },
+          "house_system": {
+            "type": "string",
+            "enum": [
+              "placidus",
+              "whole_sign",
+              "equal",
+              "koch"
+            ],
+            "description": "House system for both charts. Defaults to 'placidus'."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format. 'llm' is compact and token-efficient (available on all tiers)."
+          },
+          "include_visual": {
+            "type": "boolean",
+            "description": "When true, renders a bi-wheel SVG comparing both charts and embeds it in the response. The chart image will display in the conversation alongside the data. Costs 2 additional credits on top of the base call cost."
+          },
+          "visual_config": {
+            "type": "object",
+            "description": "Optional rendering preferences (only used when include_visual=true).",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark"
+                ],
+                "description": "Color theme. Default: light."
+              },
+              "size": {
+                "type": "number",
+                "description": "Canvas size in pixels, 200–4000. Default: 800."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "person_a_datetime",
+          "person_a_latitude",
+          "person_a_longitude",
+          "person_b_datetime",
+          "person_b_latitude",
+          "person_b_longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_relocation",
+      "description": "Calculate a relocation chart — the same natal planetary positions re-cast for a different geographic location. Used to understand how living in a different city shifts house placements and angles, without changing the planetary longitudes in the chart.\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: How does moving from Chicago to London change someone's chart?\n  natal_datetime='1990-04-15T14:30:00', natal_latitude=41.8781, natal_longitude=-87.6298,\n  relocation_latitude=51.5074, relocation_longitude=-0.1278",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "natal_datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth datetime (local time at birth location)."
+          },
+          "natal_latitude": {
+            "type": "number",
+            "description": "Latitude of birth location in decimal degrees."
+          },
+          "natal_longitude": {
+            "type": "number",
+            "description": "Longitude of birth location in decimal degrees."
+          },
+          "relocation_latitude": {
+            "type": "number",
+            "description": "Latitude of the relocation city in decimal degrees (positive = North)."
+          },
+          "relocation_longitude": {
+            "type": "number",
+            "description": "Longitude of the relocation city in decimal degrees (positive = East)."
+          },
+          "house_system": {
+            "type": "string",
+            "enum": [
+              "placidus",
+              "whole_sign",
+              "equal",
+              "koch",
+              "campanus",
+              "regiomontanus",
+              "porphyry"
+            ],
+            "description": "House system to use. Defaults to 'placidus'."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format. 'llm' = compact token-efficient output (available on all tiers)."
+          }
+        },
+        "required": [
+          "natal_datetime",
+          "natal_latitude",
+          "natal_longitude",
+          "relocation_latitude",
+          "relocation_longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_electional",
+      "description": "Find optimal planetary timing windows (electional astrology). Scans a date range to find the best times for an event based on essential dignity, aspect quality, sect, and void-of-course moon penalties. Evaluates every hour and clusters the best continuous windows.\n\nCREDIT COST: 5 credits per call (heavy calculation).\n\nEXAMPLE: Find the best time to launch a business in early March 2026.\n  start_date='2026-03-01', end_date='2026-03-10', latitude=40.7128, longitude=-74.0060,\n  avoid_voc=true, lunar_phase='waxing'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "description": "ISO 8601 start date or datetime for the search window (e.g., 2026-03-01)."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "ISO 8601 end date or datetime for the search window."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Latitude of location in decimal degrees (positive = North)."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Longitude of location in decimal degrees (positive = East)."
+          },
+          "max_results": {
+            "type": "number",
+            "description": "Maximum number of top windows to return (default 5)."
+          },
+          "avoid_retrograde": {
+            "type": "string",
+            "description": "Comma-separated list of planets to avoid when retrograde (e.g., 'mercury,venus')."
+          },
+          "lunar_phase": {
+            "type": "string",
+            "enum": [
+              "waxing",
+              "waning",
+              "new",
+              "full",
+              "any"
+            ],
+            "description": "Filter windows by lunar phase. Defaults to 'any'."
+          },
+          "avoid_voc": {
+            "type": "boolean",
+            "description": "If true, strictly ignores any moments where the Moon is Void of Course."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format. 'llm' = compact token-efficient output (available on all tiers)."
+          }
+        },
+        "required": [
+          "start_date",
+          "end_date",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "electional_moment_analysis",
+      "description": "Analyze the astrological quality of a specific moment: planet positions, aspects, void of course status, lunar phase, day ruler, and an overall electional score (0-100). Perfect for evaluating whether 'right now' or a specific date/time is good for action.\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: Analyze March 21, 2026 at noon:\n  date='2026-03-21T12:00:00'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 datetime to analyze (e.g., '2026-03-21T12:00:00'). Defaults to now."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "electional_station_tracker",
+      "description": "Find all upcoming retrograde and direct stations for planets in a date range. Returns exact station times, longitudes, and signs.\n\nUSE THIS TOOL FOR: 'When does Mercury go retrograde?', 'Is Venus retrograde this year?', 'What planets station this month?', 'When does Mars go direct?'\n\nAll required fields have smart defaults (searches the next 90 days from today).\n\nCREDIT COST: 3 credits per call.\n\nEXAMPLE: Mercury and Venus stations in the next 3 months (all defaults):\n  (no args required, will auto-scan next 90 days for all inner planets)\n\nEXAMPLE: Outer planet stations in 2026:\n  start_date='2026-01-01', end_date='2026-12-31', planets='jupiter,saturn,uranus,neptune,pluto'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "description": "Start date (ISO 8601). Defaults to today."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "End date (ISO 8601). Defaults to +90 days."
+          },
+          "planets": {
+            "type": "string",
+            "description": "Comma-separated planet names to track. E.g. 'mercury,venus,mars' or 'jupiter,saturn,uranus,neptune,pluto'. Defaults to Mercury through Saturn (inner + classical planets)."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "electional_aspect_search",
+      "description": "Find all active aspects between planets at a specific moment. Returns aspect type, orb, quality score, and whether it's applying or separating. Great for checking the 'weather' of a given day.\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: What aspects are active on March 21, 2026?\n  date='2026-03-21T12:00:00'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 datetime to check. Defaults to now."
+          },
+          "max_orb": {
+            "type": "number",
+            "description": "Maximum orb in degrees. Default uses standard orbs per aspect type."
+          },
+          "aspects": {
+            "type": "string",
+            "description": "Comma-separated aspect types to filter (e.g., 'conjunction,trine,square'). Default all."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "vedic_chart",
+      "description": "Calculate a Vedic (Jyotish) natal chart with sidereal positions. Returns planet placements in rashis (sidereal signs), nakshatras with pada, navamsa placements, and bhavas (houses). Uses Whole Sign houses, sidereal zodiac with configurable ayanamsa.\n\nCREDIT COST: 1 credit per call.\n\nSUPPORTED AYANAMSA: lahiri (default), fagan_bradley, krishnamurti, raman, yukteshwar\n\nEXAMPLE: Vedic chart for someone born Jan 15, 1990 at 8:30 AM UTC in Mumbai:\n  datetime='1990-01-15T08:30:00Z', latitude=19.076, longitude=72.8777",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth datetime in UTC, e.g. '1990-01-15T08:30:00Z'. Include 'Z' or timezone offset."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees (north positive)."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees (east positive)."
+          },
+          "ayanamsa": {
+            "type": "string",
+            "enum": [
+              "lahiri",
+              "fagan_bradley",
+              "krishnamurti",
+              "raman",
+              "yukteshwar"
+            ],
+            "description": "Ayanamsa system for sidereal conversion. Defaults to 'lahiri'."
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "chinese_bazi",
+      "description": "Calculate a Chinese BaZi (四柱命盘 Four Pillars of Destiny) chart. Returns the Year, Month, Day, and Hour pillars, each with a Heavenly Stem (天干) and Earthly Branch (地支) pair. Includes the Day Master element and basic metadata.\n\nCREDIT COST: 1 credit (3 credits when include_visual=true).\n\nSet include_visual=true to receive a rendered SVG chart alongside the text data.\n\nFor deep analysis, follow up with:\n  • bazi_ten_gods()         — Ten Gods (十神) per pillar including hidden stems\n  • bazi_element_balance()  — Weighted Wu Xing (五行) element scores + Yong Shen\n  • bazi_luck_pillars()     — 8 Da Yun 10-year luck cycles\n\nEXAMPLE: BaZi chart for someone born July 15, 1987 at 2 PM:\n  year=1987, month=7, day=15, hour=14",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "description": "Gregorian birth year, e.g. 1987."
+          },
+          "month": {
+            "type": "integer",
+            "description": "Birth month (1–12)."
+          },
+          "day": {
+            "type": "integer",
+            "description": "Birth day of month (1–31)."
+          },
+          "hour": {
+            "type": "integer",
+            "description": "Birth hour (0–23). Optional, defaults to 12 (noon). Chinese shí hours are 2-hour blocks — precision within a 2-hour window is sufficient."
+          },
+          "datetime": {
+            "type": "string",
+            "description": "Alternative to year/month/day: ISO 8601 datetime (e.g. '1987-07-15T14:00:00'). year/month/day/hour are extracted automatically. Use this OR the individual fields."
+          },
+          "include_visual": {
+            "type": "boolean",
+            "description": "When true, the response includes a rendered SVG chart of the Four Pillars. Costs an extra 2 credits (total 3 credits). Ideal for delivering a visual alongside text analysis."
+          },
+          "visual_config": {
+            "type": "object",
+            "description": "Optional rendering preferences. Only relevant when include_visual=true.",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark",
+                  "mono"
+                ],
+                "description": "Chart color theme. Defaults to 'light'."
+              },
+              "size": {
+                "type": "integer",
+                "description": "Chart width in pixels (400–1600). Defaults to 800."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bazi_ten_gods",
+      "description": "Calculate the Ten Gods (十神 Shí Shén) for a BaZi chart. Each of the 10 gods describes the relationship between the Day Master (日主, the person's core identity element) and every other Heavenly Stem in the chart — including visible stems and the hidden stems stored within each Earthly Branch.\n\nThe 10 gods and their categories:\n  COMPANION: Friend (比肩), Rob Wealth (劫财)\n  OUTPUT:    Eating God (食神), Hurting Officer (伤官)\n  WEALTH:    Indirect Wealth (偏财), Direct Wealth (正财)\n  POWER:     Seven Killings (七杀), Direct Officer (正官)\n  RESOURCE:  Indirect Resource (偏印), Direct Resource (正印)\n\nThe Day Pillar itself has no Ten God (it IS the Day Master). Hidden stems in the Day Branch still receive Ten God labels.\n\nCREDIT COST: 1 credit (3 credits when include_visual=true).\n\nSet include_visual=true to receive an SVG Four Pillars chart alongside the Ten Gods data.\n\nEXAMPLE: Ten Gods for someone born July 15, 1987 at 2 PM:\n  year=1987, month=7, day=15, hour=14",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "description": "Gregorian birth year, e.g. 1987."
+          },
+          "month": {
+            "type": "integer",
+            "description": "Birth month (1–12)."
+          },
+          "day": {
+            "type": "integer",
+            "description": "Birth day of month (1–31)."
+          },
+          "hour": {
+            "type": "integer",
+            "description": "Birth hour (0–23). Optional, defaults to 12 (noon). Chinese shí hours are 2-hour blocks — precision within a 2-hour window is sufficient."
+          },
+          "datetime": {
+            "type": "string",
+            "description": "Alternative to year/month/day: ISO 8601 datetime (e.g. '1987-07-15T14:00:00'). year/month/day/hour are extracted automatically. Use this OR the individual fields."
+          },
+          "include_visual": {
+            "type": "boolean",
+            "description": "When true, the response includes a rendered SVG chart of the Four Pillars. Costs an extra 2 credits (total 3 credits). Ideal for delivering a visual alongside text analysis."
+          },
+          "visual_config": {
+            "type": "object",
+            "description": "Optional rendering preferences. Only relevant when include_visual=true.",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark",
+                  "mono"
+                ],
+                "description": "Chart color theme. Defaults to 'light'."
+              },
+              "size": {
+                "type": "integer",
+                "description": "Chart width in pixels (400–1600). Defaults to 800."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bazi_element_balance",
+      "description": "Calculate the weighted Wu Xing (五行 Five Elements) distribution for a BaZi chart. Returns percentage scores for Wood, Fire, Earth, Metal, and Water across all chart positions.\n\nScoring is weighted — hidden stems inside Earthly Branches count toward element totals:\n  • Visible Heavenly Stems: 1.0 weight each (4 positions)\n  • Hidden Stem main (本气):      1.0 weight\n  • Hidden Stem secondary (中气): 0.6 weight\n  • Hidden Stem residual (余气):  0.3 weight\n\nAlso returns:\n  • Day Master strength: 'strong' (旺, ≥50% own+resource elements) or 'weak' (弱)\n  • Yong Shen (用神): the favorable element — what the chart needs most\n\nCREDIT COST: 1 credit (3 credits when include_visual=true).\n\nSet include_visual=true to receive an SVG Four Pillars chart alongside the element data.\n\nEXAMPLE: Element balance for 1987-07-15 at 14:00:\n  year=1987, month=7, day=15, hour=14",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "description": "Gregorian birth year, e.g. 1987."
+          },
+          "month": {
+            "type": "integer",
+            "description": "Birth month (1–12)."
+          },
+          "day": {
+            "type": "integer",
+            "description": "Birth day of month (1–31)."
+          },
+          "hour": {
+            "type": "integer",
+            "description": "Birth hour (0–23). Optional, defaults to 12 (noon). Chinese shí hours are 2-hour blocks — precision within a 2-hour window is sufficient."
+          },
+          "datetime": {
+            "type": "string",
+            "description": "Alternative to year/month/day: ISO 8601 datetime (e.g. '1987-07-15T14:00:00'). year/month/day/hour are extracted automatically. Use this OR the individual fields."
+          },
+          "include_visual": {
+            "type": "boolean",
+            "description": "When true, the response includes a rendered SVG chart of the Four Pillars. Costs an extra 2 credits (total 3 credits). Ideal for delivering a visual alongside text analysis."
+          },
+          "visual_config": {
+            "type": "object",
+            "description": "Optional rendering preferences. Only relevant when include_visual=true.",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark",
+                  "mono"
+                ],
+                "description": "Chart color theme. Defaults to 'light'."
+              },
+              "size": {
+                "type": "integer",
+                "description": "Chart width in pixels (400–1600). Defaults to 800."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bazi_luck_pillars",
+      "description": "Calculate the 8 Da Yun (大运) 10-year luck pillar cycles for a BaZi chart. Luck pillars sequence through the sexagenary cycle starting from a person's 'starting age' (起运岁数), calculated by counting days from birth to the nearest solar term boundary (Jié 节). Each 3 days = 1 year of starting age (Zi Ping rule).\n\nDirection (forward/backward) depends on gender and year polarity:\n  • Male in Yang year → forward\n  • Male in Yin year → backward\n  • Female in Yang year → backward\n  • Female in Yin year → forward\n\ngender is REQUIRED — the direction of luck pillars is gender-dependent.\n\nReturns: starting_age, direction, direction_reason, and 8 pillars each with:\n  stem, branch, Chinese characters, element, start_age, end_age\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Luck pillars for a female born July 15, 1987 at 2 PM:\n  year=1987, month=7, day=15, hour=14, gender='female'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "description": "Gregorian birth year, e.g. 1987."
+          },
+          "month": {
+            "type": "integer",
+            "description": "Birth month (1–12)."
+          },
+          "day": {
+            "type": "integer",
+            "description": "Birth day of month (1–31)."
+          },
+          "hour": {
+            "type": "integer",
+            "description": "Birth hour (0–23). Optional, defaults to 12 (noon). Chinese shí hours are 2-hour blocks — precision within a 2-hour window is sufficient."
+          },
+          "datetime": {
+            "type": "string",
+            "description": "Alternative to year/month/day: ISO 8601 datetime (e.g. '1987-07-15T14:00:00'). year/month/day/hour are extracted automatically. Use this OR the individual fields."
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "male",
+              "female"
+            ],
+            "description": "Required. Determines the direction of Da Yun progression. Male in Yang year / Female in Yin year → forward. Male in Yin year / Female in Yang year → backward."
+          }
+        },
+        "required": [
+          "gender"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bazi_annual_pillar",
+      "description": "Look up the sexagenary pillar for any Gregorian year (1–9999). Returns the Heavenly Stem, Earthly Branch, Chinese characters, zodiac animal, element, polarity, and NaYin (纳音) poetic resonance image.\n\nNaYin maps each pair in the 60-cycle sexagenary sequence to one of 30 elemental images (e.g. '海中金 Metal in the Sea', '炉中火 Fire in the Furnace'). It is traditionally applied to the Year and Day pillars to reveal deeper elemental character.\n\nUse this to:\n  • Identify the energetic quality of any given year\n  • Determine a person's birth year pillar for compatibility context\n  • Find the NaYin element for year or day interpretations\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Year pillar for 2025:\n  year=2025",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "description": "Gregorian year (1–9999). e.g. 2025."
+          }
+        },
+        "required": [
+          "year"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bazi_compatibility",
+      "description": "Calculate BaZi compatibility between two people by comparing their Four Pillars charts. Returns a score 0–100, an assessment, and a breakdown of the harmony/clash/penalty factors found between the two charts.\n\nScoring factors include:\n  +5  Six Harmony (六合 Liù Hé) — branch pair bonds\n  +8  Three Harmonies (三合 Sān Hé) — branch trinity formations\n  -8  Six Clash (六冲 Liù Chōng) — opposing branch pairs\n  -5  Six Harm (六害 Liù Hài) — branch interference pairs\n  -6  Three Penalties (三刑 Sān Xíng) — branch penalty formations\n\nAssessment grades:\n  90–100: excellent | 70–89: good | 50–69: moderate | below 50: challenging\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: Compatibility between two people:\n  chart_a_year=1987, chart_a_month=7, chart_a_day=15, chart_a_hour=14\n  chart_b_year=1990, chart_b_month=3, chart_b_day=22, chart_b_hour=8",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chart_a_year": {
+            "type": "integer",
+            "description": "Chart A birth year."
+          },
+          "chart_a_month": {
+            "type": "integer",
+            "description": "Chart A birth month (1–12)."
+          },
+          "chart_a_day": {
+            "type": "integer",
+            "description": "Chart A birth day (1–31)."
+          },
+          "chart_a_hour": {
+            "type": "integer",
+            "description": "Chart A birth hour (0–23). Optional."
+          },
+          "chart_a_datetime": {
+            "type": "string",
+            "description": "Chart A alternative: ISO 8601 datetime. Extracts year/month/day/hour automatically."
+          },
+          "chart_b_year": {
+            "type": "integer",
+            "description": "Chart B birth year."
+          },
+          "chart_b_month": {
+            "type": "integer",
+            "description": "Chart B birth month (1–12)."
+          },
+          "chart_b_day": {
+            "type": "integer",
+            "description": "Chart B birth day (1–31)."
+          },
+          "chart_b_hour": {
+            "type": "integer",
+            "description": "Chart B birth hour (0–23). Optional."
+          },
+          "chart_b_datetime": {
+            "type": "string",
+            "description": "Chart B alternative: ISO 8601 datetime. Extracts year/month/day/hour automatically."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bazi_chart",
+      "description": "Render a self-contained SVG chart of a BaZi Four Pillars chart. Returns a production-quality visualization showing:\n  • All four pillars (Year, Month, Day, Hour) with Heavenly Stems and Earthly Branches\n  • Ten Gods (十神) labels for each non-Day pillar\n  • Wu Xing (五行) element balance bar chart\n  • Day Master identity with element and polarity\n\nThe chart is rendered in the Open Ephemeris design system (OKLCH color tokens) and is fully self-contained — suitable for embedding or display without dependencies.\n\nTheme options: 'light' (default), 'dark', 'mono'.\n\nCREDIT COST: 3 credits per call (1 base + 2 visual render).\n\nUse this tool when the user asks to 'show', 'visualize', 'draw', or 'render' a BaZi / Four Pillars chart. For text-only data, use chinese_bazi() instead.\n\nEXAMPLE: Render a chart for someone born July 15, 1987 at 2 PM:\n  year=1987, month=7, day=15, hour=14",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "description": "Gregorian birth year, e.g. 1987."
+          },
+          "month": {
+            "type": "integer",
+            "description": "Birth month (1–12)."
+          },
+          "day": {
+            "type": "integer",
+            "description": "Birth day of month (1–31)."
+          },
+          "hour": {
+            "type": "integer",
+            "description": "Birth hour (0–23). Optional, defaults to 12 (noon). Chinese shí hours are 2-hour blocks — precision within a 2-hour window is sufficient."
+          },
+          "datetime": {
+            "type": "string",
+            "description": "Alternative to year/month/day: ISO 8601 datetime (e.g. '1987-07-15T14:00:00'). year/month/day/hour are extracted automatically. Use this OR the individual fields."
+          },
+          "theme": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark",
+              "mono"
+            ],
+            "description": "Chart color theme. Defaults to 'light'."
+          },
+          "size": {
+            "type": "integer",
+            "description": "Chart width in pixels (400–1600). Defaults to 800."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_chart_wheel",
+      "description": "Generate a classic astrological Chart Wheel image (SVG) for a person/event. This draws a standard circular chart wheel with planets, aspects, and house cusps. The tool returns a native SVG image that Claude displays inline in the conversation — no external tools needed.\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: Generate a natal chart wheel for someone born April 15, 1990 in Chicago:\n  datetime='1990-04-15T14:30:00', latitude=41.8781, longitude=-87.6298",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 datetime string, e.g. '1990-04-15T14:30:00' (local time at birth location). Include timezone offset if known, e.g. '1990-04-15T14:30:00-05:00'."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone name, e.g. 'America/Denver'. Use this if passing local time without a UTC offset in the datetime string."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Geographic latitude of birth location in decimal degrees (positive = North)."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Geographic longitude of birth location in decimal degrees (positive = East)."
+          },
+          "house_system": {
+            "type": "string",
+            "enum": [
+              "placidus",
+              "whole_sign",
+              "equal",
+              "koch",
+              "campanus",
+              "regiomontanus",
+              "porphyry",
+              "alcabitius",
+              "morinus"
+            ],
+            "description": "House system to use. Defaults to 'placidus' if omitted."
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark",
+              "mono"
+            ],
+            "description": "Aesthetic style of the chart: 'light' (default, warm cream background), 'dark' (deep navy), or 'mono' (black-and-white print-ready)."
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_bi_wheel",
+      "description": "Generate a Bi-Wheel (Synastry/Transit) image (SVG) comparing two charts. Draws Subject A's planets on the inside wheel and Subject B's on the outside wheel. Returns a native SVG that Claude displays inline in the conversation.\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: Compare someone born April 15, 1990 (A) to someone born June 10, 1992 (B):\n  datetime_a='...', latitude_a=..., longitude_a=..., datetime_b='...', latitude_b=..., longitude_b=...",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime_a": {
+            "type": "string",
+            "description": "ISO 8601 datetime string, e.g. '1990-04-15T14:30:00' (local time at birth location). Include timezone offset if known, e.g. '1990-04-15T14:30:00-05:00'."
+          },
+          "timezone_a": {
+            "type": "string",
+            "description": "IANA timezone name for subject A, e.g. 'America/Denver'."
+          },
+          "latitude_a": {
+            "type": "number",
+            "description": "Latitude for subject A"
+          },
+          "longitude_a": {
+            "type": "number",
+            "description": "Longitude for subject A"
+          },
+          "datetime_b": {
+            "type": "string",
+            "description": "ISO 8601 datetime string, e.g. '1990-04-15T14:30:00' (local time at birth location). Include timezone offset if known, e.g. '1990-04-15T14:30:00-05:00'."
+          },
+          "timezone_b": {
+            "type": "string",
+            "description": "IANA timezone name for subject B, e.g. 'Europe/London'."
+          },
+          "latitude_b": {
+            "type": "number",
+            "description": "Latitude for subject B"
+          },
+          "longitude_b": {
+            "type": "number",
+            "description": "Longitude for subject B"
+          },
+          "house_system": {
+            "type": "string",
+            "enum": [
+              "placidus",
+              "whole_sign",
+              "equal",
+              "koch",
+              "campanus",
+              "regiomontanus",
+              "porphyry",
+              "alcabitius",
+              "morinus"
+            ],
+            "description": "House system to use. Defaults to 'placidus' if omitted."
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark",
+              "mono"
+            ],
+            "description": "Aesthetic style of the chart: 'light' (default, warm cream background), 'dark' (deep navy), or 'mono' (black-and-white print-ready)."
+          }
+        },
+        "required": [
+          "datetime_a",
+          "latitude_a",
+          "longitude_a",
+          "datetime_b",
+          "latitude_b",
+          "longitude_b"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_solar_return",
+      "description": "Calculate the exact Solar Return date/time — when the Sun returns to its natal ecliptic longitude (happens once per year near the birthday). Returns the Solar Return chart for the year ahead.\n\nCREDIT COST: 5 credits per call.\n\nTARGET DATE: Provide target_datetime near the desired birthday year. If omitted, defaults to the current year's solar return.\n\nEXAMPLE: Solar return for someone born 1985-06-21 (current year):\n  birth_datetime='1985-06-21T14:00:00Z'\n\nEXAMPLE: Solar return for 2027 specifically:\n  birth_datetime='1985-06-21T14:00:00Z', target_datetime='2027-01-01T00:00:00Z'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "birth_datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth date/time. Include offset or Z (e.g. '1985-06-21T14:00:00-05:00')."
+          },
+          "target_datetime": {
+            "type": "string",
+            "description": "Date/time near which to find the Solar Return (ISO 8601 with offset or Z). Defaults to approximately 1 year from now if omitted."
+          },
+          "birth_latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees (optional, for location context)."
+          },
+          "birth_longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees (optional, for location context)."
+          },
+          "return_latitude": {
+            "type": "number",
+            "description": "Location latitude for the return chart (optional, if different from birth location)."
+          },
+          "return_longitude": {
+            "type": "number",
+            "description": "Location longitude for the return chart (optional)."
+          },
+          "include_visual": {
+            "type": "boolean",
+            "description": "When true, renders the solar return chart wheel as an SVG and embeds it in the response. The chart image will display in the conversation alongside the data. Costs 2 additional credits on top of the base call cost."
+          },
+          "visual_config": {
+            "type": "object",
+            "description": "Optional rendering preferences (only used when include_visual=true).",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark"
+                ],
+                "description": "Color theme. Default: light."
+              },
+              "size": {
+                "type": "number",
+                "description": "Canvas size in pixels, 200–4000. Default: 800."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "birth_datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_lunar_return",
+      "description": "Calculate the exact Lunar Return date/time — when the Moon returns to its natal ecliptic longitude (~every 27.3 days). Used to cast the monthly Lunar Return chart.\n\nCREDIT COST: 5 credits per call.\n\nTARGET DATE: Provide target_datetime near the month you want. If omitted, defaults to the next upcoming lunar return from today.\n\nEXAMPLE: Next lunar return after today for someone born 1990-04-15:\n  birth_datetime='1990-04-15T14:30:00Z'\n\nEXAMPLE: Lunar return nearest March 2026:\n  birth_datetime='1990-04-15T14:30:00Z', target_datetime='2026-03-15T00:00:00Z'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "birth_datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth date/time. Include offset or Z."
+          },
+          "target_datetime": {
+            "type": "string",
+            "description": "Date/time near which to find the Lunar Return (ISO 8601 with offset or Z). Defaults to today if omitted (finds next return)."
+          },
+          "birth_latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees (optional)."
+          },
+          "birth_longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees (optional)."
+          }
+        },
+        "required": [
+          "birth_datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_planetary_return",
+      "description": "Calculate a planetary return — when any planet returns to its natal longitude. Useful for Jupiter returns (~12 years), Saturn returns (~29 years), Chiron returns (~50 years), Uranus returns (~84 years), etc.\n\nCREDIT COST: 5 credits per call.\n\nEXAMPLE: Saturn return for birth 1990-04-15 near year 2019:\n  body='saturn', birth_datetime='1990-04-15T14:30:00Z', target_datetime='2019-01-01T00:00:00Z'\nEXAMPLE: Chiron return for birth 1975-03-10 near age 50:\n  body='chiron', birth_datetime='1975-03-10T08:00:00Z', target_datetime='2025-01-01T00:00:00Z'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Planet name: sun, moon, mercury, venus, mars, jupiter, saturn, uranus, neptune, pluto, chiron, pholus."
+          },
+          "birth_datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth date/time. MUST include offset or Z."
+          },
+          "target_datetime": {
+            "type": "string",
+            "description": "Date/time near which to find the return (ISO 8601). MUST include offset or Z. Required."
+          },
+          "birth_latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees. Required to get a full return chart (house cusps, angles)."
+          },
+          "birth_longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees. Required to get a full return chart (house cusps, angles)."
+          }
+        },
+        "required": [
+          "body",
+          "birth_datetime",
+          "target_datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_progressed_chart",
+      "description": "Calculate a Secondary Progressed (or Solar Arc / Tertiary) chart. Advances the natal chart symbolically — 1 day = 1 year (secondary), or using solar arc motion. Returns progressed planet positions, house cusps, aspects, and retrograde status.\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Secondary progressions for someone born 1985-06-21, progressed to 2026-01-01:\n  birth_datetime='1985-06-21T14:00:00', birth_latitude=51.5, birth_longitude=-0.12,\n  target_datetime='2026-01-01', method='secondary'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "birth_datetime": {
+            "type": "string",
+            "description": "ISO 8601 natal birth date/time."
+          },
+          "birth_latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees."
+          },
+          "birth_longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees."
+          },
+          "target_datetime": {
+            "type": "string",
+            "description": "Target date to progress the chart to (ISO 8601)."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "secondary",
+              "solar_arc",
+              "tertiary"
+            ],
+            "description": "Progression method. Defaults to 'secondary' (1 day = 1 year)."
+          },
+          "include_aspects": {
+            "type": "boolean",
+            "description": "Whether to include aspect grid in the response. Default false."
+          },
+          "include_visual": {
+            "type": "boolean",
+            "description": "When true, renders the progressed chart wheel as an SVG and embeds it in the response. The chart image will display in the conversation alongside the data. Costs 2 additional credits on top of the base call cost."
+          },
+          "visual_config": {
+            "type": "object",
+            "description": "Optional rendering preferences (only used when include_visual=true).",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark"
+                ],
+                "description": "Color theme. Default: light."
+              },
+              "size": {
+                "type": "number",
+                "description": "Canvas size in pixels, 200–4000. Default: 800."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "birth_datetime",
+          "birth_latitude",
+          "birth_longitude",
+          "target_datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_planet_position",
+      "description": "Get the precise ecliptic longitude, latitude, distance, speed, and retrograde status for a single planet/body at a given date and time. Planet IDs: 0=Sun, 1=Moon, 2=Mercury, 3=Venus, 4=Mars, 5=Jupiter, 6=Saturn, 7=Uranus, 8=Neptune, 9=Pluto, 10=North Node, 11=South Node, 12=Lilith, 15=Chiron, 17=Ceres, 18=Pallas, 19=Juno, 20=Vesta.\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Where is Mars on 2026-03-20 at noon UTC?\n  planet_id=4, datetime='2026-03-20T12:00:00Z'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planet_id": {
+            "type": "integer",
+            "description": "Planet/body ID (0=Sun, 1=Moon, 2=Mercury, 3=Venus, 4=Mars, 5=Jupiter, 6=Saturn, 7=Uranus, 8=Neptune, 9=Pluto, 10=MeanNode, 11=TrueNode, 12=Lilith, 15=Chiron, 17=Ceres, 18=Pallas, 19=Juno, 20=Vesta)."
+          },
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 date/time in UTC or with offset (e.g. '2026-03-20T12:00:00Z' or '2026-03-20T12:00:00-05:00')."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Observer latitude for topocentric position (optional). Omit for geocentric."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Observer longitude for topocentric position (optional). Omit for geocentric."
+          }
+        },
+        "required": [
+          "planet_id",
+          "datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_house_cusps",
+      "description": "Calculate house cusps and angles (ASC, MC, DSC, IC) for a given date, time, and location using one or more house systems.\n\nHouse system codes: P=Placidus, K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign.\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Placidus houses for London at 2026-03-20 noon UTC:\n  datetime='2026-03-20T12:00:00Z', latitude=51.5074, longitude=-0.1278, house_systems=['P']",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 date/time in UTC or with offset (e.g. '2026-03-20T12:00:00Z')."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Observer latitude in decimal degrees."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Observer longitude in decimal degrees."
+          },
+          "house_systems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of house system codes. E.g. ['P', 'W']. Defaults to ['P'] (Placidus)."
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_composite",
+      "description": "Calculate a composite chart from two or more natal charts. The composite uses midpoints of each planet pair to derive a single relationship chart.\n\nCREDIT COST: 3 credits per call.\n\nEXAMPLE: Composite for two people:\n  person_a_datetime='1990-04-15T14:30:00', person_a_latitude=41.88, person_a_longitude=-87.63,\n  person_b_datetime='1988-09-22T08:15:00', person_b_latitude=34.05, person_b_longitude=-118.24",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "person_a_datetime": {
+            "type": "string",
+            "description": "Person A birth datetime (ISO 8601)."
+          },
+          "person_a_timezone": {
+            "type": "string",
+            "description": "IANA timezone name for Person A, e.g. 'America/Denver'."
+          },
+          "person_a_latitude": {
+            "type": "number",
+            "description": "Person A birth latitude."
+          },
+          "person_a_longitude": {
+            "type": "number",
+            "description": "Person A birth longitude."
+          },
+          "person_b_datetime": {
+            "type": "string",
+            "description": "Person B birth datetime (ISO 8601)."
+          },
+          "person_b_timezone": {
+            "type": "string",
+            "description": "IANA timezone name for Person B, e.g. 'Europe/London'."
+          },
+          "person_b_latitude": {
+            "type": "number",
+            "description": "Person B birth latitude."
+          },
+          "person_b_longitude": {
+            "type": "number",
+            "description": "Person B birth longitude."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Use 'llm' for token-efficient LLM projection."
+          }
+        },
+        "required": [
+          "person_a_datetime",
+          "person_a_latitude",
+          "person_a_longitude",
+          "person_b_datetime",
+          "person_b_latitude",
+          "person_b_longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_composite_midpoint",
+      "description": "Calculate a midpoint composite chart — an alternative composite method using the midpoints of matching planet positions.\n\nCREDIT COST: 3 credits per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "person_a_datetime": {
+            "type": "string",
+            "description": "Person A birth datetime (ISO 8601)."
+          },
+          "person_a_timezone": {
+            "type": "string",
+            "description": "IANA timezone name for Person A, e.g. 'America/Denver'."
+          },
+          "person_a_latitude": {
+            "type": "number",
+            "description": "Person A birth latitude."
+          },
+          "person_a_longitude": {
+            "type": "number",
+            "description": "Person A birth longitude."
+          },
+          "person_b_datetime": {
+            "type": "string",
+            "description": "Person B birth datetime (ISO 8601)."
+          },
+          "person_b_timezone": {
+            "type": "string",
+            "description": "IANA timezone name for Person B, e.g. 'Europe/London'."
+          },
+          "person_b_latitude": {
+            "type": "number",
+            "description": "Person B birth latitude."
+          },
+          "person_b_longitude": {
+            "type": "number",
+            "description": "Person B birth longitude."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Use 'llm' for token-efficient LLM projection."
+          }
+        },
+        "required": [
+          "person_a_datetime",
+          "person_a_latitude",
+          "person_a_longitude",
+          "person_b_datetime",
+          "person_b_latitude",
+          "person_b_longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_overlay",
+      "description": "Calculate an overlay chart — place one person's planets in another person's houses. Shows how person A's energies impact person B's life areas and vice versa.\n\nCREDIT COST: 3 credits per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "person_a_datetime": {
+            "type": "string",
+            "description": "Person A birth datetime (ISO 8601)."
+          },
+          "person_a_timezone": {
+            "type": "string",
+            "description": "IANA timezone name for Person A, e.g. 'America/Denver'."
+          },
+          "person_a_latitude": {
+            "type": "number",
+            "description": "Person A birth latitude."
+          },
+          "person_a_longitude": {
+            "type": "number",
+            "description": "Person A birth longitude."
+          },
+          "person_b_datetime": {
+            "type": "string",
+            "description": "Person B birth datetime (ISO 8601)."
+          },
+          "person_b_timezone": {
+            "type": "string",
+            "description": "IANA timezone name for Person B, e.g. 'Europe/London'."
+          },
+          "person_b_latitude": {
+            "type": "number",
+            "description": "Person B birth latitude."
+          },
+          "person_b_longitude": {
+            "type": "number",
+            "description": "Person B birth longitude."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Use 'llm' for token-efficient LLM projection."
+          }
+        },
+        "required": [
+          "person_a_datetime",
+          "person_a_latitude",
+          "person_a_longitude",
+          "person_b_datetime",
+          "person_b_latitude",
+          "person_b_longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_natal_transits",
+      "description": "Calculate active transits to a natal chart — shows which current planets are aspecting natal positions. Essential for predictive astrology.\n\nCREDIT COST: 3 credits per call.\n\nEXAMPLE: Current transits to someone born 1990-04-15:\n  natal_datetime='1990-04-15T14:30:00', natal_latitude=41.88, natal_longitude=-87.63",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "natal_datetime": {
+            "type": "string",
+            "description": "Natal birth datetime (ISO 8601)."
+          },
+          "natal_timezone": {
+            "type": "string",
+            "description": "IANA timezone name for Natal, e.g. 'America/Denver'."
+          },
+          "natal_latitude": {
+            "type": "number",
+            "description": "Natal birth latitude."
+          },
+          "natal_longitude": {
+            "type": "number",
+            "description": "Natal birth longitude."
+          },
+          "transit_datetime": {
+            "type": "string",
+            "description": "Transit moment (ISO 8601). Defaults to now."
+          },
+          "transit_timezone": {
+            "type": "string",
+            "description": "IANA timezone name for Transit, e.g. 'America/Denver'. Only applicable if transit_datetime is provided without offset."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Use 'llm' for token-efficient LLM projection."
+          }
+        },
+        "required": [
+          "natal_datetime",
+          "natal_latitude",
+          "natal_longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "human_design_composite",
+      "description": "Calculate a Human Design composite chart for two people. Merges both bodygraphs to show shared channels, authority dynamics, and relationship type.\n\nCREDIT COST: 4 credits per call.\n\nEXAMPLE:\n  person_a_datetime='1990-04-15T14:30:00Z', person_b_datetime='1988-09-22T08:15:00Z'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "person_a_datetime": {
+            "type": "string",
+            "description": "Person A birth datetime as ISO 8601 UTC (e.g. '1990-04-15T14:30:00Z')."
+          },
+          "person_b_datetime": {
+            "type": "string",
+            "description": "Person B birth datetime as ISO 8601 UTC."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format. 'llm' is compact."
+          }
+        },
+        "required": [
+          "person_a_datetime",
+          "person_b_datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "human_design_penta",
+      "description": "Calculate a Human Design Penta (group) chart for 3-5 people. Shows functional attributes, leadership dynamics, channels, redundancies, and a group stability score.\n\nCREDIT COST: 6 credits per call.\n\nEXAMPLE (3 people):\n  group_name='Team Alpha',\n  members=[\n    {id: 'alice', name: 'Alice', datetime: '1990-04-15T14:30:00Z'},\n    {id: 'bob',   name: 'Bob',   datetime: '1988-09-22T08:15:00Z'},\n    {id: 'carol', name: 'Carol', datetime: '1995-01-10T11:00:00Z'}\n  ]",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "group_name": {
+            "type": "string",
+            "description": "Name of the group."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Unique member ID."
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Member's name."
+                },
+                "datetime": {
+                  "type": "string",
+                  "description": "Birth datetime as ISO 8601 UTC."
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "datetime"
+              ]
+            },
+            "description": "Array of 3-5 members with id, name, and datetime.",
+            "minItems": 3,
+            "maxItems": 5
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format."
+          }
+        },
+        "required": [
+          "group_name",
+          "members"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "human_design_bodygraph",
+      "description": "Generate a Human Design Bodygraph image (SVG) from a birth datetime (UTC). Renders the full bodygraph circuit board showing all 9 centers, 36 channels, and 64 gates with Personality (conscious) and Design (unconscious) activations color-coded. Defined centers are filled with their HD doctrine color; open/undefined centers remain muted. Returns a native SVG that Claude displays inline. Use format='png' to opt into raster output (requires server-side rasterizer).\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: Generate a bodygraph for someone born April 15, 1990 at 19:30 UTC:\n  datetime='1990-04-15T19:30:00Z'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth datetime in UTC, e.g. '1990-04-15T19:30:00Z'. Human Design chart calculation is time-sensitive — accuracy to the minute matters."
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark",
+              "mono"
+            ],
+            "description": "Aesthetic style of the bodygraph: 'dark' (default, deep background), 'light' (cream background), or 'mono' (black-and-white print-ready)."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "svg",
+              "png"
+            ],
+            "description": "Output format. Defaults to 'svg' (pure Go renderer — no external deps, displays natively in Claude). Use 'png' for raster output (requires server-side rasterizer)."
+          }
+        },
+        "required": [
+          "datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hd_planetary_return",
+      "description": "Calculate a Human Design planetary return chart — full HD chart (type, strategy, authority, gates, channels) at the moment a planet returns to its natal position. Supports all HD-relevant planets.\n\nCREDIT COST: 2 credits per call.\n\nKey returns in Human Design:\n  • Saturn Return (~29y, ~59y) — maturation/authority activation\n  • Chiron Return (~50y) — wound-to-teaching integration\n  • Jupiter Return (~12y) — expansion cycles\n  • Mars Return (~2y) — energy/drive reset\n  • Lunar Return (~27.3d) — emotional/body cycle\n\nEXAMPLE: Saturn return chart for birth 1990-04-15:\n  planet='saturn', datetime='1990-04-15T19:30:00Z', return_year=2020",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planet": {
+            "type": "string",
+            "enum": [
+              "sun",
+              "moon",
+              "mercury",
+              "venus",
+              "mars",
+              "jupiter",
+              "saturn",
+              "uranus",
+              "neptune",
+              "pluto",
+              "chiron",
+              "pholus"
+            ],
+            "description": "Planet to calculate the return for."
+          },
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth datetime in UTC, e.g. '1990-04-15T19:30:00Z'."
+          },
+          "return_year": {
+            "type": "integer",
+            "description": "Year to find the return near (e.g. 2020 for a Saturn return at ~age 29)."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format. 'llm' returns compact projection for token efficiency."
+          }
+        },
+        "required": [
+          "planet",
+          "datetime",
+          "return_year"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hd_opposition",
+      "description": "Calculate a Human Design opposition chart — the HD chart at the moment a planet opposes its natal position (180°).\n\nKey oppositions in Human Design:\n  • Uranus Opposition (~age 42) — midlife awakening/individuation\n  • Saturn Opposition (~age 14-15, ~44) — structural tension\n  • Jupiter Opposition (~age 6, ~18, ~30) — expansion challenges\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: Uranus opposition for birth 1983-07-15:\n  planet='uranus', datetime='1983-07-15T12:00:00Z', target_year=2025",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planet": {
+            "type": "string",
+            "enum": [
+              "uranus",
+              "saturn",
+              "jupiter"
+            ],
+            "description": "Planet to calculate the opposition for."
+          },
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 birth datetime in UTC, e.g. '1983-07-15T12:00:00Z'."
+          },
+          "target_year": {
+            "type": "integer",
+            "description": "Year to search for the opposition near."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format. 'llm' returns compact projection for token efficiency."
+          }
+        },
+        "required": [
+          "planet",
+          "datetime",
+          "target_year"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_natal_batch",
+      "description": "Calculate natal charts for multiple subjects in a single request. Supports up to 100 subjects. Returns enhanced natal chart data for each.\n\nCREDIT COST: 1 credit per subject.\n\nEXAMPLE: Two people batch:\n  subjects: [\n    { name: 'Alice', datetime: '1990-04-15T14:30:00', latitude: 41.88, longitude: -87.63 },\n    { name: 'Bob', datetime: '1988-09-22T08:15:00', latitude: 34.05, longitude: -118.24 }\n  ]",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subjects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Subject name."
+                },
+                "datetime": {
+                  "type": "string",
+                  "description": "Birth datetime (ISO 8601)."
+                },
+                "latitude": {
+                  "type": "number",
+                  "description": "Birth latitude."
+                },
+                "longitude": {
+                  "type": "number",
+                  "description": "Birth longitude."
+                }
+              },
+              "required": [
+                "name",
+                "datetime",
+                "latitude",
+                "longitude"
+              ]
+            },
+            "description": "Array of subjects (1-100)."
+          }
+        },
+        "required": [
+          "subjects"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_dignities",
+      "description": "Calculate essential dignities (domicile, exaltation, detriment, fall, peregrine) for all planets at a given date/time. Essential for traditional astrology.\n\nCREDIT COST: 1 credit per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 date/time."
+          }
+        },
+        "required": [
+          "datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_retrograde_status",
+      "description": "Get retrograde/direct status and speed for all planets at a given date/time. Returns is_retrograde flag, longitude speed, and station proximity for every planet.\n\nCREDIT COST: 1 credit per call.\n\nOptionally pass planet_id (0-9) to query a single planet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 date/time."
+          },
+          "planet_id": {
+            "type": "integer",
+            "description": "Optional single planet ID (0-9). Omit for all planets."
+          }
+        },
+        "required": [
+          "datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_midpoints",
+      "description": "Calculate midpoints between all planet pairs for a given date/time and location. Returns midpoint longitude, the two planets involved, and any planet at the midpoint.\n\nCREDIT COST: 1 credit per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 date/time."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Observer latitude."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Observer longitude."
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_fixed_stars",
+      "description": "Calculate positions of fixed stars and conjunctions to natal planets. Returns star longitude, magnitude, and any planets within orb.\n\nCREDIT COST: 1 credit per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 date/time."
+          },
+          "star_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional list of star names (e.g. ['Regulus', 'Spica']). Omit for default list."
+          },
+          "orb": {
+            "type": "number",
+            "description": "Conjunction orb in degrees. Default 1°."
+          }
+        },
+        "required": [
+          "datetime"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_hermetic_lots",
+      "description": "Calculate Arabic Parts / Hermetic Lots (Lot of Fortune, Spirit, etc.) for a given chart.\n\nCREDIT COST: 1 credit per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 date/time."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Observer latitude."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Observer longitude."
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_angles_points",
+      "description": "Calculate chart angles and sensitive points (ASC, MC, DSC, IC, Vertex, East Point, etc.) for a given date/time and location.\n\nCREDIT COST: 1 credit per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 date/time."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Observer latitude."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Observer longitude."
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ephemeris_aspect_check",
+      "description": "Check the aspect between two ecliptic longitudes. Returns the angular separation and any aspects within orb (conjunction, sextile, square, trine, opposition, etc.).\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Check aspect between 15° Aries and 75° Gemini:\n  longitude_1=15, longitude_2=75",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "longitude_1": {
+            "type": "number",
+            "description": "First ecliptic longitude (0-360)."
+          },
+          "longitude_2": {
+            "type": "number",
+            "description": "Second ecliptic longitude (0-360)."
+          },
+          "max_orb": {
+            "type": "number",
+            "description": "Maximum orb in degrees. Default 8°."
+          }
+        },
+        "required": [
+          "longitude_1",
+          "longitude_2"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "venus_star_points",
+      "description": "Get Venus Star Points — the Sun-Venus conjunction events nearest to a birth date. Shows the quality of each conjunction (cazimi, combust, under beams) with zodiac details.\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: Venus star points for someone born 1990-04-15:\n  datetime='1990-04-15T14:30:00', latitude=41.88, longitude=-87.63",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "Birth datetime (ISO 8601)."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Birth latitude."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Birth longitude."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format."
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "venus_star_points_conjunctions",
+      "description": "Find all Sun-Venus conjunctions in a date range. Returns each conjunction with its exact timestamp, zodiac position, orb, visibility (morning/evening star), and dignity.\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: Find Venus conjunctions in 2026:\n  start_date='2026-01-01', end_date='2026-12-31'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "description": "Start date (ISO 8601)."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "End date (ISO 8601)."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format."
+          }
+        },
+        "required": [
+          "start_date",
+          "end_date"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "venus_eight_year_star",
+      "description": "Compute the 8-year Venus Star pattern — the pentagram of 5 Venus-Sun conjunctions that trace a near-perfect star over 8 years (the Venus synodic cycle). Returns the 5 vertices with their zodiac positions.\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: 8-year star starting from 2020:\n  date='2020-01-01'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "Start date for the 8-year cycle (ISO 8601)."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format."
+          }
+        },
+        "required": [
+          "date"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "venus_phase",
+      "description": "Get the current Venus phase — morning star, evening star, or combust. Returns Venus longitude, Sun longitude, elongation, retrograde/cazimi status.\n\nCREDIT COST: 1 credit per call.\n\nEXAMPLE: Venus phase right now (omit date):\n  (no args required)\n\nEXAMPLE: Venus phase on a specific date:\n  date='2026-03-20'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "Date to check (ISO 8601). Omit for today's phase."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "venus_elongations",
+      "description": "Find Venus greatest elongation events (when Venus is farthest from the Sun in the sky). Returns east (evening star) and west (morning star) elongation peaks.\n\nCREDIT COST: 2 credits per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "description": "Start date (ISO 8601)."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "End date (ISO 8601)."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format."
+          }
+        },
+        "required": [
+          "start_date",
+          "end_date"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "venus_stations",
+      "description": "Find Venus retrograde and direct stations in a date range. Returns the exact moment Venus appears to stop and reverse direction.\n\nCREDIT COST: 2 credits per call.\n\nEXAMPLE: Venus stations in 2026:\n  start_date='2026-01-01', end_date='2026-12-31'",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "description": "Start date (ISO 8601)."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "End date (ISO 8601). Defaults to +1 year."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "llm"
+            ],
+            "description": "Output format."
+          }
+        },
+        "required": [
+          "start_date"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "acg_power_lines",
+      "description": "Calculate Astrocartography power lines (MC, IC, AC/ASC, DC/DSC) for a natal chart. Returns GeoJSON LineStrings tracing each planetary angle line around the globe. These are the latitudinal lines where a planet was rising (AC), setting (DC), culminating (MC), or anti-culminating (IC) at birth.\n\n❌  NOT FOR: 'Is [city] good for me?' or 'What planets affect me in Tokyo?' → For a specific city/location analysis, use acg_hits instead (faster and more relevant).\n✅  USE FOR: Getting the full global GeoJSON line geometry for map rendering or bulk geographic analysis.\n\nCREDIT COST: 10 credits per call.\n\nEXAMPLE: Saturn and Jupiter power lines for a chart born 1990-04-15 in Chicago:\n  birth_datetime='1990-04-15T14:30:00', birth_latitude=41.8781, birth_longitude=-87.6298,\n  bodies=['Saturn', 'Jupiter']",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "birth_datetime": {
+            "type": "string",
+            "description": "ISO 8601 natal birth date/time."
+          },
+          "birth_latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees."
+          },
+          "birth_longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees."
+          },
+          "bodies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of celestial bodies for line calculation. E.g. ['Sun', 'Moon', 'Venus', 'Mars', 'Jupiter', 'Saturn']. Aliases: 'NorthNode'/'Node'/'Rahu' → MeanNode, 'SouthNode'/'Ketu' → SouthNode. Omit to use all classical planets."
+          },
+          "query_latitude": {
+            "type": "number",
+            "description": "Filter lines near this latitude (optional, for hits mode)."
+          },
+          "query_longitude": {
+            "type": "number",
+            "description": "Filter lines near this longitude (optional, for hits mode)."
+          },
+          "radius_deg": {
+            "type": "number",
+            "description": "Search radius in degrees for hits filtering. Default 2°."
+          }
+        },
+        "required": [
+          "birth_datetime",
+          "birth_latitude",
+          "birth_longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "acg_hits",
+      "description": "Find all Astrocartography lines (power lines + aspect lines) passing near a specific location. Returns features sorted by distance, making it easy to interpret planetary influences at a place.\n\n✅  USE THIS TOOL FOR: 'Is [city] good for me?', 'What planets affect me in Tokyo?', 'What ACG lines run through Paris for my chart?', 'Which cities are under my Jupiter line?'\n❌  NOT FOR: Full global map geometry → use acg_power_lines for that instead.\n\nCREDIT COST: 15 credits per call.\n\nEXAMPLE: All ACG lines within 3° of Paris for a chart born 1990-04-15 in Chicago:\n  birth_datetime='1990-04-15T14:30:00', birth_latitude=41.8781, birth_longitude=-87.6298,\n  query_latitude=48.8566, query_longitude=2.3522, radius_deg=3",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "birth_datetime": {
+            "type": "string",
+            "description": "ISO 8601 natal birth date/time."
+          },
+          "birth_latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees."
+          },
+          "birth_longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees."
+          },
+          "query_latitude": {
+            "type": "number",
+            "description": "Latitude of the location to check for nearby lines."
+          },
+          "query_longitude": {
+            "type": "number",
+            "description": "Longitude of the location to check for nearby lines."
+          },
+          "radius_deg": {
+            "type": "number",
+            "description": "Search radius in degrees (default 2°, max 90°)."
+          },
+          "bodies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of celestial bodies for line calculation. E.g. ['Sun', 'Moon', 'Venus', 'Mars', 'Jupiter', 'Saturn']. Aliases: 'NorthNode'/'Node'/'Rahu' → MeanNode, 'SouthNode'/'Ketu' → SouthNode. Omit to use all classical planets."
+          },
+          "include_aspects": {
+            "type": "boolean",
+            "description": "Include aspect lines in results (default true)."
+          }
+        },
+        "required": [
+          "birth_datetime",
+          "birth_latitude",
+          "birth_longitude",
+          "query_latitude",
+          "query_longitude"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "explore_vedic_chart",
+      "description": "Generate an interactive Vedic Jyotish (South Indian) Rashi chart visualization.\n\nRenders a 4×4 fixed-sign grid with:\n  • All nine Jyotish planets (Sun through Ketu) placed in their Rashi\n  • Lagna (Ascendant) cell marked with a gold diagonal\n  • Sanskrit/Devanagari sign labels toggle\n  • Click any Rashi cell → detailed planet info drawer\n    (degree, Nakshatra, Pada, lord, Navamsa sign, dignity)\n  • Ask Claude buttons for Lagna, Moon/Nakshatra, and full chart interpretation\n  • Ayanamsa system displayed (Lahiri by default)\n\nCREDIT COST: 1 credit.\n\nUse this for a rich, interactive Vedic chart experience in MCP Apps-capable hosts (Claude Desktop). Falls back to a markdown table summary in other hosts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datetime": {
+            "type": "string",
+            "description": "Birth date and time as ISO 8601, e.g. '1987-07-15T14:30:00Z'. Always include time when known — it determines the Lagna (Ascendant)."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Birth latitude in decimal degrees, e.g. 28.6 for New Delhi."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Birth longitude in decimal degrees, e.g. 77.2 for New Delhi."
+          },
+          "ayanamsa": {
+            "type": "string",
+            "enum": [
+              "lahiri",
+              "fagan_bradley",
+              "krishnamurti",
+              "raman",
+              "yukteshwar"
+            ],
+            "description": "Ayanamsa system for sidereal calculation. Options: 'lahiri' (default, most common), 'raman', 'krishnamurti', 'fagan_bradley', 'yukteshwar'."
+          }
+        },
+        "required": [
+          "datetime",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

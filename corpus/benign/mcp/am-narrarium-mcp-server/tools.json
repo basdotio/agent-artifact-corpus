@@ -1,0 +1,3568 @@
+{
+  "package": "narrarium-mcp-server",
+  "tools": [
+    {
+      "name": "init_book_repo",
+      "description": "Create the local Narrarium repository structure for a book project, including folders, guidelines, summaries, evaluations, and reusable skills.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "author": {
+            "type": "string"
+          },
+          "language": {
+            "default": "en",
+            "type": "string"
+          },
+          "createSkills": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rootPath",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "setup_framework",
+      "description": "Return the exact npx commands and setup steps to bootstrap a new Narrarium project from scratch, or to upgrade an existing book repo.\n\nUse this tool when the user asks how to set up the framework, how to upgrade, or how to install Narrarium.\n\n## Creating a new book\nRun from any empty folder:\n```\nnpx create-narrarium-book . --title \"My Book\" --language en --author \"Author Name\"\n```\nAnswer **y** when npx asks to install the package.\nAdd `--with-reader` to also scaffold the Astro reader site.\n\n## Upgrading an existing book repo\nRun from the **book root** (the folder that contains `book.md`):\n```\nnpx create-narrarium-book . --upgrade\n```\nAnswer **y** when npx asks to install the package.\nTo also upgrade the reader scaffold, add `--with-reader`.\nAfter the upgrade, install reader dependencies:\n```\ncd reader\nnpm install\n```\n\n## Notes\n- The workflow file `.github/workflows/deploy-reader-pages.yml` is **never overwritten** on upgrade — your password secret and any manual edits are preserved.\n- The MCP server config (`.vscode/mcp.json`, `opencode.jsonc`) is also never overwritten.\n- Reader personas are seeded automatically on first create or upgrade if the `personas/` folder is empty.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectName": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "language": {
+            "default": "en",
+            "type": "string"
+          },
+          "withReader": {
+            "default": true,
+            "type": "boolean"
+          },
+          "sample": {
+            "default": false,
+            "type": "boolean"
+          },
+          "readerDir": {
+            "default": "reader",
+            "type": "string"
+          },
+          "upgrade": {
+            "default": false,
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "repository_spec",
+      "description": "Return the Narrarium repository model and canon rules so clients can understand the book framework structure.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "start_wizard",
+      "description": "Start a multi-step guided wizard session for creating canon files or chapter structures. Use this when the user has not provided all required details yet.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "character",
+              "location",
+              "faction",
+              "item",
+              "secret",
+              "timeline-event",
+              "chapter",
+              "paragraph"
+            ]
+          },
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "seed": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "kind",
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "wizard_answer",
+      "description": "Answer the current prompt in a running wizard session and receive the next guided question.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "answer": {},
+          "skip": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      }
+    },
+    {
+      "name": "wizard_status",
+      "description": "Inspect the current state of a wizard session, including collected fields and the next question.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      }
+    },
+    {
+      "name": "wizard_finalize",
+      "description": "Finalize a wizard session and write the corresponding file or folder into the local book repository.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "body": {
+            "type": "string"
+          },
+          "wikipediaLang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          },
+          "forceWikipediaRefresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "maxWikipediaSnapshotAgeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      }
+    },
+    {
+      "name": "wizard_cancel",
+      "description": "Cancel a wizard session and discard its in-memory answers.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      }
+    },
+    {
+      "name": "character_wizard",
+      "description": "Return the Narrarium character creation checklist so the agent can gather the right information before creating a character file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_character",
+      "description": "Create a rich character file using the Narrarium character wizard fields. Use this instead of the generic entity tool when the user is adding a real story character.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string"
+          },
+          "aliases": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "roleTier": {
+            "type": "string",
+            "enum": [
+              "main",
+              "supporting",
+              "secondary",
+              "minor",
+              "background"
+            ]
+          },
+          "storyRole": {
+            "default": "other",
+            "type": "string",
+            "enum": [
+              "protagonist",
+              "deuteragonist",
+              "antagonist",
+              "mentor",
+              "ally",
+              "love-interest",
+              "foil",
+              "comic-relief",
+              "other"
+            ]
+          },
+          "speakingStyle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "backgroundSummary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "functionInBook": {
+            "type": "string",
+            "minLength": 1
+          },
+          "age": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "occupation": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "firstImpression": {
+            "type": "string"
+          },
+          "currentIdentity": {
+            "type": "string"
+          },
+          "formerNames": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "identityShifts": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "identityArc": {
+            "type": "string"
+          },
+          "arc": {
+            "type": "string"
+          },
+          "internalConflict": {
+            "type": "string"
+          },
+          "externalConflict": {
+            "type": "string"
+          },
+          "traits": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mannerisms": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "desires": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "fears": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "relationships": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "factions": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "homeLocation": {
+            "type": "string"
+          },
+          "introducedIn": {
+            "type": "string"
+          },
+          "pronunciation": {
+            "type": "string"
+          },
+          "spokenName": {
+            "type": "string"
+          },
+          "ttsLabel": {
+            "type": "string"
+          },
+          "secretRefs": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "privateNotes": {
+            "type": "string"
+          },
+          "revealIn": {
+            "type": "string"
+          },
+          "knownFrom": {
+            "type": "string"
+          },
+          "timelineAges": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "historical": {
+            "default": false,
+            "type": "boolean"
+          },
+          "wikipediaTitle": {
+            "type": "string"
+          },
+          "wikipediaLang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          },
+          "forceWikipediaRefresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "maxWikipediaSnapshotAgeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "name",
+          "roleTier",
+          "speakingStyle",
+          "backgroundSummary",
+          "functionInBook"
+        ]
+      }
+    },
+    {
+      "name": "location_wizard",
+      "description": "Return the Narrarium location creation checklist so the agent can gather the right details before creating a location file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_location",
+      "description": "Create a rich location file with atmosphere, story function, landmarks, risks, and optional historical research support.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string"
+          },
+          "locationKind": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "atmosphere": {
+            "type": "string",
+            "minLength": 1
+          },
+          "functionInBook": {
+            "type": "string",
+            "minLength": 1
+          },
+          "landmarks": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "risks": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "factionsPresent": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "basedOnRealPlace": {
+            "default": false,
+            "type": "boolean"
+          },
+          "timelineRef": {
+            "type": "string"
+          },
+          "pronunciation": {
+            "type": "string"
+          },
+          "spokenName": {
+            "type": "string"
+          },
+          "ttsLabel": {
+            "type": "string"
+          },
+          "secretRefs": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "privateNotes": {
+            "type": "string"
+          },
+          "revealIn": {
+            "type": "string"
+          },
+          "knownFrom": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "historical": {
+            "default": false,
+            "type": "boolean"
+          },
+          "wikipediaTitle": {
+            "type": "string"
+          },
+          "wikipediaLang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          },
+          "forceWikipediaRefresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "maxWikipediaSnapshotAgeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "name",
+          "atmosphere",
+          "functionInBook"
+        ]
+      }
+    },
+    {
+      "name": "faction_wizard",
+      "description": "Return the Narrarium faction creation checklist so the agent can gather the right details before creating a faction file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_faction",
+      "description": "Create a rich faction file with mission, ideology, methods, alliances, and optional historical research support.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string"
+          },
+          "factionKind": {
+            "type": "string"
+          },
+          "mission": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ideology": {
+            "type": "string",
+            "minLength": 1
+          },
+          "functionInBook": {
+            "type": "string",
+            "minLength": 1
+          },
+          "publicImage": {
+            "type": "string"
+          },
+          "hiddenAgenda": {
+            "type": "string"
+          },
+          "leaders": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allies": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enemies": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "methods": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "baseLocation": {
+            "type": "string"
+          },
+          "pronunciation": {
+            "type": "string"
+          },
+          "spokenName": {
+            "type": "string"
+          },
+          "ttsLabel": {
+            "type": "string"
+          },
+          "secretRefs": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "privateNotes": {
+            "type": "string"
+          },
+          "revealIn": {
+            "type": "string"
+          },
+          "knownFrom": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "historical": {
+            "default": false,
+            "type": "boolean"
+          },
+          "wikipediaTitle": {
+            "type": "string"
+          },
+          "wikipediaLang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          },
+          "forceWikipediaRefresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "maxWikipediaSnapshotAgeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "name",
+          "mission",
+          "ideology",
+          "functionInBook"
+        ]
+      }
+    },
+    {
+      "name": "item_wizard",
+      "description": "Return the Narrarium item creation checklist so the agent can gather the right details before creating an item file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_item",
+      "description": "Create a rich item file with appearance, purpose, significance, ownership, and optional historical research support.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string"
+          },
+          "itemKind": {
+            "type": "string"
+          },
+          "appearance": {
+            "type": "string",
+            "minLength": 1
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "functionInBook": {
+            "type": "string",
+            "minLength": 1
+          },
+          "significance": {
+            "type": "string"
+          },
+          "originStory": {
+            "type": "string"
+          },
+          "powers": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limitations": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "owner": {
+            "type": "string"
+          },
+          "introducedIn": {
+            "type": "string"
+          },
+          "pronunciation": {
+            "type": "string"
+          },
+          "spokenName": {
+            "type": "string"
+          },
+          "ttsLabel": {
+            "type": "string"
+          },
+          "secretRefs": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "privateNotes": {
+            "type": "string"
+          },
+          "revealIn": {
+            "type": "string"
+          },
+          "knownFrom": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "historical": {
+            "default": false,
+            "type": "boolean"
+          },
+          "wikipediaTitle": {
+            "type": "string"
+          },
+          "wikipediaLang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          },
+          "forceWikipediaRefresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "maxWikipediaSnapshotAgeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "name",
+          "appearance",
+          "purpose",
+          "functionInBook"
+        ]
+      }
+    },
+    {
+      "name": "secret_wizard",
+      "description": "Return the Narrarium secret creation checklist so the agent can gather the right details before creating a secret file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_secret",
+      "description": "Create a rich secret file with stakes, holders, protection, reveal strategy, and spoiler thresholds.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string"
+          },
+          "secretKind": {
+            "type": "string"
+          },
+          "functionInBook": {
+            "type": "string",
+            "minLength": 1
+          },
+          "stakes": {
+            "type": "string",
+            "minLength": 1
+          },
+          "protectedBy": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "falseBeliefs": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revealStrategy": {
+            "type": "string"
+          },
+          "holders": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pronunciation": {
+            "type": "string"
+          },
+          "spokenName": {
+            "type": "string"
+          },
+          "ttsLabel": {
+            "type": "string"
+          },
+          "secretRefs": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "privateNotes": {
+            "type": "string"
+          },
+          "revealIn": {
+            "type": "string"
+          },
+          "knownFrom": {
+            "type": "string"
+          },
+          "timelineRef": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "historical": {
+            "default": false,
+            "type": "boolean"
+          },
+          "wikipediaTitle": {
+            "type": "string"
+          },
+          "wikipediaLang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          },
+          "forceWikipediaRefresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "maxWikipediaSnapshotAgeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "title",
+          "functionInBook",
+          "stakes"
+        ]
+      }
+    },
+    {
+      "name": "timeline_event_wizard",
+      "description": "Return the Narrarium timeline event checklist so the agent can gather the right details before creating a timeline event file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_timeline_event",
+      "description": "Create a timeline event file with participants, significance, consequences, and optional factual research support.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "participants": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "significance": {
+            "type": "string"
+          },
+          "functionInBook": {
+            "type": "string"
+          },
+          "consequences": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pronunciation": {
+            "type": "string"
+          },
+          "spokenName": {
+            "type": "string"
+          },
+          "ttsLabel": {
+            "type": "string"
+          },
+          "secretRefs": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "privateNotes": {
+            "type": "string"
+          },
+          "revealIn": {
+            "type": "string"
+          },
+          "knownFrom": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "historical": {
+            "default": false,
+            "type": "boolean"
+          },
+          "wikipediaTitle": {
+            "type": "string"
+          },
+          "wikipediaLang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          },
+          "forceWikipediaRefresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "maxWikipediaSnapshotAgeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "chapter_wizard",
+      "description": "Return the Narrarium chapter checklist so the agent can gather the right details before creating a chapter.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "paragraph_wizard",
+      "description": "Return the Narrarium paragraph or scene checklist so the agent can gather the right details before creating a paragraph file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "chapter_writing_context",
+      "description": "Assemble the point-in-time context that should be read before writing or polishing a chapter: prose defaults, scoped story-so-far context, prior chapter state, and matching chapter draft without leaking later story material. In prose, keep canon names as plain text instead of markdown links; the reader resolves visible mentions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter"
+        ]
+      }
+    },
+    {
+      "name": "paragraph_writing_context",
+      "description": "Assemble the point-in-time context that should be read before writing or polishing a paragraph: prose defaults, scoped story-so-far context, prior scenes only, and the matching paragraph draft or final paragraph without leaking later story material. In prose, keep canon names as plain text instead of markdown links; the reader resolves visible mentions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "revise_chapter",
+      "description": "Propose a chapter-level editorial pass without writing files. Use this when you want diagnosis plus scene-by-scene rewrite proposals for an existing final chapter. The result can also suggest merged state_changes review if multiple scenes touch continuity-sensitive beats.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "clarity",
+              "pacing",
+              "dialogue",
+              "voice",
+              "tension",
+              "show-dont-tell",
+              "redundancy"
+            ]
+          },
+          "intensity": {
+            "default": "medium",
+            "type": "string",
+            "enum": [
+              "light",
+              "medium",
+              "strong"
+            ]
+          },
+          "preserveFacts": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "mode"
+        ]
+      }
+    },
+    {
+      "name": "revise_paragraph",
+      "description": "Propose a revision for an existing final paragraph without writing files. Use this for targeted editorial passes like clarity, pacing, tension, dialogue, voice, show-dont-tell, or redundancy cleanup. Show the proposal to the user first, then apply it with update_paragraph only after clear confirmation. The result can also suggest state_changes to review if the paragraph carries continuity-sensitive beats.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "clarity",
+              "pacing",
+              "dialogue",
+              "voice",
+              "tension",
+              "show-dont-tell",
+              "redundancy"
+            ]
+          },
+          "intensity": {
+            "default": "medium",
+            "type": "string",
+            "enum": [
+              "light",
+              "medium",
+              "strong"
+            ]
+          },
+          "preserveFacts": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph",
+          "mode"
+        ]
+      }
+    },
+    {
+      "name": "review_dialogue_action_beats",
+      "description": "Review a final paragraph beat by beat to judge whether dialogue-adjacent actions are purposeful, weak, or better replaced with a simple speech tag. This is proposal-only and may also suggest new beats or recurring tics worth observing for character canon.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "intensity": {
+            "default": "medium",
+            "type": "string",
+            "enum": [
+              "light",
+              "medium",
+              "strong"
+            ]
+          },
+          "preserveDialogueWords": {
+            "default": true,
+            "type": "boolean"
+          },
+          "allowMissingActionAdds": {
+            "default": true,
+            "type": "boolean"
+          },
+          "allowSaidFallback": {
+            "default": true,
+            "type": "boolean"
+          },
+          "includeTicSuggestions": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "resume_book_context",
+      "description": "Assemble restart context for a book project using prose rules, stable context, summaries, and exported conversations. You can also scope it to a target chapter or paragraph so the canon only reflects the story up to that writing point.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string"
+          },
+          "paragraph": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "create_entity",
+      "description": "Create a canonical entity markdown file inside the local book repository. Use this for quick stubs, items, locations, factions, secrets, and timeline events. Prefer create_character for full story characters.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "character",
+              "item",
+              "location",
+              "faction",
+              "secret",
+              "timeline-event"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "historical": {
+            "default": false,
+            "type": "boolean"
+          },
+          "wikipediaTitle": {
+            "type": "string"
+          },
+          "wikipediaLang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          },
+          "forceWikipediaRefresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "maxWikipediaSnapshotAgeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "rootPath",
+          "kind"
+        ]
+      }
+    },
+    {
+      "name": "create_chapter",
+      "description": "Create a chapter folder, chapter metadata file, and paired resume and evaluation files in the local book repository. In prose bodies, keep canon names as plain text instead of markdown links to canon files.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "number": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string"
+          },
+          "pov": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "styleRefs": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "narrationPerson": {
+            "type": "string"
+          },
+          "narrationTense": {
+            "type": "string"
+          },
+          "proseMode": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timelineRef": {
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "number",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "create_paragraph",
+      "description": "Create a numbered paragraph or scene markdown file inside an existing chapter folder. In prose bodies, keep canon names as plain text instead of markdown links to canon files.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "number": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "number",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "create_chapter_draft",
+      "description": "Create a rough chapter draft inside drafts/ using the same chapter slug structure as the final chapter tree. Keep canon names as plain text in the draft prose instead of markdown links.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "number": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string"
+          },
+          "pov": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "styleRefs": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "narrationPerson": {
+            "type": "string"
+          },
+          "narrationTense": {
+            "type": "string"
+          },
+          "proseMode": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timelineRef": {
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "number",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "update_chapter_draft",
+      "description": "Update an existing chapter draft by patching its frontmatter and replacing or appending rough draft body content.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "body": {
+            "type": "string"
+          },
+          "appendBody": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter"
+        ]
+      }
+    },
+    {
+      "name": "update_book_notes",
+      "description": "Update the global working notes or story-design document. Use appendBody when the user asks you to keep a note without replacing the whole file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "default": "notes",
+            "type": "string",
+            "enum": [
+              "notes",
+              "story-design"
+            ]
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "body": {
+            "type": "string"
+          },
+          "appendBody": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "save_book_item",
+      "description": "Create or update a structured idea or note entry at book level. Use this for active idea queues and note queues rather than freeform body edits.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bucket": {
+            "type": "string",
+            "enum": [
+              "ideas",
+              "notes"
+            ]
+          },
+          "entryId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tags": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "default": "active",
+            "type": "string",
+            "enum": [
+              "active",
+              "review",
+              "resolved",
+              "rejected"
+            ]
+          }
+        },
+        "required": [
+          "rootPath",
+          "bucket",
+          "title",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "save_chapter_item",
+      "description": "Create or update a structured idea or note entry tied to a chapter draft.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bucket": {
+            "type": "string",
+            "enum": [
+              "ideas",
+              "notes"
+            ]
+          },
+          "entryId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tags": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "default": "active",
+            "type": "string",
+            "enum": [
+              "active",
+              "review",
+              "resolved",
+              "rejected"
+            ]
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "bucket",
+          "title",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "update_chapter_notes",
+      "description": "Update or append chapter-specific working notes stored in drafts/<chapter>/notes.md. Use this when the user wants to keep or refine notes tied to a chapter draft.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "body": {
+            "type": "string"
+          },
+          "appendBody": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter"
+        ]
+      }
+    },
+    {
+      "name": "promote_book_item",
+      "description": "Promote a structured book-level idea or note out of the active queue. You can move it into notes or story design, or archive it as promoted after you already used it in a draft.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "ideas",
+              "notes"
+            ]
+          },
+          "entryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "promotedTo": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "notes",
+              "story-design"
+            ]
+          }
+        },
+        "required": [
+          "rootPath",
+          "source",
+          "entryId",
+          "promotedTo"
+        ]
+      }
+    },
+    {
+      "name": "promote_chapter_item",
+      "description": "Promote a structured chapter-level idea or note out of the active queue. You can move it into chapter notes or archive it as promoted after using it in draft work.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "ideas",
+              "notes"
+            ]
+          },
+          "entryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "promotedTo": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "notes"
+            ]
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "source",
+          "entryId",
+          "promotedTo"
+        ]
+      }
+    },
+    {
+      "name": "create_paragraph_draft",
+      "description": "Create a rough paragraph or scene draft inside drafts/ using the same chapter tree as the final chapter.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "number": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "number",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "update_paragraph_draft",
+      "description": "Update an existing paragraph draft by patching its frontmatter and replacing or appending rough scene content. Keep canon names as plain text in the draft prose instead of markdown links.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "body": {
+            "type": "string"
+          },
+          "appendBody": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "create_chapter_from_draft",
+      "description": "Promote a chapter draft into the final chapters/ tree. It copies structural frontmatter from drafts/, accepts polished body text if provided, and syncs plot.md after writing. Final prose should keep canon names as plain text instead of markdown links.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter"
+        ]
+      }
+    },
+    {
+      "name": "create_paragraph_from_draft",
+      "description": "Promote a paragraph draft into the final chapters/ tree. It copies structural frontmatter from drafts/, accepts polished body text if provided, and syncs plot.md after writing. Final prose should keep canon names as plain text instead of markdown links.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "create_asset_prompt",
+      "description": "Create an asset prompt markdown file in the canonical assets tree for a book, entity, chapter, or paragraph image.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "assetKind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "extension": {
+            "default": "png",
+            "type": "string",
+            "minLength": 1
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "promptStyleRef": {
+            "default": "guideline:images",
+            "type": "string"
+          },
+          "orientation": {
+            "default": "portrait",
+            "type": "string",
+            "enum": [
+              "portrait",
+              "landscape",
+              "square"
+            ]
+          },
+          "aspectRatio": {
+            "default": "2:3",
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "subject"
+        ]
+      }
+    },
+    {
+      "name": "register_asset",
+      "description": "Copy an existing image into the canonical assets tree and create its matching prompt metadata file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceFilePath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "assetKind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "extension": {
+            "type": "string",
+            "minLength": 1
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "promptStyleRef": {
+            "default": "guideline:images",
+            "type": "string"
+          },
+          "orientation": {
+            "default": "portrait",
+            "type": "string",
+            "enum": [
+              "portrait",
+              "landscape",
+              "square"
+            ]
+          },
+          "aspectRatio": {
+            "default": "2:3",
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "frontmatter": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "subject",
+          "sourceFilePath"
+        ]
+      }
+    },
+    {
+      "name": "generate_asset_image",
+      "description": "Generate an image for a canonical subject, save it into the assets tree, and keep the asset prompt metadata in sync.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "assetKind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "provider": {
+            "default": "openai",
+            "type": "string",
+            "enum": [
+              "openai"
+            ]
+          },
+          "model": {
+            "default": "gpt-image-1",
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "promptStyleRef": {
+            "type": "string"
+          },
+          "orientation": {
+            "type": "string",
+            "enum": [
+              "portrait",
+              "landscape",
+              "square"
+            ]
+          },
+          "aspectRatio": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath",
+          "subject"
+        ]
+      }
+    },
+    {
+      "name": "update_chapter",
+      "description": "Update an existing chapter metadata file and optional chapter notes body. Use this for summary, POV, tags, and chapter notes changes without touching chapter numbering or folder naming. In prose bodies, keep canon names as plain text instead of markdown links.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "body": {
+            "type": "string"
+          },
+          "appendBody": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter"
+        ]
+      }
+    },
+    {
+      "name": "update_paragraph",
+      "description": "Apply an existing paragraph or scene revision after the user confirmed it. Use this for summary, viewpoint, tags, and body revisions without renumbering or renaming the file. Keep canon names as plain text instead of markdown links; the MCP layer refreshes plot and resume files after the update.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "body": {
+            "type": "string"
+          },
+          "appendBody": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "apply_dialogue_action_beats",
+      "description": "Apply confirmed dialogue action beat selections to a final paragraph after review_dialogue_action_beats. This only updates the chosen beats and then writes the paragraph.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reviewId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedParagraphHash": {
+            "type": "string",
+            "minLength": 1
+          },
+          "selections": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "beatId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "choiceId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "beatId",
+                "choiceId"
+              ]
+            }
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph",
+          "reviewId",
+          "expectedParagraphHash",
+          "selections"
+        ]
+      }
+    },
+    {
+      "name": "search_book",
+      "description": "Search the local book repository across canon, chapters, notes, summaries, and research before drafting or editing.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "default": 10,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 25
+          }
+        },
+        "required": [
+          "rootPath",
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "query_canon",
+      "description": "Answer a natural-language canon question by combining structured state, summaries, chapters, and repository search. Use this for questions like where a character is, what they know, who holds a secret, when something first appears, or how a relationship/condition/open loop changes across a chapter range.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "throughChapter": {
+            "type": "string"
+          },
+          "fromChapter": {
+            "type": "string"
+          },
+          "toChapter": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 6,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 12
+          }
+        },
+        "required": [
+          "rootPath",
+          "question"
+        ]
+      }
+    },
+    {
+      "name": "validate_book",
+      "description": "Validate Narrarium frontmatter and file placement rules inside the local book repository.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "update_entity",
+      "description": "Update an existing entity file by patching frontmatter and optionally replacing or appending markdown body content. Use rename_entity when the slug, id, or asset folder must move.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "character",
+              "item",
+              "location",
+              "faction",
+              "secret",
+              "timeline-event"
+            ]
+          },
+          "slugOrId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "body": {
+            "type": "string"
+          },
+          "appendBody": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath",
+          "kind",
+          "slugOrId"
+        ]
+      }
+    },
+    {
+      "name": "rename_entity",
+      "description": "Rename an entity in a safe way: update its slug and id, move its markdown file, and move any matching asset folder if present.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "character",
+              "item",
+              "location",
+              "faction",
+              "secret",
+              "timeline-event"
+            ]
+          },
+          "slugOrId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "newNameOrTitle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "newSlug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath",
+          "kind",
+          "slugOrId",
+          "newNameOrTitle"
+        ]
+      }
+    },
+    {
+      "name": "rename_chapter",
+      "description": "Rename a chapter title or number, move its folder, and move any matching chapter or paragraph asset folders if present.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "newTitle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "newNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "newTitle"
+        ]
+      }
+    },
+    {
+      "name": "rename_paragraph",
+      "description": "Rename a paragraph or scene title or number, move its markdown file, and move any matching paragraph asset folder if present.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "newTitle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "newNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph",
+          "newTitle"
+        ]
+      }
+    },
+    {
+      "name": "list_related_canon",
+      "description": "List canon files that reference or mention a given id or query, useful before writing scenes or revising continuity.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idOrQuery": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "default": 10,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "rootPath",
+          "idOrQuery"
+        ]
+      }
+    },
+    {
+      "name": "sync_resume",
+      "description": "Refresh a chapter resume or the total book resume from the current repository state without calling another model.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "chapter",
+              "total"
+            ]
+          },
+          "chapter": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath",
+          "scope"
+        ]
+      }
+    },
+    {
+      "name": "sync_all_resumes",
+      "description": "Refresh every chapter resume and the total book resume in one pass.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "sync_story_state",
+      "description": "Refresh state/current.md and per-chapter state snapshots from chapter resume state_changes. This stays manual by design and clears the stale story-state flag.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "sync_plot",
+      "description": "Refresh the root plot.md file so it tracks chapter progression, revealed secrets, and timeline dates from current canon.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "evaluate_chapter",
+      "description": "Refresh a full chapter evaluation by reading the whole chapter across all paragraph files, combining objective text signals with editorial reading against the active writing-style files and canon coherence checks, then writing objective/editorial scores, a weighted verdict, an explanation of why that verdict landed there, and next steps plus paragraph evaluation files.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter"
+        ]
+      }
+    },
+    {
+      "name": "evaluate_paragraph",
+      "description": "Refresh the saved evaluation for a single paragraph while still using the full chapter as context, including objective scores, writing-style-aware editorial notes, canon coherence checks, a weighted verdict, an explanation of why that verdict landed there, and concrete next steps.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "prepare_paragraph_evaluation",
+      "description": "Compute objective text metrics and style context for a single paragraph and return them as structured data so the LLM can perform the editorial reading before calling write_paragraph_evaluation. Call this first, read the result carefully, then call write_paragraph_evaluation with your editorial judgment.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "write_paragraph_evaluation",
+      "description": "Write the final paragraph evaluation file using LLM-supplied editorial strengths, concerns, canon notes, next steps, and verdict explanation combined with objective metrics recomputed from the current chapter state. Call prepare_paragraph_evaluation first to obtain the objective data before calling this tool.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "editorialStrengths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "1–4 specific editorial strengths observed in the prose"
+          },
+          "editorialConcerns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "1–4 specific editorial weaknesses observed"
+          },
+          "canonStrengths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "0–3 ways the paragraph handles canon mentions well"
+          },
+          "canonConcerns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "0–3 canon coherence issues observed"
+          },
+          "nextSteps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "1–4 concrete revision actions for this paragraph"
+          },
+          "verdictExplanation": {
+            "type": "string",
+            "description": "2–4 sentences explaining why the combined score lands where it does"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph",
+          "editorialStrengths",
+          "editorialConcerns",
+          "canonStrengths",
+          "canonConcerns",
+          "nextSteps",
+          "verdictExplanation"
+        ]
+      }
+    },
+    {
+      "name": "evaluate_book",
+      "description": "Refresh the total book evaluation with chapter scorecards, writing-style-aware editorial checks, canon coherence checks, weighted verdict summaries, explicit verdict explanations, and revision priorities, and optionally refresh all chapter and paragraph evaluations too.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "syncChapterEvaluations": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "wikipedia_search",
+      "description": "Search English and the user's request language Wikipedia for historical or factual research before adding canon to the book repository.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "default": 5,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 10
+          },
+          "lang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "wikipedia_page",
+      "description": "Fetch English and the user's request language Wikipedia page summaries and save them into research/wikipedia inside the local book repository.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rootPath": {
+            "type": "string"
+          },
+          "saveToResearch": {
+            "default": true,
+            "type": "boolean"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "lang": {
+            "default": "en",
+            "type": "string",
+            "minLength": 2
+          },
+          "forceWikipediaRefresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "maxWikipediaSnapshotAgeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "export_epub",
+      "description": "Export the current book repository into an EPUB file from the ordered chapter and paragraph markdown files.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "outputPath": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "create_persona",
+      "description": "Create a reader persona file in personas/ of the book repository.\nPersonas represent fictional reader archetypes used to review chapters from different perspectives.\nEach persona has reading habits, values, dislikes, beauty and readability focus areas, emotional triggers, and tolerance scores.\nUse seed_default_personas to populate the book with the five built-in archetypes instead of creating one manually.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the book repository root"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Full display name of the persona, e.g. 'The Casual Reader'"
+          },
+          "archetype": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short archetype label, e.g. 'casual reader', 'literary critic'"
+          },
+          "slug": {
+            "description": "File slug (auto-derived from name if omitted)",
+            "type": "string"
+          },
+          "ageRange": {
+            "description": "Age range or description, e.g. '30s', 'teenager'",
+            "type": "string"
+          },
+          "readingHabits": {
+            "description": "How and why this persona reads",
+            "type": "string"
+          },
+          "values": {
+            "default": [],
+            "description": "What this persona values most in a story",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dislikes": {
+            "default": [],
+            "description": "What this persona dislikes or finds off-putting",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "beautyFocus": {
+            "default": [],
+            "description": "Aspects this persona focuses on when judging prose beauty",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "readabilityFocus": {
+            "default": [],
+            "description": "Aspects this persona focuses on when judging readability",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "emotionalTriggers": {
+            "default": [],
+            "description": "What emotionally moves this persona",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "complexityTolerance": {
+            "default": 3,
+            "description": "Tolerance for narrative complexity (1=very low, 5=very high)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "pacingTolerance": {
+            "default": 3,
+            "description": "Tolerance for slow pacing (1=very low, 5=very high)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "tags": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "body": {
+            "description": "Optional custom markdown body; auto-generated if omitted",
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rootPath",
+          "name",
+          "archetype"
+        ]
+      }
+    },
+    {
+      "name": "seed_default_personas",
+      "description": "Seed the book repository with the five built-in reader personas if they do not already exist.\nThe default personas are: The Casual Reader, The Literary Critic, The Genre Fan, The Empathetic Reader, The Impatient Skimmer.\nAlready-existing persona files are never overwritten.\nCall this once when setting up a new book to have a ready-made panel of reviewers.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the book repository root"
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "list_personas",
+      "description": "List all reader personas defined in the book repository's personas/ folder.\nReturns each persona's slug, name, archetype, complexity tolerance, and pacing tolerance.\nUse this before calling review_chapter_with_personas to know which personas are available.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the book repository root"
+          }
+        },
+        "required": [
+          "rootPath"
+        ]
+      }
+    },
+    {
+      "name": "review_chapter_with_personas",
+      "description": "Review a chapter from the perspective of one or more reader personas and write the results to evaluations/chapters/<chapter>/personas-review.md.\n\n## Workflow\n1. Call list_personas (or load the persona files directly) to know which personas exist.\n2. Read the chapter prose using chapter_writing_context or by reading the chapter files directly.\n3. For each persona, simulate how that reader would experience the chapter:\n   - Assign a beauty score (1–10): how aesthetically pleasing is the prose to this persona?\n   - Assign a readability score (1–10): how easy and enjoyable is it to read for this persona?\n   - Write an overall impression (2–4 sentences in the persona's voice).\n   - List 2–4 strengths (what worked for this persona).\n   - List 2–4 concerns (what didn't work or felt off).\n   - List 1–3 concrete suggestions from this persona's point of view.\n4. Pass all reviews to this tool — it writes the consolidated personas-review.md file.\n\nThe file is placed alongside the editorial evaluation in evaluations/chapters/<chapter>/personas-review.md.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the book repository root"
+          },
+          "chapterSlug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Slug of the chapter being reviewed"
+          },
+          "reviews": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "personaSlug": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Slug of the persona (filename without .md)"
+                },
+                "personaName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Display name of the persona"
+                },
+                "beautyScore": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10,
+                  "description": "Beauty score 1–10"
+                },
+                "readabilityScore": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10,
+                  "description": "Readability score 1–10"
+                },
+                "overallImpression": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "2–4 sentence overall impression in the persona's voice"
+                },
+                "strengths": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "2–4 things that worked for this persona"
+                },
+                "concerns": {
+                  "default": [],
+                  "description": "2–4 things that didn't work",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "suggestions": {
+                  "default": [],
+                  "description": "1–3 concrete suggestions",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "personaSlug",
+                "personaName",
+                "beautyScore",
+                "readabilityScore",
+                "overallImpression",
+                "strengths"
+              ]
+            },
+            "description": "One review entry per persona"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapterSlug",
+          "reviews"
+        ]
+      }
+    },
+    {
+      "name": "create_script",
+      "description": "Create a new scene script in scripts/<chapter>/<paragraph>.md using the Narrarium script meta-language.\n\n## Script meta-language legend\n\n| Syntax       | Meaning                                                         |\n| ------------ | --------------------------------------------------------------- |\n| `Location:`  | Where the scene takes place (free text or canon location slug)  |\n| `[...]`      | **Tell beat** — quick narrative summary, shown not shown        |\n| `{...}`      | **Emotion/state beat** — character feeling or internal event    |\n| `(...)`      | **Action beat** — physical action performed by a character      |\n| `«...»`      | **Dialogue idea** — what a character should say (not verbatim)  |\n| `#...`       | **Author comment** — thematic note or reminder, not prose       |\n\nRules:\n- One beat per line.\n- Beats are ordered as they should appear in the final prose.\n- `Location:` must be the first line if present.\n- `#` comments are never rendered into prose — they are instructions to the writer.\n- Multiple beats of the same type can appear in any order.\n\n## When to use\n- Before writing a paragraph from scratch: write the script first, then call `script_to_paragraph`.\n- When the user wants to plan a scene without committing to final prose.\n- When the user dictates a scene in shorthand and you need to store it.\n\nThe script file mirrors the chapter/paragraph structure of chapters/ and drafts/.\nFile path: `scripts/<chapter-slug>/<paragraph-slug>.md`",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the book repository root"
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Chapter slug or id (e.g. '001-opening' or 'chapter:001-opening')"
+          },
+          "number": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Paragraph number within the chapter"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Paragraph title (used to build the filename slug)"
+          },
+          "location": {
+            "description": "Where the scene takes place — free text or canon location slug",
+            "type": "string"
+          },
+          "body": {
+            "description": "Full script body using the meta-language. If omitted a template is generated.",
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "description": "Optional tags",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "overwrite": {
+            "default": false,
+            "description": "Overwrite if the script already exists",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "number",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "update_script",
+      "description": "Update an existing scene script in scripts/<chapter>/<paragraph>.md.\n\nUse this to refine beats, add new lines, or patch frontmatter (e.g. change location or tags).\nProvide `body` to fully replace the script body, or `appendBody` to add lines at the end.\n\n## Script meta-language legend\n\n| Syntax       | Meaning                                                         |\n| ------------ | --------------------------------------------------------------- |\n| `Location:`  | Where the scene takes place (free text or canon location slug)  |\n| `[...]`      | **Tell beat** — quick narrative summary, shown not shown        |\n| `{...}`      | **Emotion/state beat** — character feeling or internal event    |\n| `(...)`      | **Action beat** — physical action performed by a character      |\n| `«...»`      | **Dialogue idea** — what a character should say (not verbatim)  |\n| `#...`       | **Author comment** — thematic note or reminder, not prose       |\n\nRules:\n- One beat per line.\n- Beats are ordered as they should appear in the final prose.\n- `Location:` must be the first line if present.\n- `#` comments are never rendered into prose — they are instructions to the writer.\n- Multiple beats of the same type can appear in any order.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the book repository root"
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Chapter slug or id"
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Paragraph slug or id (e.g. '001-arrival' or 'paragraph:001-opening:001-arrival')"
+          },
+          "body": {
+            "description": "New full script body — replaces existing content",
+            "type": "string"
+          },
+          "appendBody": {
+            "description": "Lines to append to the existing script body",
+            "type": "string"
+          },
+          "frontmatterPatch": {
+            "default": {},
+            "description": "Frontmatter fields to patch (e.g. location, tags)",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "read_script",
+      "description": "Read an existing scene script and return its meta-language body plus the legend.\n\nUse this to inspect a script before writing prose, or to check what beats are planned.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the book repository root"
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Chapter slug or id"
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Paragraph slug or id"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "script_to_paragraph",
+      "description": "Assemble the full writing context needed to turn a scene script into polished prose.\n\nReturns:\n- The script body with meta-language beats\n- The script meta-language legend\n- The book writing-style guideline\n- The existing paragraph body if one already exists (revision mode)\n\nAfter calling this tool, write the paragraph prose following the writing-style rules and the beat order in the script, then call `create_paragraph` or `update_paragraph` with the result.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the book repository root"
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Chapter slug or id"
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Paragraph slug or id"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    },
+    {
+      "name": "paragraph_to_script",
+      "description": "Reverse-engineer a scene script skeleton from an existing paragraph body.\n\nUse this when:\n- A paragraph was written without a script and you want to create one retroactively.\n- You want to analyse the structure of an existing scene.\n- You want to create a script template that mirrors what was already written.\n\nThe tool returns a suggested script body. Review and refine it, then call `create_script` or `update_script` to save it.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the book repository root"
+          },
+          "chapter": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Chapter slug or id"
+          },
+          "paragraph": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Paragraph slug or id"
+          }
+        },
+        "required": [
+          "rootPath",
+          "chapter",
+          "paragraph"
+        ]
+      }
+    }
+  ]
+}

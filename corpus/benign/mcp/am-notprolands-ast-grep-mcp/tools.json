@@ -1,0 +1,208 @@
+{
+  "package": "@notprolands/ast-grep-mcp",
+  "tools": [
+    {
+      "name": "dump_syntax_tree",
+      "description": "Dump code's syntax structure or dump a query's pattern structure.\nThis is useful to discover correct syntax kind and syntax tree structure. Call it when debugging a rule.\nThe tool requires three arguments: code, language and format.\n`format` is the output format of the syntax tree.\nuse `format=cst` to inspect the code's concrete syntax tree structure, useful to debug target code.\nuse `format=pattern` to inspect how ast-grep interprets a pattern, useful to debug pattern rule.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code you need"
+          },
+          "language": {
+            "type": "string",
+            "description": "The language of the code"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "pattern",
+              "cst",
+              "ast"
+            ],
+            "default": "cst",
+            "description": "Code dump format. Available values: pattern, ast, cst"
+          }
+        },
+        "required": [
+          "code",
+          "language"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "test_match_code_rule",
+      "description": "Test a code against an ast-grep YAML rule.\nThis is useful to test a rule before using it in a project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code to test against the rule"
+          },
+          "yaml": {
+            "type": "string",
+            "description": "The ast-grep YAML rule to search. It must have id, language, rule fields."
+          }
+        },
+        "required": [
+          "code",
+          "yaml"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_code",
+      "description": "Find code in a project folder that matches the given ast-grep pattern.\nPattern is good for simple and single-AST node result.\nFor more complex usage, please use YAML by `find_code_by_rule`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_folder": {
+            "type": "string",
+            "description": "The absolute path to the project folder. It must be absolute path."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "The ast-grep pattern to search for. Note the pattern must has valid AST structure."
+          },
+          "language": {
+            "type": "string",
+            "default": "",
+            "description": "The language of the query"
+          }
+        },
+        "required": [
+          "project_folder",
+          "pattern"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_code_by_rule",
+      "description": "Find code using ast-grep's YAML rule in a project folder.\nYAML rule is more powerful than simple pattern and can perform complex search like find AST inside/having another AST.\nIt is a more advanced search tool than the simple `find_code`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_folder": {
+            "type": "string",
+            "description": "The path to the project folder"
+          },
+          "yaml": {
+            "type": "string",
+            "description": "The ast-grep YAML rule to search. It must have id, language, rule fields."
+          }
+        },
+        "required": [
+          "project_folder",
+          "yaml"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "rewrite_code",
+      "description": "Transform and refactor code using AST-based find-and-replace patterns.\nUse metavariables ($VAR, $$$VARS) in both pattern and replacement.\n\nExample: Find `console.log($ARG)` and replace with `logger.info($ARG)`\n\n⚠️ WARNING: This tool modifies files when auto_apply=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_folder": {
+            "type": "string",
+            "description": "The path to search and modify files in"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "AST pattern to find. Must use valid code syntax with metavariables like $VAR for single nodes, $$$VARS for multiple nodes."
+          },
+          "replacement": {
+            "type": "string",
+            "description": "Replacement pattern. Use same metavariables from the search pattern."
+          },
+          "language": {
+            "type": "string",
+            "default": "typescript",
+            "description": "Programming language for the patterns"
+          },
+          "globs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "File patterns to include/exclude. Use ! prefix to exclude (e.g., [\"*.ts\", \"!*.test.ts\"])"
+          },
+          "context": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Number of context lines to show around each match (0-10)"
+          },
+          "auto_apply": {
+            "type": "boolean",
+            "default": true,
+            "description": "Apply all changes automatically. Defaults to true for AI agents."
+          },
+          "strictness": {
+            "type": "string",
+            "enum": [
+              "smart",
+              "ast",
+              "relaxed",
+              "cst",
+              "signature"
+            ],
+            "default": "smart",
+            "description": "Pattern matching strictness: smart=ignore trivial nodes (default), ast=AST nodes only, cst=exact match, relaxed=ignore comments, signature=ignore text"
+          }
+        },
+        "required": [
+          "project_folder",
+          "pattern",
+          "replacement"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "analyze-imports",
+      "description": "Analyze import statements and dependencies in your codebase. Choose \"usage\" to see which imports are actually used (great for refactoring), or \"discovery\" to explore all imports and identifiers in the code (great for understanding structure).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "usage",
+              "discovery"
+            ],
+            "default": "usage",
+            "description": "Analysis mode: \"usage\" shows where imports are used (default, best for refactoring), \"discovery\" shows all imports and identifiers (best for code exploration)"
+          },
+          "path": {
+            "type": "string",
+            "description": "Specific directory or file to analyze (defaults to current directory). Supports both relative paths and absolute paths. Relative paths are resolved against the project root."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan-code",
+      "description": "Analyze TypeScript code for common bugs, performance issues and best practices. Detects problems like: type safety violations, loose object types, incorrect async patterns (await in Promise.all) and import style issues. Uses AST-based analysis for precise detection without false positives. Essential for maintaining code quality and preventing runtime errors.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

@@ -1,0 +1,219 @@
+{
+  "package": "sbb-mcp",
+  "tools": [
+    {
+      "name": "search_stations",
+      "description": "Search for Swiss train stations, addresses, or points of interest by name. Returns UIC station IDs (e.g. \"8503000\" for Zürich HB) used by the other tools. Note: search_connections accepts station names directly, so this tool is only needed when the user explicitly asks for station info or when you need disambiguation between multiple matches.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Station name to search for (e.g. \"Zurich\", \"Bern\", \"Interlaken\")"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 10,
+            "description": "Maximum number of results"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_connections",
+      "description": "Find train connections between two Swiss stations. Accepts station names directly (e.g. \"Zürich HB\", \"Bern\") or UIC IDs — name resolution happens internally. Returns live schedules with departure/arrival times, duration, transfers, and trip IDs for downstream pricing/details/ticket calls. Live data: includes delays and cancellations for trains departing within 30 min.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Origin station name or ID (e.g. \"Zurich HB\" or \"8503000\")"
+          },
+          "to": {
+            "type": "string",
+            "description": "Destination station name or ID (e.g. \"Bern\" or \"8507000\")"
+          },
+          "date": {
+            "type": "string",
+            "description": "Travel date in YYYY-MM-DD format (default: today)"
+          },
+          "time": {
+            "type": "string",
+            "description": "Time in HH:MM (Europe/Zurich local time, 24h). By default treated as DEPARTURE time. Default: now."
+          },
+          "arrival_time": {
+            "type": "boolean",
+            "description": "Defaults to false (treat `time` as departure). Only set true when the user EXPLICITLY says they want to ARRIVE by a specific time (\"I need to be in Bern by 9am\", \"arriving at 14:00\"). For loose phrases like \"around 9am\", \"morning\", or \"tomorrow at 9\", leave this false — those mean departure time."
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_trip_details",
+      "description": "Get detailed information about a specific train connection including all intermediate stops, platforms, and occupancy. Use a trip ID from search_connections results.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trip_id": {
+            "type": "string",
+            "description": "Trip ID from search_connections results"
+          }
+        },
+        "required": [
+          "trip_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_more_connections",
+      "description": "Load earlier or later train connections for a previous search. Use the collection ID from search_connections results.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection_id": {
+            "type": "string",
+            "description": "Collection ID from search_connections results"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "next",
+              "previous"
+            ],
+            "description": "\"next\" for later trains, \"previous\" for earlier trains"
+          }
+        },
+        "required": [
+          "collection_id",
+          "direction"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_prices",
+      "description": "Get ticket prices in CHF for one or more train connections. Supports Half-Fare card (Halbtax) and GA travelcard discounts. Up to 10 trip_ids per call — batch them in a single request rather than calling once per connection. Use trip_ids from a recent search_connections result; do not invent IDs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trip_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 10,
+            "description": "Trip IDs from search_connections results"
+          },
+          "traveler_type": {
+            "type": "string",
+            "enum": [
+              "ADULT",
+              "CHILD"
+            ],
+            "default": "ADULT",
+            "description": "Traveler type"
+          },
+          "reduction_card": {
+            "type": "string",
+            "enum": [
+              "HALF_FARE",
+              "GA",
+              "NONE"
+            ],
+            "default": "HALF_FARE",
+            "description": "Swiss reduction card: HALF_FARE (Halbtax), GA (General Abonnement), or NONE"
+          }
+        },
+        "required": [
+          "trip_ids"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_ticket_link",
+      "description": "Get a direct purchase link to buy a train ticket on SBB.ch. Only call this when the user wants to buy a specific ticket. On mobile with SBB app installed, opens directly in the app with Halbtax/GA applied automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trip_id": {
+            "type": "string",
+            "description": "Trip ID to purchase"
+          },
+          "from_name": {
+            "type": "string",
+            "description": "Origin station name (e.g. \"Zürich HB\")"
+          },
+          "from_id": {
+            "type": "string",
+            "description": "Origin station ID (e.g. \"8503000\")"
+          },
+          "to_name": {
+            "type": "string",
+            "description": "Destination station name (e.g. \"Bern\")"
+          },
+          "to_id": {
+            "type": "string",
+            "description": "Destination station ID (e.g. \"8507000\")"
+          },
+          "date": {
+            "type": "string",
+            "description": "Travel date YYYY-MM-DD"
+          },
+          "time": {
+            "type": "string",
+            "description": "Departure time HH:MM"
+          },
+          "traveler_type": {
+            "type": "string",
+            "enum": [
+              "ADULT",
+              "CHILD"
+            ],
+            "default": "ADULT",
+            "description": "Traveler type"
+          },
+          "reduction_card": {
+            "type": "string",
+            "enum": [
+              "HALF_FARE",
+              "GA",
+              "NONE"
+            ],
+            "default": "HALF_FARE",
+            "description": "Swiss reduction card: HALF_FARE (Halbtax), GA (General Abonnement), or NONE"
+          }
+        },
+        "required": [
+          "trip_id",
+          "from_name",
+          "from_id",
+          "to_name",
+          "to_id",
+          "date",
+          "time"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

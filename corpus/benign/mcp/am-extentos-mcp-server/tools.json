@@ -1,0 +1,549 @@
+{
+  "package": "@extentos/mcp-server",
+  "tools": [
+    {
+      "name": "getPlatformInfo",
+      "description": "Return static platform metadata: library version + the list of SDK capabilities the glasses expose (audio.transcriptions, audio.recordDiscrete, audio.speak, camera.capturePhoto, camera.videoFrames, audio.audioChunks, toggles, connection.state, …). The right first call for any new task — primes the agent on what primitives are available before writing handler code. **Default response is COMPACT** — capability names and categories only — keeping the typical first-call cost ~2KB. Per-feature call shape + idiom + gotchas comes from `getCapabilityGuide(feature)`; full compositional patterns (wake → record → LLM → speak end-to-end) from `getCodeExample(pattern)`; conceptual docs from `searchDocs(topic)`. Pass `expand: ['capabilities.full']` for the machine-readable catalog with params/payload/requires/constraints. **glasses is optional (F-R4-01)** — defaults to `meta_rayban` (the only currently supported vendor); pass it explicitly for forward compatibility once additional vendors land. USE at session start before scaffolding or writing handler code. DON'T USE for what's installed in the project (use inspectIntegration).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "version",
+                "capabilities"
+              ]
+            },
+            "minItems": 1
+          },
+          "glasses": {
+            "type": "string",
+            "enum": [
+              "meta_rayban"
+            ]
+          },
+          "expand": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "schema",
+                "capabilities.full",
+                "capabilities.advanced"
+              ]
+            },
+            "description": "Optional opt-in expansions on top of the compact default. 'schema' = full JSON Schema document. 'capabilities.full' = per-primitive params/payload/requires/constraints. 'capabilities.advanced' = droppedPrimitives + futurePrimitives (informational only)."
+          }
+        },
+        "required": [
+          "sections"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getCodeExample",
+      "description": "Reference library — retrieve a complete SDK code example (Kotlin + Swift) for a use case. Patterns cover the canonical voice-glasses compositions: voice_qa_assistant (the multi-turn wake+question+LLM+speak flow that motivated the pure-SDK pivot), barge_in_speak (cancel TTS on user interrupt), photo_describe_voice (wake → photo → vision LLM → speak), live_transcription_ui (transcripts into Compose/SwiftUI state), voice_notes (wake → record → persist), connection_page_setup (the minimum bootstrap wiring), byok_anthropic (BYOK LLM client integration), agent_test_loop (the agent-driven E2E verification recipe — handler skeleton + dual-layer assertion against the sim event log, the emulator's Room/SQLite state, and the rendered screen). USE when you're about to write handler code and want the canonical shape to peel from, OR when you want the agent test driver that asserts the handler works end-to-end. DON'T USE for capability discovery (use getPlatformInfo) or per-feature minimal usage (use getCapabilityGuide).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "enum": [
+              "voice_qa_assistant",
+              "barge_in_speak",
+              "photo_describe_voice",
+              "live_transcription_ui",
+              "voice_notes",
+              "connection_page_setup",
+              "byok_anthropic",
+              "agent_test_loop"
+            ],
+            "description": "Which compositional pattern to fetch. Each returns full Kotlin + Swift code, an explanation, gotchas, and the SDK features it exercises."
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getCapabilityGuide",
+      "description": "Per-feature SDK usage guide — minimal Kotlin + Swift snippet + gotchas + which getCodeExample patterns exercise the feature. Pairs with getPlatformInfo (which lists feature names and categories) by adding the actual idiom for using each feature. USE when you know which feature you need but don't know the canonical call shape, or when you're hitting a confusing failure (the gotchas typically cover it). DON'T USE for a complete compositional pattern (use getCodeExample) or for capability discovery (use getPlatformInfo).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "string",
+            "enum": [
+              "audio_chunks",
+              "capture_photo",
+              "capture_video",
+              "connection_state",
+              "record_audio",
+              "speak",
+              "toggles",
+              "transcription_incremental",
+              "video_frames",
+              "voice_command"
+            ],
+            "description": "Feature name from getPlatformInfo.features[].name. Includes the cross-cutting SDK surfaces (connection_state, toggles) and the wake-phrase + media capabilities."
+          }
+        },
+        "required": [
+          "feature"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "generateConnectionModule",
+      "description": "One-shot project scaffold — emits the bootstrap module that wires `Extentos.create(...)` into the host app, build-script changes, dependencies, permissions, and the integration manifest. Run once per project; after this lands, the agent writes its own Handler classes against the SDK primitives surfaced by getCapabilityGuide / getCodeExample. **Two-call flow**: call once WITHOUT `placement` to receive `status: \"needs_placement\"` plus the question to ask the dev (where should ExtentosConnectionPage live in the app?); after the dev answers, call again WITH `placement` set to one of the 5 ids to receive the full scaffold (files, suggestedRendering, etc.). **Existing-app detection (Android)**: pass `projectPath` so the handler reads AndroidManifest.xml and detects whether you already have an Application subclass. If yes, the emitted ExtentosBootstrap is an `object` (init helper) plus a `manual_patch` for your existing class — no clobber. If no (greenfield) OR projectPath omitted, the bootstrap is emitted as a full Application subclass and the agent sets `<application android:name>` accordingly. Returns files[] with action values 'create' and 'manual_patch' — see searchDocs('file_actions') for how to apply each. USE as the first generation tool when scaffolding a fresh project. DON'T USE when Extentos is already installed (use inspectIntegration to read current state).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios"
+            ]
+          },
+          "glasses": {
+            "type": "string",
+            "enum": [
+              "meta_rayban"
+            ]
+          },
+          "appPackage": {
+            "type": "string",
+            "minLength": 1
+          },
+          "libraryVersion": {
+            "type": "string"
+          },
+          "responseFormat": {
+            "type": "string",
+            "enum": [
+              "concise",
+              "detailed"
+            ]
+          },
+          "placement": {
+            "type": "string",
+            "enum": [
+              "dedicated_route",
+              "settings_subscreen",
+              "bottom_tab",
+              "modal_sheet",
+              "headless"
+            ],
+            "description": "Where ExtentosConnectionPage should live in the app. Omit on the first call to receive the placement question; pass on the second call after the dev has chosen."
+          },
+          "projectPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the project root. Android-only: when provided, the handler reads `app/src/main/AndroidManifest.xml` to detect an existing Application subclass and emit an init-helper bootstrap (object) + a manual_patch for that class — avoiding the Application clobber. Optional; absent → assume greenfield and emit the Application-subclass form."
+          }
+        },
+        "required": [
+          "platform",
+          "glasses",
+          "appPackage"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getVoiceCommandGuidance",
+      "description": "Analyze proposed voice phrases for UX issues (length, homophones, digit-usage, Meta wake-word collision, ambiguity with existing phrases) before the agent wires them into a `glasses.audio.transcriptions()` consumer. Voice matching post-pivot is plain string contains/regex inside the customer's handler — this tool catches the issues the customer can't see (e.g. a phrase that sounds identical to another, or one that collides with Meta's hardware wake word) before they ship. USE before adding new phrase-match conditions to a handler. DON'T USE for general voice docs (use searchDocs topic 'voice_integration').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "phrases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "existingPhrases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "glasses": {
+            "type": "string",
+            "enum": [
+              "meta_rayban"
+            ]
+          }
+        },
+        "required": [
+          "phrases"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getPermissions",
+      "description": "Derive Android permissions, iOS Info.plist keys, and Meta DAT scopes from the list of SDK capabilities the app uses. USE after deciding which features (capture_photo, transcription_incremental, voice_command, …) the app integrates. DON'T USE for capability discovery (use getPlatformInfo).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Capability names from getPlatformInfo.features[].name. e.g. ['capture_photo', 'transcription_incremental', 'voice_command']."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios"
+            ]
+          }
+        },
+        "required": [
+          "capabilities",
+          "platform"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "inspectIntegration",
+      "description": "Read-only snapshot of current Extentos integration: manifest, generated-file hashes, dependency status, connection-page-config. USE before validateIntegration or for a 'what's wired so far?' read. DON'T USE for correctness checking (use validateIntegration).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "validateIntegration",
+      "description": "Check the WHOLE project for correctness — manifest, generated files, dependency, permissions (vs the manifest's capabilities list), bootstrap wiring, toolchain versions. Pre-testing gate. USE after changes before testing. DON'T USE for reading state (use inspectIntegration).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "createSimulatorSession",
+      "description": "**Get-or-create**: provision a browser-based simulator session for this project, OR return the existing saved one. The simulator hosts your customer-built app running against a Meta-DAT-shaped transport stub — `glasses.audio.transcriptions()`, `glasses.camera.capturePhoto()`, `glasses.audio.speak()` and every other capability primitive flow through it exactly as they would on real hardware, so the agent can dogfood a handler in a browser before a Meta DAT is paired. Persistent-simulations model: each project + platform has at most one saved sim tied to the user's account. Calling this returns that sim's existing URL if it exists (status:'resumed') instead of creating a new one. To force a new sim ID (URL hijacked, clean-slate test), pass `resetFresh: true` — archives the existing and creates a fresh one. The dev can also reset from the dashboard at extentos.com/s. **First-time per project**: creates the sim (status:'active'); subsequent calls in any future session return the same sim. **Auto-bind** (response carries autoBind:'attached'): when the dev's running app is reachable via the MCP local bridge, attaches it to the session — no rebuild needed. Otherwise URL-bake fallback (Android: buildConfigField patch; iOS: plist write). For 'resumed' responses, the URL is unchanged from last time so no rebuild/patch is needed regardless. **Iteration model — DO NOT call this per change**: app-code edits rebuild + reinstall and reattach automatically; the simulator URL is stable. Calling this again on the same project just returns the same sim — cheap, idempotent. **First-link auto-poll**: when account-linking is required, by default polls completeAuthLink internally for `autoLinkSeconds` (default 30) and re-mints on success. `autoLink: false` for CI / non-interactive contexts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "glasses": {
+            "type": "string",
+            "enum": [
+              "meta_rayban"
+            ]
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios"
+            ]
+          },
+          "projectPath": {
+            "type": "string"
+          },
+          "recordBinary": {
+            "type": "boolean"
+          },
+          "autoOpenBrowser": {
+            "type": "boolean"
+          },
+          "autoLink": {
+            "type": "boolean",
+            "description": "When true (default), if the backend returns auth_required, this handler polls completeAuthLink internally for `autoLinkSeconds` and re-mints on success. Set false in CI / non-interactive contexts."
+          },
+          "autoLinkSeconds": {
+            "type": "number",
+            "minimum": 10,
+            "maximum": 300,
+            "description": "Max seconds to wait for the user to approve the verification URL when autoLink is true. Default 30. Clamped to [10, 300]."
+          },
+          "resetFresh": {
+            "type": "boolean",
+            "description": "When true, archive any existing saved sim for this project + platform and create a fresh one with a new sessionId. Default false — get-or-create returns the existing saved sim. Use for ID rotation (URL got hijacked, dev wants a clean slate). Dashboard's 'Reset' button hits the same backend path."
+          }
+        },
+        "required": [
+          "glasses"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "completeAuthLink",
+      "description": "Poll the backend until the user finishes signup at the verificationUrl, then persist the bearer token to ~/.extentos/auth.json. USE after createSimulatorSession returns status:'auth_required' AND you set autoLink:false (or the inline poll timed out). DON'T USE preemptively. **Note (Bundle 10+):** createSimulatorSession's `autoLink` arg (default true) handles this inline for you in the typical case; you only need to call completeAuthLink directly if you opted out of autoLink or the user took longer to approve than autoLinkSeconds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceCode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxWaitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600
+          },
+          "pollIntervalSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "deviceCode"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getEventLog",
+      "description": "Fetch structured event trace inside a simulator session. Primary debugging tool for *why is my handler not seeing what I expect* — transcripts not arriving, photo capture failing, toggle changes not propagating, speak getting cut off, connection dropping. Events are grouped into six chips (errors / voice / camera / ai / lifecycle / custom) — one chip per event, with `errors` absorbing every severity≥warn row regardless of modality. To see e.g. voice activity plus voice errors, fetch the chips separately and union them. USE to diagnose which capability primitive is misbehaving. DON'T USE for static configuration checking (use validateIntegration) or for live session phase (use getSimulatorStatus). **Scope:** captures the simulator's WebSocket relay — transport + SDK primitives (audio, camera, speak, toggles, voice triggers, runtime events). Customer-side direct-HTTP calls (BYOK Anthropic / OpenAI / Gemini / etc.) traverse api.<provider>.com from the customer's app, NOT the simulator relay — invisible by default. **Surface BYOK calls in the event log by wrapping them in `glasses.observability.aiCall(label) { ... }` (F-R3-11)** — the wrapper emits `ai_call_start` and `ai_call_end` frames that land under the 'ai' filter chip with timing + success/error metadata. Without the wrapper, BYOK failures show as silent gaps (e.g. capture_photo + photo_result + speak with 3 unexplained seconds between) — those failures still need logcat / OSLog. Use the wrapper for any AI call that's part of your debug story; leave it off for true fire-and-forget background calls. **Live watch:** pass `follow: true` to block until new events land instead of returning an empty snapshot, and carry the returned `cursor` between calls — loop the pair to tail the log in real time (e.g. to follow a multi-turn AI conversation the developer built into the app, reacting to each `speak` as it happens). See getCodeExample('agent_test_loop').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "filter": {
+            "type": "string",
+            "enum": [
+              "all",
+              "errors",
+              "voice",
+              "camera",
+              "ai",
+              "lifecycle",
+              "custom"
+            ],
+            "description": "Chip to filter the event stream by. 'all' (default) returns every event. 'errors' returns severity≥warn events across all modalities. 'voice' / 'camera' / 'ai' cover hardware/integration capabilities (severity=info only — failures land under 'errors'). 'ai' fires for events whose `type` starts with `ai_` — today that's customer-side BYOK calls wrapped via `glasses.observability.aiCall(label) { ... }`. Wrap BYOK calls to see start/end + duration in the timeline; without the wrapper the 'ai' chip stays empty even though Anthropic / OpenAI / Gemini calls are running. 'lifecycle' covers connection / session / pairing / hardware / runtime state. 'custom' is the open-world catch-all for app-emitted event types the platform did not anticipate."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque keyset cursor from a prior getEventLog response. Pass it back to fetch ONLY events newer than the last batch — no duplicates, no gaps, even for events that share a millisecond timestamp. Omit it to read from the start of the log. The cursor is the agent's bookmark: capture one BEFORE injectTranscript, then watch forward from it so nothing that lands between inject and read is missed."
+          },
+          "follow": {
+            "type": "boolean",
+            "description": "When true, turns this call into a live watch: if no events are newer than `cursor`, the call BLOCKS until something happens (or `timeoutMs` elapses) instead of returning an empty snapshot. Returns the moment activity lands. Run it in a loop — capture the returned `cursor`, react to `events`, call again — to tail the log in real time. This is the optimal way to follow an unfolding flow (e.g. a multi-turn AI conversation in the app): the agent sees whatever happened next without having to guess the event type in advance. The response adds `followed: true`, `timedOut`, and `waitedMs`. A `timedOut: true` result is normal (no activity yet) — not an error; re-call with the same cursor to keep watching."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 60000,
+            "description": "Max time (ms) a `follow` call blocks waiting for new events. Clamped to [1000, 60000]; default 15000. Ignored unless `follow` is true."
+          },
+          "responseFormat": {
+            "type": "string",
+            "enum": [
+              "concise",
+              "detailed"
+            ]
+          },
+          "redactBinary": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "injectTranscript",
+      "description": "Inject a synthetic STT transcript into a live simulator session, the same way the simulator browser tab's click-to-fire chips do. Closes the agent-driven end-to-end test loop: after createSimulatorSession returns and your app attaches, call this with the wake phrase text to drive your voice handler — no human in the loop. Frame travels through the same hub path as a real browser click, so handler dispatch + event-log entries (visible via getEventLog) are identical. USE for automated voice-flow validation (createSimulatorSession → injectTranscript → getEventLog). DON'T USE for static validation (use validateIntegration) or capability discovery (use getPlatformInfo).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The transcript text to inject. For wake-phrase tests, pass the exact phrase your onPhrase / transcriptions matcher expects (case-insensitive substring match — \"start recording\" matches \"please start recording now\")."
+          },
+          "isFinal": {
+            "type": "boolean",
+            "description": "When true (default for type=stt_transcript), the frame is a final transcript that fires onPhrase matchers. When false, it's a partial — most matchers wait for finals, but the simulator UI + live-captions consumers see both."
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "Convenience: when true, send as stt_partial (a not-yet-final transcript). Sets isFinal=false by default. Use for testing live-captions UI that consumes partials."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "STT confidence value (0-1). Defaults to 0.99 to match the manual_trigger semantics the simulator's click-to-fire uses."
+          }
+        },
+        "required": [
+          "sessionId",
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getSimulatorStatus",
+      "description": "Read a live simulator session's current state — phase (active/paused/closed), hardware-ready, attached roles (app + browser), active capability streams (which `videoFrames`/`audioChunks`/`transcriptions` subscriptions are open right now), and current toggle values. Session-level snapshot only. USE during testing to confirm a stream is open, a toggle is set, the session is healthy, or the app role has actually attached. DON'T USE for event traces (use getEventLog).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getProductionChecklist",
+      "description": "Return a personalized production-readiness checklist based on the SDK capabilities the app uses + the handlers it declares. USE when going to production. DON'T USE during development.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Capability names from getPlatformInfo.features[].name. Drives the streams / hardware-verify / permissions-audit steps."
+          },
+          "handlers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of the handlers the app declares (one per BYOK / AI integration). Drives the API Keys step."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios"
+            ]
+          },
+          "projectPath": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capabilities",
+          "platform"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getCredentialGuide",
+      "description": "Return step-by-step credential setup instructions for the Meta DAT plus each BYOK AI service the app integrates with. USE when wiring a new BYOK provider or graduating from simulator to real hardware. DON'T USE during simulator-only dev loop.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "services": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "enum": [
+                "anthropic",
+                "openai",
+                "google_cloud_vision",
+                "google_translate",
+                "google_gemini",
+                "deepl",
+                "azure_cognitive",
+                "aws_bedrock",
+                "huggingface",
+                "custom"
+              ]
+            },
+            "description": "List of providers the app integrates with — one per handler/integration. Order doesn't matter."
+          },
+          "handlers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional list of handler names. When provided, each provider guide labels which handlers it's for by matching name patterns (vision/translate/gemini/etc.)."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios"
+            ]
+          }
+        },
+        "required": [
+          "services",
+          "platform"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "searchDocs",
+      "description": "Search Extentos documentation by topic or keyword. The conceptual / narrative layer that complements the action-oriented tools — read these to understand *how* the SDK is meant to be used, not just what calls exist. Canonical post-pivot topics: `getting_started` (full topic index — read first), `custom_handlers` (the central composition doc — how to write a Handler class that subscribes to capability primitives), `voice_integration`, `connection_ui_placement`, `host_app_scaffold`, `auto_bind_session_lifecycle`, `local_bridge_discovery`, `device_code_flow`, `connection_state_model`, `permissions`, `production_checklist`, `concurrency_modes`, `multi_platform_projects`, `library_api`, `toggles`, `audio_video_coexistence`, `simulator_browser_mode`, `event_log_schema`, `file_actions`, `agent_e2e_testing` (how an AI coding agent verifies its own generated handler end-to-end — sim event log + adb-mediated emulator DB read + screencap, the dual-layer pattern that closes the agent loop without a human). Topic IDs are stable. **At least one of `topic` or `query` is required** (enforced by the handler — calling with neither returns an invalid_arguments error). Pass `topic` alone to fetch the full topic content (most common); pass `query` alone for keyword search across all topics; pass both to narrow keyword search inside a topic. **mode: \"snippets\" (F-R4-10)** returns only the matching paragraphs instead of full topic bodies — pair with a query when keyword-searching across topics so a single search doesn't dump ~20KB of unrelated content into context. USE to learn how primitives compose into a real flow, or to read up on a specific feature (permissions, toggles, connection lifecycle). DON'T USE for the platform capability list (use getPlatformInfo), call-shape per feature (use getCapabilityGuide), or project-installed state (use inspectIntegration).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional keyword(s). When omitted, the response is the full content of the topic named in `topic`. When both supplied, query narrows within the topic. At least one of `query` or `topic` must be supplied."
+          },
+          "topic": {
+            "type": "string",
+            "description": "Optional topic id. Omit and pass `query` for cross-topic keyword search; pass topic alone to fetch the topic's full content (most common usage). At least one of `query` or `topic` must be supplied."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "full",
+              "snippets"
+            ],
+            "description": "Response shape (F-R4-10). 'full' (default) returns each matching topic's full body — the original behavior, best for reading a single named topic. 'snippets' returns only the paragraphs containing the query terms (up to 3 per topic, ~600 chars each) — best when querying across topics so you don't pay for unrelated content in the agent's context window. Snippets mode requires a query; pure topic fetches always return full content."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ]
+}

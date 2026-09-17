@@ -1,0 +1,939 @@
+{
+  "package": "@ateam-ai/mcp",
+  "tools": [
+    {
+      "name": "ateam_bootstrap",
+      "description": "REQUIRED onboarding entrypoint for A-Team MCP. MUST be called when user greets, says hi, asks what this is, asks for help, explores capabilities, or when MCP is first connected. Returns platform explanation, example solutions, and assistant behavior instructions. Do NOT improvise an introduction — call this tool instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "ateam_auth",
+      "description": "Authenticate with A-Team. Required before any tenant-aware operation (reading solutions, deploying, testing, etc.). The user can get their API key at https://mcp.ateam-ai.com/get-api-key. Only global endpoints (spec, examples, validate) work without auth. IMPORTANT: Even if environment variables (ADAS_API_KEY) are configured, you MUST call ateam_auth explicitly — env vars alone are not sufficient. For cross-tenant admin operations, use master_key instead of api_key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Your A-Team API key (e.g., adas_xxxxx)"
+          },
+          "master_key": {
+            "type": "string",
+            "description": "Master key for cross-tenant operations. Authenticates across ALL tenants without per-tenant API keys. Requires tenant parameter."
+          },
+          "tenant": {
+            "type": "string",
+            "description": "Tenant name (e.g., dev, main). Optional with api_key if format is adas_<tenant>_<hex>. REQUIRED with master_key."
+          },
+          "url": {
+            "type": "string",
+            "description": "Optional API URL override (e.g., https://dev-api.ateam-ai.com). Use this to target a different environment without restarting the MCP server."
+          }
+        }
+      }
+    },
+    {
+      "name": "ateam_get_spec",
+      "description": "Get the A-Team specification — schemas, validation rules, system tools, agent guides, and templates. Start here after bootstrap to understand how to build skills and solutions. Use 'section' to get just one part of the skill spec (much smaller than the full spec). Use 'search' to find specific fields or concepts across the spec.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "enum": [
+              "overview",
+              "skill",
+              "solution",
+              "enums",
+              "connector-multi-user"
+            ],
+            "description": "What to fetch: 'overview' = API overview + endpoints, 'skill' = full skill spec, 'solution' = full solution spec, 'enums' = all enum values, 'connector-multi-user' = multi-user connector guide"
+          },
+          "section": {
+            "type": "string",
+            "enum": [
+              "engine",
+              "tools",
+              "intents",
+              "policy",
+              "triggers",
+              "connectors",
+              "role",
+              "template",
+              "guide"
+            ],
+            "description": "Optional: get just one section of the skill spec (only works with topic='skill'). Sections: 'engine' = model/reasoning/planner optimization/bootstrap tools, 'tools' = tool definitions/meta tools, 'intents' = intents/problem/scenarios, 'policy' = access control/grants/workflows, 'triggers' = automation triggers, 'connectors' = connector linking/channels, 'role' = persona/goals, 'template' = minimal quick start, 'guide' = build steps/common mistakes"
+          },
+          "search": {
+            "type": "string",
+            "description": "Optional: filter the spec to only sections containing this search term. Works with any topic. Example: search='bootstrap' returns only fields/sections mentioning 'bootstrap'."
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      }
+    },
+    {
+      "name": "ateam_get_workflows",
+      "description": "Get the builder workflows — step-by-step state machines for building skills and solutions. Use this to guide users through the entire build process conversationally. Returns phases, what to ask, what to build, exit criteria, and tips for each stage.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "ateam_get_examples",
+      "description": "Get complete working examples that pass validation. Study these before building your own.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "skill",
+              "connector",
+              "connector-ui",
+              "solution",
+              "script-cache-skill",
+              "index"
+            ],
+            "description": "Example type: 'skill' = Order Support Agent, 'connector' = stdio MCP connector, 'connector-ui' = UI-capable connector, 'solution' = full 3-skill e-commerce solution, 'script-cache-skill' = fat-tool skill with script_cache opt-in (reference implementation of script-level JIT shortcuts — study this before building any browser-automation skill), 'index' = list all available examples"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "ateam_build_and_run",
+      "description": "Build and deploy a governed AI Team solution in one step. ⚠️ HEAVIEST OPERATION (60-180s): validates solution+skills → deploys all connectors+skills to A-Team Core (regenerates MCP servers) → health-checks → optionally runs a warm test → auto-pushes to GitHub. AUTO-DETECTS GitHub repo: if you omit mcp_store and a repo exists, connector code is pulled from GitHub automatically. First deploy requires mcp_store. After that, write files via ateam_github_write, then just call build_and_run without mcp_store. For small changes to an already-deployed solution, prefer ateam_patch (faster, incremental). Requires authentication.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID. Use this INSTEAD of passing the full solution object — the solution definition is auto-pulled from GitHub. Required if solution object is omitted."
+          },
+          "solution": {
+            "type": "object",
+            "description": "Full solution definition. Required on first deploy. After first deploy, just pass solution_id instead — everything is auto-pulled from GitHub."
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Optional after first deploy: skill definitions. If omitted, auto-pulled from GitHub repo (skills/{id}/skill.json)."
+          },
+          "connectors": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Optional: connector metadata (id, name, transport). Entry points auto-detected from mcp_store."
+          },
+          "mcp_store": {
+            "type": "object",
+            "description": "Optional: connector source code files. Key = connector id, value = array of {path, content}."
+          },
+          "github": {
+            "type": "boolean",
+            "description": "Optional: if true, pull connector source code from the solution's GitHub repo. AUTO-DETECTED: if you omit both mcp_store and github, the system checks if a repo exists and pulls from it automatically. You rarely need to set this explicitly."
+          },
+          "test_message": {
+            "type": "string",
+            "description": "Optional: send a test message after deployment to verify the skill works. Returns the full execution result."
+          },
+          "test_skill_id": {
+            "type": "string",
+            "description": "Optional: which skill to test (defaults to the first skill)."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "ateam_test_skill",
+      "description": "Send a test message to a deployed skill and get the full execution result. By default waits for completion (up to 60s). Set wait=false for async mode — returns job_id immediately, then poll with ateam_test_status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "skill_id": {
+            "type": "string",
+            "description": "The skill ID to test (original or internal ID)"
+          },
+          "message": {
+            "type": "string",
+            "description": "The test message to send to the skill"
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "If true (default), wait for completion. If false, return job_id immediately for polling via ateam_test_status."
+          },
+          "actor_id": {
+            "type": "string",
+            "description": "Optional actor ID for conversation continuity. Pass the actor_id from a previous test response to continue the conversation. Omit to auto-generate a test actor (test_<timestamp>_<random>, auto-expires in 24h)."
+          }
+        },
+        "required": [
+          "solution_id",
+          "skill_id",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "ateam_conversation",
+      "description": "Send a message to a deployed solution and get the result. No skill_id needed — the system auto-routes to the right skill. Supports multi-turn conversations: pass the actor_id from a previous response to continue the thread (e.g., reply to a confirmation prompt). Each call creates a new job but the same actor_id maintains conversation context.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "message": {
+            "type": "string",
+            "description": "The message to send (e.g., 'send email to X' or 'I confirm')"
+          },
+          "actor_id": {
+            "type": "string",
+            "description": "Optional: actor ID from a previous response to continue the conversation. Omit for a new conversation."
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "If true (default), wait for completion. If false, return job_id immediately for polling."
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "Optional: max wait time in ms (default: 60000, max: 300000)."
+          }
+        },
+        "required": [
+          "solution_id",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "ateam_test_pipeline",
+      "description": "Test the decision pipeline (intent detection → planning) for a skill WITHOUT executing tools. Returns intent classification, first planned action, and timing. Use this to debug why a skill classifies intent incorrectly or plans the wrong action.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "skill_id": {
+            "type": "string",
+            "description": "The skill ID to test"
+          },
+          "message": {
+            "type": "string",
+            "description": "The test message to classify and plan for"
+          }
+        },
+        "required": [
+          "solution_id",
+          "skill_id",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "ateam_test_voice",
+      "description": "Simulate a voice conversation with a deployed solution. Runs the full voice pipeline (session → caller verification → prompt → skill dispatch → response) using text instead of audio. Returns each turn with bot response, verification status, tool calls, and entities. Use this to test voice-enabled solutions end-to-end without making a phone call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of user messages to send sequentially (simulates a multi-turn phone conversation)"
+          },
+          "phone_number": {
+            "type": "string",
+            "description": "Optional: simulated caller phone number (e.g., '+14155551234'). If the number is in the solution's known phones list, the caller is auto-verified."
+          },
+          "skill_slug": {
+            "type": "string",
+            "description": "Optional: target a specific skill by slug instead of using voice routing."
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "Optional: max wait time per skill execution in milliseconds (default: 60000)."
+          }
+        },
+        "required": [
+          "solution_id",
+          "messages"
+        ]
+      }
+    },
+    {
+      "name": "ateam_patch",
+      "description": "Surgically update ANY field in a skill or solution definition, redeploy, and optionally re-test — all in one step.\n\nSUPPORTED OPERATIONS:\n1. Scalar (dot notation): { \"problem.statement\": \"new value\", \"role.persona\": \"You are...\" }\n2. Deep nested: { \"intents.thresholds.accept\": 0.9, \"policy.escalation.enabled\": true }\n3. Array push: { \"tools_push\": [{ name: \"new_tool\", description: \"...\" }] }\n4. Array delete: { \"tools_delete\": [\"tool_name\"] }\n5. Array update: { \"tools_update\": [{ name: \"existing_tool\", description: \"updated\" }] }\n6. Replace whole section: { \"role\": { persona: \"...\", goals: [...] } }\n\nEXAMPLES:\n- Change persona (full replace): updates: { \"role.persona\": \"You are a friendly assistant\" }\n- Append to persona (don't replace): updates: { \"persona_append\": \"\\n\\nALWAYS respond in 2 sentences.\" }\n- Add a guardrail: updates: { \"policy.guardrails.never_push\": [\"Never share passwords\"] }\n- Update problem: updates: { \"problem.statement\": \"...\", \"problem.goals\": [\"goal1\"] }\n- Add a tool: updates: { \"tools_push\": [{ name: \"conn.tool\", description: \"...\", inputs: [...], output: {...} }] }\n- Change intent: updates: { \"intents.supported_update\": [{ id: \"i1\", description: \"new desc\" }] }\n- Force redeploy: updates: { \"_force_redeploy\": true }\n- CREATE a new skill: target='skill', skill_id='my-new-skill', updates: { \"problem.statement\": \"...\", \"role.persona\": \"...\" }\n  If the skill doesn't exist yet, a default scaffold is created and the updates are applied on top. The skill is automatically added to the solution topology.\n\nUse target='skill' + skill_id for skill fields. Use target='solution' for solution-level fields (linked_skills, platform_connectors, ui_plugins).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "solution",
+              "skill"
+            ],
+            "description": "What to update: 'solution' for solution definition, 'skill' for skill definition fields (problem, role, intents, tools, policy, engine, scenarios, etc.)"
+          },
+          "skill_id": {
+            "type": "string",
+            "description": "Required when target is 'skill'. The skill ID to patch."
+          },
+          "updates": {
+            "type": "object",
+            "description": "The update payload. Use dot notation for nested scalars (e.g. 'problem.statement': 'new value'). For arrays, use _push/_delete/_update suffixes (e.g. 'tools_push', 'tools_delete'). You can update ANY field in the skill definition: problem, role, intents, tools, policy, engine, scenarios, glossary, etc."
+          },
+          "test_message": {
+            "type": "string",
+            "description": "Optional: re-test the skill after patching. Requires skill_id."
+          }
+        },
+        "required": [
+          "solution_id",
+          "target",
+          "updates"
+        ]
+      }
+    },
+    {
+      "name": "ateam_get_solution",
+      "description": "Read solution state — definition, skills, health, status, or export. Use this to inspect deployed solutions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "definition",
+              "skills",
+              "health",
+              "status",
+              "export",
+              "validate",
+              "connectors_health"
+            ],
+            "description": "What to read: 'definition' = full solution def, 'skills' = list skills, 'health' = live health check, 'status' = deploy status, 'export' = exportable bundle, 'validate' = re-validate from stored state, 'connectors_health' = connector status"
+          },
+          "skill_id": {
+            "type": "string",
+            "description": "Optional: read a specific skill by ID (original or internal)"
+          }
+        },
+        "required": [
+          "solution_id",
+          "view"
+        ]
+      }
+    },
+    {
+      "name": "ateam_list_solutions",
+      "description": "List all solutions deployed in the Skill Builder.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "ateam_delete_solution",
+      "description": "Delete a deployed solution and all its skills from A-Team. Use with caution — this removes the solution from both the Skill Builder and A-Team Core. Useful for cleaning up test solutions or starting fresh.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID to delete"
+          }
+        },
+        "required": [
+          "solution_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_delete_skill",
+      "description": "Delete a single skill from a deployed solution. Removes the skill from A-Team Core (kills the running MCP process, unregisters from skill registry, deletes from Mongo), removes the skill from solution.skills[] and solution.linked_skills, and deletes the skill's files from Builder FS. Use this to drop a skill without tearing down the whole solution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID (e.g. 'personal-adas')"
+          },
+          "skill_id": {
+            "type": "string",
+            "description": "The skill ID to remove (e.g. 'linkedin-agent')"
+          }
+        },
+        "required": [
+          "solution_id",
+          "skill_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_delete_connector",
+      "description": "Remove a connector from a deployed solution. Stops and deletes it from A-Team Core, removes references from the solution definition (grants, platform_connectors) and skill definitions (connectors array), and cleans up mcp-store files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID (e.g. 'smart-home-assistant')"
+          },
+          "connector_id": {
+            "type": "string",
+            "description": "The connector ID to remove (e.g. 'device-mock-mcp')"
+          }
+        },
+        "required": [
+          "solution_id",
+          "connector_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_show_skill_minimal",
+      "description": "Show the minimal authoring view of a skill — persona + connectors + handoff_when + style + policy guardrails only. ~10× smaller than ateam_get_solution(view:'skills') for the same skill. Use this when you only need the irreducible author content (Phase 9 of the strip).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "skill_id": {
+            "type": "string",
+            "description": "The skill ID"
+          }
+        },
+        "required": [
+          "solution_id",
+          "skill_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_show_solution_minimal",
+      "description": "Show the minimal authoring view of a solution — name + description + style + routing_mode + identity_mode + skill ids + connector ids only. Skips deployed metadata, handoffs (auto-generated), grants, ui_plugins, validation results. Use this for fast inspection without the verbose fields (Phase 9 of the strip).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          }
+        },
+        "required": [
+          "solution_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_create_connector",
+      "description": "Scaffold a new MCP connector with server.js + package.json + README. Eliminates ~50% of identical boilerplate (MCP server setup, tool registration, stdio transport). You then fill in the tool implementations. Set ui_capable=true to include ui.listPlugins / ui.getPlugin stubs (plugin source files added separately via ateam_create_plugin). After scaffolding, the files are uploaded to Core via the same path as ateam_upload_connector.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "connector_id": {
+            "type": "string",
+            "description": "Connector ID (lowercase-with-dashes, no spaces). Becomes the directory name."
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name for the connector (e.g. 'Hue Lights'). Defaults to connector_id."
+          },
+          "ui_capable": {
+            "type": "boolean",
+            "description": "If true, include ui.listPlugins/ui.getPlugin handler stubs. Default: false."
+          }
+        },
+        "required": [
+          "solution_id",
+          "connector_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_create_plugin",
+      "description": "Scaffold a UI plugin (iframe HTML, React Native TSX, or both) inside an existing connector. Eliminates ~50% of identical plugin boilerplate (imports, theme/bridge hooks, postMessage protocol, default export shape). You then fill in the component body. Use kind='iframe' for web-only, 'rn' for mobile-only, 'adaptive' for both. Auto-discovery (Phase 5 of the strip) picks up the new plugin at next deploy without a manifest declaration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "connector_id": {
+            "type": "string",
+            "description": "Existing connector to add the plugin into (e.g. 'personal-assistant-ui-mcp')"
+          },
+          "plugin_name": {
+            "type": "string",
+            "description": "Plugin name (lowercase-with-dashes). E.g. 'memories-panel'. Becomes the dir name."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "iframe",
+              "rn",
+              "adaptive"
+            ],
+            "description": "Render mode. 'adaptive' (default) produces both iframe + RN scaffolds."
+          }
+        },
+        "required": [
+          "solution_id",
+          "connector_id",
+          "plugin_name"
+        ]
+      }
+    },
+    {
+      "name": "ateam_upload_connector",
+      "description": "Upload connector code to Core and restart — WITHOUT redeploying skills. Use this to update connector source code (server.js, UI assets, plugins) quickly. Set github=true to pull files from the solution's GitHub repo, or pass files directly. Much faster than ateam_build_and_run for connector-only changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "connector_id": {
+            "type": "string",
+            "description": "The connector ID to upload (e.g. 'personal-assistant-ui-mcp')"
+          },
+          "github": {
+            "type": "boolean",
+            "description": "If true, pull connector files from GitHub repo. Default: false."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Relative file path (e.g. 'server.js', 'ui-dist/panel/index.html')"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "File content"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            },
+            "description": "Files to upload. Alternative to github=true."
+          }
+        },
+        "required": [
+          "solution_id",
+          "connector_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_test_status",
+      "description": "Poll the progress of an async skill test. Returns iteration count, tool call steps, status (running/completed/failed), and result when done. (Advanced — use ateam_test_skill with wait=true for synchronous testing.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "skill_id": {
+            "type": "string",
+            "description": "The skill ID"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "The job ID returned by ateam_test_skill"
+          }
+        },
+        "required": [
+          "solution_id",
+          "skill_id",
+          "job_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_test_abort",
+      "description": "Abort a running skill test. Stops the job execution at the next iteration boundary. (Advanced.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "skill_id": {
+            "type": "string",
+            "description": "The skill ID"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "The job ID to abort"
+          }
+        },
+        "required": [
+          "solution_id",
+          "skill_id",
+          "job_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_test_connector",
+      "description": "Call a tool on a running connector and get the result. Use this to test individual connector tools (e.g., triggers.list, entities.list, google.command) without deploying to a client. The connector must be connected and running.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "connector_id": {
+            "type": "string",
+            "description": "The connector ID (e.g., 'home-assistant-mcp', 'google-home-mcp')"
+          },
+          "tool": {
+            "type": "string",
+            "description": "The tool name to call (e.g., 'triggers.list', 'entities.list', 'google.devices')"
+          },
+          "args": {
+            "type": "object",
+            "description": "Optional: arguments to pass to the tool"
+          }
+        },
+        "required": [
+          "solution_id",
+          "connector_id",
+          "tool"
+        ]
+      }
+    },
+    {
+      "name": "ateam_get_connector_source",
+      "description": "Read the source code files of a deployed MCP connector. Returns all files (server.js, package.json, etc.) stored in the mcp_store for this connector. Use this BEFORE patching or rewriting a connector — always read the current code first so you can make surgical fixes instead of blind full rewrites.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID (e.g. 'smart-home-assistant')"
+          },
+          "connector_id": {
+            "type": "string",
+            "description": "The connector ID to read (e.g. 'home-assistant-mcp')"
+          }
+        },
+        "required": [
+          "solution_id",
+          "connector_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_push",
+      "description": "Push the current deployed solution to GitHub. Auto-creates the repo on first use. Commits the full bundle (solution + skills + connector source) atomically. Use after ateam_build_and_run to version your solution, or anytime you want to snapshot the current state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID (e.g. 'smart-home-assistant')"
+          },
+          "message": {
+            "type": "string",
+            "description": "Optional commit message (default: 'Deploy <solution_id>')"
+          }
+        },
+        "required": [
+          "solution_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_pull",
+      "description": "Deploy a solution FROM its GitHub repo. Reads .ateam/export.json + connector source from the repo and feeds it into the deploy pipeline. Use this to restore a previous version or deploy from GitHub as the source of truth.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID to pull and deploy from GitHub"
+          }
+        },
+        "required": [
+          "solution_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_status",
+      "description": "Check if a solution has a GitHub repo, its URL, and the latest commit. Use this to verify GitHub integration is working for a solution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          }
+        },
+        "required": [
+          "solution_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_read",
+      "description": "Read any file from a solution's GitHub repo. Returns the file content. Use this to read connector source code, skill definitions, or any versioned file. Great for reviewing previous versions or understanding what's in the repo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "path": {
+            "type": "string",
+            "description": "File path in the repo (e.g. 'connectors/home-assistant-mcp/server.js', 'solution.json', 'skills/order-support/skill.json')"
+          }
+        },
+        "required": [
+          "solution_id",
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_patch",
+      "description": "Edit a file in the solution's GitHub repo and commit. Two modes:\n1. FULL FILE: provide `content` — replaces entire file (good for new files or small files)\n2. SEARCH/REPLACE: provide `search` + `replace` — surgical edit without sending full file (preferred for large files like server.js)\nAlways use search/replace for large files (>5KB). Always read the file first with ateam_github_read to get the exact text to search for.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "path": {
+            "type": "string",
+            "description": "File path to create/update (e.g. 'connectors/home-assistant-mcp/server.js')"
+          },
+          "content": {
+            "type": "string",
+            "description": "The full file content to write (mode 1 — full file replacement)"
+          },
+          "search": {
+            "type": "string",
+            "description": "Exact text to find in the file (mode 2 — search/replace). Must match exactly including whitespace."
+          },
+          "replace": {
+            "type": "string",
+            "description": "Text to replace the search string with (mode 2 — required with search)"
+          },
+          "message": {
+            "type": "string",
+            "description": "Optional commit message (default: 'Update <path>')"
+          }
+        },
+        "required": [
+          "solution_id",
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_write",
+      "description": "Write a file to the solution's GitHub repo. Use this to create new connector files or replace existing ones — one file per call. This is the PRIMARY way to write connector code after first deploy. Write each file individually (server.js, package.json, UI assets), then call ateam_build_and_run() to deploy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "path": {
+            "type": "string",
+            "description": "File path to write (e.g. 'connectors/my-mcp/server.js', 'connectors/my-mcp/package.json')"
+          },
+          "content": {
+            "type": "string",
+            "description": "The full file content"
+          },
+          "message": {
+            "type": "string",
+            "description": "Optional commit message (default: 'Write <path>')"
+          }
+        },
+        "required": [
+          "solution_id",
+          "path",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_log",
+      "description": "View commit history for a solution's GitHub repo. Shows recent commits with messages, SHAs, timestamps, and links. Use this to see what changes have been made and when.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max commits to return (default: 10)"
+          }
+        },
+        "required": [
+          "solution_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_promote",
+      "description": "Create a checkpoint (safe point) on the current main branch. Tags the current state with safe-YYYY-MM-DD-NNN so you can rollback to it later. Use this before risky changes or when the solution is in a known-good state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional: human-readable label for this checkpoint (e.g., 'before refactor', 'v2 stable')"
+          }
+        },
+        "required": [
+          "solution_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_rollback",
+      "description": "Rollback main branch to a previous checkpoint (safe-* tag). Resets main to the specified checkpoint commit. ⚠️ DESTRUCTIVE — use with caution. Use ateam_github_list_versions to find available checkpoints first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          },
+          "tag": {
+            "type": "string",
+            "description": "Required: checkpoint tag to rollback to (e.g., 'safe-2026-03-11-001')"
+          }
+        },
+        "required": [
+          "solution_id",
+          "tag"
+        ]
+      }
+    },
+    {
+      "name": "ateam_github_list_versions",
+      "description": "List all available checkpoints (safe-* tags) for a solution. Shows tag name, date, counter, and commit SHA. Use before rollback to see available safe points.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID"
+          }
+        },
+        "required": [
+          "solution_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_redeploy",
+      "description": "Re-deploy skills WITHOUT changing any definitions. ⚠️ HEAVY OPERATION: regenerates MCP servers (Python code) for every skill, pushes each to A-Team Core, restarts connectors, and verifies tool discovery. Takes 30-120s depending on skill count. Use after connector restarts, Core hiccups, or stale state. For incremental changes, prefer ateam_patch (which updates + redeploys in one step).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solution_id": {
+            "type": "string",
+            "description": "The solution ID to redeploy"
+          },
+          "skill_id": {
+            "type": "string",
+            "description": "Optional: redeploy a single skill only. Omit to redeploy ALL skills in the solution."
+          }
+        },
+        "required": [
+          "solution_id"
+        ]
+      }
+    },
+    {
+      "name": "ateam_status_all",
+      "description": "Show GitHub sync status for ALL tenants and solutions in one call. Requires master key authentication. Returns a summary table of every tenant's solutions with their GitHub sync state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "ateam_sync_all",
+      "description": "Sync ALL tenants: push Builder FS → GitHub, then pull GitHub → Core MongoDB. Requires master key authentication. Returns a summary table with results for each tenant/solution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "push_only": {
+            "type": "boolean",
+            "description": "Only push to GitHub (skip pull to Core). Default: false (full sync)."
+          },
+          "pull_only": {
+            "type": "boolean",
+            "description": "Only pull from GitHub to Core (skip push). Default: false (full sync)."
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "package": "@sveltejs/mcp",
+  "tools": [
+    {
+      "name": "get-documentation",
+      "description": "Retrieves full documentation content for Svelte 5 or SvelteKit sections. Supports flexible search by title (e.g., \"$state\", \"routing\") or file path (e.g., \"cli/overview\"). Can accept a single section name or an array of sections. Before running this, make sure to analyze the users query, as well as the output from list-sections (which should be called first). Then ask for ALL relevant sections the user might require. For example, if the user asks to build anything interactive, you will need to fetch all relevant runes, and so on. Before calling this tool, try to implement Svelte components using your own knowledge and the `svelte-autofixer` tool, since calling this tool is token intensive.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "The section name(s) to retrieve. Can search by title (e.g., \"$state\", \"load functions\") or file path (e.g., \"cli/overview\"). Supports single string and array of strings"
+          }
+        },
+        "required": [
+          "section"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list-sections",
+      "description": "Lists all available Svelte 5 and SvelteKit documentation sections in a structured format. Each section includes a \"use_cases\" field that describes WHEN this documentation would be useful. You should carefully analyze the use_cases field to determine which sections are relevant for the user's query. The use_cases contain comma-separated keywords describing project types (e.g., \"e-commerce\", \"blog\"), features (e.g., \"authentication\", \"forms\"), components (e.g., \"slider\", \"modal\"), development stages (e.g., \"deployment\", \"testing\"), or \"always\" for fundamental concepts. Match these use_cases against the user's intent - for example, if building an e-commerce site, fetch sections with use_cases containing \"e-commerce\", \"product listings\", \"shopping cart\", etc. If building a slider, look for \"slider\", \"carousel\", \"animation\", etc. Returns sections as \"* title: [section_title], use_cases: [use_cases], path: [file_path]\". Always run list-sections FIRST for any Svelte query, then analyze ALL use_cases to identify relevant sections, and finally use get_documentation to fetch ALL relevant sections at once.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "playground-link",
+      "description": "Generates a Playground link given a Svelte code snippet. Once you have the final version of the code you want to send to the user, ALWAYS ask the user if it wants a playground link to allow it to quickly check the code in the playground before calling this tool. NEVER use this tool if you have written the component to a file in the user project. The playground accept multiple files so if are importing from other files just include them all at the root level.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the Playground, it should reflect the user task"
+          },
+          "tailwind": {
+            "type": "boolean",
+            "description": "If the code requires Tailwind CSS to work...only send true if it it's using tailwind classes in the code"
+          },
+          "files": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "An object where all the keys are the filenames (with extensions) and the values are the file content. For example: { 'Component.svelte': '<script>...</script>', 'utils.js': 'export function ...' }. The playground accept multiple files so if are importing from other files just include them all at the root level."
+          }
+        },
+        "required": [
+          "name",
+          "tailwind",
+          "files"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "svelte-autofixer",
+      "description": "Given a svelte component or module returns a list of suggestions to fix any issues it has. This tool MUST be used whenever the user is asking to write svelte code before sending the code back to the user",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code to be processed by the autofixer. It can also be a path to a file containing the code. If the file doesn't exists the string will be treated as the code"
+          },
+          "desired_svelte_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "The desired svelte version...if possible read this from the package.json of the user project, otherwise use some hint from the wording (if the user asks for runes it wants version 5). Default to 5 in case of doubt."
+          },
+          "async": {
+            "type": "boolean",
+            "description": "If true the code is an async component/module and might use await in the markup or top-level awaits in the script tag. If possible check the svelte.config.js/svelte.config.ts to check if the option is enabled otherwise asks the user if they prefer using it or not. You can only use this option if the version is 5."
+          },
+          "filename": {
+            "type": "string",
+            "description": "The filename of the component if available, it MUST be only the Component name with .svelte or .svelte.ts extension and not the entire path."
+          }
+        },
+        "required": [
+          "code",
+          "desired_svelte_version"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

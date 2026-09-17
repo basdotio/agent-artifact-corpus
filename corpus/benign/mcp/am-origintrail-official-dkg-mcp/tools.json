@@ -1,0 +1,620 @@
+{
+  "package": "@origintrail-official/dkg-mcp",
+  "tools": [
+    {
+      "name": "dkg_list_context_graphs",
+      "description": "List all context graphs the node knows about (called 'projects' in the DKG node UI). Returns id, display name, role (curator / participant), and layer. The first call most agents make when joining a workspace.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "dkg_sub_graph_list",
+      "description": "List the sub-graphs inside a DKG context graph (e.g. code, github, decisions, tasks, meta, chat) with entity counts. Use to figure out what kind of knowledge the context graph exposes before querying.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "contextGraphId; defaults to .dkg/config.yaml"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_query",
+      "description": "Execute an arbitrary SPARQL SELECT / ASK / CONSTRUCT against a DKG context graph. Known prefixes are auto-prepended so you can just write `SELECT ?d WHERE { ?d a decisions:Decision }`. Scope with `view` — \"working-memory\" (default, private), \"shared-working-memory\" (team), or \"verified-memory\" (on-chain). Set `includeSharedMemory: true` alongside `view: \"working-memory\"` to query WM ∪ SWM in one call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sparql": {
+            "type": "string",
+            "description": "SPARQL query body. Prefixes are auto-injected."
+          },
+          "projectId": {
+            "type": "string",
+            "description": "contextGraphId; defaults to .dkg/config.yaml"
+          },
+          "subGraphName": {
+            "type": "string",
+            "description": "Limit the query to a single sub-graph"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "working-memory",
+              "shared-working-memory",
+              "verified-memory"
+            ],
+            "description": "Memory tier: working-memory (default, private), shared-working-memory (team), verified-memory (on-chain)."
+          },
+          "includeSharedMemory": {
+            "type": "boolean",
+            "description": "When set with view: \"working-memory\", include SWM in the result set (the legacy `layer: \"union\"` semantics)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Row cap when rendering to markdown; does NOT modify the query"
+          }
+        },
+        "required": [
+          "sparql"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_get_entity",
+      "description": "Fetch all triples where the given URI is the subject, plus a 1-hop neighbourhood (inbound edges). Equivalent to the entity detail page in the Node UI. Use when you want to understand a specific decision, task, file, or PR end-to-end.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "Entity URI (e.g. urn:dkg:decision:shacl-on-vm-promotion)"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "contextGraphId; defaults to .dkg/config.yaml"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "working-memory",
+              "shared-working-memory",
+              "verified-memory"
+            ],
+            "description": "Memory tier (explicit selection is STRICT — pick one tier only): \"working-memory\" (private WM only — pair with includeSharedMemory: true to add SWM), \"shared-working-memory\" (team SWM only), \"verified-memory\" (on-chain VM only). Omit `view` to get the WM ∪ SWM default (the V9-era `layer: \"union\"` shape)."
+          },
+          "includeSharedMemory": {
+            "type": "boolean",
+            "description": "When set with view: \"working-memory\", include SWM in the result set (the WM∪SWM combined view)."
+          }
+        },
+        "required": [
+          "uri"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_list_activity",
+      "description": "Recent activity across all sub-graphs, newest first. Mirrors the \"Recent activity\" feed on the project overview page: decisions, tasks, PRs, chat turns. Each row shows what changed, when, and who was attributed. Use to catch up at the start of a session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "subGraph": {
+            "type": "string",
+            "description": "Narrow to one sub-graph (e.g. \"decisions\", \"chat\")"
+          },
+          "agentUri": {
+            "type": "string",
+            "description": "Only items attributed to this agent"
+          },
+          "sinceIso": {
+            "type": "string",
+            "description": "Earliest timestamp, ISO-8601"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "working-memory",
+              "shared-working-memory",
+              "verified-memory"
+            ],
+            "description": "Memory tier (explicit selection is STRICT — pick one tier only): \"working-memory\" (private WM only — pair with includeSharedMemory: true to add SWM), \"shared-working-memory\" (team SWM only), \"verified-memory\" (on-chain VM only). Omit `view` to get the WM ∪ SWM default (the V9-era `layer: \"union\"` shape)."
+          },
+          "includeSharedMemory": {
+            "type": "boolean",
+            "description": "When set with view: \"working-memory\", include SWM in the result set (the WM∪SWM combined view)."
+          },
+          "limit": {
+            "type": "number",
+            "default": 25
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_get_agent",
+      "description": "Look up one agent by URI (or a display name) and return its profile card: framework, operator, wallet address, joined-at, reputation, plus everything that agent has authored in the project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "agentUri": {
+            "type": "string",
+            "description": "Agent URI (e.g. urn:dkg:agent:claude-code-branarakic)"
+          },
+          "nameOrHandle": {
+            "type": "string",
+            "description": "Name or handle substring, if you don't know the URI"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_assertion_create",
+      "description": "Step 1 of the canonical write flow: create an empty Working Memory assertion graph. Idempotent — duplicate names land as `alreadyExists: true` rather than throwing. Slug must match /^[a-z0-9-]+$/ for new names; pre-existing assertions accept any name.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "Assertion name slug (e.g. \"session-2026-04-30\")"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "contextGraphId; defaults to .dkg/config.yaml"
+          },
+          "subGraphName": {
+            "type": "string",
+            "description": "Optional sub-graph to scope the assertion to"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_assertion_write",
+      "description": "Step 2 of the canonical write flow: append RDF quads into an existing Working Memory assertion. Writes are additive (set-merge); callers that want replace semantics should call `dkg_assertion_discard` first or mint a unique assertion name per snapshot.\n\nIMPORTANT — quad shape: each quad has subject/predicate/object/graph. Subjects and predicates are ALWAYS URIs (no spaces). The `object` field accepts EITHER a URI (no surrounding quotes) OR a literal string WRAPPED IN DOUBLE QUOTES. Most common mistake: passing free-text literals without quotes — those get parsed as URIs and fail on the embedded spaces.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Existing assertion name (e.g. \"my-notes-2026-05-07\")"
+          },
+          "quads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subject": {
+                  "type": "string",
+                  "description": "Subject URI. Plain string like \"urn:my-thing\" or \"did:dkg:agent/abc\". Angle brackets are tolerated and stripped (`<urn:foo>` → `urn:foo`). MUST NOT contain spaces — URIs are space-free by spec."
+                },
+                "predicate": {
+                  "type": "string",
+                  "description": "Predicate URI. Same rules as subject. Common predicates: \"rdfs:label\", \"rdf:type\", \"schema:name\", or any custom URI."
+                },
+                "object": {
+                  "type": "string",
+                  "description": "Object value. EITHER a URI (same rules as subject — plain or angle-bracketed, no spaces) OR a literal string WRAPPED IN DOUBLE QUOTES.\n  URI example:     \"urn:other-thing\"  or  \"<urn:other-thing>\"\n  Literal example: \"\\\"Hello world with spaces\\\"\"  ← double quotes mandatory for literals\n  Typed literal:   \"\\\"42\\\"^^<http://www.w3.org/2001/XMLSchema#integer>\"\n  Lang-tagged:     \"\\\"hello\\\"@en\"\nA literal without surrounding quotes will be parsed as a URI and FAIL on spaces."
+                },
+                "graph": {
+                  "type": "string",
+                  "description": "Optional named graph URI (same rules as subject)"
+                }
+              },
+              "required": [
+                "subject",
+                "predicate",
+                "object"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "description": "Non-empty array of RDF quads to append"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "subGraphName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "quads"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_assertion_promote",
+      "description": "Step 3 of the canonical write flow: promote a Working Memory assertion (or specific root entities within it) from private WM to Shared Working Memory so teammates see it. Omit `entities` to promote every root entity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Existing assertion name"
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Root entity URIs to promote. Omit to promote all roots."
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "subGraphName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_assertion_discard",
+      "description": "Discard a Working Memory assertion without promoting it. Idempotent — no-op on a missing assertion. Use before re-writing an assertion whose name you want to keep stable but whose contents you want to *replace* rather than *merge*.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Existing assertion name"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "subGraphName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_assertion_query",
+      "description": "Return every quad in a Working Memory assertion. Not a SPARQL endpoint — for ad-hoc filtering use `dkg_query` with `view: \"working-memory\"`. The canonical introspection step for the `assertion_create + assertion_write + assertion_promote` round-trip.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Existing assertion name"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "subGraphName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_assertion_import_file",
+      "description": "Import a local document (markdown, PDF, DOCX, etc.) into a Working Memory assertion: the daemon runs its extraction pipeline and writes the resulting triples. text/markdown is native; other types need a registered converter (extraction returns `status: \"skipped\"` if none). Useful for seeding a context graph from existing documents in a single step.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Target assertion name"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Absolute local path to the file to import"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string",
+            "description": "MIME override (e.g. \"text/markdown\", \"application/pdf\"). Inferred from extension when omitted."
+          },
+          "ontologyRef": {
+            "type": "string",
+            "description": "Optional ontology URI to guide extraction"
+          },
+          "subGraphName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "filePath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_assertion_history",
+      "description": "Fetch an assertion's lifecycle descriptor: author, extraction status, promotion state, timestamps. Returns a 404 (surfaced as a tool error) if no record exists for the (contextGraphId, name, agentAddress) tuple. Useful for debug/audit; not required for the canonical write flow.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Assertion name"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "agentAddress": {
+            "type": "string",
+            "description": "Optional author — defaults to this node's agent address"
+          },
+          "subGraphName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_memory_search",
+      "description": "Search agent-backed memory across WM/SWM/VM layers in the agent-context graph (and an optional project graph) with trust-weighted ranking. Higher-trust layers (VM > SWM > WM) collapse lower-trust hits for the same entity URI. Use this for \"ask my memory anything\" recall — for ad-hoc SPARQL prefer `dkg_query`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 2,
+            "description": "Free-text query (case-insensitive, ≥2 chars)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "Maximum hits to return after ranking + dedup"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Optional project context-graph id. When supplied, fan-out adds the project's WM/SWM/VM layers to the agent-context layers."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_context_graph_create",
+      "description": "Create a context graph (called 'projects' in the DKG node UI). Idempotent — re-creating an existing CG with the same id is a no-op and surfaces `already exists` in the response. Returns the CG's id, URI, and whether it was newly created or already existed. The `id` slug is auto-derived from `name` when omitted (e.g. \"My Research\" → \"my-research\"); slugs must match /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable name (e.g. \"My Research Context Graph\")"
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description of the CG's purpose"
+          },
+          "id": {
+            "type": "string",
+            "description": "Optional explicit slug. Auto-derived from `name` when omitted. Must match /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_subscribe",
+      "description": "Subscribe to a context graph so its data syncs locally from peers. Call once before querying or publishing a remotely-authored CG. Defaults to also syncing Shared Working Memory; pass `includeSharedMemory: false` to skip SWM sync (saves bandwidth when you only need on-chain data).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contextGraphId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Context graph id (e.g. \"my-research\")"
+          },
+          "includeSharedMemory": {
+            "type": "boolean",
+            "default": true,
+            "description": "Also sync SWM. Default true."
+          }
+        },
+        "required": [
+          "contextGraphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_sub_graph_create",
+      "description": "Create a named sub-graph inside a context graph (an optional partition for scoped assertions, e.g. \"code\", \"tasks\", \"meta\"). Idempotent — a pre-existing sub-graph with the same name is silently reused, no error. Names must be lowercase letters, digits, and hyphens, and must not start with `_`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contextGraphId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Parent context graph id"
+          },
+          "subGraphName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Sub-graph name (lowercase letters, digits, hyphens; not starting with \"_\")"
+          }
+        },
+        "required": [
+          "contextGraphId",
+          "subGraphName"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_status",
+      "description": "Show DKG node status: peer ID, connected peers, multiaddrs, and wallet addresses. Call this to verify the daemon is running and to diagnose connectivity issues.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "dkg_wallet_balances",
+      "description": "Check TRAC and ETH token balances for the node's operational wallets. Use before publishing to verify sufficient funds. Returns per-wallet balances, chain id, and RPC URL.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "dkg_publish",
+      "description": "\"I have fresh quads, write+publish now.\" Two-call helper: writes the supplied quads to Shared Working Memory, then publishes the entire SWM in the CG to Verified Memory (on-chain) and clears SWM. For the canonical step-wise flow (write → promote → publish) use `dkg_assertion_create / write / promote` followed by `dkg_shared_memory_publish` — that path keeps WM as a draft staging area before SWM. Use `dkg_publish` only when you have fresh quads to anchor immediately.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contextGraphId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Target context graph id"
+          },
+          "quads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subject": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Subject URI"
+                },
+                "predicate": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Predicate URI"
+                },
+                "object": {
+                  "type": "string",
+                  "description": "Object — URI or literal. Auto-detected: values starting with http://, https://, urn:, or did: pass as URIs; anything else becomes a literal."
+                },
+                "graph": {
+                  "type": "string",
+                  "description": "Optional named graph URI"
+                }
+              },
+              "required": [
+                "subject",
+                "predicate",
+                "object"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "description": "Non-empty array of quads to publish. Object values are auto-typed (URI vs literal)."
+          }
+        },
+        "required": [
+          "contextGraphId",
+          "quads"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dkg_shared_memory_publish",
+      "description": "Canonical step-4 finalizer for \"publish existing SWM\" (one HTTP call). Publishes all Shared Working Memory in a context graph to Verified Memory (on-chain) and clears SWM. Use after `dkg_assertion_promote` to finalize promoted data. Pass `rootEntities` to publish only specific roots (subset publishes default to NOT clearing SWM, so other unpublished roots are not dropped). Set `registerIfNeeded: true` to upgrade a local-only CG to on-chain registration before publishing — note this MAY spend gas/TRAC; opt-in only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contextGraphId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Target context graph id"
+          },
+          "rootEntities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional filter — publish only these root entity URIs. Omit to publish all SWM in the CG."
+          },
+          "subGraphName": {
+            "type": "string",
+            "description": "Optional sub-graph scope. Must match the sub-graph used during create/write/promote."
+          },
+          "registerIfNeeded": {
+            "type": "boolean",
+            "description": "When true, register the CG on-chain before publishing if needed. May spend gas/TRAC; opt-in only."
+          },
+          "accessPolicy": {
+            "type": "number",
+            "enum": [
+              0,
+              1
+            ],
+            "description": "Used only when `registerIfNeeded: true`. 0 = open, 1 = private."
+          }
+        },
+        "required": [
+          "contextGraphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

@@ -1,0 +1,2727 @@
+{
+  "package": "moflo",
+  "tools": [
+    {
+      "name": "agent_spawn",
+      "description": "Spawn a new agent with intelligent model selection",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentType": {
+            "type": "string",
+            "description": "Type of agent to spawn"
+          },
+          "agentId": {
+            "type": "string",
+            "description": "Optional custom agent ID"
+          },
+          "config": {
+            "type": "object",
+            "description": "Agent configuration"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Agent domain"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "haiku",
+              "sonnet",
+              "opus",
+              "inherit"
+            ],
+            "description": "Claude model to use (haiku=fast/cheap, sonnet=balanced, opus=most capable)"
+          },
+          "task": {
+            "type": "string",
+            "description": "Task description for intelligent model routing"
+          }
+        },
+        "required": [
+          "agentType"
+        ]
+      }
+    },
+    {
+      "name": "agent_terminate",
+      "description": "Terminate an agent on the coordinator (force / grace-period supported; reassigns active tasks)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "ID of agent to terminate"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Force immediate termination"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason for termination (audit trail)"
+          },
+          "gracePeriodMs": {
+            "type": "number",
+            "description": "Grace period before forcing (ms)"
+          }
+        },
+        "required": [
+          "agentId"
+        ]
+      }
+    },
+    {
+      "name": "agent_status",
+      "description": "Get agent status from the coordinator (workload, health, last heartbeat, optional metrics)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "ID of agent"
+          },
+          "includeMetrics": {
+            "type": "boolean",
+            "description": "Include AgentMetrics in response"
+          },
+          "includeHistory": {
+            "type": "boolean",
+            "description": "Include task counters from metrics"
+          }
+        },
+        "required": [
+          "agentId"
+        ]
+      }
+    },
+    {
+      "name": "agent_list",
+      "description": "List coordinator-tracked agents (with status / type / domain filters and pagination)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Filter by status (idle/busy/...)"
+          },
+          "agentType": {
+            "type": "string",
+            "description": "Filter by agent type"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Filter by domain"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results to return"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Skip first N results"
+          }
+        }
+      }
+    },
+    {
+      "name": "agent_pool",
+      "description": "Manage agent pool",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "status",
+              "scale",
+              "drain",
+              "fill"
+            ],
+            "description": "Pool action"
+          },
+          "targetSize": {
+            "type": "number",
+            "description": "Target pool size (for scale action)"
+          },
+          "agentType": {
+            "type": "string",
+            "description": "Agent type filter"
+          },
+          "min": {
+            "type": "number",
+            "description": "Reported minimum pool size (status echo)"
+          },
+          "max": {
+            "type": "number",
+            "description": "Reported maximum pool size (status echo)"
+          },
+          "autoScale": {
+            "type": "boolean",
+            "description": "Reported auto-scale flag (status echo)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "agent_health",
+      "description": "Check agent health",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "Specific agent ID (optional)"
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Health threshold (0-1)"
+          }
+        }
+      }
+    },
+    {
+      "name": "swarm_init",
+      "description": "Initialize the swarm coordinator (idempotent — returns the existing swarmId on re-init)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topology": {
+            "type": "string",
+            "description": "Swarm topology (hierarchical | mesh | adaptive | collective | hierarchical-mesh)"
+          },
+          "maxAgents": {
+            "type": "number",
+            "description": "Maximum number of agents"
+          },
+          "config": {
+            "type": "object",
+            "description": "Swarm configuration"
+          }
+        }
+      }
+    },
+    {
+      "name": "swarm_status",
+      "description": "Get live swarm status from the coordinator (agent + task counts, topology, metrics)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "swarmId": {
+            "type": "string",
+            "description": "Swarm ID"
+          },
+          "includeAgents": {
+            "type": "boolean",
+            "description": "Include live agent list"
+          },
+          "includeMetrics": {
+            "type": "boolean",
+            "description": "Include coordinator metrics"
+          },
+          "includeTopology": {
+            "type": "boolean",
+            "description": "Include topology state"
+          }
+        }
+      }
+    },
+    {
+      "name": "swarm_health",
+      "description": "Check swarm health status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "swarmId": {
+            "type": "string",
+            "description": "Swarm ID to check"
+          }
+        }
+      }
+    },
+    {
+      "name": "swarm_scale",
+      "description": "Scale swarm agents up or down with gradual / immediate / adaptive strategy",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetAgents": {
+            "type": "number",
+            "description": "Target number of non-terminated agents (1-1000)",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "scaleStrategy": {
+            "type": "string",
+            "enum": [
+              "gradual",
+              "immediate",
+              "adaptive"
+            ],
+            "description": "Scaling strategy (default: gradual)"
+          },
+          "agentTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Agent types to spawn (round-robin) and to restrict scale-down candidates to. Defaults to [\"worker\"]."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason for scaling (audit trail)"
+          }
+        },
+        "required": [
+          "targetAgents"
+        ]
+      }
+    },
+    {
+      "name": "memory_store",
+      "description": "Store a value in memory with vector embedding for semantic search (node:sqlite + HNSW backend). Upserts by default — pass upsert:false to fail on duplicate keys. Optional `metadata` lets chunk-row producers set the navigation fields (parentDoc, prevChunk, nextChunk, siblings, …) that `memory_get_neighbors` reads.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Memory key (unique within namespace)"
+          },
+          "value": {
+            "description": "Value to store (string or object)"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Namespace for organization (default: \"default\")"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional tags for filtering"
+          },
+          "ttl": {
+            "type": "number",
+            "description": "Time-to-live in seconds (optional)"
+          },
+          "upsert": {
+            "type": "boolean",
+            "description": "If false, fail on duplicate keys instead of replacing (default: true)"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Optional per-row metadata persisted to the `metadata` TEXT column. For chunk entries, include `type: \"chunk\"` plus the navigation fields (parentDoc, parentPath, chunkIndex, totalChunks, prevChunk, nextChunk, siblings, hierarchicalParent, hierarchicalChildren, chunkTitle, headerLevel) so `memory_get_neighbors` can traverse. Capped at 64KB serialised."
+          }
+        },
+        "required": [
+          "key",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "memory_retrieve",
+      "description": "Retrieve the full value for a SPECIFIC key. For chunk entries, prefer `memory_get_neighbors` for traversal — bulk-retrieving search hits is a protocol violation. The returned `navigation` object lets you keep traversing. See `.claude/guidance/moflo-memory-protocol.md`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Memory key"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Namespace (default: \"default\")"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    },
+    {
+      "name": "memory_search",
+      "description": "Semantic vector search using HNSW index (150x-12,500x faster than keyword search). When a result has a non-null `navigation` crumb, you MUST traverse via `memory_get_neighbors` — bulk `memory_retrieve` per hit is a protocol violation. See `.claude/guidance/moflo-memory-protocol.md`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query (semantic similarity)"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Namespace to search (default: all namespaces)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum results (default: 8)"
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Minimum similarity threshold 0-1 (default: 0.5)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "memory_get_neighbors",
+      "description": "Traverse the chunk graph in one call: fetch the requested neighbors (prev/next/siblings/parent/children) of a chunk key. Returns success:false if the source is not a chunk.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Source chunk key (must be a chunk-* entry)"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Namespace (default: \"default\")"
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "prev",
+                "next",
+                "siblings",
+                "parent",
+                "children"
+              ]
+            },
+            "description": "Which neighbors to fetch. Default: ['prev','next']. parent/children = hierarchical (h2→h3) chunk neighbors; siblings = same-doc chunk peers."
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    },
+    {
+      "name": "memory_delete",
+      "description": "Delete a memory entry by key",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Memory key"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Namespace (default: \"default\")"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    },
+    {
+      "name": "memory_list",
+      "description": "List memory entries with optional filtering",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "description": "Filter by namespace"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum results (default: 50)"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Offset for pagination (default: 0)"
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_stats",
+      "description": "Get memory storage statistics including HNSW index status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "hooks_pre-edit",
+      "description": "Get context and agent suggestions before editing a file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Path to the file being edited"
+          },
+          "operation": {
+            "type": "string",
+            "description": "Type of operation (create, update, delete, refactor)"
+          },
+          "context": {
+            "type": "string",
+            "description": "Additional context"
+          }
+        },
+        "required": [
+          "filePath"
+        ]
+      }
+    },
+    {
+      "name": "hooks_post-edit",
+      "description": "Record editing outcome for learning",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Path to the edited file"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Whether the edit was successful"
+          },
+          "agent": {
+            "type": "string",
+            "description": "Agent that performed the edit"
+          }
+        },
+        "required": [
+          "filePath"
+        ]
+      }
+    },
+    {
+      "name": "hooks_pre-command",
+      "description": "Assess risk before executing a command",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Command to execute"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "hooks_post-command",
+      "description": "Record command execution outcome",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Executed command"
+          },
+          "exitCode": {
+            "type": "number",
+            "description": "Command exit code"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "hooks_route",
+      "description": "Route task to optimal agent using semantic similarity (native HNSW or pure JS)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Task description"
+          },
+          "context": {
+            "type": "string",
+            "description": "Additional context"
+          },
+          "useSemanticRouter": {
+            "type": "boolean",
+            "description": "Use semantic similarity routing (default: true)"
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    },
+    {
+      "name": "hooks_metrics",
+      "description": "View learning metrics dashboard",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "description": "Metrics period (1h, 24h, 7d, 30d)"
+          },
+          "includeV3": {
+            "type": "boolean",
+            "description": "Include V3 performance metrics"
+          }
+        }
+      }
+    },
+    {
+      "name": "hooks_list",
+      "description": "List all registered hooks",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "hooks_pre-task",
+      "description": "Record task start and get agent suggestions with intelligent model routing (ADR-026)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Task identifier"
+          },
+          "description": {
+            "type": "string",
+            "description": "Task description"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Optional file path for AST analysis"
+          }
+        },
+        "required": [
+          "taskId",
+          "description"
+        ]
+      }
+    },
+    {
+      "name": "hooks_post-task",
+      "description": "Record task completion for learning",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Task identifier"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Whether task was successful"
+          },
+          "agent": {
+            "type": "string",
+            "description": "Agent that completed the task"
+          },
+          "quality": {
+            "type": "number",
+            "description": "Quality score (0-1)"
+          },
+          "task": {
+            "type": "string",
+            "description": "Task description for routing pattern learning"
+          },
+          "storeDecisions": {
+            "type": "boolean",
+            "description": "Whether to persist routing decisions for future learning"
+          }
+        },
+        "required": [
+          "taskId"
+        ]
+      }
+    },
+    {
+      "name": "hooks_explain",
+      "description": "Explain routing decision with full transparency",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Task description"
+          },
+          "agent": {
+            "type": "string",
+            "description": "Specific agent to explain"
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "Verbose explanation"
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    },
+    {
+      "name": "hooks_pretrain",
+      "description": "Analyze repository to bootstrap intelligence (4-step pipeline)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Repository path"
+          },
+          "depth": {
+            "type": "string",
+            "description": "Analysis depth (shallow, medium, deep)"
+          },
+          "fileTypes": {
+            "type": "string",
+            "description": "Comma-separated file extensions to scan (default: ts,js,py,md)"
+          },
+          "skipCache": {
+            "type": "boolean",
+            "description": "Skip cached analysis"
+          }
+        }
+      }
+    },
+    {
+      "name": "hooks_build-agents",
+      "description": "Generate optimized agent configurations from pretrain data",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "outputDir": {
+            "type": "string",
+            "description": "Output directory for configs"
+          },
+          "focus": {
+            "type": "string",
+            "description": "Focus area (v3-implementation, security, performance, all)"
+          },
+          "format": {
+            "type": "string",
+            "description": "Config format (yaml, json)"
+          },
+          "persist": {
+            "type": "boolean",
+            "description": "Write configs to disk"
+          }
+        }
+      }
+    },
+    {
+      "name": "hooks_transfer",
+      "description": "Transfer learned patterns from another project",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourcePath": {
+            "type": "string",
+            "description": "Source project path"
+          },
+          "filter": {
+            "type": "string",
+            "description": "Filter patterns by type"
+          },
+          "minConfidence": {
+            "type": "number",
+            "description": "Minimum confidence threshold"
+          }
+        },
+        "required": [
+          "sourcePath"
+        ]
+      }
+    },
+    {
+      "name": "hooks_session-start",
+      "description": "Initialize a new session and auto-start daemon",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Optional session ID"
+          },
+          "restoreLatest": {
+            "type": "boolean",
+            "description": "Restore latest session state"
+          },
+          "startDaemon": {
+            "type": "boolean",
+            "description": "Auto-start worker daemon (default: true)"
+          }
+        }
+      }
+    },
+    {
+      "name": "hooks_session-end",
+      "description": "End current session, stop daemon, and persist state",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "saveState": {
+            "type": "boolean",
+            "description": "Save session state"
+          },
+          "exportMetrics": {
+            "type": "boolean",
+            "description": "Export session metrics"
+          },
+          "stopDaemon": {
+            "type": "boolean",
+            "description": "Stop worker daemon (default: true)"
+          }
+        }
+      }
+    },
+    {
+      "name": "hooks_session-restore",
+      "description": "Restore a previous session",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Session ID to restore (or \"latest\")"
+          },
+          "restoreAgents": {
+            "type": "boolean",
+            "description": "Restore spawned agents"
+          },
+          "restoreTasks": {
+            "type": "boolean",
+            "description": "Restore active tasks"
+          }
+        }
+      }
+    },
+    {
+      "name": "hooks_intelligence",
+      "description": "MoVector intelligence system status (shows REAL metrics from memory store)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "Intelligence mode"
+          },
+          "enableSona": {
+            "type": "boolean",
+            "description": "Enable SONA learning"
+          },
+          "enableMoe": {
+            "type": "boolean",
+            "description": "Enable MoE routing"
+          },
+          "enableHnsw": {
+            "type": "boolean",
+            "description": "Enable HNSW search"
+          },
+          "forceTraining": {
+            "type": "boolean",
+            "description": "Force training cycle"
+          },
+          "showStatus": {
+            "type": "boolean",
+            "description": "Show status only"
+          }
+        }
+      }
+    },
+    {
+      "name": "hooks_intelligence-reset",
+      "description": "Reset intelligence learning state",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "hooks_intelligence_pattern-store",
+      "description": "Store pattern in ReasoningBank (HNSW-indexed)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Pattern description"
+          },
+          "type": {
+            "type": "string",
+            "description": "Pattern type"
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Confidence score"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional metadata"
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "hooks_intelligence_pattern-search",
+      "description": "Search patterns using REAL vector search (HNSW when available, brute-force fallback)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "topK": {
+            "type": "number",
+            "description": "Number of results"
+          },
+          "minConfidence": {
+            "type": "number",
+            "description": "Minimum similarity threshold (0-1)"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Namespace to search (default: patterns)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "hooks_worker-list",
+      "description": "List all 12 background workers with status and capabilities",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Filter by status (all, running, completed, pending)"
+          },
+          "includeActive": {
+            "type": "boolean",
+            "description": "Include active worker instances"
+          }
+        }
+      }
+    },
+    {
+      "name": "hooks_worker-dispatch",
+      "description": "Dispatch a background worker for analysis/optimization tasks",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trigger": {
+            "type": "string",
+            "description": "Worker trigger type",
+            "enum": [
+              "ultralearn",
+              "optimize",
+              "consolidate",
+              "predict",
+              "audit",
+              "map",
+              "preload",
+              "deepdive",
+              "document",
+              "refactor",
+              "benchmark",
+              "testgaps"
+            ]
+          },
+          "context": {
+            "type": "string",
+            "description": "Context for the worker (file path, topic, etc.)"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Priority (low, normal, high, critical)"
+          },
+          "background": {
+            "type": "boolean",
+            "description": "Run in background (non-blocking)"
+          }
+        },
+        "required": [
+          "trigger"
+        ]
+      }
+    },
+    {
+      "name": "hooks_worker-status",
+      "description": "Get status of a specific worker or all active workers",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workerId": {
+            "type": "string",
+            "description": "Specific worker ID to check"
+          },
+          "includeCompleted": {
+            "type": "boolean",
+            "description": "Include completed workers"
+          }
+        }
+      }
+    },
+    {
+      "name": "hooks_worker-detect",
+      "description": "Detect worker triggers from user prompt (for UserPromptSubmit hook)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "User prompt to analyze"
+          },
+          "autoDispatch": {
+            "type": "boolean",
+            "description": "Automatically dispatch detected workers"
+          },
+          "minConfidence": {
+            "type": "number",
+            "description": "Minimum confidence threshold (0-1)"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    },
+    {
+      "name": "hooks_worker-cancel",
+      "description": "Cancel a running worker",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workerId": {
+            "type": "string",
+            "description": "Worker ID to cancel"
+          }
+        },
+        "required": [
+          "workerId"
+        ]
+      }
+    },
+    {
+      "name": "hooks_model-route",
+      "description": "Route task to optimal Claude model (haiku/sonnet/opus) based on complexity",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Task description to analyze"
+          },
+          "preferSpeed": {
+            "type": "boolean",
+            "description": "Prefer faster models when possible"
+          },
+          "preferCost": {
+            "type": "boolean",
+            "description": "Prefer cheaper models when possible"
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    },
+    {
+      "name": "hooks_model-outcome",
+      "description": "Record model routing outcome for learning",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Original task"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "haiku",
+              "sonnet",
+              "opus"
+            ],
+            "description": "Model used"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure",
+              "escalated"
+            ],
+            "description": "Task outcome"
+          }
+        },
+        "required": [
+          "task",
+          "model",
+          "outcome"
+        ]
+      }
+    },
+    {
+      "name": "hooks_model-stats",
+      "description": "Get model routing statistics",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "task_create",
+      "description": "Create a new task and submit it to the coordinator",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Task type (research | analysis | coding | testing | review | documentation | coordination | consensus | custom)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional human-readable name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Task description"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Task priority (critical | high | normal | low | background)"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Task tags"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "Task timeout (ms)"
+          },
+          "maxRetries": {
+            "type": "number",
+            "description": "Max retry attempts"
+          },
+          "input": {
+            "description": "Task input payload (any shape)"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional metadata merged into task.metadata"
+          }
+        },
+        "required": [
+          "type",
+          "description"
+        ]
+      }
+    },
+    {
+      "name": "task_status",
+      "description": "Get task status from the coordinator",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Task ID"
+          }
+        },
+        "required": [
+          "taskId"
+        ]
+      }
+    },
+    {
+      "name": "task_list",
+      "description": "List tasks with filters",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Filter by status (comma-separated for multiple)"
+          },
+          "type": {
+            "type": "string",
+            "description": "Filter by task type"
+          },
+          "assignedTo": {
+            "type": "string",
+            "description": "Filter by assigned agent ID"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Filter by priority"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max tasks to return (default 50)"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Skip first N results"
+          }
+        }
+      }
+    },
+    {
+      "name": "task_complete",
+      "description": "Mark a task as completed and record its result",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Task ID"
+          },
+          "result": {
+            "description": "Task result payload (any shape)"
+          }
+        },
+        "required": [
+          "taskId"
+        ]
+      }
+    },
+    {
+      "name": "task_assign",
+      "description": "Assign a task to a specific agent or to a domain pool",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Task ID to assign"
+          },
+          "agentId": {
+            "type": "string",
+            "description": "Agent ID for direct assignment"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Domain to assign through (queen | security | core | integration | support)"
+          }
+        },
+        "required": [
+          "taskId"
+        ]
+      }
+    },
+    {
+      "name": "task_orchestrate",
+      "description": "Submit multiple tasks in one call; load-balanced across available agents",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "description": "Array of task definitions (same shape as task_create input)",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "tasks"
+        ]
+      }
+    },
+    {
+      "name": "task_cancel",
+      "description": "Cancel a task",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Task ID"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Cancellation reason"
+          }
+        },
+        "required": [
+          "taskId"
+        ]
+      }
+    },
+    {
+      "name": "session_save",
+      "description": "Save current session state",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Session name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Session description"
+          },
+          "includeMemory": {
+            "type": "boolean",
+            "description": "Include memory in session"
+          },
+          "includeTasks": {
+            "type": "boolean",
+            "description": "Include tasks in session"
+          },
+          "includeAgents": {
+            "type": "boolean",
+            "description": "Include agents in session"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "session_restore",
+      "description": "Restore a saved session",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Session ID to restore"
+          },
+          "name": {
+            "type": "string",
+            "description": "Session name to restore"
+          }
+        }
+      }
+    },
+    {
+      "name": "session_list",
+      "description": "List saved sessions",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Maximum sessions to return"
+          },
+          "sortBy": {
+            "type": "string",
+            "description": "Sort field (date, name, size)"
+          }
+        }
+      }
+    },
+    {
+      "name": "session_delete",
+      "description": "Delete a saved session",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Session ID to delete"
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      }
+    },
+    {
+      "name": "hive-mind_spawn",
+      "description": "Spawn workers and automatically join them to the hive-mind (combines agent/spawn + hive-mind/join)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "Number of workers to spawn (default: 1)",
+            "default": 1
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "worker",
+              "specialist",
+              "scout"
+            ],
+            "description": "Worker role in hive",
+            "default": "worker"
+          },
+          "agentType": {
+            "type": "string",
+            "description": "Agent type for spawned workers",
+            "default": "worker"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Prefix for worker IDs",
+            "default": "hive-worker"
+          }
+        }
+      }
+    },
+    {
+      "name": "hive-mind_init",
+      "description": "Initialize the hive-mind collective",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topology": {
+            "type": "string",
+            "enum": [
+              "mesh",
+              "hierarchical",
+              "ring",
+              "star"
+            ],
+            "description": "Network topology",
+            "default": "mesh"
+          },
+          "queenId": {
+            "type": "string",
+            "description": "Initial queen agent ID"
+          },
+          "consensus": {
+            "type": "string",
+            "enum": [
+              "byzantine",
+              "raft",
+              "gossip",
+              "crdt",
+              "quorum"
+            ],
+            "description": "Consensus algorithm reported by hive-mind_status; recorded as the hive's configured algorithm",
+            "default": "byzantine"
+          },
+          "maxAgents": {
+            "type": "number",
+            "description": "Maximum workers the hive will accept via hive-mind_spawn (1-100)",
+            "default": 15,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "persist": {
+            "type": "boolean",
+            "description": "Persist hive-mind shared memory through the write-through adapter",
+            "default": true
+          },
+          "memoryBackend": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "sqlite",
+              "agentdb",
+              "hybrid"
+            ],
+            "description": "Memory backend label round-tripped through hive-mind_status.config",
+            "default": "hybrid"
+          }
+        }
+      }
+    },
+    {
+      "name": "hive-mind_status",
+      "description": "Get hive-mind status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "verbose": {
+            "type": "boolean",
+            "description": "Include detailed information"
+          }
+        }
+      }
+    },
+    {
+      "name": "hive-mind_join",
+      "description": "Join an agent to the hive-mind",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "Agent ID to join"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "worker",
+              "specialist",
+              "scout"
+            ],
+            "description": "Agent role in hive"
+          }
+        },
+        "required": [
+          "agentId"
+        ]
+      }
+    },
+    {
+      "name": "hive-mind_leave",
+      "description": "Remove an agent from the hive-mind",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "Agent ID to remove"
+          }
+        },
+        "required": [
+          "agentId"
+        ]
+      }
+    },
+    {
+      "name": "hive-mind_consensus",
+      "description": "Propose or vote on consensus",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "propose",
+              "vote",
+              "status",
+              "list"
+            ],
+            "description": "Consensus action"
+          },
+          "proposalId": {
+            "type": "string",
+            "description": "Proposal ID (for vote/status)"
+          },
+          "type": {
+            "type": "string",
+            "description": "Proposal type (for propose)"
+          },
+          "value": {
+            "description": "Proposal value (for propose)"
+          },
+          "vote": {
+            "type": "boolean",
+            "description": "Vote (true=for, false=against)"
+          },
+          "voterId": {
+            "type": "string",
+            "description": "Voter agent ID"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "hive-mind_broadcast",
+      "description": "Broadcast message to all workers",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Message to broadcast"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "critical"
+            ],
+            "description": "Message priority"
+          },
+          "fromId": {
+            "type": "string",
+            "description": "Sender agent ID"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "hive-mind_shutdown",
+      "description": "Shutdown the hive-mind and terminate all workers",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graceful": {
+            "type": "boolean",
+            "description": "Graceful shutdown (wait for pending tasks)",
+            "default": true
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Force immediate shutdown",
+            "default": false
+          }
+        }
+      }
+    },
+    {
+      "name": "hive-mind_memory",
+      "description": "Access hive shared memory (backed by Memory DB)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "get",
+              "set",
+              "delete",
+              "list"
+            ],
+            "description": "Memory action"
+          },
+          "key": {
+            "type": "string",
+            "description": "Memory key"
+          },
+          "value": {
+            "description": "Value to store (for set)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "spell_cast",
+      "description": "Cast a spell from a YAML/JSON scroll, grimoire name/abbreviation, or inline incantation",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Spell name or abbreviation (resolved via grimoire)"
+          },
+          "file": {
+            "type": "string",
+            "description": "Path to a YAML/JSON spell scroll file"
+          },
+          "content": {
+            "type": "string",
+            "description": "Inline YAML/JSON spell incantation"
+          },
+          "args": {
+            "type": "object",
+            "description": "Reagents (arguments) to pass to the spell"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview the spell without casting"
+          },
+          "forceCredentialReprompt": {
+            "type": "boolean",
+            "description": "Force re-prompting for env-type prereqs even when the credential store has a stored value (used to rotate or correct stored secrets)"
+          }
+        }
+      }
+    },
+    {
+      "name": "spell_create",
+      "description": "Scribe a new spell definition from steps (returns YAML scroll)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Spell name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Spell description"
+          },
+          "steps": {
+            "type": "array",
+            "description": "Spell steps (incantation sequence)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "arguments": {
+            "type": "object",
+            "description": "Spell reagent definitions (arguments)"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "spell_execute",
+      "description": "Execute a spell from a definition object directly",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "definition": {
+            "type": "object",
+            "description": "SpellDefinition object (from spell_create or parsed YAML scroll)"
+          },
+          "args": {
+            "type": "object",
+            "description": "Reagents (runtime arguments)"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview the spell without casting"
+          }
+        },
+        "required": [
+          "definition"
+        ]
+      }
+    },
+    {
+      "name": "spell_status",
+      "description": "Scry the execution status of a cast spell",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "spellId": {
+            "type": "string",
+            "description": "Spell invocation ID"
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "Include step details in the scrying"
+          }
+        },
+        "required": [
+          "spellId"
+        ]
+      }
+    },
+    {
+      "name": "spell_list",
+      "description": "List available spells from the grimoire and recent castings",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "registry",
+              "runs",
+              "all"
+            ],
+            "description": "What to list (default: all)"
+          },
+          "status": {
+            "type": "string",
+            "description": "Filter castings by status"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max spells to return"
+          },
+          "refresh": {
+            "type": "boolean",
+            "description": "Re-scan grimoire scrolls before listing"
+          }
+        }
+      }
+    },
+    {
+      "name": "spell_suspend",
+      "description": "Suspend a running spell (converts to dispel — spells run to completion)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "spellId": {
+            "type": "string",
+            "description": "Spell invocation ID"
+          }
+        },
+        "required": [
+          "spellId"
+        ]
+      }
+    },
+    {
+      "name": "spell_resume",
+      "description": "Resume a spell (re-casts from beginning — mid-spell resume not yet supported)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "spellId": {
+            "type": "string",
+            "description": "Spell invocation ID of a previously tracked spell"
+          },
+          "args": {
+            "type": "object",
+            "description": "Override reagents for the re-cast"
+          }
+        },
+        "required": [
+          "spellId"
+        ]
+      }
+    },
+    {
+      "name": "spell_cancel",
+      "description": "Dispel (cancel) a running spell",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "spellId": {
+            "type": "string",
+            "description": "Spell invocation ID"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason for dispelling"
+          }
+        },
+        "required": [
+          "spellId"
+        ]
+      }
+    },
+    {
+      "name": "spell_template",
+      "description": "Browse spell templates from the grimoire",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "info"
+            ],
+            "description": "Grimoire action"
+          },
+          "query": {
+            "type": "string",
+            "description": "Spell name or abbreviation (for info)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "spell_accept",
+      "description": "Accept a spell's permissions after reviewing the risk analysis. Required before first execution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Spell name (as shown in the risk analysis)"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "aidefence_scan",
+      "description": "Scan input text for AI manipulation threats (prompt injection, jailbreaks, PII). Returns threat assessment with <10ms latency.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Text to scan for threats"
+          },
+          "quick": {
+            "type": "boolean",
+            "description": "Quick scan mode (faster, less detailed)",
+            "default": false
+          }
+        },
+        "required": [
+          "input"
+        ]
+      }
+    },
+    {
+      "name": "aidefence_analyze",
+      "description": "Deep analysis of input for specific threat types with similar pattern search and mitigation recommendations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Text to analyze"
+          },
+          "searchSimilar": {
+            "type": "boolean",
+            "description": "Search for similar known threats",
+            "default": true
+          },
+          "k": {
+            "type": "number",
+            "description": "Number of similar patterns to retrieve",
+            "default": 5
+          }
+        },
+        "required": [
+          "input"
+        ]
+      }
+    },
+    {
+      "name": "aidefence_stats",
+      "description": "Get AIDefence detection and learning statistics.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "aidefence_learn",
+      "description": "Record detection feedback for pattern learning. Improves future detection accuracy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Original input that was scanned"
+          },
+          "wasAccurate": {
+            "type": "boolean",
+            "description": "Whether the detection was accurate"
+          },
+          "verdict": {
+            "type": "string",
+            "description": "User verdict or correction"
+          },
+          "threatType": {
+            "type": "string",
+            "description": "Threat type for mitigation recording"
+          },
+          "mitigationStrategy": {
+            "type": "string",
+            "description": "Mitigation strategy used",
+            "enum": [
+              "block",
+              "sanitize",
+              "warn",
+              "log",
+              "escalate",
+              "transform",
+              "redirect"
+            ]
+          },
+          "mitigationSuccess": {
+            "type": "boolean",
+            "description": "Whether the mitigation was successful"
+          }
+        },
+        "required": [
+          "input",
+          "wasAccurate"
+        ]
+      }
+    },
+    {
+      "name": "aidefence_is_safe",
+      "description": "Quick boolean check if input is safe. Fastest option for simple validation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Text to check"
+          }
+        },
+        "required": [
+          "input"
+        ]
+      }
+    },
+    {
+      "name": "aidefence_has_pii",
+      "description": "Check if input contains PII (emails, SSNs, API keys, passwords, etc.).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Text to check for PII"
+          }
+        },
+        "required": [
+          "input"
+        ]
+      }
+    },
+    {
+      "name": "system_health",
+      "description": "Perform system health check",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deep": {
+            "type": "boolean",
+            "description": "Perform deep health check"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Components to check"
+          },
+          "fix": {
+            "type": "boolean",
+            "description": "Attempt to fix issues"
+          }
+        }
+      }
+    },
+    {
+      "name": "neural_train",
+      "description": "Train a neural model",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "modelId": {
+            "type": "string",
+            "description": "Model ID to train"
+          },
+          "modelType": {
+            "type": "string",
+            "enum": [
+              "moe",
+              "transformer",
+              "classifier",
+              "embedding"
+            ],
+            "description": "Model type"
+          },
+          "epochs": {
+            "type": "number",
+            "description": "Number of training epochs"
+          },
+          "learningRate": {
+            "type": "number",
+            "description": "Learning rate"
+          },
+          "data": {
+            "type": "object",
+            "description": "Training data"
+          }
+        },
+        "required": [
+          "modelType"
+        ]
+      }
+    },
+    {
+      "name": "neural_predict",
+      "description": "Make predictions using a neural model",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "modelId": {
+            "type": "string",
+            "description": "Model ID to use"
+          },
+          "input": {
+            "type": "string",
+            "description": "Input text or data"
+          },
+          "topK": {
+            "type": "number",
+            "description": "Number of top predictions"
+          }
+        },
+        "required": [
+          "input"
+        ]
+      }
+    },
+    {
+      "name": "neural_patterns",
+      "description": "Get or manage neural patterns",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "store",
+              "search",
+              "delete"
+            ],
+            "description": "Action to perform"
+          },
+          "patternId": {
+            "type": "string",
+            "description": "Pattern ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Pattern name"
+          },
+          "type": {
+            "type": "string",
+            "description": "Pattern type"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "data": {
+            "type": "object",
+            "description": "Pattern data"
+          }
+        }
+      }
+    },
+    {
+      "name": "neural_status",
+      "description": "Get neural system status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "modelId": {
+            "type": "string",
+            "description": "Specific model ID"
+          },
+          "detailed": {
+            "type": "boolean",
+            "description": "Include detailed info"
+          }
+        }
+      }
+    },
+    {
+      "name": "performance_report",
+      "description": "Generate performance report",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "timeRange": {
+            "type": "string",
+            "description": "Time range (1h, 24h, 7d)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "summary",
+              "detailed"
+            ],
+            "description": "Report format"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Components to include"
+          }
+        }
+      }
+    },
+    {
+      "name": "performance_benchmark",
+      "description": "Run performance benchmarks",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "suite": {
+            "type": "string",
+            "enum": [
+              "all",
+              "memory",
+              "neural",
+              "swarm",
+              "io"
+            ],
+            "description": "Benchmark suite"
+          },
+          "iterations": {
+            "type": "number",
+            "description": "Number of iterations"
+          },
+          "warmup": {
+            "type": "boolean",
+            "description": "Include warmup phase"
+          }
+        }
+      }
+    },
+    {
+      "name": "github_repo_analyze",
+      "description": "Analyze a GitHub repository",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "Repository owner"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Repository name"
+          },
+          "branch": {
+            "type": "string",
+            "description": "Branch to analyze"
+          },
+          "deep": {
+            "type": "boolean",
+            "description": "Deep analysis"
+          }
+        }
+      }
+    },
+    {
+      "name": "github_pr_manage",
+      "description": "Manage pull requests",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "create",
+              "review",
+              "merge",
+              "close"
+            ],
+            "description": "Action to perform"
+          },
+          "owner": {
+            "type": "string",
+            "description": "Repository owner"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Repository name"
+          },
+          "prNumber": {
+            "type": "number",
+            "description": "PR number"
+          },
+          "title": {
+            "type": "string",
+            "description": "PR title"
+          },
+          "branch": {
+            "type": "string",
+            "description": "Source branch"
+          },
+          "baseBranch": {
+            "type": "string",
+            "description": "Target branch"
+          },
+          "body": {
+            "type": "string",
+            "description": "PR description"
+          }
+        }
+      }
+    },
+    {
+      "name": "github_issue_track",
+      "description": "Track and manage issues",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "create",
+              "update",
+              "close",
+              "assign"
+            ],
+            "description": "Action to perform"
+          },
+          "owner": {
+            "type": "string",
+            "description": "Repository owner"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Repository name"
+          },
+          "issueNumber": {
+            "type": "number",
+            "description": "Issue number"
+          },
+          "title": {
+            "type": "string",
+            "description": "Issue title"
+          },
+          "body": {
+            "type": "string",
+            "description": "Issue body"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issue labels"
+          },
+          "assignees": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Assignees"
+          }
+        }
+      }
+    },
+    {
+      "name": "github_metrics",
+      "description": "Get repository metrics and statistics",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "Repository owner"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Repository name"
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "all",
+              "commits",
+              "contributors",
+              "traffic",
+              "releases"
+            ],
+            "description": "Metric type"
+          },
+          "timeRange": {
+            "type": "string",
+            "description": "Time range"
+          }
+        }
+      }
+    },
+    {
+      "name": "coordination_sync",
+      "description": "Synchronize state across nodes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "status",
+              "trigger",
+              "resolve"
+            ],
+            "description": "Action to perform"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Force synchronization"
+          },
+          "conflictResolution": {
+            "type": "string",
+            "enum": [
+              "latest",
+              "merge",
+              "manual"
+            ],
+            "description": "Conflict resolution strategy"
+          }
+        }
+      }
+    },
+    {
+      "name": "moflodb_health",
+      "description": "Get MofloDb v3 controller health status including cache stats and attestation count",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "moflodb_controllers",
+      "description": "List all MofloDb v3 controllers and their initialization status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "moflodb_pattern-store",
+      "description": "Store a pattern directly via ReasoningBank controller",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Pattern description"
+          },
+          "type": {
+            "type": "string",
+            "description": "Pattern type (e.g., task-routing, error-recovery)"
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Confidence score (0-1)"
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_pattern-search",
+      "description": "Search patterns via ReasoningBank controller with BM25+semantic hybrid",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "topK": {
+            "type": "number",
+            "description": "Number of results (default: 5)"
+          },
+          "minConfidence": {
+            "type": "number",
+            "description": "Minimum score threshold (0-1)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_feedback",
+      "description": "Record task feedback for learning via LearningSystem + ReasoningBank controllers",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Task identifier"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Whether task succeeded"
+          },
+          "quality": {
+            "type": "number",
+            "description": "Quality score (0-1)"
+          },
+          "agent": {
+            "type": "string",
+            "description": "Agent that performed the task"
+          }
+        },
+        "required": [
+          "taskId"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_causal-edge",
+      "description": "Record a causal edge between two memory entries via CausalMemoryGraph",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceId": {
+            "type": "string",
+            "description": "Source entry ID"
+          },
+          "targetId": {
+            "type": "string",
+            "description": "Target entry ID"
+          },
+          "relation": {
+            "type": "string",
+            "description": "Relationship type (e.g., caused, preceded, succeeded)"
+          },
+          "weight": {
+            "type": "number",
+            "description": "Edge weight (0-1)"
+          }
+        },
+        "required": [
+          "sourceId",
+          "targetId",
+          "relation"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_route",
+      "description": "Route a task via MofloDb SemanticRouter or LearningSystem recommendAlgorithm",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Task description to route"
+          },
+          "context": {
+            "type": "string",
+            "description": "Additional context"
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_session-start",
+      "description": "Start a session with ReflexionMemory episodic replay",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Session identifier"
+          },
+          "context": {
+            "type": "string",
+            "description": "Session context for pattern retrieval"
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_session-end",
+      "description": "End session, persist to ReflexionMemory, trigger NightlyLearner consolidation",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Session identifier"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Session summary"
+          },
+          "tasksCompleted": {
+            "type": "number",
+            "description": "Number of tasks completed"
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_hierarchical-store",
+      "description": "Store to hierarchical memory with tier (working, episodic, semantic)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Memory entry key"
+          },
+          "value": {
+            "type": "string",
+            "description": "Memory entry value"
+          },
+          "tier": {
+            "type": "string",
+            "description": "Memory tier (working, episodic, semantic)",
+            "enum": [
+              "working",
+              "episodic",
+              "semantic"
+            ],
+            "default": "working"
+          }
+        },
+        "required": [
+          "key",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_hierarchical-recall",
+      "description": "Recall from hierarchical memory with optional tier filter",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Recall query"
+          },
+          "tier": {
+            "type": "string",
+            "description": "Filter by tier (working, episodic, semantic)"
+          },
+          "topK": {
+            "type": "number",
+            "description": "Number of results (default: 5)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_consolidate",
+      "description": "Run memory consolidation to promote entries across tiers and compress old data",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "minAge": {
+            "type": "number",
+            "description": "Minimum age in hours since store (optional)"
+          },
+          "maxEntries": {
+            "type": "number",
+            "description": "Maximum entries to consolidate (optional)"
+          }
+        }
+      }
+    },
+    {
+      "name": "moflodb_batch",
+      "description": "Batch operations on memory entries (insert, update, delete)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "description": "Batch operation type",
+            "enum": [
+              "insert",
+              "update",
+              "delete"
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "description": "Array of {key, value} entries to operate on",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          }
+        },
+        "required": [
+          "operation",
+          "entries"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_context-synthesize",
+      "description": "Synthesize context from stored memories for a given query",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Query to synthesize context for"
+          },
+          "maxEntries": {
+            "type": "number",
+            "description": "Maximum entries to include (default: 10)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "moflodb_semantic-route",
+      "description": "Route an input via MofloDb SemanticRouter for intent classification",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Input text to route"
+          }
+        },
+        "required": [
+          "input"
+        ]
+      }
+    }
+  ]
+}

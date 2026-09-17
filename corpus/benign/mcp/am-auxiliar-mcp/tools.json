@@ -1,0 +1,346 @@
+{
+  "package": "auxiliar-mcp",
+  "tools": [
+    {
+      "name": "recommend_service",
+      "description": "Get a current, verified recommendation for a cloud service based on your constraints. Returns pricing, risks, provision commands, and alternatives. Data is Chrome-verified from actual service websites (not stale training data).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "need": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "What kind of service you need (database, email, auth, deploy, payments, search, cms, storage, monitoring, cache, queues, vector, llm, sms, feature-flags, cron, pdf-extraction — aliases like 'llm-api', 'file-storage', 'vector-db', 'ocr', 'document-ai', 'invoice-extraction', 'nfs-e' also work)"
+          },
+          "framework": {
+            "description": "Your framework (nextjs, express, sveltekit, etc.)",
+            "type": "string",
+            "maxLength": 100
+          },
+          "region": {
+            "description": "Preferred region (us, eu, etc.)",
+            "type": "string",
+            "maxLength": 50
+          },
+          "budget": {
+            "description": "Budget constraint",
+            "type": "string",
+            "enum": [
+              "free",
+              "cheap",
+              "moderate",
+              "enterprise"
+            ]
+          },
+          "constraints": {
+            "description": "Any other constraints (e.g., 'GDPR', 'no vendor lock-in', 'already on AWS')",
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "need"
+        ]
+      }
+    },
+    {
+      "name": "get_pricing",
+      "description": "Get current, Chrome-verified pricing for a specific service. This data comes from actually browsing the service's pricing page (including JS-rendered pages that WebFetch can't read). More current than training data.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Service slug (e.g., 'neon', 'resend', 'clerk', 'supabase', 'stripe', 'vercel')"
+          }
+        },
+        "required": [
+          "service"
+        ]
+      }
+    },
+    {
+      "name": "get_risks",
+      "description": "Get current risk flags, gotchas, and recent breaking changes for a service. Warns about things like removed free tiers, deprecated libraries, pricing changes, and known issues that training data doesn't cover.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Service slug (e.g., 'neon', 'clerk', 'sendgrid', 'authjs')"
+          }
+        },
+        "required": [
+          "service"
+        ]
+      }
+    },
+    {
+      "name": "check_compatibility",
+      "description": "Check if a set of services are compatible with each other. Warns about known conflicts, integration issues, or gotchas when using services together (e.g., Turso+Prisma needs adapter, Clerk doesn't support SvelteKit well).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "services": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "List of services to check (e.g., ['neon', 'better-auth', 'vercel'])"
+          },
+          "framework": {
+            "description": "Your framework",
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "services"
+        ]
+      }
+    },
+    {
+      "name": "setup_service",
+      "description": "Get step-by-step setup instructions for a service, including CLI commands (if available), signup URL, required env vars, and estimated time. Does NOT automate signup — gives you the exact steps to follow.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The service provider (neon, resend, supabase, vercel, clerk, stripe, better-auth, etc.)"
+          },
+          "projectName": {
+            "description": "Name for the project/database",
+            "type": "string",
+            "maxLength": 100
+          },
+          "region": {
+            "description": "Preferred region",
+            "type": "string",
+            "maxLength": 50
+          }
+        },
+        "required": [
+          "provider"
+        ]
+      }
+    },
+    {
+      "name": "list_services",
+      "description": "List all available services and categories. Use without parameters to see all categories, or specify a category to see its services.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "category": {
+            "description": "Category to list services for (e.g., 'database', 'auth', 'email'). Aliases like 'db', 'authentication', 'mail' also work. Omit to see all categories.",
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "solve_task",
+      "description": "Fetch the full /solve/ task ranking for a specific job-to-be-done (e.g., 'extract text from PDFs', 'parse Brazilian NFS-e invoices'). Returns the ranked candidates with install commands, an evaluated scorecard (word accuracy, layout, latency, cost, install friction), alternatives considered and dropped, FAQs, and methodological caveats. Use this when an agent needs to pick an installable tool (skill/MCP/API/local binary) for a task rather than a cloud service. Data comes from a reproducible eval run on a real-world corpus — not training data.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "task_slug": {
+            "description": "Task slug (e.g., 'pdf-text-extraction-mcp', 'nfs-e-extraction', 'cnpj-enrichment-mcp'). Aliases that resolve automatically: 'pdf', 'ocr', 'pdf-ocr', 'document-ai', 'invoice-extraction', 'boleto', 'receipt-parsing', 'bookkeeping-ocr' (→ PDF OCR ranking); 'nfs-e', 'nfse', 'nota-fiscal', 'nota-fiscal-eletronica', 'brazilian-invoice', 'cnpj-invoice' (→ NFS-e structured extraction); 'cnpj', 'cnae', 'cnpj-cnae', 'cnpj-to-cnae', 'regime-tributario', 'regime-tributário', 'cnpj-regime-tributario', 'simples-nacional', 'mei', 'tax-registry', 'tax-registry-enrichment', 'cnpj-enrichment', 'razao-social', 'razão-social' (→ CNPJ tax-registry enrichment). Call list_solve_tasks first if you don't know the slug.",
+            "type": "string",
+            "maxLength": 100
+          },
+          "category": {
+            "description": "Filter by task category (e.g., 'ocr', 'pdf-processing', 'agent-tools'). Returns all matching tasks.",
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "list_solve_tasks",
+      "description": "List all available /solve/ task rankings with their top picks. Use this to discover what jobs-to-be-done auxiliar.ai has evaluated installable tools for. Complementary to list_services (cloud services catalog): list_solve_tasks surfaces agent-installable tooling (skills, MCPs, APIs, local binaries) evaluated on real-world corpora.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "find_capability",
+      "description": "Unified discovery across every Capability on auxiliar.ai — cloud services, skills, MCP servers, plugins, parsers, installable tools, public-data lookups, task templates. Replaces recommend_service + solve_task + the future find_skill / find_mcp / find_plugin. Pass a free-text query, or specify jtbd (jobs-to-be-done tag), element_type, and/or agent_context to narrow the result. Returns a ranked list with id, page_url, install command, eval score, and jtbd tags. Use get_capability(id) to fetch the full record.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Free-text query — what the agent is trying to do (e.g., 'Brazilian invoice extraction', 'serverless postgres with branching', 'ocr')",
+            "type": "string",
+            "maxLength": 200
+          },
+          "jtbd": {
+            "description": "Jobs-to-be-done tags. Capabilities matching at least one tag get a strong score boost. Example: ['nfs-e-extraction', 'bookkeeping']",
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            }
+          },
+          "element_type": {
+            "description": "Restrict to one Capability kind",
+            "type": "string",
+            "enum": [
+              "cloud_service",
+              "installable_tool",
+              "skill",
+              "mcp",
+              "plugin",
+              "parser",
+              "hook",
+              "prompt",
+              "data",
+              "task_template"
+            ]
+          },
+          "agent_context": {
+            "description": "Agent host name (claude-code, cursor, claude-desktop, openclaw). Excludes Capabilities verified-incompatible with that host; includes those marked compatible OR not yet evaluated.",
+            "type": "string",
+            "maxLength": 60
+          },
+          "max_results": {
+            "description": "Max results to return (default 10, max 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "include_experimental": {
+            "description": "Include records with experimental=true (default false). Experimental records are ingested from external sources (MCP Registry, Printing Press, etc.) but not yet vetted by the curator fleet — filtered out by default to keep ranking clean. Set true for curator/enrichment dogfooding.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_capability",
+      "description": "Fetch the full Capability record by stable slug. Returns every field — pricing tiers, risks, install spec, dependencies, eval records, distribution surfaces, choose_if/avoid_if. Use after find_capability narrows the candidate set, or when the agent already has a known slug from a /solve/ page or prior session.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Capability id / stable slug (e.g., 'neon', 'auxiliar-nfs-e', 'pdf-text-extraction-mcp')"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "list_capabilities",
+      "description": "Filtered enumeration of the Capability index. Replaces list_services + list_solve_tasks — element_type discriminates instead of routing through separate tools. Filters compose (AND): a Capability must match every specified filter. With no filters, returns the full index sorted by name.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "element_type": {
+            "description": "Restrict to one Capability kind",
+            "type": "string",
+            "enum": [
+              "cloud_service",
+              "installable_tool",
+              "skill",
+              "mcp",
+              "plugin",
+              "parser",
+              "hook",
+              "prompt",
+              "data",
+              "task_template"
+            ]
+          },
+          "category": {
+            "description": "Legacy category match (e.g., 'database', 'email', 'ocr')",
+            "type": "string",
+            "maxLength": 60
+          },
+          "jtbd": {
+            "description": "Single jtbd_tag — exact match required",
+            "type": "string",
+            "maxLength": 60
+          },
+          "agent_context": {
+            "description": "Exclude Capabilities verified-incompatible with this agent host",
+            "type": "string",
+            "maxLength": 60
+          }
+        }
+      }
+    },
+    {
+      "name": "compare_capabilities",
+      "description": "Side-by-side comparison structure for 2-5 Capabilities. Returns each Capability's fields aligned in a uniform row-per-field shape — same data backing as the Hugo /compare/<a>-vs-<b>/ pages but JSON-shaped for in-loop consumption. Use after the agent has a small candidate set and needs to choose.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 2,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "Capability ids to compare (2-5). Order is preserved in the output rows."
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      }
+    },
+    {
+      "name": "invoke_capability",
+      "description": "Execute a registered data-plane tool over HTTP. Use this to actually CALL a Capability the agent has discovered via find_capability/get_capability/list_capabilities — fetch a CNPJ, search Lei Rouanet projects, list Brasileirão standings, etc. Pass `tool` as the slug (e.g., 'fetch_cnpj', 'rouanet_projeto_fetch') and `args` as the kwargs dict the underlying function expects. Returns {tool, source_module, elapsed_ms, result}. LOW-sensitivity tools work without auth — set AUXILIAR_GATEWAY_TOKEN for HIGH_PII tools (CPF dossiê, judicial process by CPF, etc.) and for higher rate limits. Caching, rate limits, and retries are handled server-side.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Tool slug — the function name in the gateway registry (e.g., 'fetch_cnpj', 'rouanet_projeto_fetch', 'br_futebol_brasileirao_tabela'). Lowercase, underscore-separated, must start with a letter."
+          },
+          "args": {
+            "description": "Keyword arguments for the tool. Pass an empty object for no-arg tools. Unknown args return 400; missing required args return 400.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "tool"
+        ]
+      }
+    }
+  ]
+}

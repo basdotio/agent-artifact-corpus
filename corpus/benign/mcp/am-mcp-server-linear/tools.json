@@ -1,0 +1,846 @@
+{
+  "package": "mcp-server-linear",
+  "tools": [
+    {
+      "name": "linear_auth_callback",
+      "description": "Handle OAuth callback",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "OAuth authorization code"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      }
+    },
+    {
+      "name": "linear_create_issue",
+      "description": "Create a new issue in Linear",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Issue title"
+          },
+          "description": {
+            "type": "string",
+            "description": "Issue description"
+          },
+          "teamId": {
+            "type": "string",
+            "description": "Team ID (UUID)"
+          },
+          "parentId": {
+            "type": "string",
+            "description": "Parent issue ID (UUID, not issue identifier)",
+            "optional": true
+          },
+          "labelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label UUIDs to apply, eg ['a1eb5aed-7425-4ea5-98ec-dfab52381e0e']",
+            "optional": true
+          },
+          "assigneeId": {
+            "type": "string",
+            "description": "Assignee user ID (UUID)",
+            "optional": true
+          },
+          "priority": {
+            "type": "number",
+            "description": "Issue priority (0-4)",
+            "optional": true
+          },
+          "createAsUser": {
+            "type": "string",
+            "description": "Name to display for the created issue",
+            "optional": true
+          },
+          "displayIconUrl": {
+            "type": "string",
+            "description": "URL of the avatar to display",
+            "optional": true
+          }
+        },
+        "required": [
+          "title",
+          "description",
+          "teamId"
+        ]
+      }
+    },
+    {
+      "name": "linear_create_project_with_issues",
+      "description": "Create a new project with associated issues. Note: Project requires teamIds (array) not teamId (single value).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Project name"
+              },
+              "description": {
+                "type": "string",
+                "description": "Project description (optional)"
+              },
+              "teamIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Array of team IDs this project belongs to (Required). Use linear_get_teams to get available team IDs.",
+                "minItems": 1
+              }
+            },
+            "required": [
+              "name",
+              "teamIds"
+            ]
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Issue title"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Issue description"
+                },
+                "teamId": {
+                  "type": "string",
+                  "description": "Team ID (must match one of the project teamIds)"
+                }
+              },
+              "required": [
+                "title",
+                "description",
+                "teamId"
+              ]
+            },
+            "description": "List of issues to create with this project"
+          }
+        },
+        "required": [
+          "project",
+          "issues"
+        ]
+      }
+    },
+    {
+      "name": "linear_bulk_update_issues",
+      "description": "Update multiple issues at once",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of issue UUIDs to update (not issue identifiers like 'ENG-123')"
+          },
+          "update": {
+            "type": "object",
+            "properties": {
+              "stateId": {
+                "type": "string",
+                "description": "New state ID",
+                "optional": true
+              },
+              "assigneeId": {
+                "type": "string",
+                "description": "New assignee ID",
+                "optional": true
+              },
+              "priority": {
+                "type": "number",
+                "description": "New priority (0-4)",
+                "optional": true
+              }
+            }
+          }
+        },
+        "required": [
+          "issueIds",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "linear_edit_issue",
+      "description": "Edit an existing issue, updating any of its fields. Note: When setting projectMilestoneId, you must also set projectId.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueId": {
+            "type": "string",
+            "description": "Required: The UUID of the issue to update"
+          },
+          "title": {
+            "type": "string",
+            "description": "The issue title",
+            "optional": true
+          },
+          "description": {
+            "type": "string",
+            "description": "The issue description in markdown format",
+            "optional": true
+          },
+          "stateId": {
+            "type": "string",
+            "description": "UUID of the target state",
+            "optional": true
+          },
+          "priority": {
+            "type": "number",
+            "description": "Issue priority (0=No priority, 1=Urgent, 2=High, 3=Normal, 4=Low)",
+            "optional": true
+          },
+          "assigneeId": {
+            "type": "string",
+            "description": "UUID of the user to assign the issue to",
+            "optional": true
+          },
+          "labelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of label UUIDs (replaces existing labels)",
+            "optional": true
+          },
+          "projectId": {
+            "type": "string",
+            "description": "UUID of the project to associate with the issue",
+            "optional": true
+          },
+          "projectMilestoneId": {
+            "type": "string",
+            "description": "UUID of the project milestone to associate with the issue. Note: Requires projectId to be set when using this field",
+            "optional": true
+          },
+          "estimate": {
+            "type": "number",
+            "description": "The estimated complexity points for the issue",
+            "optional": true
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "The due date in YYYY-MM-DD format",
+            "optional": true
+          },
+          "parentId": {
+            "type": "string",
+            "description": "UUID of the parent issue",
+            "optional": true
+          },
+          "sortOrder": {
+            "type": "number",
+            "description": "Position of the issue relative to other issues",
+            "optional": true
+          }
+        },
+        "required": [
+          "issueId"
+        ]
+      }
+    },
+    {
+      "name": "linear_search_issues",
+      "description": "Search for issues with filtering and pagination",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query string",
+            "optional": true
+          },
+          "teamIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter by team IDs",
+            "optional": true
+          },
+          "assigneeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter by assignee IDs",
+            "optional": true
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter by state names",
+            "optional": true
+          },
+          "priority": {
+            "type": "number",
+            "description": "Filter by priority (0-4)",
+            "optional": true
+          },
+          "first": {
+            "type": "number",
+            "description": "Number of issues to return (default: 50)",
+            "optional": true
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor for pagination",
+            "optional": true
+          },
+          "orderBy": {
+            "type": "string",
+            "description": "Field to order by (default: updatedAt)",
+            "optional": true
+          }
+        }
+      }
+    },
+    {
+      "name": "linear_search_issues_by_identifier",
+      "description": "Search for issues by their identifiers (e.g., [\"ENG-78\", \"ENG-79\"])",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of issue identifiers to search for"
+          }
+        },
+        "required": [
+          "identifiers"
+        ]
+      }
+    },
+    {
+      "name": "linear_get_issue",
+      "description": "Get a single issue by identifier, including all comments",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string",
+            "description": "Issue identifier (e.g., 'ENG-123')"
+          }
+        },
+        "required": [
+          "identifier"
+        ]
+      }
+    },
+    {
+      "name": "linear_get_teams",
+      "description": "Get all teams with their states and labels",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "linear_get_user",
+      "description": "Get current user information",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "linear_delete_issue",
+      "description": "Delete an issue",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Issue UUID (not issue identifier like 'ENG-123')"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "linear_get_project",
+      "description": "Get project information",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Project identifier"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "linear_list_projects",
+      "description": "List all projects or filter them by criteria",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "object",
+                "properties": {
+                  "eq": {
+                    "type": "string",
+                    "description": "Equal to"
+                  },
+                  "in": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "In array of values"
+                  },
+                  "neq": {
+                    "type": "string",
+                    "description": "Not equal to"
+                  },
+                  "nin": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Not in array of values"
+                  }
+                },
+                "description": "Filter by project status"
+              },
+              "projectMilestones": {
+                "type": "object",
+                "description": "Filter by project milestones"
+              },
+              "projectUpdates": {
+                "type": "object",
+                "description": "Filter by project updates"
+              },
+              "nextProjectMilestone": {
+                "type": "object",
+                "description": "Filter by next project milestone"
+              },
+              "completedProjectMilestones": {
+                "type": "object",
+                "description": "Filter by completed project milestones"
+              }
+            },
+            "description": "Optional filter criteria for projects"
+          }
+        }
+      }
+    },
+    {
+      "name": "linear_create_issues",
+      "description": "Create multiple issues at once",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Issue title"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Issue description"
+                },
+                "teamId": {
+                  "type": "string",
+                  "description": "Team ID (UUID)"
+                },
+                "parentId": {
+                  "type": "string",
+                  "description": "Parent issue ID (UUID, not issue identifier)",
+                  "optional": true
+                },
+                "labelIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Label UUIDs to apply, eg ['a1eb5aed-7425-4ea5-98ec-dfab52381e0e']",
+                  "optional": true
+                },
+                "assigneeId": {
+                  "type": "string",
+                  "description": "Assignee user ID (UUID)",
+                  "optional": true
+                },
+                "priority": {
+                  "type": "number",
+                  "description": "Issue priority (0-4)",
+                  "optional": true
+                },
+                "projectId": {
+                  "type": "string",
+                  "description": "Project ID",
+                  "optional": true
+                },
+                "createAsUser": {
+                  "type": "string",
+                  "description": "Name to display for the created issue",
+                  "optional": true
+                },
+                "displayIconUrl": {
+                  "type": "string",
+                  "description": "URL of the avatar to display",
+                  "optional": true
+                }
+              },
+              "required": [
+                "title",
+                "description",
+                "teamId"
+              ]
+            },
+            "description": "List of issues to create"
+          }
+        },
+        "required": [
+          "issues"
+        ]
+      }
+    },
+    {
+      "name": "linear_create_comment",
+      "description": "Creates a new comment on an issue",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Comment text content"
+          },
+          "issueId": {
+            "type": "string",
+            "description": "ID of the issue to comment on"
+          }
+        },
+        "required": [
+          "body",
+          "issueId"
+        ]
+      }
+    },
+    {
+      "name": "linear_update_comment",
+      "description": "Updates an existing comment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Comment ID"
+          },
+          "input": {
+            "type": "object",
+            "properties": {
+              "body": {
+                "type": "string",
+                "description": "Updated comment text"
+              }
+            },
+            "required": [
+              "body"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "input"
+        ]
+      }
+    },
+    {
+      "name": "linear_delete_comment",
+      "description": "Deletes a comment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Comment ID to delete"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "linear_resolve_comment",
+      "description": "Resolves a comment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Comment ID to resolve"
+          },
+          "resolvingCommentId": {
+            "type": "string",
+            "description": "Optional ID of a resolving comment",
+            "optional": true
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "linear_unresolve_comment",
+      "description": "Unresolves a comment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Comment ID to unresolve"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "linear_create_customer_need_from_attachment",
+      "description": "Creates a new customer need from an attachment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "attachmentId": {
+            "type": "string",
+            "description": "ID of the attachment"
+          },
+          "title": {
+            "type": "string",
+            "description": "Title for the customer need",
+            "optional": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Description for the customer need",
+            "optional": true
+          },
+          "teamId": {
+            "type": "string",
+            "description": "Team ID for the customer need",
+            "optional": true
+          }
+        },
+        "required": [
+          "attachmentId"
+        ]
+      }
+    },
+    {
+      "name": "linear_get_project_milestones",
+      "description": "Get milestones for a project with filtering and pagination",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project ID to get milestones for"
+          },
+          "filter": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "object",
+                "properties": {
+                  "eq": {
+                    "type": "string",
+                    "description": "Equal to"
+                  },
+                  "contains": {
+                    "type": "string",
+                    "description": "Contains string"
+                  }
+                },
+                "description": "Filter by milestone name"
+              },
+              "targetDate": {
+                "type": "object",
+                "properties": {
+                  "lt": {
+                    "type": "string",
+                    "description": "Less than date"
+                  },
+                  "gt": {
+                    "type": "string",
+                    "description": "Greater than date"
+                  }
+                },
+                "description": "Filter by target date"
+              },
+              "completed": {
+                "type": "boolean",
+                "description": "Filter by completion status"
+              }
+            },
+            "description": "Optional filter criteria",
+            "optional": true
+          },
+          "first": {
+            "type": "number",
+            "description": "Number of items to return (used with after)",
+            "optional": true
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor for forward pagination",
+            "optional": true
+          },
+          "last": {
+            "type": "number",
+            "description": "Number of items to return (used with before)",
+            "optional": true
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor for backward pagination",
+            "optional": true
+          },
+          "includeArchived": {
+            "type": "boolean",
+            "description": "Include archived milestones",
+            "optional": true
+          },
+          "orderBy": {
+            "type": "string",
+            "description": "Field to order by (createdAt or updatedAt)",
+            "optional": true
+          }
+        },
+        "required": [
+          "projectId"
+        ]
+      }
+    },
+    {
+      "name": "linear_create_project_milestone",
+      "description": "Create a new project milestone",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project ID to create milestone for"
+          },
+          "name": {
+            "type": "string",
+            "description": "Milestone name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Milestone description",
+            "optional": true
+          },
+          "targetDate": {
+            "type": "string",
+            "description": "Target completion date (ISO format)",
+            "optional": true
+          },
+          "sortOrder": {
+            "type": "number",
+            "description": "Sort order for the milestone",
+            "optional": true
+          }
+        },
+        "required": [
+          "projectId",
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "linear_update_project_milestone",
+      "description": "Update a project milestone",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Milestone ID to update"
+          },
+          "name": {
+            "type": "string",
+            "description": "New milestone name",
+            "optional": true
+          },
+          "description": {
+            "type": "string",
+            "description": "New milestone description",
+            "optional": true
+          },
+          "targetDate": {
+            "type": "string",
+            "description": "New target completion date (ISO format)",
+            "optional": true
+          },
+          "sortOrder": {
+            "type": "number",
+            "description": "New sort order",
+            "optional": true
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "linear_delete_project_milestone",
+      "description": "Delete a project milestone",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Milestone ID to delete"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    }
+  ]
+}

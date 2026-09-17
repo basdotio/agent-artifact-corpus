@@ -1,0 +1,645 @@
+{
+  "package": "screenpipe-mcp",
+  "tools": [
+    {
+      "name": "search-content",
+      "description": "Search screen text, audio transcriptions, input events, and memories. Returns timestamped results with app context. IMPORTANT: prefer activity-summary for broad questions ('what was I doing?'). Use search-content only when you need specific text/content. Start with limit=5, increase only if needed. Results can be large — use max_content_length=500 to truncate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Full-text search query. Omit to return all content in time range. Avoid for audio — transcriptions are noisy, q filters too aggressively."
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "all",
+              "ocr",
+              "audio",
+              "input",
+              "accessibility",
+              "memory"
+            ],
+            "description": "Filter by content type. 'accessibility' is preferred for screen text (OS-native). 'ocr' is fallback for apps without accessibility support. Default: 'all'.",
+            "default": "all"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 10, max 20). Start with 5 for exploration.",
+            "default": 10
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Pagination offset. Use when results say 'use offset=N for more'.",
+            "default": 0
+          },
+          "start_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative (e.g. '2h ago', '1d ago'). Always provide to avoid scanning entire history."
+          },
+          "end_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative (e.g. 'now'). Defaults to now."
+          },
+          "app_name": {
+            "type": "string",
+            "description": "Filter by app name (e.g. 'Google Chrome', 'Slack', 'zoom.us'). Case-sensitive."
+          },
+          "window_name": {
+            "type": "string",
+            "description": "Filter by window title substring"
+          },
+          "min_length": {
+            "type": "integer",
+            "description": "Min content length in characters"
+          },
+          "max_length": {
+            "type": "integer",
+            "description": "Max content length in characters"
+          },
+          "include_frames": {
+            "type": "boolean",
+            "description": "Include base64 screenshots (OCR only). Warning: large response.",
+            "default": false
+          },
+          "speaker_ids": {
+            "type": "string",
+            "description": "Comma-separated speaker IDs to filter audio"
+          },
+          "speaker_name": {
+            "type": "string",
+            "description": "Filter audio by speaker name (case-insensitive partial match)"
+          },
+          "max_content_length": {
+            "type": "integer",
+            "description": "Truncate each result's text via middle-truncation. Use 200-500 to keep responses compact."
+          }
+        }
+      }
+    },
+    {
+      "name": "list-meetings",
+      "description": "List detected meetings (Zoom, Teams, Meet, etc.) with duration, app, and attendees. Only available when screenpipe runs in smart transcription mode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative (e.g. '1d ago')"
+          },
+          "end_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 20)",
+            "default": 20
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Pagination offset",
+            "default": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "activity-summary",
+      "description": "Rich activity overview: app usage, window/tab titles with URLs and time spent, key text per context, audio transcriptions. USE THIS FIRST for broad questions: 'what was I doing?', 'how long on X?', 'which apps?'. The 'windows' field shows exactly what the user worked on (e.g. 'Debug crash issue — 20 min', 'Stripe pricing page — 5 min'). Usually sufficient without further searches.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative (e.g. '3h ago')"
+          },
+          "end_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative (e.g. 'now')"
+          },
+          "app_name": {
+            "type": "string",
+            "description": "Optional app name filter to focus on one app"
+          }
+        },
+        "required": [
+          "start_time",
+          "end_time"
+        ]
+      }
+    },
+    {
+      "name": "search-elements",
+      "description": "Search UI elements (buttons, links, text fields) from the accessibility tree. Lighter than search-content for targeted UI lookups. Use when you need to find specific UI controls or page structure, not general content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Full-text search on element text"
+          },
+          "frame_id": {
+            "type": "integer",
+            "description": "Filter to specific frame ID from search results"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "accessibility",
+              "ocr"
+            ],
+            "description": "Element source. 'accessibility' is preferred (OS-native tree). 'ocr' for apps without a11y."
+          },
+          "role": {
+            "type": "string",
+            "description": "Element role filter (e.g. 'AXButton', 'AXLink', 'AXTextField')"
+          },
+          "start_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative"
+          },
+          "end_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative"
+          },
+          "app_name": {
+            "type": "string",
+            "description": "Filter by app name"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 50). Start with 10-20.",
+            "default": 50
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Pagination offset",
+            "default": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "frame-context",
+      "description": "Get full accessibility text, parsed tree nodes, and URLs for a specific frame ID. Use after search-content to get detailed context for a specific moment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "frame_id": {
+            "type": "integer",
+            "description": "Frame ID from search-content results (content.frame_id field)"
+          }
+        },
+        "required": [
+          "frame_id"
+        ]
+      }
+    },
+    {
+      "name": "export-video",
+      "description": "Export an MP4 video of screen recordings for a time range. Returns the file path. Can take a few minutes for long ranges.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative"
+          },
+          "end_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative"
+          },
+          "fps": {
+            "type": "number",
+            "description": "Output FPS (default 1.0). Higher = smoother but larger file.",
+            "default": 1
+          }
+        },
+        "required": [
+          "start_time",
+          "end_time"
+        ]
+      }
+    },
+    {
+      "name": "update-memory",
+      "description": "Create, update, or delete a persistent memory (facts, preferences, decisions the user wants to remember). To retrieve memories, use search-content with content_type='memory'. To create: provide content + tags. To update: provide id + fields to change. To delete: provide id + delete=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Memory ID — omit to create new, provide to update/delete"
+          },
+          "content": {
+            "type": "string",
+            "description": "Memory text (required for creation)"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categorization tags (e.g. ['work', 'project-x'])"
+          },
+          "importance": {
+            "type": "number",
+            "description": "0.0 (trivial) to 1.0 (critical). Default 0.5."
+          },
+          "source_context": {
+            "type": "object",
+            "description": "Optional metadata linking to source (app, timestamp, etc.)"
+          },
+          "delete": {
+            "type": "boolean",
+            "description": "Set true to delete the memory identified by id"
+          }
+        }
+      }
+    },
+    {
+      "name": "send-notification",
+      "description": "Send a notification to the screenpipe desktop UI. Use to alert the user about findings, completed tasks, or actions needing attention.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Notification title (short, descriptive)"
+          },
+          "body": {
+            "type": "string",
+            "description": "Notification body (markdown supported)"
+          },
+          "pipe_name": {
+            "type": "string",
+            "description": "Name of the pipe/tool sending this notification"
+          },
+          "timeout_secs": {
+            "type": "integer",
+            "description": "Auto-dismiss after N seconds (default 20). Use 0 for persistent.",
+            "default": 20
+          },
+          "actions": {
+            "type": "array",
+            "description": "Up to 5 action buttons. Each needs id, label, type ('pipe'|'api'|'deeplink'|'dismiss').",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Unique action ID"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Button label"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "pipe",
+                    "api",
+                    "deeplink",
+                    "dismiss"
+                  ],
+                  "description": "Action type"
+                },
+                "pipe": {
+                  "type": "string",
+                  "description": "Pipe name to run (type=pipe)"
+                },
+                "context": {
+                  "type": "object",
+                  "description": "Context passed to pipe (type=pipe)"
+                },
+                "open_in_chat": {
+                  "type": "boolean",
+                  "description": "Open pipe run in chat UI instead of background (type=pipe)"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "URL for api/deeplink actions"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "type"
+              ]
+            }
+          }
+        },
+        "required": [
+          "title",
+          "pipe_name"
+        ]
+      }
+    },
+    {
+      "name": "health-check",
+      "description": "Check if screenpipe is running and healthy. Returns recording status, frame/audio stats, timestamps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list-audio-devices",
+      "description": "List available audio input/output devices for recording.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list-monitors",
+      "description": "List available monitors/screens for capture.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "add-tags",
+      "description": "Add tags to a content item (vision frame or audio chunk) for organization and retrieval.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "vision",
+              "audio"
+            ],
+            "description": "Type of content to tag"
+          },
+          "id": {
+            "type": "integer",
+            "description": "Content item ID"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags to add"
+          }
+        },
+        "required": [
+          "content_type",
+          "id",
+          "tags"
+        ]
+      }
+    },
+    {
+      "name": "search-speakers",
+      "description": "Search for speakers by name prefix. Returns speaker ID, name, and metadata.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Speaker name prefix to search for (case-insensitive)"
+          }
+        }
+      }
+    },
+    {
+      "name": "list-unnamed-speakers",
+      "description": "List speakers that haven't been named yet. Useful for speaker identification workflow.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 10)",
+            "default": 10
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Pagination offset",
+            "default": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "update-speaker",
+      "description": "Rename a speaker or update their metadata.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Speaker ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "New speaker name"
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON metadata string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "merge-speakers",
+      "description": "Merge two speakers into one (e.g. when the same person was detected as different speakers).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "speaker_to_keep_id": {
+            "type": "integer",
+            "description": "Speaker ID to keep"
+          },
+          "speaker_to_merge_id": {
+            "type": "integer",
+            "description": "Speaker ID to merge into the kept one"
+          }
+        },
+        "required": [
+          "speaker_to_keep_id",
+          "speaker_to_merge_id"
+        ]
+      }
+    },
+    {
+      "name": "start-meeting",
+      "description": "Manually start a meeting recording session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "string",
+            "description": "App name (default 'manual')",
+            "default": "manual"
+          },
+          "title": {
+            "type": "string",
+            "description": "Meeting title"
+          },
+          "attendees": {
+            "type": "string",
+            "description": "Comma-separated attendee names"
+          }
+        }
+      }
+    },
+    {
+      "name": "stop-meeting",
+      "description": "Stop the current manual meeting recording session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get-meeting",
+      "description": "Get details of a specific meeting by ID, including transcription and attendees.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Meeting ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "update-meeting",
+      "description": "Update a meeting's mutable fields (title, attendees, note, app, start/end). Partial: only the fields you pass are written, others stay as-is. Use this to save an AI-generated summary into the meeting note — read the current note first via get-meeting and pass the existing notes plus your additions so you don't overwrite the user's writing. Convention: append AI-generated summary text under a `## Summary` heading at the bottom of the existing note.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Meeting ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "Meeting title"
+          },
+          "attendees": {
+            "type": "string",
+            "description": "Comma-separated attendee names"
+          },
+          "note": {
+            "type": "string",
+            "description": "Full new note body. To preserve existing notes, fetch them first via get-meeting and concatenate before passing."
+          },
+          "meeting_app": {
+            "type": "string",
+            "description": "App / source name (e.g. 'meet.google.com', 'manual')"
+          },
+          "meeting_start": {
+            "type": "string",
+            "description": "ISO 8601 start time (rarely needed)"
+          },
+          "meeting_end": {
+            "type": "string",
+            "description": "ISO 8601 end time (rarely needed)"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "keyword-search",
+      "description": "Fast keyword search using FTS index. Faster than search-content for exact keyword matching. Returns frame IDs and matched text.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Keyword search query"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "ocr",
+              "audio",
+              "all"
+            ],
+            "description": "Content type filter",
+            "default": "all"
+          },
+          "start_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative"
+          },
+          "end_time": {
+            "type": "string",
+            "description": "ISO 8601 UTC or relative"
+          },
+          "app_name": {
+            "type": "string",
+            "description": "Filter by app name"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 20)",
+            "default": 20
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Pagination offset",
+            "default": 0
+          }
+        },
+        "required": [
+          "q"
+        ]
+      }
+    },
+    {
+      "name": "get-frame-elements",
+      "description": "Get all UI elements for a specific frame. More targeted than search-elements when you already have a frame_id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "frame_id": {
+            "type": "integer",
+            "description": "Frame ID"
+          }
+        },
+        "required": [
+          "frame_id"
+        ]
+      }
+    },
+    {
+      "name": "control-recording",
+      "description": "Start or stop audio/screen recording. Use to pause/resume capture.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start-audio",
+              "stop-audio"
+            ],
+            "description": "Recording action"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    }
+  ]
+}

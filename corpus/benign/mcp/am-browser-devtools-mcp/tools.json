@@ -1,0 +1,1984 @@
+{
+  "package": "browser-devtools-mcp",
+  "tools": [
+    {
+      "name": "a11y_take-aria-snapshot",
+      "description": "ARIA snapshot of the page or a scoped element. Returns a tree with refs (e1, e2, ...) and a refs map.\nUse refs in interaction tools: selector \"e1\" or \"@e1\" to click/fill that element. Output includes URL, title, and YAML tree.\nRefs are valid until next snapshot or navigation. interactiveOnly: only interactive elements get refs; omit for content roles (headings, etc.) too.\ncursorInteractive: true adds refs for clickable elements without ARIA (e.g. div with cursor:pointer/onclick).\nUse with a11y_take-ax-tree-snapshot for full UI analysis.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Scope to this element; omit for full page."
+          },
+          "interactiveOnly": {
+            "type": "boolean",
+            "description": "Only interactive elements get refs."
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Max tree depth; 0 = root only."
+          },
+          "compact": {
+            "type": "boolean",
+            "description": "Omit structural nodes without content."
+          },
+          "cursorInteractive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include cursor:pointer / onclick elements."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "a11y_take-ax-tree-snapshot",
+      "description": "Combines Chromium AX tree with runtime visual diagnostics (bounding box, visibility, viewport).\nUse to detect: elements with role/name but hidden or off-screen; layout/geometry issues; overlap/occlusion (enable checkOcclusion).\nWhen investigating UI/layout or when clicks fail on seemingly visible elements, set checkOcclusion:true—it uses elementFromPoint()\nat center+corners to find what is actually on top. boundingBox is from getBoundingClientRect() (viewport coords; layout box only).\nselectorHint is best-effort (data-testid/data-selector/id). Use with a11y_take-aria-snapshot for full UI analysis.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "ARIA/AX role names to include; omit for default set. Standard roles: ARIA https://w3c.github.io/aria/#role_definitions, Chromium AX https://chromium.googlesource.com/chromium/src/+/main/ui/accessibility/ax_enum_util.cc (e.g. button, heading, staticText, image, main, navigation). Matching is case-insensitive; \"text\" also matches staticText, \"img\" matches image."
+          },
+          "includeStyles": {
+            "type": "boolean",
+            "default": true
+          },
+          "includeRuntimeVisual": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include bounding box and visibility."
+          },
+          "checkOcclusion": {
+            "type": "boolean",
+            "default": false,
+            "description": "Use elementFromPoint to detect what is on top."
+          },
+          "onlyVisible": {
+            "type": "boolean",
+            "default": false
+          },
+          "onlyInViewport": {
+            "type": "boolean",
+            "default": false
+          },
+          "textPreviewMaxLength": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 80
+          },
+          "styleProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "display",
+              "visibility",
+              "opacity",
+              "pointer-events",
+              "position",
+              "z-index",
+              "color",
+              "background-color",
+              "border-color",
+              "border-width",
+              "border-style",
+              "font-family",
+              "font-size",
+              "font-weight",
+              "line-height",
+              "letter-spacing",
+              "text-align",
+              "text-decoration-line",
+              "white-space",
+              "overflow",
+              "overflow-x",
+              "overflow-y",
+              "transform",
+              "cursor"
+            ],
+            "description": "CSS property names when includeStyles."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "content_get-as-html",
+      "description": "\nGets the HTML content of the current page. \nBy default, all <script> tags are removed from the output unless \"removeScripts\" is explicitly set to \"false\".\n        ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector or ref; omit for full document."
+          },
+          "removeScripts": {
+            "type": "boolean",
+            "default": true
+          },
+          "removeComments": {
+            "type": "boolean",
+            "default": false
+          },
+          "removeStyles": {
+            "type": "boolean",
+            "default": false
+          },
+          "removeMeta": {
+            "type": "boolean",
+            "default": false
+          },
+          "cleanHtml": {
+            "type": "boolean",
+            "default": false
+          },
+          "minify": {
+            "type": "boolean",
+            "default": false
+          },
+          "maxLength": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 50000
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "content_get-as-text",
+      "description": "Gets the visible text content of the current page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Limit text to this container; omit for full page."
+          },
+          "maxLength": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 50000,
+            "description": "Truncate after this many characters."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "content_save-as-pdf",
+      "description": "Saves the current page as a PDF file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "outputPath": {
+            "type": "string",
+            "default": "C:\\Users\\a\\AppData\\Local\\Temp"
+          },
+          "name": {
+            "type": "string",
+            "default": "page"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "Letter",
+              "Legal",
+              "Tabloid",
+              "Ledger",
+              "A0",
+              "A1",
+              "A2",
+              "A3",
+              "A4",
+              "A5",
+              "A6"
+            ],
+            "default": "A4",
+            "description": "Page size."
+          },
+          "printBackground": {
+            "type": "boolean",
+            "default": false,
+            "description": "Background."
+          },
+          "margin": {
+            "type": "object",
+            "properties": {
+              "top": {
+                "type": "string",
+                "default": "1cm"
+              },
+              "right": {
+                "type": "string",
+                "default": "1cm"
+              },
+              "bottom": {
+                "type": "string",
+                "default": "1cm"
+              },
+              "left": {
+                "type": "string",
+                "default": "1cm"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Margin (e.g. 1cm)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "content_start-recording",
+      "description": "Starts video recording of the browser page.\nRecording captures all page interactions until content_stop-recording is called.\nUses Playwright's native screencast API — works in all modes (headless, headed, persistent, CDP attach).\nOnly supported on Chromium-based browsers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "outputDir": {
+            "type": "string",
+            "default": "C:\\Users\\a\\AppData\\Local\\Temp",
+            "description": "Directory where the video file will be saved."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name for the video file (without extension). Defaults to \"recording\"."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "content_stop-recording",
+      "description": "Stops video recording of the browser page and saves the video file.\nMust be called after content_start-recording. The video is saved as a WebM file.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "content_take-screenshot",
+      "description": "Takes a screenshot of the current page or a specific element.\nDo NOT use for page structure—use ARIA/AX snapshots instead.\nUse only for visual verification (design check, visual bug, contrast, layout).\nScreenshot is saved to disk; use includeBase64 only when the file cannot be read from the returned path (e.g. remote, container).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "outputPath": {
+            "type": "string",
+            "default": "C:\\Users\\a\\AppData\\Local\\Temp"
+          },
+          "name": {
+            "type": "string",
+            "default": "screenshot"
+          },
+          "selector": {
+            "type": "string",
+            "description": "Selector/ref; omit=viewport."
+          },
+          "fullPage": {
+            "type": "boolean",
+            "default": false
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "default": "png"
+          },
+          "quality": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "JPEG quality 0–100."
+          },
+          "includeBase64": {
+            "type": "boolean",
+            "default": false,
+            "description": "Base64 fallback."
+          },
+          "annotate": {
+            "type": "boolean",
+            "default": false,
+            "description": "Overlay ARIA ref labels."
+          },
+          "annotateContent": {
+            "type": "boolean",
+            "default": false,
+            "description": "Annotate headings."
+          },
+          "annotateCursorInteractive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Annotate cursor:pointer elements."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_status",
+      "description": "\nReturns the current debugging status including:\n- Whether debugging is enabled\n- Source map status\n- Exceptionpoint state\n- Count of tracepoints, logpoints, and watches\n- Snapshot statistics\n        ",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "debug_resolve-source-location",
+      "description": "\nResolves a generated/bundled code location to its original source via source maps.\nUseful for translating minified stack traces or bundle line numbers to original TypeScript/JavaScript source.\n\nRequires a page with debugging context (debugging is auto-enabled on first use).\nInput: generated script URL, line, column (1-based).\nOutput: original source path, line, column when a source map is available.\n        ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Generated script URL (bundle)."
+          },
+          "line": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "1-based line in generated code."
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "1-based column; default 1."
+          }
+        },
+        "required": [
+          "url",
+          "line"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_put-tracepoint",
+      "description": "\nPuts a non-blocking tracepoint at the specified location.\nWhen hit, a snapshot of the call stack and local variables is captured \nautomatically without pausing execution.\n\nThe urlPattern matches script URLs. Special characters are auto-escaped.\nExamples:\n- \"app.js\" matches scripts containing \"app.js\"\n- \"bundle.min.js\" matches scripts containing \"bundle.min.js\"\n\nDO NOT escape characters yourself (e.g., don't use \"app\\.js\").\n\nReturns resolvedLocations: number of scripts where the tracepoint was set.\nIf 0, the pattern didn't match any loaded scripts.\n        ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urlPattern": {
+            "type": "string",
+            "description": "Glob pattern for script URL (e.g. **/app.js)."
+          },
+          "lineNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "1-based line."
+          },
+          "columnNumber": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "1-based column."
+          },
+          "condition": {
+            "type": "string",
+            "description": "Only trigger when this expression is true."
+          },
+          "hitCondition": {
+            "type": "string",
+            "description": "Hit count (e.g. == 5, >= 10, % 10 == 0)."
+          }
+        },
+        "required": [
+          "urlPattern",
+          "lineNumber"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_remove-probe",
+      "description": "Removes a tracepoint, logpoint, or watch expression by ID.\n`type`: `tracepoint`, `logpoint`, or `watch`. `id`: the probe or watch ID (from list-probes).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tracepoint",
+              "logpoint",
+              "watch"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Probe or watch ID from list-probes."
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_list-probes",
+      "description": "Lists tracepoints, logpoints, and/or watch expressions. Optional `types`: array of `tracepoint`, `logpoint`, `watch`. If omitted or empty, returns all.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tracepoint",
+                "logpoint",
+                "watch"
+              ]
+            },
+            "description": "List only these types; omit for all."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_clear-probes",
+      "description": "Removes tracepoints, logpoints, and/or watch expressions. Optional `types`: array of `tracepoint`, `logpoint`, `watches`. If omitted or empty, clears all.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tracepoint",
+                "logpoint",
+                "watches"
+              ]
+            },
+            "description": "Which probe types to clear: tracepoint, logpoint, watches. If omitted or empty, all are cleared."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_put-logpoint",
+      "description": "\nPuts a logpoint at the specified location.\nWhen the logpoint is hit, the logExpression is evaluated and the result \nis captured in the snapshot's logResult field.\n\nLogpoints are lightweight - they only capture the log expression result,\nNOT call stack or watch expressions. Use tracepoints for full debug context.\n\nurlPattern matches script URLs (e.g., \"app.js\"). Auto-escaped, do not add backslashes.\n\nlogExpression: a single JavaScript expression (e.g. \"user.name\", \"JSON.stringify({ a, b })\", or \"{ discountAmount, finalAmount, n }\"). Object literals are supported; for maximum compatibility prefer a single variable or JSON.stringify(...).\n\nReturns resolvedLocations: 0 means pattern didn't match any loaded scripts.\n        ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urlPattern": {
+            "type": "string",
+            "description": "Glob pattern for script URL (e.g. **/app.js)."
+          },
+          "lineNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "1-based line in script."
+          },
+          "logExpression": {
+            "type": "string",
+            "description": "JS expression to evaluate and log (e.g. user.name, JSON.stringify({ a, b }), or { x, y })."
+          },
+          "columnNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "1-based column."
+          },
+          "condition": {
+            "type": "string",
+            "description": "Only log when this expression is true."
+          },
+          "hitCondition": {
+            "type": "string",
+            "description": "Hit-count condition (e.g. > 5)."
+          }
+        },
+        "required": [
+          "urlPattern",
+          "lineNumber",
+          "logExpression"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_put-exceptionpoint",
+      "description": "\nSets the exception tracepoint state:\n- \"none\": Don't capture on exceptions\n- \"uncaught\": Capture only on uncaught exceptions\n- \"all\": Capture on all exceptions (caught and uncaught)\n\nWhen an exception occurs, a snapshot is captured with exception details.\n        ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "none",
+              "uncaught",
+              "all"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_get-probe-snapshots",
+      "description": "Retrieves snapshots captured by tracepoints, logpoints, and/or exceptionpoints.\nOptional `types`: array of `tracepoint`, `logpoint`, `exceptionpoint`. If omitted or empty, returns all.\nResponse fields: `tracepointSnapshots`, `logpointSnapshots`, `exceptionpointSnapshots`.\nOptional `probeId` filters tracepoint or logpoint snapshots; `fromSequence` and `limit` apply per type.\nOutput trimming: by default only the top 5 call stack frames are returned, only `local` scope(s) are included, and variables per scope are capped at 20. Override with maxCallStackDepth, includeScopes, maxVariablesPerScope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tracepoint",
+                "logpoint",
+                "exceptionpoint"
+              ]
+            },
+            "description": "Return only these types; omit for all."
+          },
+          "probeId": {
+            "type": "string",
+            "description": "Filter by this probe ID (tracepoint/logpoint)."
+          },
+          "fromSequence": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Snapshots with sequence > this (polling)."
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "maxCallStackDepth": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 5,
+            "description": "Max call stack frames per snapshot. Default 5."
+          },
+          "includeScopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "global",
+                "local",
+                "with",
+                "closure",
+                "catch",
+                "block",
+                "script",
+                "eval",
+                "module",
+                "wasm-expression-stack"
+              ]
+            },
+            "default": [
+              "local"
+            ],
+            "description": "Scope types to include. Default [local] (local only to keep payload small)."
+          },
+          "maxVariablesPerScope": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 20,
+            "description": "Max variables per scope. Default 20."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_clear-probe-snapshots",
+      "description": "Clears snapshots captured by tracepoints, logpoints, and/or exceptionpoints.\nOptional `types`: array of `tracepoint`, `logpoint`, `exceptionpoint`. If omitted or empty, clears all.\nOptional `probeId`: clear only snapshots for this probe (for tracepoint/logpoint).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tracepoint",
+                "logpoint",
+                "exceptionpoint"
+              ]
+            },
+            "description": "Clear only these types; omit for all."
+          },
+          "probeId": {
+            "type": "string",
+            "description": "Clear only this probe (tracepoint/logpoint)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "debug_add-watch",
+      "description": "\nAdds a watch expression to be evaluated at every breakpoint hit.\nWatch expression results are included in the snapshot's watchResults field.\n\nExamples:\n- \"user.name\"\n- \"this.state\"\n- \"items.length\"\n- \"JSON.stringify(config)\"\n\nWatch expressions are evaluated in the context of the paused frame.\n        ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "Expression evaluated at every tracepoint hit (e.g. user.name)."
+          }
+        },
+        "required": [
+          "expression"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interaction_click",
+      "description": "Clicks an element. Accepts selector or ref (e.g. e1, @e1). Set waitForNavigation: true when the click opens a new page — waits for navigation then for network idle so snapshot/screenshot see full content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector or ref from a11y snapshot (e.g. e1, @e1)."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Wait for element, ms. Default 10000."
+          },
+          "waitForNavigation": {
+            "type": "boolean",
+            "default": false,
+            "description": "Wait for navigation triggered by click (parallel with click). Use when click opens a new page."
+          },
+          "waitForTimeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 30000,
+            "description": "Timeout for navigation and for network idle wait (ms). Only when waitForNavigation is true. Default 30000."
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interaction_drag",
+      "description": "Drags an element to a target location. Accepts CSS selectors or refs (e.g. e1, @e1) from the last ARIA snapshot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceSelector": {
+            "type": "string",
+            "description": "CSS selector or ref for the element to drag."
+          },
+          "targetSelector": {
+            "type": "string",
+            "description": "CSS selector or ref for the drop target."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Wait for elements, ms. Default 10000."
+          }
+        },
+        "required": [
+          "sourceSelector",
+          "targetSelector"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interaction_fill",
+      "description": "Fills out an input field. Accepts a CSS selector or a ref from the last ARIA snapshot (e.g. e1, @e1).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector or ref from a11y snapshot for the input."
+          },
+          "value": {
+            "type": "string"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Wait for element, ms. Default 10000."
+          }
+        },
+        "required": [
+          "selector",
+          "value"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interaction_hover",
+      "description": "Hovers an element on the page. Accepts a CSS selector or a ref from the last ARIA snapshot (e.g. e1, @e1).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector or ref from a11y snapshot."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Wait for element, ms. Default 10000."
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interaction_press-key",
+      "description": "Presses a keyboard key with optional \"hold\" and auto-repeat behavior.\n\nKey facts:\n- keyboard.press(key, { delay }) does NOT trigger OS-style auto-repeat.\n- Some UI behaviors (especially scrolling) require repeated keydown events.\n- Use repeat=true + holdMs to approximate real keyboard holding.\n\nExecution logic:\n- If selector is provided, the element is focused first.\n- If holdMs is omitted or repeat=false:\n  → a single keyboard.press() is executed.\n- If holdMs is provided AND repeat=true:\n  → keyboard.press() is called repeatedly until holdMs elapses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Key name (e.g. Enter, ArrowDown, Space)."
+          },
+          "selector": {
+            "type": "string",
+            "description": "Focus this element first; omit for page focus."
+          },
+          "holdMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Ms between keydown and keyup."
+          },
+          "repeat": {
+            "type": "boolean",
+            "default": false,
+            "description": "Repeat key while holdMs (e.g. for scroll)."
+          },
+          "repeatIntervalMs": {
+            "type": "integer",
+            "minimum": 10,
+            "default": 50
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interaction_resize-viewport",
+      "description": "Resizes the PAGE VIEWPORT using Playwright viewport emulation (page.setViewportSize).\n\nThis affects:\n- window.innerWidth / window.innerHeight\n- CSS media queries (responsive layouts)\n- Layout, rendering and screenshots\n\nNotes:\n- This does NOT resize the OS-level browser window.\n- Runtime switching to viewport=null (binding to real window size) is not supported by Playwright.\n  If you need real window-driven responsive behavior, start the BrowserContext with viewport: null\n  and use the window resize tool instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 200
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 200
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interaction_resize-window",
+      "description": "Resizes the REAL BROWSER WINDOW (OS-level window) for the current page using Chrome DevTools Protocol (CDP).\n\nThis tool works best on Chromium-based browsers (Chromium/Chrome/Edge).\nIt is especially useful in headful sessions when you run with viewport emulation disabled (viewport: null),\nso the page layout follows the OS window size.\n\nImportant:\n- If Playwright viewport emulation is enabled (viewport is NOT null), resizing the OS window may not change page layout.\n- On non-Chromium browsers (Firefox/WebKit), CDP is not available and this tool will fail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 200,
+            "description": "Required when state=normal."
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 200,
+            "description": "Required when state=normal."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "maximized",
+              "minimized",
+              "fullscreen"
+            ],
+            "default": "normal",
+            "description": "When not normal, width/height may be ignored."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interaction_select",
+      "description": "Select an option in a dropdown. Accepts a CSS selector or a ref from the last ARIA snapshot (e.g. e1, @e1).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector or ref from a11y snapshot for the dropdown."
+          },
+          "value": {
+            "type": "string"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Wait for element, ms. Default 10000."
+          }
+        },
+        "required": [
+          "selector",
+          "value"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interaction_scroll",
+      "description": "Scrolls the page viewport or a specific scrollable element.\n\nModes:\n- 'by': Scrolls by a relative delta (dx/dy) from the current scroll position.\n- 'to': Scrolls to an absolute scroll position (x/y).\n- 'top': Scrolls to the very top.\n- 'bottom': Scrolls to the very bottom.\n- 'left': Scrolls to the far left.\n- 'right': Scrolls to the far right.\n\nUse this tool to:\n- Reveal content below the fold\n- Jump to the top/bottom without knowing exact positions\n- Bring elements into view before clicking\n- Inspect lazy-loaded content that appears on scroll",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "by",
+              "to",
+              "top",
+              "bottom",
+              "left",
+              "right"
+            ],
+            "default": "by",
+            "description": "by=dx,dy; to=x,y; or edge (top/bottom/left/right)."
+          },
+          "selector": {
+            "type": "string",
+            "description": "Scrollable container: ref (e.g. from latest <a11y_take-aria-snapshot>), getBy… expression, or CSS. Omit for viewport."
+          },
+          "dx": {
+            "type": "number"
+          },
+          "dy": {
+            "type": "number"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "behavior": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "smooth"
+            ],
+            "default": "auto"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "navigation_go-back-or-forward",
+      "description": "\nNavigates to the previous or next page in history.\n- `direction: \"back\"` — previous page in history.\n- `direction: \"forward\"` — next page in history.\n\nIn case of multiple redirects, the navigation will resolve with the response of the last redirect.\nIf cannot go back/forward, returns empty response.\n\nBy default (includeSnapshot: true), an ARIA snapshot with refs is returned. Use `snapshotOptions` for `interactiveOnly` (default false) and `cursorInteractive` (default false), same as a11y_take-aria-snapshot.\n\nWhen `includeScreenshot: true`, the screenshot is always saved to disk; `screenshotFilePath` is returned. By default `outputPath` is the OS temp dir and `name` is \"screenshot\" (same as content_take-screenshot). Use `screenshotOptions.includeBase64: true` only when the file cannot be read from the returned path (e.g. remote, container).\n        ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "back",
+              "forward"
+            ]
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Max wait ms. 0=no timeout."
+          },
+          "waitUntil": {
+            "type": "string",
+            "enum": [
+              "load",
+              "domcontentloaded",
+              "commit"
+            ],
+            "default": "load",
+            "description": "Playwright navigation lifecycle: when the main frame reaches this state. Does not use Playwright networkidle; use waitForNavigation for session network-idle after history navigation."
+          },
+          "waitForNavigation": {
+            "type": "boolean",
+            "default": true,
+            "description": "Wait for navigation then for network idle before snapshot/screenshot. Default true."
+          },
+          "waitForTimeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 30000,
+            "description": "Timeout for navigation and network idle wait (ms). Only when waitForNavigation is true. Default 30000."
+          },
+          "includeSnapshot": {
+            "type": "boolean",
+            "default": true,
+            "description": "Return ARIA snapshot with refs."
+          },
+          "snapshotOptions": {
+            "type": "object",
+            "properties": {
+              "interactiveOnly": {
+                "type": "boolean",
+                "default": false,
+                "description": "Only interactive elements get refs. Default false (content roles like headings also included)."
+              },
+              "cursorInteractive": {
+                "type": "boolean",
+                "default": false,
+                "description": "Include cursor:pointer / onclick elements. Default false."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Options when includeSnapshot is true. Same as <a11y_take-aria-snapshot>."
+          },
+          "includeScreenshot": {
+            "type": "boolean",
+            "default": false,
+            "description": "Take a screenshot after navigation; saved to disk (default: OS temp dir). Use includeBase64 only when file cannot be read from path."
+          },
+          "screenshotOptions": {
+            "type": "object",
+            "properties": {
+              "outputPath": {
+                "type": "string",
+                "default": "C:\\Users\\a\\AppData\\Local\\Temp",
+                "description": "Directory to save the screenshot. Default: OS temp dir."
+              },
+              "name": {
+                "type": "string",
+                "default": "screenshot",
+                "description": "Base name for the screenshot file. Default: \"screenshot\"."
+              },
+              "fullPage": {
+                "type": "boolean",
+                "default": true,
+                "description": "Capture full scrollable page. Default: true."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "png",
+                  "jpeg"
+                ],
+                "default": "png",
+                "description": "Image format. Default: png."
+              },
+              "annotate": {
+                "type": "boolean",
+                "default": true,
+                "description": "Overlay ARIA ref labels on the screenshot. Default: true."
+              },
+              "includeBase64": {
+                "type": "boolean",
+                "default": false,
+                "description": "Include base64 image in response; use only when file cannot be read from path (e.g. remote, container)."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Options when includeScreenshot is true. Same semantics as <content_take-screenshot> (outputPath/name default to tmp and \"screenshot\")."
+          }
+        },
+        "required": [
+          "direction"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "navigation_go-to",
+      "description": "\nNavigates to the given URL.\n**NOTE**: The tool either throws an error or returns a main resource response. \nThe only exceptions are navigation to `about:blank` or navigation to the same URL with a different hash, \nwhich would succeed and return empty response.\n\n**By default** (`includeSnapshot: true`), an ARIA snapshot with refs is taken after navigation and returned in `output` and `refs`; you can use refs (e1, e2, ...) in interaction tools without calling a11y_take-aria-snapshot separately. Use `snapshotOptions` for `interactiveOnly` (default false) and `cursorInteractive` (default false). Set `includeSnapshot: false` to get only url/status/ok.\n\nWhen `includeScreenshot: true`, the screenshot is always saved to disk; `screenshotFilePath` is returned. By default `outputPath` is the OS temp dir and `name` is \"screenshot\" (same as content_take-screenshot). Use `screenshotOptions.includeBase64: true` only when the file cannot be read from the returned path (e.g. remote, container).\n        ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Max wait ms. 0=no timeout."
+          },
+          "waitUntil": {
+            "type": "string",
+            "enum": [
+              "load",
+              "domcontentloaded",
+              "commit"
+            ],
+            "default": "load",
+            "description": "Playwright navigation lifecycle: when the main frame reaches this state. Does not use Playwright networkidle; use waitForNavigation for session network-idle after navigation."
+          },
+          "waitForNavigation": {
+            "type": "boolean",
+            "default": true,
+            "description": "Wait for navigation then for network idle before snapshot/screenshot. Default true."
+          },
+          "waitForTimeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 30000,
+            "description": "Timeout for navigation and network idle wait (ms). Only when waitForNavigation is true. Default 30000."
+          },
+          "includeSnapshot": {
+            "type": "boolean",
+            "default": true,
+            "description": "Return ARIA snapshot with refs after nav."
+          },
+          "snapshotOptions": {
+            "type": "object",
+            "properties": {
+              "interactiveOnly": {
+                "type": "boolean",
+                "default": false,
+                "description": "Only interactive elements get refs. Default false (content roles like headings also included)."
+              },
+              "cursorInteractive": {
+                "type": "boolean",
+                "default": false,
+                "description": "Include cursor:pointer / onclick elements. Default false."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Options when includeSnapshot is true. Same as <a11y_take-aria-snapshot>."
+          },
+          "includeScreenshot": {
+            "type": "boolean",
+            "default": false,
+            "description": "Take a screenshot after navigation; saved to disk (default: OS temp dir). Use includeBase64 only when file cannot be read from path."
+          },
+          "screenshotOptions": {
+            "type": "object",
+            "properties": {
+              "outputPath": {
+                "type": "string",
+                "default": "C:\\Users\\a\\AppData\\Local\\Temp",
+                "description": "Directory to save the screenshot. Default: OS temp dir."
+              },
+              "name": {
+                "type": "string",
+                "default": "screenshot",
+                "description": "Base name for the screenshot file. Default: \"screenshot\"."
+              },
+              "fullPage": {
+                "type": "boolean",
+                "default": true,
+                "description": "Capture full scrollable page. Default: true."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "png",
+                  "jpeg"
+                ],
+                "default": "png",
+                "description": "Image format. Default: png."
+              },
+              "annotate": {
+                "type": "boolean",
+                "default": true,
+                "description": "Overlay ARIA ref labels on the screenshot. Default: true."
+              },
+              "includeBase64": {
+                "type": "boolean",
+                "default": false,
+                "description": "Include base64 image in response; use only when file cannot be read from path (e.g. remote, container)."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Options when includeScreenshot is true. Same semantics as <content_take-screenshot> (outputPath/name default to tmp and \"screenshot\")."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "navigation_reload",
+      "description": "\nReloads the current page.\nIn case of multiple redirects, the navigation resolves with the response of the last redirect.\nIf the reload does not produce a response, returns empty response.\n\nBy default (includeSnapshot: true), an ARIA snapshot with refs is returned. Use `snapshotOptions` for `interactiveOnly` (default false) and `cursorInteractive` (default false), same as a11y_take-aria-snapshot.\n\nWhen `includeScreenshot: true`, the screenshot is saved to disk; `screenshotFilePath` is returned. Default path/name: OS temp dir and \"screenshot\" (same as content_take-screenshot). Use `screenshotOptions.includeBase64: true` only when the file cannot be read from the path.\n        ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "timeout": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Max wait ms."
+          },
+          "waitUntil": {
+            "type": "string",
+            "enum": [
+              "load",
+              "domcontentloaded",
+              "commit"
+            ],
+            "default": "load",
+            "description": "Playwright navigation lifecycle: when the main frame reaches this state. Does not use Playwright networkidle; use waitForNavigation for session network-idle after reload."
+          },
+          "waitForNavigation": {
+            "type": "boolean",
+            "default": true,
+            "description": "Wait for reload then for network idle before snapshot/screenshot. Default true."
+          },
+          "waitForTimeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 30000,
+            "description": "Timeout for reload and network idle wait (ms). Only when waitForNavigation is true. Default 30000."
+          },
+          "includeSnapshot": {
+            "type": "boolean",
+            "default": true,
+            "description": "Return ARIA snapshot with refs."
+          },
+          "snapshotOptions": {
+            "type": "object",
+            "properties": {
+              "interactiveOnly": {
+                "type": "boolean",
+                "default": false,
+                "description": "Only interactive elements get refs. Default false (content roles like headings also included)."
+              },
+              "cursorInteractive": {
+                "type": "boolean",
+                "default": false,
+                "description": "Include cursor:pointer / onclick elements. Default false."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Options when includeSnapshot is true. Same as <a11y_take-aria-snapshot>."
+          },
+          "includeScreenshot": {
+            "type": "boolean",
+            "default": false,
+            "description": "Take a screenshot after reload; saved to disk (default: OS temp dir)."
+          },
+          "screenshotOptions": {
+            "type": "object",
+            "properties": {
+              "outputPath": {
+                "type": "string",
+                "default": "C:\\Users\\a\\AppData\\Local\\Temp",
+                "description": "Directory to save the screenshot. Default: OS temp dir."
+              },
+              "name": {
+                "type": "string",
+                "default": "screenshot",
+                "description": "Base name for the screenshot file. Default: \"screenshot\"."
+              },
+              "fullPage": {
+                "type": "boolean",
+                "default": true,
+                "description": "Capture full scrollable page. Default: true."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "png",
+                  "jpeg"
+                ],
+                "default": "png",
+                "description": "Image format. Default: png."
+              },
+              "annotate": {
+                "type": "boolean",
+                "default": true,
+                "description": "Overlay ARIA ref labels on the screenshot. Default: true."
+              },
+              "includeBase64": {
+                "type": "boolean",
+                "default": false,
+                "description": "Include base64 image in response; use only when file cannot be read from path (e.g. remote, container)."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Options when includeScreenshot is true. Same semantics as <content_take-screenshot> (outputPath/name default to tmp and \"screenshot\")."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "o11y_get-console-messages",
+      "description": "Retrieves console messages/logs from the browser with filtering options.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "all",
+              "debug",
+              "info",
+              "warning",
+              "error"
+            ],
+            "description": "Filter by level (this level or higher)."
+          },
+          "search": {
+            "type": "string",
+            "description": "Filter by message text."
+          },
+          "timestamp": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Only messages at or after this Unix ms."
+          },
+          "sequenceNumber": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Incremental: only messages with sequence > this."
+          },
+          "limit": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 100
+              },
+              "from": {
+                "type": "string",
+                "enum": [
+                  "start",
+                  "end"
+                ],
+                "default": "end",
+                "description": "Keep from start or end when truncating."
+              }
+            },
+            "additionalProperties": false,
+            "default": {
+              "count": 100,
+              "from": "end"
+            }
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "o11y_get-http-requests",
+      "description": "Retrieves HTTP requests from the browser with filtering options.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resourceType": {
+            "type": "string",
+            "enum": [
+              "document",
+              "stylesheet",
+              "image",
+              "media",
+              "font",
+              "script",
+              "texttrack",
+              "xhr",
+              "fetch",
+              "eventsource",
+              "websocket",
+              "manifest",
+              "other"
+            ],
+            "description": "Type filter."
+          },
+          "status": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "max": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false,
+            "description": "HTTP status range."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "2xx only."
+          },
+          "timestamp": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Only requests at or after this Unix ms."
+          },
+          "sequenceNumber": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Incremental: only requests with sequence > this."
+          },
+          "limit": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 100
+              },
+              "from": {
+                "type": "string",
+                "enum": [
+                  "start",
+                  "end"
+                ],
+                "default": "end",
+                "description": "Keep from start or end when truncating."
+              }
+            },
+            "additionalProperties": false,
+            "default": {
+              "count": 100,
+              "from": "end"
+            }
+          },
+          "includeRequestHeaders": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include request headers in each item. Default false."
+          },
+          "includeResponseHeaders": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include response headers in each item. Default false."
+          },
+          "includeResponseBody": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include response body in each item. Default false."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "o11y_get-trace-context",
+      "description": "Gets the OpenTelemetry trace context (trace id and tracestate) from the live browser page when OTEL is enabled.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "o11y_get-web-vitals",
+      "description": "Collects Web Vitals (LCP, INP, CLS, TTFB, FCP) with Google thresholds and recommendations.\nCall after navigation or user actions; use waitMs for more stable LCP/CLS/INP.\nSome metrics may be unavailable depending on browser and interactions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "waitMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30000,
+            "default": 0,
+            "description": "Ms to wait before reading (e.g. let LCP settle)."
+          },
+          "includeDebug": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include entry counts and LCP element hint."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "o11y_new-trace-id",
+      "description": "Generates new OpenTelemetry compatible trace id and sets it to the current session.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "o11y_set-trace-context",
+      "description": "Sets or clears the OpenTelemetry trace context. Empty traceId clears the MCP-pinned trace id (new browser traces get random ids). Empty traceState clears tracestate. Non-empty traceState must be valid W3C tracestate (comma-separated key=value list).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "traceId": {
+            "type": "string"
+          },
+          "traceState": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "react_get-component-for-element",
+      "description": "Finds React component(s) for a DOM element via React Fiber (best-effort). Give selector or (x,y); we resolve the element,\nfind __reactFiber$ on it or ancestors, then build the component stack from the host fiber that owns that node.\nFiber is not a public API—results vary by dev/prod build; names can be displayName, wrappers, or minified.\nwrappersDetected/wrapperFrames help with memo/forwardRef/context. If hostMapping.strategy is ancestor-fallback,\nuse a more specific selector or deeper node for better accuracy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Target element; takes precedence over x/y."
+          },
+          "x": {
+            "type": "integer",
+            "description": "Viewport X when selector omitted."
+          },
+          "y": {
+            "type": "integer",
+            "description": "Viewport Y when selector omitted."
+          },
+          "maxStackDepth": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 30
+          },
+          "includePropsPreview": {
+            "type": "boolean",
+            "default": true,
+            "description": "If true, includes a best-effort, truncated props preview for the nearest component."
+          },
+          "maxPropsPreviewChars": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 2000,
+            "description": "Maximum characters for props preview (after safe stringification)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "react_get-element-for-component",
+      "description": "Maps a React component instance to the DOM elements it renders (DOM footprint) by traversing the Fiber graph.\nPrefer an anchor (anchorSelector or anchorX/anchorY) to target the instance; optionally add a query\n(componentName, fileNameHint, lineNumber) to search Fiber. With both, we rank candidates and pick the best match near the anchor.\nReact DevTools hook gives reliable root discovery (getFiberRoots); without it we fall back to DOM scan for __reactFiber$ (best-effort).\nFor more reliable roots in a persistent browser, install the React Developer Tools Chrome extension.\nDebug source is best-effort and may be missing in some builds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "anchorSelector": {
+            "type": "string",
+            "description": "Anchor selector/ref."
+          },
+          "anchorX": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Viewport X when anchorSelector omitted."
+          },
+          "anchorY": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Viewport Y when anchorSelector omitted."
+          },
+          "componentName": {
+            "type": "string"
+          },
+          "matchStrategy": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "contains"
+            ],
+            "default": "contains"
+          },
+          "fileNameHint": {
+            "type": "string",
+            "description": "File hint."
+          },
+          "lineNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "maxElements": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 200
+          },
+          "onlyVisible": {
+            "type": "boolean",
+            "default": true
+          },
+          "onlyInViewport": {
+            "type": "boolean",
+            "default": true
+          },
+          "textPreviewMaxLength": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 80
+          },
+          "maxMatches": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 5
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scenario-add",
+      "description": "Adds a new scenario. A scenario is a reusable JS script (like execute) that can call tools via callTool().\nScenarios are stored on disk under the scenarios.json file (project-level by default, or global with scope=\"global\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique scenario name (used as key)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of what this scenario does."
+          },
+          "script": {
+            "type": "string",
+            "description": "JavaScript code to execute. Same sandbox as <execute>: use await callTool(name, input, returnOutput?) to invoke tools."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "default": "project",
+            "description": "Storage scope (default: project)."
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "script"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scenario-update",
+      "description": "Updates an existing scenario's description and/or script.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the scenario to update."
+          },
+          "description": {
+            "type": "string",
+            "description": "New description (omit to keep current)."
+          },
+          "script": {
+            "type": "string",
+            "description": "New script (omit to keep current)."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "default": "project",
+            "description": "Storage scope (default: project)."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scenario-delete",
+      "description": "Deletes a scenario by name.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the scenario to delete."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "default": "project",
+            "description": "Storage scope (default: project)."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scenario-list",
+      "description": "Lists all available scenarios. When scope is omitted, returns scenarios from both project and global scopes (project overrides global for same name).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "description": "Filter by scope. Omit to list from both (project overrides global)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scenario-search",
+      "description": "Searches scenarios by query across both project and global scopes.\nUses configurable search strategy (SEARCH_STRATEGY or SCENARIO_SEARCH_STRATEGY env var).\nReturns matching scenarios ranked by relevance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 10,
+            "description": "Maximum number of results (default: 10)."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "stub_clear",
+      "description": "Clears stubs installed.\n\n- If stubId is provided, clears only that stub.\n- If stubId is omitted, clears all stubs for the current session/context.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stubId": {
+            "type": "string",
+            "description": "Remove this stub; omit to clear all."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "stub_intercept-http-request",
+      "description": "Installs a request interceptor stub that can modify outgoing requests before they are sent.\n\nUse cases:\n- A/B testing / feature flags (inject headers)\n- Security testing (inject malformed headers / payload)\n- Edge cases (special characters, large payload)\n- Auth simulation (add API keys / tokens in headers)\n\nNotes:\n- pattern is a glob matched against the full request URL (picomatch).\n- This modifies requests; it does not change responses.\n- times limits how many times the interceptor applies (-1 means infinite).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "URL glob (picomatch)."
+          },
+          "modifications": {
+            "type": "object",
+            "properties": {
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "body": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array"
+                  }
+                ]
+              },
+              "method": {
+                "type": "string",
+                "description": "Override method (e.g. GET, POST)."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Changes to apply to the request."
+          },
+          "delayMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "times": {
+            "type": "integer",
+            "description": "Max applications; -1 = infinite."
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "stub_list",
+      "description": "Lists currently installed stubs for the active browser context/session.\nUseful to debug why certain calls are being mocked/intercepted.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "stub_mock-http-response",
+      "description": "Installs a response stub for matching requests using glob patterns (picomatch).\n\nUse cases:\n- Offline testing (return 200 with local JSON)\n- Error scenarios (force 500/404 or abort with timedout)\n- Edge cases (empty data / huge payload / special characters)\n- Flaky API testing (chance < 1.0)\n- Performance testing (delayMs)\n\nNotes:\n- pattern is a glob matched against the full request URL.\n- stubs are evaluated in insertion order; first match wins.\n- times limits how many times the stub applies (-1 means infinite).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "URL glob."
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "fulfill",
+                  "abort"
+                ],
+                "default": "fulfill"
+              },
+              "status": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "body": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array"
+                  }
+                ]
+              },
+              "abortErrorCode": {
+                "type": "string",
+                "description": "Error code when action=abort."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Response."
+          },
+          "delayMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "times": {
+            "type": "integer",
+            "description": "Max times to apply; -1=infinite."
+          },
+          "chance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Probability 0–1; omit=always."
+          }
+        },
+        "required": [
+          "pattern",
+          "response"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sync_wait-for-network-idle",
+      "description": "Waits until the page is network-idle: in-flight requests <= maxConnections for at least idleTimeMs (server-side tracking, no page globals).\nUse before SPAs, screenshots, or AX snapshots for stable results. With long-polling, increase maxConnections or use shorter idleTimeMs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 30000,
+            "description": "Max wait ms before failing."
+          },
+          "idleTimeMs": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 500,
+            "description": "Network must stay idle for this many ms to resolve."
+          },
+          "maxConnections": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Idle when in-flight requests <= this."
+          },
+          "pollIntervalMs": {
+            "type": "integer",
+            "minimum": 10,
+            "default": 50,
+            "description": "Polling interval ms."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "execute",
+      "description": "Batch-execute multiple tool calls in a single request via custom JavaScript. Reduces round-trips and token usage.\n\n**IMPORTANT** \n- The code is already run inside an async function. Pass only the body (statements). \n  Do NOT wrap in `async function() { ... }` or `async () => { ... }` — that causes a syntax error. \n  Write `await callTool(...); return x;` directly.\n\n**IMPORTANT:** \n- `page` (Playwright Page) is available in the VM — use it for navigation or `page.evaluate()`. \n- Prefer interaction tools with refs (e1, e2 from a11y_take-aria-snapshot); use raw Playwright only as last resort.\n- `document`/`window` are not in the VM — use `page.evaluate(() => { ... })` to run code in the browser.\n- Use `waitForNavigation: true` on interaction_click when the click navigates. \n- After navigation, do not continue with refs from the previous page — take fresh refs with a11y_take-aria-snapshot first.\n\nBindings:\n- await callTool(name, input, returnOutput?): async — always use with await. Returns the tool output for in-code use.\n  returnOutput=true also includes it in the response toolOutputs array; false (default) omits it.\n  Throws on failure — execution stops at the first error; partial toolOutputs/logs are still returned.\n  On failure, failedTool in the response identifies which tool caused the error.\n  Max 50 callTool invocations per execution.\n- console.log/warn/error: captured in the response logs array.\n- sleep(ms): async delay.\n\nBuilt-ins: Math, JSON, Date, RegExp, Number, String, Boolean, Array, Object, Promise, Map, Set, WeakMap, WeakSet, \n           Symbol, Proxy, Reflect, URL, URLSearchParams, TextEncoder/Decoder, structuredClone, \n           crypto.randomUUID(), AbortController, setTimeout/clearTimeout.\nNOT available: require, import, process, fs, Buffer, fetch.\n\n\n**Example** — fill form, submit (with navigation wait), then snapshot and screenshot:\n  await callTool('interaction_fill', { selector: 'e3', value: 'user@test.com' });\n  await callTool('interaction_fill', { selector: 'e5', value: 'secret123' });\n  await callTool('interaction_click', { selector: 'e7', waitForNavigation: true });\n  // Or with page.locator: await page.locator('button').click();\n  // Or with page.evaluate: await page.evaluate(() => document.querySelector('button').click());\n  await callTool('a11y_take-aria-snapshot', {}, true);\n  await callTool('content_take-screenshot', {}, true);",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "JavaScript code: the body only (no async function wrapper). Use await callTool(name, input, returnOutput?) and return for result. Do NOT wrap in async function() { ... }."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 120000,
+            "default": 30000,
+            "description": "Wall-clock timeout for the entire execution in ms, including awaited tool calls and sleep (default: 30000, max: 120000)."
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scenario-run",
+      "description": "Runs a saved scenario by name. Looks up the scenario in project scope first, then global.\nThe scenario's JS script runs in the same sandbox as execute: callTool(), console, sleep are available.\nScenarios can compose other scenarios via callTool('scenario-run', { name: '...' }).\nMax recursion depth: 5.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the scenario to run."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "description": "Wall-clock timeout in ms (default: 30000)."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

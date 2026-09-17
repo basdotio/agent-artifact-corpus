@@ -1,0 +1,259 @@
+{
+  "package": "mpp32-mcp-server",
+  "tools": [
+    {
+      "name": "get_mpp32_diagnostics",
+      "description": "Report what the mpp32-mcp-server detected at startup: version, API URL, env vars (MPP32_AGENT_KEY, MPP32_SOLANA_PRIVATE_KEY, MPP32_PRIVATE_KEY, MPP32_PREFERRED_NETWORK), and a live API connectivity check. Use this FIRST if payments fail with 'no key configured' even though you set one in claude_desktop_config.json.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "debug_mpp32",
+      "description": "Alias for get_mpp32_diagnostics. Reports env-var detection, API connectivity, and ready-to-pay status.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_mpp32_services",
+      "description": "Browse the MPP32 federated catalog of 4,500+ machine-payable APIs and data services. Includes native MPP32 services (callable end-to-end through this MCP), the x402 Bazaar (USDC on Solana), curated free APIs (DexScreener, Jupiter, CoinGecko health, httpbin, etc.), and the public MCP Registry (npx-installable servers; listing-only). Each result indicates whether it is callable through `call_mpp32_endpoint` or listing-only. The catalog is large (~4,500 entries) — by default a single call returns up to 100 results and the response will tell you the true total and whether the page was truncated. Use `q` (free-text search), `category`, `source`, or `protocol` to narrow down, or raise `limit` (max 500) for broader pages.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Filter by category slug (e.g. 'ai-inference', 'token-scanner', 'price-oracle', 'web-search', 'defi-analytics')."
+          },
+          "q": {
+            "type": "string",
+            "description": "Free-text search across name, description, tags, and category."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "native",
+              "x402-bazaar",
+              "mcp-registry",
+              "curated",
+              "free"
+            ],
+            "description": "Filter by catalog source. 'native' = callable end-to-end; 'curated'/'free' = often callable; 'x402-bazaar'/'mcp-registry' = mostly listing-only."
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "x402",
+              "tempo",
+              "acp",
+              "ap2",
+              "agtp"
+            ],
+            "description": "Filter by payment protocol (e.g. 'x402' for USDC-settled services)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Max results (default 100, max 500)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "call_mpp32_endpoint",
+      "description": "Call any HTTP-callable service in the MPP32 federated catalog. Free services return immediately. Paid services return a 402 challenge that this tool will sign and retry automatically when a payment key (MPP32_SOLANA_PRIVATE_KEY for x402-on-Solana, MPP32_PRIVATE_KEY for x402-on-Base/Ethereum and Tempo pathUSD) is configured. Set MPP32_AGENT_KEY for dashboard tracking. Use `list_mpp32_services` first to find a slug. Many catalog entries store only the upstream BASE URL (e.g. `https://api.exa.ai`) — pass the upstream path (e.g. `/search`) via the `path` argument when calling those. Listing-only entries (npx-installable MCP servers, etc.) cannot be called through this tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Service slug from `list_mpp32_services` (e.g. 'curated:exa', 'mpp32-intelligence')."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE"
+            ],
+            "default": "POST",
+            "description": "HTTP method."
+          },
+          "path": {
+            "type": "string",
+            "description": "Upstream path appended to the service's base URL (e.g. '/search' for Exa, '/v1/chat/completions' for OpenAI). Leave empty for catalog entries that already store a full path, or for native MPP32 services. Always begins with '/'."
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            ],
+            "description": "JSON body (object or stringified) for POST/PUT/DELETE."
+          },
+          "query": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "URL query parameters as key-value pairs."
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_solana_token_intelligence",
+      "description": "Get real-time Solana token intelligence from the MPP32 Intelligence Oracle. Returns alpha score (0-100), rug risk assessment, whale activity, smart money signals, 24h pump probability, projected ROI ranges, and aggregated DexScreener/Jupiter/CoinGecko market data. Costs $0.008 per query, paid automatically via x402 (USDC on Solana) or Tempo (pathUSD on Eth L2). M32 token holders receive up to 40% discount once their wallet is signature-verified. Set MPP32_AGENT_KEY in config to attribute calls to your dashboard.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Solana token mint address or ticker symbol (e.g. SOL, BONK, JUP, M32, or full base58 address)."
+          },
+          "walletAddress": {
+            "type": "string",
+            "description": "Optional Solana wallet address. Used for M32-holder discount preview; discount only applies after SIWS wallet-signature verification."
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_m32_whale_tracker",
+      "description": "M32-gated whale analysis for any Solana token. Returns top 20 holders, concentration risk, holder distribution, and buy/sell pressure. Requires the caller to hold 1,000,000+ M32 tokens (balance verified on-chain via X-Wallet-Address header). Free for qualifying holders — no payment required. Returns 403 if the wallet holds insufficient M32.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Solana token mint address to analyze for whale activity."
+          },
+          "walletAddress": {
+            "type": "string",
+            "description": "Your Solana wallet address. M32 balance is checked on-chain to verify you hold 1M+ M32."
+          }
+        },
+        "required": [
+          "token",
+          "walletAddress"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compare_tokens_m32",
+      "description": "M32-gated head-to-head intelligence comparison of two Solana tokens. Returns side-by-side alpha scores, rug risk, whale activity, volume, liquidity, market data, and a winner verdict. Requires the caller to hold 2,500,000+ M32 tokens (balance verified on-chain via X-Wallet-Address header). Free for qualifying holders. Returns 403 if insufficient M32.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tokenA": {
+            "type": "string",
+            "description": "First Solana token mint address."
+          },
+          "tokenB": {
+            "type": "string",
+            "description": "Second Solana token mint address."
+          },
+          "walletAddress": {
+            "type": "string",
+            "description": "Your Solana wallet address. M32 balance is checked on-chain to verify you hold 2.5M+ M32."
+          }
+        },
+        "required": [
+          "tokenA",
+          "tokenB",
+          "walletAddress"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scan_portfolio_m32",
+      "description": "M32-gated full wallet portfolio scan. Discovers all SPL tokens in a Solana wallet, runs intelligence on top holdings, and returns per-token analysis with aggregate portfolio risk metrics. Requires the caller to hold 5,000,000+ M32 tokens (balance verified on-chain via X-Wallet-Address header). Free for qualifying holders. Returns 403 if insufficient M32.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "Solana wallet address to scan for token holdings."
+          },
+          "walletAddress": {
+            "type": "string",
+            "description": "Your Solana wallet address. M32 balance is checked on-chain to verify you hold 5M+ M32."
+          }
+        },
+        "required": [
+          "wallet",
+          "walletAddress"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "manage_agent_budget",
+      "description": "View, set, or reset the spending circuit breaker for your MPP32 agent session. Use 'get' to check current budget status (remaining budget, hourly velocity, circuit breaker state). Use 'set' to configure spending limits (budget cap in USD, hourly velocity limit, alert threshold percentage). Use 'reset' to manually reset a tripped circuit breaker so the session can resume spending. Circuit breakers trip automatically when budget or velocity limits are exceeded, preventing runaway agent spending.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "get",
+              "set",
+              "reset"
+            ],
+            "description": "Action: 'get' = view budget status, 'set' = update limits, 'reset' = clear tripped circuit breaker"
+          },
+          "budgetLimitUsd": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1000000,
+            "description": "Maximum total session spend in USD. Only used with action='set'."
+          },
+          "velocityLimitUsd": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1000000,
+            "description": "Maximum spend per hour in USD. Only used with action='set'."
+          },
+          "alertThresholdPercent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Budget percentage at which to warn (e.g. 80 = warn at 80% spent). Only used with action='set'."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

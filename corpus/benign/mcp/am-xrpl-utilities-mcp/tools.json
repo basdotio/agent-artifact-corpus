@@ -1,0 +1,406 @@
+{
+  "package": "@xrpl-utilities/mcp",
+  "tools": [
+    {
+      "name": "xrpl_sentinel_scan",
+      "description": "Classify an XRPL wallet by its on-chain activity pattern. Returns activity_score (0-100, higher = more automated/service-like), activity_level (Low/Medium/High/Dormant/Unknown), confidence, signals[] from a 35-entry behavioral catalog, top_counterparties[] with public labels, an AI-generated reasoning narrative, and a _delta block when prior recorded scans exist. Costs $0.10 USD per call paid via x402 (XRP/RLUSD on XRPL or USDC on Base). Pass payment_signature from your x402-xrpl client.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "XRPL classic address (r-prefixed, base58).",
+            "pattern": "^r[1-9A-HJ-NP-Za-km-z]{24,34}$"
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header (base64-encoded JSON of a signed XRPL Payment matching one of the requirements returned by an initial unauthenticated probe). Omit for free marketing-site preview, supply for the paid agent path."
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_sentinel_scan_history",
+      "description": "Return up to 25 prior recorded scans for an address so an agent can read trajectory without scanning the wallet N times. Each history row carries score, level, signals, features, and scanned_at. Costs $0.10 USD per call paid via x402 (XRP/RLUSD on XRPL or USDC on Base). Recording began with schema 2.1.0; older paid scans were not persisted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "XRPL classic address.",
+            "pattern": "^r[1-9A-HJ-NP-Za-km-z]{24,34}$"
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_pulse_recent_events",
+      "description": "Return the most-recent normalized XRPL signal events newest-first. Mixes six streams: public-source news (regulatory press + central banks + crypto media filtered for XRP/RLUSD/XRPL/Ripple), on-chain whale activity (every Payment above the storage threshold), XLS-70/80/81 permissioned-domain lifecycle events sourced from XR-Trust, Sentinel state-change signals (activity-level transitions + first-fire of INSTITUTIONAL_SCALE_FLOW / DORMANT_REAWAKENING / SCORE_TRAJECTORY_BOT_ONBOARDING), RWA issuer per-mint/per-burn flow (Ondo OUSG, Schuman EUROP, Braza USDB + BBRL, SG-FORGE EURCV, Guggenheim DCP, Justoken JMWH, OpenEden TBL, RLUSD, AUDD, Archax abrdn MMF), and RWA issuer daily aggregate snapshots (obligations + trustline-count deltas per UTC day, with treasury-balance subtraction for OpenEden TBL). Each event carries title, brief, published_at, source_appearances[], correlation (news only), active_utility (per-source canonical shape), and target_addresses[]. Costs $0.10 USD per call paid via x402 (XRP/RLUSD on XRPL or USDC on Base).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Max events to return (1-500). Default 50.",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 50
+          },
+          "since_iso": {
+            "type": "string",
+            "description": "ISO 8601 timestamp; only events with published_at >= this are returned. Optional."
+          },
+          "before_iso": {
+            "type": "string",
+            "description": "ISO 8601 cursor for backward pagination. When set, only events strictly older than this timestamp are returned. Pair with the oldest event's published_at from a prior response to walk backward through history. Optional."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "news",
+              "activity"
+            ],
+            "description": "Source-bucket filter. 'news' returns RSS sources only; 'activity' returns whale + sentinel_signal + permissioned_domain rows. Omit to return the mixed feed."
+          },
+          "min_whale_usd": {
+            "type": "number",
+            "description": "Suppress whale events below this USD threshold. Default $1,000,000 (whale-grade only). Pass 0 to see the full $50k+ activity stream.",
+            "minimum": 0
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_pulse_events_by_address",
+      "description": "Return Pulse events that reference a specific XRPL classic address, newest-first. Match strategy spans all event sources: whale events where the address is sender or receiver, sentinel_signal events for that address, news + permissioned- domain events whose target_addresses[] includes it. Useful as the on-chain-history complement to xrpl_sentinel_scan (behavioral classification of one wallet); together they answer 'what does this wallet look like AND what has it actually been doing on the public feed?'. No title-similarity clustering on this endpoint - events about the same wallet aren't necessarily about the same story. Costs $0.10 USD per call paid via x402 (XRP/RLUSD on XRPL or USDC on Base).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "XRPL classic address (starts with 'r', 25-35 chars)."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max events to return (1-200). Default 50.",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50
+          },
+          "since_iso": {
+            "type": "string",
+            "description": "ISO 8601 timestamp; only events with published_at >= this are returned. Optional."
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_pulse_stream_purchase",
+      "description": "Buy a time-boxed XR-Pulse live WebSocket subscription. Returns a stream_token (HS256 JWT) plus a ws_url. Open the WebSocket and pass the token as the ?token= query parameter; events are pushed as they fire, with server-side filtering by source / signal / min USD value bound into the token at purchase time. Tiers: 1h ~$0.50, 6h ~$2.50, 24h ~$7.50 (XRP/RLUSD on XRPL or USDC on Base via x402). Reconnect with the same token until expires_at_unix; no event replay across reconnects (use xrpl_pulse_recent_events to catch up history). The WebSocket itself is not exposed as an MCP tool (MCP is request/response) — agents take the token and open the WebSocket directly. v2 of this surface will swap the time-boxed billing for native XRPL Payment Channels with per-message claims.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "duration": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "6h",
+              "24h"
+            ],
+            "description": "Subscription window length. Default 1h.",
+            "default": "1h"
+          },
+          "min_usd": {
+            "type": "number",
+            "description": "Optional server-side filter: drop whale-style events whose active_utility.usd_value is below this floor. Bound into the JWT — change filters means buying a new subscription.",
+            "minimum": 0
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional source allowlist (whale_xrpl, sentinel_signal, permissioned_domain_lifecycle, rwa_issuer_flow, rwa_issuer_daily, rwa_amm_pool_state, plus any news source key). Omit to receive every source.",
+            "maxItems": 32
+          },
+          "signals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional signal allowlist (whale_transfer, INSTITUTIONAL_SCALE_FLOW, issuer_deepfreeze, token_escrow_event, permissioned_dex_event, etc.). Filters on active_utility.signal (whale-style) or active_utility.signals[].signal (news-style).",
+            "maxItems": 32
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_telemetry_snapshot",
+      "description": "One-shot XRPL macro snapshot. Returns supply (total / circulating / escrowed / dormant / AMM-locked / exchange omnibus / DEX orderbook depth), liquidity (per-region 24h flows), amm (top pairs + vaults), derived_models.active_float (modeled supply available for 3-second settlement, with the full additive mathematical_bridge), and utility_floor (baseline equilibrium price + premium ratio). Standard x402 verify-then-work-then-settle. $0.10 USD per call. Pass payment_signature.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_telemetry_get_quote",
+      "description": "Start the async invoice flow: returns invoice_id, amount in drops, payTo address, deepLink + QR, and expiry. The caller pays the XRPL Payment to that address from any wallet, then polls xrpl_telemetry_get_status until paid: true, then calls xrpl_telemetry_get_results. The MCP wrapper itself doesn't require a payment_signature header, but the snapshot still costs $0.10 USD - the payment just happens out-of-band as a regular XRPL Payment instead of an inline x402 header.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_telemetry_get_status",
+      "description": "Poll the status of an invoice from xrpl_telemetry_get_quote. Returns paid (bool), amount, ledger_index when settled, and expiry. The MCP wrapper itself doesn't require a payment header (the operator's check is just reading the validated XRPL ledger for the deposit transaction).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "invoice_id": {
+            "type": "string",
+            "description": "Invoice id from the /quote response."
+          }
+        },
+        "required": [
+          "invoice_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_telemetry_get_results",
+      "description": "Fetch the full TelemetryPayload for an invoice once paid. Same shape as xrpl_telemetry_snapshot. The MCP wrapper doesn't need a payment header here because the $0.10 already settled when the caller paid the deeplink in step 2 of the flow.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "invoice_id": {
+            "type": "string",
+            "description": "Paid invoice id."
+          }
+        },
+        "required": [
+          "invoice_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_trust_list_domains",
+      "description": "Enumerate all XRPL PermissionedDomain (XLS-80) ledger objects on validated mainnet. Each record carries domain_id, owner_address, owner_label (XRPScan), accepted_credentials[] (with hex-decoded credential_type when ASCII-printable), institutional_issuer_count, and full ledger metadata. Walk_status indicates snapshot completeness. $0.10 USD per call paid via x402.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 100
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_trust_get_domain",
+      "description": "Drill down on a single PermissionedDomain by 64-hex LedgerIndex. Returns the list-view fields plus lifecycle (created_at, last_modified_at, modification_count, walked from PreviousTxnID meta chain), permissioned_market (XLS-81 owner-side offers + AMMs), and identity (XLS-40 DID + parsed .well-known/xrp-ledger.toml when published). $0.10 USD per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain_id": {
+            "type": "string",
+            "description": "64-character hex LedgerIndex of the PermissionedDomain object.",
+            "pattern": "^[A-Fa-f0-9]{64}$"
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "required": [
+          "domain_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_trust_credential_issuers",
+      "description": "Aggregated view of every distinct credential issuer referenced across all PermissionedDomain objects. Each entry: issuer_address, issuer_label, domains_referencing (count), credential_types_issued (sorted unique). Useful for ranking which institutional issuers are most adopted on-chain. $0.10 USD per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_trust_recent_events",
+      "description": "XLS-70/80/81 lifecycle event stream sourced from XR-Trust's long-lived XRPL WebSocket subscribe loop. Each event carries tx_type (PermissionedDomainSet/Delete, CredentialCreate/Accept/Delete, OfferCreate/OfferCancel, AMMCreate/etc.), tx_hash, account, domain_id, ledger_index, and tx_type-specific payload (credential_type for XLS-70, taker_gets/pays for XLS-81). Cursor via since=trust_lifecycle_<n>. $0.10 USD per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "string",
+            "description": "Event-id cursor (e.g. 'trust_lifecycle_42'); only events after this id are returned. Optional."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 100
+          },
+          "tx_type": {
+            "type": "string",
+            "description": "Comma-separated filter on TransactionType (e.g. 'PermissionedDomainSet,CredentialCreate'). Optional."
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_vault_scan",
+      "description": "Per-issuer real-world-asset deep dive on the XRP Ledger. Accepts {issuer: <wallet OR logical_label OR currency>} and returns the issuer's metadata, current obligations + net-circulating supply (treasury-adjusted where applicable), trustline count, last-24h mint and burn flow, AMM-of-RWA pool exposure (every XLS-30 pool containing this issuer's IOU with native-unit balances + LP supply), and a daily history series that accrues over time. Tracked issuer set covers Ondo OUSG (permissioned + public), Schuman EUROP, Braza USDB, Braza BBRL, SG-FORGE EURCV, Guggenheim DCP (Zeconomy SPV), Justoken JMWH (in MWh, not USD), OpenEden TBL, Ripple RLUSD, AUDD, plus Archax abrdn USD Liquidity Fund as rails-only for first-mint capture. $0.10 USD per call paid via x402 v2 (XRP/RLUSD on XRPL via t54 facilitator, or USDC on Base via Coinbase facilitator).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "description": "Wallet (r-prefix XRPL classic address; exact match) OR logical_label (e.g. 'Ondo OUSG', 'Justoken JMWH'; case-insensitive) OR currency code (e.g. 'OUSG', 'TBL', 'RLUSD'; case-insensitive). Resolution priority: wallet > logical_label > currency. Returns 404 when no tracked issuer matches."
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "required": [
+          "issuer"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_flows_scan",
+      "description": "Per-ETF deep dive for any of the six US-listed spot XRP ETFs (Bitwise XRP, Canary XRPC, Franklin Templeton XRPZ, Grayscale GXRP, 21Shares TOXR, REX-Osprey XRPR). Returns the ticker's registry metadata (launch date, expense ratio, source URL, asset class, any operator caveat), latest reading (current AUM, xrp_held when available, NAV, source lineage), full accruing daily history with per-day AUM and source labels, and the latest XRPL exchange-flow delta row from XR-Pulse as the on-chain side of the correlation. An inline re-scrape fires before the response is built so the latest_reading is current-as-of-call, not as-of-last-hourly-loop. $0.10 USD per call paid via x402 v2 (XRPL `exact` scheme, t54 facilitator; XRP and RLUSD both accepted).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "ETF ticker (case-insensitive). One of XRP, XRPC, XRPZ, GXRP, TOXR, XRPR. Returns 404 when the ticker is not in the operator-curated registry."
+          },
+          "payment_signature": {
+            "type": "string",
+            "description": "x402 v2 PAYMENT-SIGNATURE header."
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_flows_correlation",
+      "description": "Daily ETF AUM and XRPL exchange-flow delta for the six US-listed spot XRP ETFs (Bitwise XRP, Canary XRPC, Franklin XRPZ, Grayscale GXRP, 21Shares TOXR, REX-Osprey XRPR). Returns per-ticker daily AUM with day-over-day delta, a chain_flow_daily series from XR-Pulse, and a 7-day rolling Pearson coefficient measuring how tightly ETF flow aligns with on-chain flow. CORRELATION ONLY, NEVER CAUSATION: ETFs hold XRP via pooled institutional custody so on-chain wallets cannot be attributed to a specific fund. v1.0.0: per-issuer scrapers are stubbed; AUM fields return null until v1.x lands real readings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "default": 30,
+            "description": "Days of history to return (1-90, default 30)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_flows_cross_border_flow",
+      "description": "XRPL institutional cross-border settlement edges: country-pair flow aggregates over a configurable window. A Payment counts as a cross-border edge only when BOTH sender and receiver XRPScan labels resolve to operator-curated jurisdictions AND those countries differ. Returns per-country inbound/outbound/net USD plus top corridors plus an honest coverage block. Labeled wallets only - the institutional/exchange/issuer layer, not retail. Free; aggregates of public on-chain data.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "window_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "default": 30,
+            "description": "Trailing window in UTC days."
+          },
+          "top_corridors": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 20,
+            "description": "Cap on the top_corridors[] list."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "xrpl_flows_launch_impact",
+      "description": "Per-ETF launch-window analysis: for each tracked spot XRP ETF, returns its launch date and a [L-30, L+30] window summary of XRPL exchange-flow delta + DEX volume. The post-window vs pre-window ratio is the headline 'launch impact' figure. Static analysis; recomputed on demand rather than polled. v1.0.0 returns the launch metadata only; the on-chain delta window analysis lands once Pulse /stats/exchange-flow-delta is shipped and a recompute pass runs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  ]
+}

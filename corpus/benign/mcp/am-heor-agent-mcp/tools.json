@@ -1,0 +1,2597 @@
+{
+  "package": "heor-agent-mcp",
+  "tools": [
+    {
+      "name": "literature.search",
+      "description": "Search PubMed, ClinicalTrials.gov, bioRxiv/medRxiv, ChEMBL, FDA Orange Book, FDA Purple Book, enterprise sources (Embase, ScienceDirect, Cochrane, Citeline, Pharmapendium, Cortellis), HTA cost reference sources (CMS NADAC, PSSRU, NHS National Cost Collection, BNF, PBS Schedule), LATAM sources (DATASUS, CONITEC, ANVISA, PAHO, IETS, FONASA), APAC sources (HITAP), and HTA appraisal/guidance sources (NICE TAs, CADTH CDR/pCODR, ICER, PBAC PSDs, G-BA AMNOG, HAS Transparency Committee, IQWiG, AIFA, TLV Sweden, INESSS Quebec) for evidence on a drug or indication. Returns structured results including HTA precedents and appraisal decisions with a full audit trail suitable for HTA submissions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Research question (e.g. 'semaglutide type 2 diabetes cost-effectiveness')"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "pubmed",
+                "clinicaltrials",
+                "biorxiv",
+                "chembl",
+                "embase",
+                "sciencedirect",
+                "who_gho",
+                "world_bank",
+                "all_of_us",
+                "oecd",
+                "ihme_gbd",
+                "orange_book",
+                "purple_book",
+                "cochrane",
+                "citeline",
+                "pharmapendium",
+                "cortellis",
+                "google_scholar",
+                "cms_nadac",
+                "pssru",
+                "nhs_costs",
+                "bnf",
+                "pbs_schedule",
+                "datasus",
+                "conitec",
+                "anvisa",
+                "paho",
+                "iets",
+                "fonasa",
+                "hitap",
+                "nice_ta",
+                "cadth_reviews",
+                "icer_reports",
+                "pbac_psd",
+                "gba_decisions",
+                "has_tc",
+                "iqwig",
+                "aifa",
+                "tlv",
+                "inesss",
+                "ispor",
+                "wiley",
+                "ohe",
+                "euroqol"
+              ]
+            },
+            "description": "Data sources to query. Default: pubmed, clinicaltrials, biorxiv, chembl, wiley (+ embase if ELSEVIER_API_KEY set). Use 'who_gho' and 'world_bank' for epidemiology and demographic data. Use 'oecd' for OECD health statistics (expenditure, hospital beds, physicians, life expectancy). Use 'ihme_gbd' for Global Burden of Disease estimates. Use 'orange_book' for FDA drug approvals. Use 'purple_book' for FDA biologics and biosimilars. Enterprise (require API key): 'cochrane' (COCHRANE_API_KEY), 'citeline' (CITELINE_API_KEY), 'pharmapendium' (PHARMAPENDIUM_API_KEY), 'cortellis' (CORTELLIS_API_KEY). HTA cost refs: 'cms_nadac', 'pssru', 'nhs_costs', 'bnf', 'pbs_schedule'. LATAM sources: 'datasus', 'conitec', 'anvisa', 'paho', 'iets', 'fonasa'. APAC sources: 'hitap'. HTA appraisal/precedent sources: 'nice_ta', 'cadth_reviews', 'icer_reports', 'pbac_psd', 'gba_decisions', 'has_tc', 'iqwig', 'aifa', 'tlv', 'inesss'. HEOR methodology sources: 'ispor', 'wiley' (Pharmacoeconomics, Health Economics, Value in Health — via CrossRef), 'ohe' (Office of Health Economics — value set analyses, HTA methodology), 'euroqol' (EuroQol Group — EQ-5D instrument, country value sets, crosswalks)."
+          },
+          "max_results": {
+            "type": "number",
+            "description": "Maximum results to return (default: 20, max: 100)"
+          },
+          "date_from": {
+            "type": "string",
+            "description": "Exclude results before this date (ISO format: YYYY-MM-DD)"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "docx"
+            ],
+            "description": "Output format. 'docx' requires hosted tier."
+          },
+          "project": {
+            "type": "string",
+            "description": "Project ID for knowledge base persistence. When set, results are saved to ~/.heor-agent/projects/{project}/raw/literature/"
+          },
+          "runs": {
+            "type": "number",
+            "description": "Number of search runs (1-5, default 1). Multiple runs deduplicate and rank by consistency. Use runs=3 for comprehensive, stable results."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "models.cost_effectiveness",
+      "description": "Build a cost-utility analysis (ICER, QALY, PSA, sensitivity analysis) for a drug vs comparator. Follows ISPOR good practice guidelines and NICE reference case. Includes probabilistic sensitivity analysis (PSA), one-way sensitivity, and cost-effectiveness acceptability curve (CEAC). NOTE: utility inputs are value-set-dependent — UK submissions in 2026+ will transition from DSU 3L→5L mapping to the new UK EQ-5D-5L value set (NICE consultation 2026-04-15 to 2026-05-13). Use utility_value_set tool to check expected impact on ICER before finalising inputs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "intervention": {
+            "type": "string",
+            "description": "Drug or treatment name"
+          },
+          "comparator": {
+            "type": "string",
+            "description": "Comparator (standard of care)"
+          },
+          "indication": {
+            "type": "string",
+            "description": "Disease or condition"
+          },
+          "time_horizon": {
+            "type": "string",
+            "description": "Modelling horizon: 'lifetime', '5yr', '10yr', or years as number"
+          },
+          "perspective": {
+            "type": "string",
+            "enum": [
+              "nhs",
+              "us_payer",
+              "societal"
+            ],
+            "description": "Economic perspective: 'nhs' (UK NHS, WTP £25-35K/QALY), 'us_payer' ($100-150K/QALY ICER standard), or 'societal' (broader costs incl. productivity)."
+          },
+          "model_type": {
+            "type": "string",
+            "enum": [
+              "markov",
+              "partsa",
+              "decision_tree"
+            ],
+            "description": "Model type. Default: markov. Use 'partsa' for oncology — requires survival_inputs (the handler now hard-fails when partsa is set without it)."
+          },
+          "survival_inputs": {
+            "type": "object",
+            "description": "Required when model_type='partsa'. Median survival inputs (months) for OS/PFS, optional comparator overrides, and parametric distribution choice. Codex P1 fix (2026-05-07).",
+            "properties": {
+              "os_median_months": {
+                "type": "number",
+                "minimum": 0
+              },
+              "pfs_median_months": {
+                "type": "number",
+                "minimum": 0
+              },
+              "os_median_months_comparator": {
+                "type": "number",
+                "minimum": 0
+              },
+              "pfs_median_months_comparator": {
+                "type": "number",
+                "minimum": 0
+              },
+              "survival_distribution": {
+                "type": "string",
+                "enum": [
+                  "exponential",
+                  "weibull"
+                ]
+              },
+              "weibull_shape": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          },
+          "clinical_inputs": {
+            "type": "object",
+            "description": "Clinical efficacy and safety parameters driving the Markov transitions.",
+            "properties": {
+              "efficacy_delta": {
+                "type": "number",
+                "description": "Relative efficacy of intervention vs comparator (0-1). Higher = stronger treatment effect. Drives probability of staying on treatment."
+              },
+              "mortality_reduction": {
+                "type": "number",
+                "description": "Relative mortality reduction (0-1). E.g., 0.2 = 20% lower mortality vs baseline 2%."
+              },
+              "ae_rate": {
+                "type": "number",
+                "description": "Annual adverse event rate (0-1)."
+              }
+            },
+            "required": [
+              "efficacy_delta"
+            ]
+          },
+          "cost_inputs": {
+            "type": "object",
+            "description": "Annual costs per patient in the base currency for the selected perspective.",
+            "properties": {
+              "drug_cost_annual": {
+                "type": "number",
+                "description": "Annual drug acquisition cost for the intervention."
+              },
+              "admin_cost": {
+                "type": "number",
+                "description": "Annual administration cost (applies to both arms if shared)."
+              },
+              "ae_cost": {
+                "type": "number",
+                "description": "Annual adverse event management cost."
+              },
+              "comparator_cost_annual": {
+                "type": "number",
+                "description": "Annual drug acquisition cost for the comparator."
+              }
+            },
+            "required": [
+              "drug_cost_annual",
+              "comparator_cost_annual"
+            ]
+          },
+          "utility_inputs": {
+            "type": "object",
+            "description": "QALY weights for each health state (optional — defaults derived from efficacy if omitted).",
+            "properties": {
+              "qaly_on_treatment": {
+                "type": "number",
+                "description": "Utility weight (0-1) for on-treatment state. 1=perfect health, 0=death."
+              },
+              "qaly_comparator": {
+                "type": "number",
+                "description": "Utility weight (0-1) for comparator / off-treatment state."
+              }
+            }
+          },
+          "run_psa": {
+            "type": "boolean",
+            "description": "Run probabilistic sensitivity analysis (default: true)"
+          },
+          "psa_iterations": {
+            "type": "number",
+            "description": "PSA iterations (default: 1000, max: 10000)"
+          },
+          "scenarios": {
+            "type": "array",
+            "description": "Optional scenario analysis: array of named parameter overrides. Each scenario re-runs the model with the specified changes. Max 10 scenarios.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Scenario name (e.g., '20% price reduction')"
+                },
+                "overrides": {
+                  "type": "object",
+                  "description": "Parameter overrides (time_horizon, perspective, clinical_inputs, cost_inputs, utility_inputs)"
+                }
+              },
+              "required": [
+                "name",
+                "overrides"
+              ]
+            }
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "docx",
+              "xlsx"
+            ],
+            "description": "Use 'xlsx' for a structured Excel report with inputs, transition matrix, PSA iterations, and CEAC in separate tabs. The workbook is a REPORT — editing cells does not re-run the model. Re-run by calling the tool again with modified parameters."
+          },
+          "project": {
+            "type": "string",
+            "description": "Project ID for knowledge base persistence. When set, model run is saved to ~/.heor-agent/projects/{project}/raw/models/"
+          },
+          "summary_metric": {
+            "type": "string",
+            "enum": [
+              "qaly",
+              "evlyg",
+              "both"
+            ],
+            "description": "Summary metric for the ICER numerator. 'qaly' (default, NICE reference case), 'evlyg' (equal value life-years gained — CMS IRA-compatible; CMS prohibits QALYs in Medicare IRA drug price negotiations per §1194(e)(2)), or 'both' to report both side-by-side."
+          }
+        },
+        "required": [
+          "intervention",
+          "comparator",
+          "indication",
+          "time_horizon",
+          "perspective",
+          "clinical_inputs",
+          "cost_inputs"
+        ]
+      }
+    },
+    {
+      "name": "hta.dossier",
+      "description": "Structure evidence into HTA body-specific submission format (NICE STA, EMA, FDA, IQWiG, HAS, EU JCA, or Global Value Dossier). Produces draft sections with gap analysis and auto-GRADE evidence quality tables. Accepts output from literature.search and models.cost_effectiveness. Enum values are case-insensitive — `\"NICE\"`/`\"nice\"`, `\"STA\"`/`\"sta\"` etc. all work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hta_body": {
+            "type": "string",
+            "enum": [
+              "nice",
+              "ema",
+              "fda",
+              "iqwig",
+              "has",
+              "jca",
+              "gvd"
+            ],
+            "description": "HTA body/dossier format. 'nice'=UK NICE STA; 'ema'=EMA CTD; 'fda'=FDA prescribing info; 'iqwig'=Germany AMNOG; 'has'=France transparency committee; 'jca'=EU Joint Clinical Assessment (Reg. 2021/2282); 'gvd'=Global Value Dossier (cross-market foundational document)."
+          },
+          "submission_type": {
+            "type": "string",
+            "enum": [
+              "sta",
+              "mta",
+              "early_access",
+              "initial",
+              "renewal",
+              "variation"
+            ],
+            "description": "Submission type. 'sta'/'mta' for NICE; 'initial'/'renewal'/'variation' for JCA; 'early_access' for accelerated pathways."
+          },
+          "drug_name": {
+            "type": "string",
+            "description": "Generic or brand name of the drug/intervention."
+          },
+          "indication": {
+            "type": "string",
+            "description": "Disease or condition being treated (e.g., 'type 2 diabetes', 'non-small cell lung cancer')."
+          },
+          "evidence_summary": {
+            "description": "Clinical evidence input. Accepts: a text summary string, OR a JSON array of LiteratureResult objects from literature.search (use output_format='json'). When passed as array, auto-generates a GRADE evidence quality table."
+          },
+          "model_results": {
+            "description": "JSON output from models.cost_effectiveness — used to populate the Economic Evidence Summary section."
+          },
+          "picos": {
+            "type": "array",
+            "description": "JCA-specific: list of PICOs from the scoping decision. Each PICO generates its own dossier section. If omitted, a default single PICO is generated.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "PICO identifier, e.g. 'PICO-1'"
+                },
+                "population": {
+                  "type": "string",
+                  "description": "Target patient subpopulation for this PICO."
+                },
+                "comparator": {
+                  "type": "string",
+                  "description": "Comparator treatment for this PICO."
+                },
+                "outcomes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Outcomes of interest for this PICO."
+                }
+              },
+              "required": [
+                "id",
+                "population",
+                "comparator",
+                "outcomes"
+              ]
+            }
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "docx"
+            ],
+            "description": "Output format. 'text' returns markdown; 'json' returns structured sections; 'docx' generates a Word document and saves to disk."
+          },
+          "project": {
+            "type": "string",
+            "description": "Project ID for knowledge base persistence. When set, dossier draft is saved to ~/.heor-agent/projects/{project}/raw/dossiers/"
+          },
+          "rob_results": {
+            "description": "Output from the evidence.risk_of_bias tool. When provided, the GRADE Risk of Bias domain uses the structured judgment (rob_judgment, downgrade, rationale) instead of a heuristic estimate."
+          },
+          "unmet_need_summary": {
+            "type": "string",
+            "description": "Optional: 1-paragraph unmet need synthesis from the evidence.unmet_need tool. Pipe evidence.unmet_need result.unmet_need_summary here. Prepended to the Unmet Need section for NICE (Section B) and GVD (Section 4)."
+          }
+        },
+        "required": [
+          "hta_body",
+          "submission_type",
+          "drug_name",
+          "indication"
+        ]
+      }
+    },
+    {
+      "name": "knowledge.search",
+      "description": "Search a project's knowledge base (raw/ and wiki/) for text matches. Returns file paths with line numbers and snippets. Use this to find previously-retrieved literature, model runs, and compiled wiki content without re-querying external APIs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project ID (must exist)"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query — multi-term searches match ANY term (OR)"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "raw",
+                "wiki"
+              ]
+            },
+            "description": "Which subtrees to search. Default: both."
+          },
+          "max_results": {
+            "type": "number",
+            "description": "Max matches to return (default 20, max 100)"
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "description": "Case-sensitive search (default false)"
+          }
+        },
+        "required": [
+          "project",
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "knowledge.read",
+      "description": "Read a file from a project's raw/ or wiki/ tree. Path is relative to project root. Only raw/ and wiki/ subtrees accessible.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative path (e.g. 'wiki/trials/sustain-6.md' or 'raw/literature/pubmed_12345.md')"
+          }
+        },
+        "required": [
+          "project",
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "knowledge.write",
+      "description": "Write a file to the project's wiki/ tree. Path MUST start with 'wiki/' and end with '.md'. Use this to compile/organize evidence from raw/ files into a structured knowledge base. Supports Obsidian-style [[wikilinks]].",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative path starting with 'wiki/', ending with .md (e.g. 'wiki/trials/sustain-6.md')"
+          },
+          "content": {
+            "type": "string",
+            "description": "Markdown content. Can include YAML frontmatter and [[wikilinks]]."
+          }
+        },
+        "required": [
+          "project",
+          "path",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "project.create",
+      "description": "Initialize a new HEOR project workspace with directory skeleton and project.yaml metadata. Idempotent — returns existing project if already created. Required before using the `project` parameter in other tools. Enum values are case-insensitive — `\"NICE\"`, `\"Nice\"`, and `\"nice\"` all work for hta_targets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Short identifier (alphanumeric + hyphens, e.g. 'semaglutide-t2d')"
+          },
+          "drug": {
+            "type": "string",
+            "description": "Drug or intervention name"
+          },
+          "indication": {
+            "type": "string",
+            "description": "Disease/condition being treated"
+          },
+          "hta_targets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "nice",
+                "smc",
+                "awmsg",
+                "ema",
+                "fda",
+                "iqwig",
+                "gba",
+                "has",
+                "jca",
+                "cadth",
+                "pbac",
+                "icer",
+                "tlv",
+                "aifa",
+                "inesss",
+                "ispor"
+              ]
+            },
+            "description": "HTA bodies to target (optional). Case-insensitive — \"NICE\"/\"Nice\"/\"nice\" are all accepted."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Free-text project notes (optional)"
+          }
+        },
+        "required": [
+          "project_id",
+          "drug",
+          "indication"
+        ]
+      }
+    },
+    {
+      "name": "evidence.network",
+      "description": "Analyze literature search results to build an evidence network map. Extracts intervention-comparator pairs from titles and abstracts, constructs a treatment comparison network, and assesses NMA (network meta-analysis) feasibility. Pass the results array from a prior literature.search call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "authors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "date": {
+                  "type": "string"
+                },
+                "study_type": {
+                  "type": "string"
+                },
+                "abstract": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "source",
+                "title",
+                "authors",
+                "date",
+                "study_type",
+                "abstract",
+                "url"
+              ]
+            },
+            "description": "Array of LiteratureResult objects from a prior literature.search call (use output_format='json')"
+          },
+          "query": {
+            "type": "string",
+            "description": "Original search query (optional, for context)"
+          }
+        },
+        "required": [
+          "results"
+        ]
+      }
+    },
+    {
+      "name": "evidence.indirect",
+      "description": "Compute indirect treatment comparisons using the Bucher method (single common comparator) or frequentist network meta-analysis (full network). Requires user-supplied effect sizes (point estimates + 95% CI) from published trials. Supports MD, OR, RR, HR. Auto-selects method by network structure. When direct head-to-head A-vs-C evidence is also in the network, automatically tests Bucher's consistency assumption (z = (direct − indirect) / SE_diff) per NICE DSU TSD 18 / Cochrane 11.4.3 — flags |z|≥1.96 as 'substantial inconsistency' so the agent can warn the user before relying on the indirect estimate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "comparisons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "intervention": {
+                  "type": "string",
+                  "description": "Treatment name"
+                },
+                "comparator": {
+                  "type": "string",
+                  "description": "Comparator name"
+                },
+                "outcome": {
+                  "type": "string",
+                  "description": "Outcome (e.g., 'HbA1c change')"
+                },
+                "measure": {
+                  "type": "string",
+                  "enum": [
+                    "MD",
+                    "OR",
+                    "RR",
+                    "HR"
+                  ],
+                  "description": "MD = mean difference, OR = odds ratio, RR = risk ratio, HR = hazard ratio"
+                },
+                "estimate": {
+                  "type": "number",
+                  "description": "Point estimate"
+                },
+                "ci_lower": {
+                  "type": "number",
+                  "description": "Lower 95% CI"
+                },
+                "ci_upper": {
+                  "type": "number",
+                  "description": "Upper 95% CI"
+                },
+                "source": {
+                  "type": "string",
+                  "description": "Trial name (e.g., 'SUSTAIN-1')"
+                }
+              },
+              "required": [
+                "intervention",
+                "comparator",
+                "outcome",
+                "measure",
+                "estimate",
+                "ci_lower",
+                "ci_upper",
+                "source"
+              ]
+            },
+            "description": "Direct comparisons with effect sizes. Need at least 2 sharing a common comparator. Ask the user for: point estimate, 95% CI, outcome name, and effect measure (MD/OR/RR/HR) from each trial."
+          },
+          "target": {
+            "type": "object",
+            "description": "Optional: specific comparison to compute. Omit to compute all possible pairwise comparisons.",
+            "properties": {
+              "intervention": {
+                "type": "string",
+                "description": "Treatment to be compared (numerator)."
+              },
+              "comparator": {
+                "type": "string",
+                "description": "Reference treatment (denominator)."
+              }
+            }
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "bucher",
+              "frequentist_nma"
+            ],
+            "description": "auto (default): Bucher for simple paths, Frequentist NMA for 3+ edges. Or force a specific method."
+          }
+        },
+        "required": [
+          "comparisons"
+        ]
+      }
+    },
+    {
+      "name": "models.budget_impact",
+      "description": "Estimate the total budget impact of adopting a new intervention over 1-5 years. Follows ISPOR Budget Impact Analysis good practice guidelines (Mauskopf 2007, Sullivan 2014). Computes year-by-year net cost to payer, including market share uptake, treatment displacement, and population growth.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "intervention": {
+            "type": "string",
+            "description": "New drug or treatment"
+          },
+          "comparator": {
+            "type": "string",
+            "description": "Current standard of care"
+          },
+          "indication": {
+            "type": "string",
+            "description": "Disease or condition"
+          },
+          "perspective": {
+            "type": "string",
+            "enum": [
+              "nhs",
+              "us_payer",
+              "societal"
+            ],
+            "description": "Payer perspective: 'nhs' (UK NHS), 'us_payer' (US commercial/Medicare), or 'societal' (broader costs incl. productivity). Determines currency and cost categories."
+          },
+          "time_horizon_years": {
+            "type": "number",
+            "description": "Budget horizon in years (1-10, default 5)"
+          },
+          "eligible_population": {
+            "type": "number",
+            "description": "Number of eligible patients in Year 1"
+          },
+          "population_growth_rate": {
+            "type": "number",
+            "description": "Annual population growth rate (e.g., 0.02 for 2%). Default 0."
+          },
+          "market_share": {
+            "type": "object",
+            "description": "Expected market share of intervention by year (0-1). Missing years extrapolate from last defined.",
+            "properties": {
+              "year_1": {
+                "type": "number"
+              },
+              "year_2": {
+                "type": "number"
+              },
+              "year_3": {
+                "type": "number"
+              },
+              "year_4": {
+                "type": "number"
+              },
+              "year_5": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "year_1"
+            ]
+          },
+          "drug_cost_annual": {
+            "type": "number",
+            "description": "Annual drug acquisition cost for intervention"
+          },
+          "comparator_cost_annual": {
+            "type": "number",
+            "description": "Annual drug cost for comparator"
+          },
+          "admin_cost_annual": {
+            "type": "number",
+            "description": "Annual administration cost (applies to both arms). Default 0."
+          },
+          "monitoring_cost_annual": {
+            "type": "number",
+            "description": "Annual monitoring cost for intervention. Default 0."
+          },
+          "ae_cost_annual": {
+            "type": "number",
+            "description": "Annual adverse event cost for intervention. Default 0."
+          },
+          "comparator_ae_cost_annual": {
+            "type": "number",
+            "description": "Annual adverse event cost for comparator. Default 0."
+          },
+          "displacement": {
+            "type": "array",
+            "description": "Existing treatments displaced by intervention (share of patients switching, cost saved)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "treatment": {
+                  "type": "string"
+                },
+                "share": {
+                  "type": "number",
+                  "description": "Fraction of treated patients displaced (0-1)"
+                },
+                "cost_annual": {
+                  "type": "number",
+                  "description": "Annual cost of displaced treatment"
+                }
+              },
+              "required": [
+                "treatment",
+                "share",
+                "cost_annual"
+              ]
+            }
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "docx",
+              "xlsx"
+            ],
+            "description": "Use 'xlsx' for a structured Excel report with all inputs, year-by-year calculations, and audit trail in separate tabs. The workbook is a REPORT — editing cells does not re-run the model. Re-run by calling the tool again with modified parameters."
+          },
+          "project": {
+            "type": "string",
+            "description": "Project ID for persistence"
+          }
+        },
+        "required": [
+          "intervention",
+          "comparator",
+          "indication",
+          "perspective",
+          "eligible_population",
+          "market_share",
+          "drug_cost_annual",
+          "comparator_cost_annual"
+        ]
+      }
+    },
+    {
+      "name": "evidence.population_adjusted",
+      "description": "⚠️ EXPERIMENTAL / orientation-only. Approximate population-adjusted indirect comparison using summary-level statistics (mean, SD per covariate). True MAIC/STC per NICE DSU TSD 18 requires individual patient data (IPD) for one trial. This tool inflates the SE of a Bucher indirect comparison based on covariate imbalance (MAIC-style ESS penalty) and applies a simple linear adjustment based on standardized mean differences (STC-style). Point estimates should be interpreted as approximate — not submission-ready. For a definitive analysis, use IPD with an outcome regression model.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index_trial": {
+            "type": "object",
+            "description": "Trial with data to be reweighted (the trial for which you want to adjust)",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Trial name (e.g., 'SUSTAIN-7')"
+              },
+              "treatment": {
+                "type": "string",
+                "description": "Treatment arm name"
+              },
+              "comparator": {
+                "type": "string",
+                "description": "Comparator arm name"
+              },
+              "n": {
+                "type": "number",
+                "description": "Sample size"
+              },
+              "effect": {
+                "type": "number",
+                "description": "Point estimate (HR, OR, RR, or MD)"
+              },
+              "ci_lower": {
+                "type": "number",
+                "description": "Lower 95% CI"
+              },
+              "ci_upper": {
+                "type": "number",
+                "description": "Upper 95% CI"
+              },
+              "measure": {
+                "type": "string",
+                "enum": [
+                  "MD",
+                  "OR",
+                  "RR",
+                  "HR"
+                ]
+              },
+              "covariates": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Covariate name (e.g., 'age', 'bmi', 'hba1c_baseline')"
+                    },
+                    "mean": {
+                      "type": "number"
+                    },
+                    "sd": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "mean",
+                    "sd"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "name",
+              "treatment",
+              "comparator",
+              "n",
+              "effect",
+              "ci_lower",
+              "ci_upper",
+              "measure",
+              "covariates"
+            ]
+          },
+          "target_trial": {
+            "type": "object",
+            "description": "Trial whose population is the matching target",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "treatment": {
+                "type": "string"
+              },
+              "comparator": {
+                "type": "string"
+              },
+              "n": {
+                "type": "number"
+              },
+              "effect": {
+                "type": "number"
+              },
+              "ci_lower": {
+                "type": "number"
+              },
+              "ci_upper": {
+                "type": "number"
+              },
+              "measure": {
+                "type": "string",
+                "enum": [
+                  "MD",
+                  "OR",
+                  "RR",
+                  "HR"
+                ]
+              },
+              "covariates": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "mean": {
+                      "type": "number"
+                    },
+                    "sd": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "mean",
+                    "sd"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "name",
+              "treatment",
+              "comparator",
+              "n",
+              "effect",
+              "ci_lower",
+              "ci_upper",
+              "measure",
+              "covariates"
+            ]
+          },
+          "effect_modifiers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of covariates that are effect modifiers (must appear in both trials' covariates)"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "maic",
+              "stc"
+            ],
+            "description": "auto (default): MAIC when >=2 modifiers and N>=50, else STC"
+          },
+          "outcome_name": {
+            "type": "string",
+            "description": "Name of the outcome being compared (e.g., 'HbA1c change')"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ]
+          },
+          "project": {
+            "type": "string",
+            "description": "Project ID for persistence"
+          }
+        },
+        "required": [
+          "index_trial",
+          "target_trial",
+          "effect_modifiers"
+        ]
+      }
+    },
+    {
+      "name": "evidence.survival",
+      "description": "Fit parametric survival distributions (Exponential, Weibull, Log-logistic, Log-normal, Gompertz) to either patient-level event-time data (preferred — true right-censored MLE per Collett 2015 / NICE DSU TSD 14) OR Kaplan-Meier step-summary data (legacy approximation, used when only published KM digitization is available). Returns AIC/BIC model comparison and extrapolation table. Supply EXACTLY ONE of `event_data` (patient-level rows) or `km_data` (KM table).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "event_data": {
+            "type": "array",
+            "description": "Patient-level event-time rows (PREFERRED — true MLE per NICE DSU TSD 14). Each row: { time, event } where event=1 for an observed event, event=0 for right-censoring. At least 5 rows required.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time": {
+                  "type": "number",
+                  "description": "Event or censoring time"
+                },
+                "event": {
+                  "type": "integer",
+                  "enum": [
+                    0,
+                    1
+                  ],
+                  "description": "1 = event observed; 0 = right-censored"
+                }
+              },
+              "required": [
+                "time",
+                "event"
+              ]
+            }
+          },
+          "km_data": {
+            "type": "array",
+            "description": "Kaplan-Meier step-summary data points (LEGACY approximation; use event_data when patient-level data is available). At least 3 required. Extract from published KM curves or trial reports.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time": {
+                  "type": "number",
+                  "description": "Time point"
+                },
+                "survival": {
+                  "type": "number",
+                  "description": "Survival proportion (0-1)"
+                },
+                "n_at_risk": {
+                  "type": "number",
+                  "description": "Number at risk (optional, improves fit)"
+                },
+                "n_events": {
+                  "type": "number",
+                  "description": "Events in interval (optional)"
+                }
+              },
+              "required": [
+                "time",
+                "survival"
+              ]
+            }
+          },
+          "time_unit": {
+            "type": "string",
+            "enum": [
+              "months",
+              "years"
+            ],
+            "description": "Time unit for KM data (default: months)"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Endpoint name (e.g., 'OS', 'PFS', 'DFS'). Default: 'OS'."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ]
+          },
+          "project": {
+            "type": "string",
+            "description": "Project ID for persistence"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "literature.screen",
+      "description": "Screen literature search results using PICO criteria. Scores each abstract by relevance to the research question, classifies study design, and returns a ranked shortlist with inclusion/exclusion decisions and reasons. Pass the results array from a prior literature.search call (use output_format='json'). Follows Cochrane Handbook Chapter 4 screening methodology.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "description": "Array of LiteratureResult objects from a prior literature.search call (use output_format='json')",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "authors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "date": {
+                  "type": "string"
+                },
+                "study_type": {
+                  "type": "string"
+                },
+                "abstract": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "source",
+                "title",
+                "authors",
+                "date",
+                "study_type",
+                "abstract",
+                "url"
+              ]
+            }
+          },
+          "criteria": {
+            "type": "object",
+            "description": "PICO inclusion criteria",
+            "properties": {
+              "population": {
+                "type": "string",
+                "description": "Target population (e.g., 'adults with type 2 diabetes')"
+              },
+              "intervention": {
+                "type": "string",
+                "description": "Intervention of interest (e.g., 'semaglutide')"
+              },
+              "comparator": {
+                "type": "string",
+                "description": "Comparator (e.g., 'placebo', 'sitagliptin'). Optional."
+              },
+              "outcomes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Outcomes of interest (e.g., ['HbA1c', 'weight loss', 'MACE']). Optional."
+              }
+            },
+            "required": [
+              "population",
+              "intervention"
+            ]
+          },
+          "exclude_study_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Additional study types to exclude (e.g., ['case_report', 'narrative_review']). Editorials/commentaries are always excluded."
+          },
+          "min_year": {
+            "type": "number",
+            "description": "Exclude studies published before this year"
+          },
+          "include_threshold": {
+            "type": "number",
+            "description": "Relevance score threshold for inclusion (0-1, default 0.3). Lower = more inclusive."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ]
+          },
+          "project": {
+            "type": "string",
+            "description": "Project ID for persistence"
+          }
+        },
+        "required": [
+          "results",
+          "criteria"
+        ]
+      }
+    },
+    {
+      "name": "evidence.risk_of_bias",
+      "description": "Assess risk of bias for a set of studies using the appropriate Cochrane instrument: RoB 2 (RCTs), ROBINS-I (observational studies), or AMSTAR-2 (systematic reviews/meta-analyses). Instrument is auto-detected from study_type or can be specified. Judgments are inferred from abstract text — domains without sufficient reporting are marked Unclear. Returns a per-study table and a rob_results object to pass to hta_dossier_prep for evidence-based GRADE assessment. Accepts `studies` as a single object OR an array; auto-wraps singletons. Enum values are case-insensitive — `\"RoB2\"`/`\"rob2\"`, `\"AUTO\"`/`\"auto\"` all work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "studies": {
+            "type": "array",
+            "description": "Array of study objects from screen_abstracts or literature_search (output_format='json')",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "authors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "date": {
+                  "type": "string"
+                },
+                "study_type": {
+                  "type": "string"
+                },
+                "abstract": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "abstract"
+              ]
+            }
+          },
+          "instrument": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "rob2",
+              "robins_i",
+              "amstar2"
+            ],
+            "description": "Assessment instrument. auto (default) detects from study_type. rob2 for RCTs, robins_i for observational, amstar2 for systematic reviews."
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Outcomes of interest for contextual domain assessment (optional)"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "studies"
+        ]
+      }
+    },
+    {
+      "name": "utils.validate_links",
+      "description": "Validate URLs by making HEAD requests and checking HTTP status codes. Returns categorization: working (200), browser_only (403 from bot-blocking sites that work in browsers), broken (404/410), or timeout/error. ALWAYS use this before presenting reference links to users — broken links destroy trust. Pass all URLs you plan to cite.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of URLs to validate (max 50)"
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "Timeout per URL in ms (default 10000, max 30000)"
+          }
+        },
+        "required": [
+          "urls"
+        ]
+      }
+    },
+    {
+      "name": "hta.utility",
+      "description": "Look up EQ-5D value set characteristics (UK 3L, England 5L, new UK 5L 2026, NICE DSU mapping) or estimate the ICER/QALY impact of the new UK EQ-5D-5L value set for a given indication type. Cites Biz, Hernández Alava, Wailoo (2026) Value in Health. Use when user asks about NICE 5L transition, UK utility value sets, or impact on NICE STA submissions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "lookup",
+              "compare",
+              "estimate_impact"
+            ],
+            "description": "'lookup' returns a single value set; 'compare' returns all four side-by-side; 'estimate_impact' returns ICER/QALY change estimates for an indication type."
+          },
+          "value_set": {
+            "type": "string",
+            "enum": [
+              "uk_3l",
+              "england_5l",
+              "uk_5l_new",
+              "dsu_mapping"
+            ],
+            "description": "Value set id (required for 'lookup'). 'uk_5l_new' is the 2026 one under NICE consultation."
+          },
+          "indication_type": {
+            "type": "string",
+            "enum": [
+              "cancer_life_extending",
+              "non_cancer_life_extending",
+              "non_cancer_qol_only"
+            ],
+            "description": "Indication category (required for 'estimate_impact'). 'non_cancer_qol_only' = chronic QoL-only conditions (migraine, UC, atopic dermatitis, HS, plaque psoriasis) — sees the biggest ICER increase."
+          },
+          "base_icer": {
+            "type": "number",
+            "description": "Optional: current ICER to project forward under new UK 5L."
+          },
+          "base_incremental_qaly": {
+            "type": "number",
+            "description": "Optional: current incremental QALY gain to project forward under new UK 5L."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "evidence.itc",
+      "description": "Assess the feasibility of an indirect treatment comparison (ITC) by walking through the three core assumptions (exchangeability, homogeneity, consistency) and recommending an appropriate method: direct comparison, Bucher, full NMA, anchored MAIC/STC, unanchored MAIC/STC, ML-NMR, NMR/subgroup meta-regression, or infeasible. Cites Cope 2014 (BMC Med), NICE DSU TSD 18 (Phillippo), Signorovitch 2023 (J Dermatol Treatment), and Cochrane Handbook Ch 10-11. Use this BEFORE running evidence.indirect or evidence.population_adjusted to select the right method.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "connected_network": {
+            "type": "boolean",
+            "description": "True if there is a connected evidence network linking the treatments of interest via at least one common comparator."
+          },
+          "h2h_available": {
+            "type": "boolean",
+            "description": "True if at least one head-to-head RCT compares the treatments directly. Default false."
+          },
+          "ipd_available_for_intervention": {
+            "type": "boolean",
+            "description": "True if individual patient data (IPD) are available from the sponsor's trial. Default false."
+          },
+          "effect_modifiers_identified": {
+            "type": "boolean",
+            "description": "True if effect modifiers have been identified through clinical input or literature review. Default false."
+          },
+          "effect_modifier_imbalance": {
+            "type": "string",
+            "enum": [
+              "none",
+              "minor",
+              "major",
+              "unknown"
+            ],
+            "description": "Severity of imbalance in identified effect modifiers across trial populations. Default 'unknown'."
+          },
+          "heterogeneity_i2_pct": {
+            "type": "number",
+            "description": "Optional: I² statistic (%) across studies of the same comparison. If absent, homogeneity is assessed qualitatively."
+          },
+          "n_studies_per_comparison": {
+            "type": "number",
+            "description": "Optional: minimum number of studies per pairwise comparison. Informs choice between Bucher (k=1) and NMA (k≥2)."
+          },
+          "subgroup_data_available": {
+            "type": "boolean",
+            "description": "True if subgroup data are available in comparator trials for adjustment. Default false."
+          },
+          "outcome_type": {
+            "type": "string",
+            "enum": [
+              "binary",
+              "continuous",
+              "time_to_event"
+            ],
+            "description": "Primary outcome type — guides estimator recommendations."
+          }
+        },
+        "required": [
+          "connected_network"
+        ]
+      }
+    },
+    {
+      "name": "examples",
+      "description": "Get a pre-filled, copy-runnable JSON input for any of the heavy-schema tools (cost_effectiveness_model, budget_impact_model, survival_fitting, population_adjusted_comparison, evidence_indirect). Use when you want to demo a tool but don't want to invent inputs from scratch — the example is editable so you can tweak intervention names, costs, populations, etc. before calling the actual tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "cost_effectiveness_model",
+              "budget_impact_model",
+              "survival_fitting",
+              "population_adjusted_comparison",
+              "evidence_indirect"
+            ],
+            "description": "Which tool to get an example for. Omit to list all available examples."
+          }
+        }
+      }
+    },
+    {
+      "name": "workflow.maic",
+      "description": "Run the canonical MAIC discovery+screening pipeline in one call: ITC feasibility + parallel literature_search (broad + per-trial) + PICO screening + risk_of_bias + evidence_network. Stops short of running MAIC/Bucher itself (those require IPD or trial-level effect estimates). Produces a structured 9-section report with explicit Next Steps. Use this as a one-shot orchestrator instead of asking Claude/ChatGPT to chain the underlying tools manually.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "intervention": {
+            "type": "string",
+            "description": "Drug/intervention name."
+          },
+          "comparator": {
+            "type": "string",
+            "description": "Comparator drug name."
+          },
+          "indication": {
+            "type": "string",
+            "description": "Disease/condition."
+          },
+          "trials_intervention": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional trial names (e.g., QUASAR, ASTRO) to search in parallel."
+          },
+          "trials_comparator": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional comparator-side trial names (e.g., INSPIRE, COMMAND)."
+          },
+          "pico": {
+            "type": "object",
+            "properties": {
+              "population": {
+                "type": "string"
+              },
+              "intervention": {
+                "type": "string"
+              },
+              "comparator": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string"
+              }
+            },
+            "description": "Optional PICO criteria for screening (defaults derived)."
+          },
+          "effect_modifiers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional effect modifiers known from clinical input."
+          },
+          "outcome_type": {
+            "type": "string",
+            "enum": [
+              "binary",
+              "continuous",
+              "time_to_event"
+            ]
+          },
+          "max_results_per_search": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "runs_per_search": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 3,
+            "default": 2
+          }
+        },
+        "required": [
+          "intervention",
+          "comparator",
+          "indication"
+        ]
+      }
+    },
+    {
+      "name": "pv.classify",
+      "description": "Classify a planned study into its EMA pharmacovigilance regulatory category (PASS imposed/voluntary, PAES, RMP Annex 4, DUS, active surveillance registry, pregnancy registry, spontaneous reporting, ICH E2E plan). Returns the matching GVP module + ENCePP study-category label (not a registered protocol ID — consult the ENCePP Code of Conduct checklist for templates) + submission obligations + RMP implications + FDA analogue. Use BEFORE preparing an HTA dossier or before designing a post-authorisation study. Pass the structured `pv_classification` output to `hta_dossier` to populate its Pharmacovigilance Plan section. Enum values are case-insensitive — `\"RCT\"`/`\"rct\"`, `\"EU\"`/`\"eu\"` etc. all work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string",
+            "description": "Drug name."
+          },
+          "indication": {
+            "type": "string",
+            "description": "Disease/condition."
+          },
+          "study_design": {
+            "type": "string",
+            "enum": [
+              "rct",
+              "single_arm",
+              "prospective_cohort",
+              "retrospective_cohort",
+              "case_control",
+              "registry",
+              "spontaneous_reports",
+              "drug_utilization",
+              "clinical_trial_extension",
+              "real_world_evidence"
+            ]
+          },
+          "primary_objective": {
+            "type": "string",
+            "enum": [
+              "safety",
+              "efficacy",
+              "effectiveness",
+              "drug_utilization",
+              "natural_history",
+              "risk_minimisation_evaluation"
+            ]
+          },
+          "regulatory_context": {
+            "type": "string",
+            "enum": [
+              "pre_authorisation",
+              "post_authorisation",
+              "conditional_approval",
+              "accelerated_approval",
+              "rmp_commitment"
+            ]
+          },
+          "imposed_by_authority": {
+            "type": "boolean",
+            "default": false
+          },
+          "population_includes_pregnant": {
+            "type": "boolean",
+            "default": false
+          },
+          "population_includes_paediatric": {
+            "type": "boolean",
+            "default": false
+          },
+          "multi_country": {
+            "type": "boolean",
+            "default": false
+          },
+          "jurisdictions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "eu",
+                "us",
+                "uk",
+                "japan",
+                "china"
+              ]
+            },
+            "default": [
+              "eu"
+            ]
+          }
+        },
+        "required": [
+          "drug",
+          "indication",
+          "study_design",
+          "primary_objective",
+          "regulatory_context"
+        ]
+      }
+    },
+    {
+      "name": "jca.pico_scope",
+      "description": "Produce the canonical EU Joint Clinical Assessment (JCA) PICO matrix for a drug-indication pair. Returns a consolidated PICO list (per JCA process under Reg. 2021/2282) plus country-specific comparator universes, outcome instrument preferences, population subgroup focus, and a heterogeneity warning. Pipe `pico_matrix.picos` directly into `hta_dossier({hta_body:\"jca\", picos: ...})`. v1 covers DE/FR/IT/ES/NL + UK (post-Brexit context). Heterogeneity warning fires at ≥3 distinct comparator molecules across ≥2 jurisdictions — a tool-level assumption, not a published EUnetHTA threshold; treat the warning as a prompt to run evidence_network + itc_feasibility, not as a definitive diagnosis. NSCLC EGFR-mutant comparator detail is currently modeled only for line_of_therapy=\"second_line\"; other lines use a generic chemotherapy anchor with a warning. Enum values are case-insensitive — `\"DE\"`/`\"de\"`, `\"first_line\"`/`\"First_Line\"` etc. all work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string",
+            "description": "Drug name."
+          },
+          "indication": {
+            "type": "string",
+            "description": "Disease/condition."
+          },
+          "drug_class": {
+            "type": "string",
+            "enum": [
+              "monoclonal_antibody",
+              "small_molecule",
+              "atmp_cell",
+              "atmp_gene",
+              "atmp_tissue",
+              "biosimilar",
+              "vaccine",
+              "radiopharmaceutical",
+              "other"
+            ]
+          },
+          "mechanism_of_action": {
+            "type": "string"
+          },
+          "line_of_therapy": {
+            "type": "string",
+            "enum": [
+              "first_line",
+              "second_line",
+              "third_line_plus",
+              "any"
+            ],
+            "default": "any"
+          },
+          "biomarker_status": {
+            "type": "string",
+            "description": "Optional biomarker status (e.g., 'EGFR T790M positive', 'PD-L1 TPS ≥50%')."
+          },
+          "jurisdictions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "de",
+                "fr",
+                "it",
+                "es",
+                "nl",
+                "uk",
+                "eu_other"
+              ]
+            },
+            "default": [
+              "de",
+              "fr",
+              "it",
+              "es",
+              "nl"
+            ]
+          },
+          "regulatory_context": {
+            "type": "string",
+            "enum": [
+              "pre_authorisation",
+              "post_authorisation",
+              "conditional_approval"
+            ],
+            "default": "post_authorisation"
+          },
+          "is_orphan": {
+            "type": "boolean",
+            "description": "Optional. Orphan-designated medicinal product. Affects JCA scope eligibility (orphans enter scope from 13 January 2028 vs 13 January 2030 for general medicinal products)."
+          },
+          "force_proceed_out_of_scope": {
+            "type": "boolean",
+            "default": false,
+            "description": "Override the JCA scope eligibility check. Default false. Set true to produce a JCA-style matrix anyway when the indication is not yet in JCA scope (e.g., for protocol-design or anticipatory market-access work). Output will carry an explicit out-of-scope warning either way."
+          }
+        },
+        "required": [
+          "drug",
+          "indication",
+          "drug_class"
+        ]
+      }
+    },
+    {
+      "name": "pv.signal_workflow",
+      "description": "Compute disproportionality statistics (PRR, ROR, IC/BCPNN, MGPS/EBGM) on user-supplied drug-AE case counts and decide a signal verdict per EMA GVP Module IX rev 2. Returns the verdict (no/strengthening/confirmed/previously known/refuted), workflow recommendations, and canonical RMP signal-section text. To classify a finding as previously_known_signal, supply BOTH prior_known_signals AND reported_event so the tool can match the disproportionality to a specific known event. Optionally layers in GVP Considerations P.III pregnancy follow-up (birth/3mo/12mo) when both pregnancy_exposure and rmp_has_pregnancy_concern are true. Pairs with pv_classify. ⚠️ MGPS uses single-stratum gamma-Poisson shrinkage in v1 — when database counts are confounded by sex/age strata, EBGM/EB05 may be inflated; stratified MGPS is planned for v2. v1 takes user counts; v2 will also integrate EVDAS programmatic access per Reg. 2025/1466.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string"
+          },
+          "indication": {
+            "type": "string"
+          },
+          "reporting_period_months": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 120,
+            "default": 12
+          },
+          "case_counts": {
+            "type": "object",
+            "properties": {
+              "drug_event": {
+                "type": "number",
+                "minimum": 0,
+                "description": "a — cases of THIS drug AND THIS event"
+              },
+              "drug_total": {
+                "type": "number",
+                "minimum": 0,
+                "description": "a+b — all cases of the drug"
+              },
+              "event_total": {
+                "type": "number",
+                "minimum": 0,
+                "description": "a+c — all cases of the event"
+              },
+              "grand_total": {
+                "type": "number",
+                "minimum": 0,
+                "description": "a+b+c+d — all cases in DB"
+              }
+            },
+            "required": [
+              "drug_event",
+              "drug_total",
+              "event_total",
+              "grand_total"
+            ]
+          },
+          "data_source": {
+            "type": "string",
+            "enum": [
+              "eudravigilance",
+              "faers",
+              "vigibase_who",
+              "national_db",
+              "spontaneous_internal"
+            ],
+            "default": "eudravigilance"
+          },
+          "pregnancy_exposure": {
+            "type": "boolean",
+            "default": false
+          },
+          "prior_known_signals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "outcome_serious": {
+            "type": "boolean",
+            "default": false
+          },
+          "rmp_has_pregnancy_concern": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "drug",
+          "indication",
+          "case_counts"
+        ]
+      }
+    },
+    {
+      "name": "hta.workflow",
+      "description": "End-to-end HTA submission orchestrator. One call runs literature_search (with PRISMA-style stability via runs=N) → screen_abstracts (PICO filter) → risk_of_bias (auto RoB 2/ROBINS-I/AMSTAR-2) → cost_effectiveness_model (Markov + 1k PSA, defaults from indication) → hta_dossier (auto-GRADE downgrade from RoB output) → validate_links (post-hoc URL audit). Returns a combined report with per-phase timings, the full dossier draft, and the URL validation table. Use as a single-shot drop-in replacement for the 4-5 separate prompts a generic LLM would need to chain these tools manually. Each phase wrapped in safe-run so single-step failures do not abort the pipeline.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string",
+            "description": "Drug or intervention name."
+          },
+          "indication": {
+            "type": "string",
+            "description": "Disease or condition (free text)."
+          },
+          "hta_body": {
+            "type": "string",
+            "enum": [
+              "nice",
+              "ema",
+              "fda",
+              "iqwig",
+              "has",
+              "jca",
+              "gvd"
+            ],
+            "default": "nice",
+            "description": "Target HTA body for the dossier draft."
+          },
+          "submission_type": {
+            "type": "string",
+            "enum": [
+              "sta",
+              "mta",
+              "early_access",
+              "initial",
+              "renewal",
+              "variation"
+            ],
+            "default": "sta"
+          },
+          "perspective": {
+            "type": "string",
+            "enum": [
+              "nhs",
+              "us_payer",
+              "societal"
+            ],
+            "default": "nhs",
+            "description": "Economic perspective for the cost-effectiveness model phase."
+          },
+          "drug_class": {
+            "type": "string",
+            "enum": [
+              "monoclonal_antibody",
+              "small_molecule",
+              "atmp_cell",
+              "atmp_gene",
+              "atmp_tissue",
+              "biosimilar",
+              "vaccine",
+              "radiopharmaceutical",
+              "other"
+            ],
+            "default": "small_molecule"
+          },
+          "is_orphan": {
+            "type": "boolean",
+            "default": false,
+            "description": "Orphan-designated medicinal product. Affects JCA scope eligibility (orphans enter JCA scope 2028 vs 2030 for general medicinal products)."
+          },
+          "pico": {
+            "type": "object",
+            "properties": {
+              "population": {
+                "type": "string"
+              },
+              "intervention": {
+                "type": "string"
+              },
+              "comparator": {
+                "type": "string"
+              },
+              "outcomes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Optional PICO criteria for the screening phase (defaults derived from drug + indication)."
+          },
+          "ce_inputs": {
+            "type": "object",
+            "description": "Optional cost-effectiveness model inputs. Sensible defaults applied when omitted (efficacy_delta=0.25; drug_cost_annual=1000; SoC=0).",
+            "properties": {
+              "drug_cost_annual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "comparator_cost_annual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "efficacy_delta": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "ae_cost": {
+                "type": "number",
+                "minimum": 0
+              },
+              "admin_cost": {
+                "type": "number",
+                "minimum": 0
+              },
+              "qaly_on_treatment": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "qaly_comparator": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "pubmed",
+                "clinicaltrials",
+                "biorxiv",
+                "cochrane",
+                "nice_ta",
+                "cadth_reviews",
+                "icer_reports",
+                "ispor",
+                "wiley"
+              ]
+            },
+            "default": [
+              "pubmed",
+              "clinicaltrials"
+            ]
+          },
+          "max_literature_results": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 30
+          },
+          "literature_runs": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 3,
+            "description": "Number of dedup-stability passes for the literature_search phase. 3 is the project default for HTA-grade reproducibility."
+          },
+          "jurisdictions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "de",
+                "fr",
+                "it",
+                "es",
+                "nl",
+                "uk",
+                "eu_other"
+              ]
+            },
+            "default": [
+              "de",
+              "fr",
+              "it",
+              "es",
+              "nl"
+            ]
+          },
+          "skip_ce_model": {
+            "type": "boolean",
+            "default": false,
+            "description": "Skip the cost-effectiveness model phase (e.g., for clinical-only dossiers)."
+          },
+          "auto_check_regulatory": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true (default), Phase 3.6 fans out regulatory.status_check across comparators from pico.comparator and unmet_need_inputs.treatment_landscape.current_soc. Results piped into hta_dossier as regulatory_landscape (renders 'Regulatory Landscape' section for nice/jca/gvd/amcp). Degrades gracefully on API errors. Set false to skip. Design log #26."
+          },
+          "unmet_need_inputs": {
+            "type": "object",
+            "description": "Optional structured inputs for Phase 3.5 (evidence.unmet_need). Only consumed when hta_body='gvd'. When supplied, the orchestrator runs evidence.unmet_need and pipes the resulting unmet_need_summary into Phase 5 hta_dossier (pre-filling GVD Section 4 / NICE Section B). Design log #23.",
+            "properties": {
+              "disease_burden": {
+                "type": "object",
+                "properties": {
+                  "incidence_per_100k": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "prevalence_per_100k": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "qualitative_summary": {
+                    "type": "string"
+                  }
+                }
+              },
+              "treatment_landscape": {
+                "type": "object",
+                "properties": {
+                  "current_soc": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "qualitative_summary": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "drug",
+          "indication"
+        ]
+      }
+    },
+    {
+      "name": "irb.review",
+      "description": "Classify a planned study under 45 CFR 46 (US Common Rule) + EU CTR 536/2014 to produce an IRB / Ethics Committee submission scaffold. Returns: review tier (exempt §46.104 cat 1-8 / expedited §46.110 cat 1-7 / full-board §46.108), EU CTR review path with timeline, vulnerable-population obligations (Subpart B/C/D), GDPR Art. 9 + HIPAA §164.514 data-management plan, SAE-reporting framework (CTR Annex III / FDA IND / PSUR), ICF complexity tier, COI framework (PHS 42 CFR 50 / EU CTR Art. 14), and a ready-to-paste cover letter. v1 covers EU+US; UK/Japan/Canada planned for v2. Optional pv_classification input ties IRB review to the regulatory PV category — when primary_category is PASS_imposed, SAE timelines override to CTR Annex III. Enum values are case-insensitive — `\"interventional\"`/`\"Interventional\"`, `\"us_irb\"`/`\"US_IRB\"` etc. all work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "study_design": {
+            "type": "string",
+            "enum": [
+              "interventional",
+              "non_interventional_prospective",
+              "retrospective_chart_review",
+              "registry",
+              "secondary_data_analysis",
+              "specimen_repository",
+              "questionnaire_only"
+            ]
+          },
+          "intervention": {
+            "type": "string"
+          },
+          "indication": {
+            "type": "string"
+          },
+          "population_includes_pediatric": {
+            "type": "boolean",
+            "default": false
+          },
+          "population_includes_pregnant": {
+            "type": "boolean",
+            "default": false
+          },
+          "population_includes_prisoners": {
+            "type": "boolean",
+            "default": false
+          },
+          "population_includes_decisionally_impaired": {
+            "type": "boolean",
+            "default": false
+          },
+          "jurisdictions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "us_irb",
+                "eu_cec",
+                "uk_hra_rec",
+                "other"
+              ]
+            },
+            "default": [
+              "us_irb",
+              "eu_cec"
+            ]
+          },
+          "data_handling": {
+            "type": "string",
+            "enum": [
+              "fully_identifiable",
+              "pseudonymized",
+              "anonymized_safe_harbor",
+              "anonymized_expert_determination",
+              "aggregate_only"
+            ]
+          },
+          "risk_level": {
+            "type": "string",
+            "enum": [
+              "minimal",
+              "greater_than_minimal",
+              "unknown"
+            ],
+            "default": "unknown"
+          },
+          "funding_source": {
+            "type": "string",
+            "enum": [
+              "industry",
+              "nih",
+              "other_government",
+              "foundation",
+              "academic",
+              "none"
+            ]
+          },
+          "multi_site": {
+            "type": "boolean",
+            "default": false
+          },
+          "expedited_category_claim": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 7
+            },
+            "description": "Expedited review categories per 45 CFR 46.110 (1-7) the investigator believes apply. Tool will validate; if it disagrees, both are surfaced as advisory_warnings."
+          },
+          "pv_classification": {
+            "type": "object",
+            "description": "Optional structured output from pv_classify. Only primary_category is read; PASS_imposed triggers CTR Annex III SAE timelines."
+          },
+          "exempt_category_hint": {
+            "type": "string",
+            "enum": [
+              "educational"
+            ],
+            "description": "Hint: flag this as 45 CFR 46.104(d)(1) educational practices research."
+          },
+          "benign_behavioural": {
+            "type": "boolean",
+            "description": "Set true for benign behavioural interventions in adults (45 CFR 46.104(d)(3))."
+          },
+          "federal_demonstration": {
+            "type": "boolean",
+            "description": "Set true for federally supported research / demonstration project (45 CFR 46.104(d)(5))."
+          },
+          "taste_test": {
+            "type": "boolean",
+            "description": "Set true for taste / food-quality / consumer-acceptance evaluation (45 CFR 46.104(d)(6))."
+          },
+          "broad_consent_obtained": {
+            "type": "boolean",
+            "description": "Set true when broad consent has been obtained for secondary research / specimen storage (45 CFR 46.104(d)(7-8))."
+          },
+          "marketed_drug": {
+            "type": "boolean",
+            "description": "Set true when the study uses a marketed drug per labeling (drives expedited cat 1, post-marketing PSUR framework)."
+          },
+          "blood_draw_within_limits": {
+            "type": "boolean",
+            "description": "Set true for blood collection within OHRP volume limits (45 CFR 46.110 cat 2)."
+          },
+          "noninvasive_collection": {
+            "type": "boolean",
+            "description": "Set true for prospective biospecimen collection by noninvasive means (45 CFR 46.110 cat 3)."
+          },
+          "noninvasive_procedure": {
+            "type": "boolean",
+            "description": "Set true for noninvasive data collection (ECG, EEG, blood pressure, ultrasound) (45 CFR 46.110 cat 4)."
+          },
+          "recording_collection": {
+            "type": "boolean",
+            "description": "Set true for voice / digital / image recording collection (45 CFR 46.110 cat 6)."
+          }
+        },
+        "required": [
+          "study_design",
+          "intervention",
+          "indication",
+          "data_handling",
+          "funding_source"
+        ]
+      }
+    },
+    {
+      "name": "icf.readability_check",
+      "description": "Score the readability of an Informed Consent Form (ICF) text. Returns Flesch-Kincaid Grade Level, Flesch Reading Ease, Gunning Fog Index, SMOG Grade, plus per-sentence breakdown identifying the worst offenders, medical-jargon detection with plain-language alternatives, and a pass/borderline/fail verdict vs a target grade level (default 8 per FDA / NIH guidance). Pairs with irb_review when planning a study — investigators paste the ICF draft, get back a concrete rewrite list. Pure logic, no external API.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "icf_text": {
+            "type": "string",
+            "description": "The ICF body text. Plain text or markdown both work."
+          },
+          "target_grade_level": {
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 12,
+            "default": 8,
+            "description": "Target US grade level for FKGL pass verdict. FDA/NIH typically 8; some IRBs use 6 (stricter)."
+          },
+          "jargon_check": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to run the medical-jargon dictionary lookup. Default true."
+          }
+        },
+        "required": [
+          "icf_text"
+        ]
+      }
+    },
+    {
+      "name": "evidence.clinical_scale",
+      "description": "Score neurology & cognitive outcome scales (UMSARS/UPDRS/MDS-UPDRS/ADAS-Cog/MoCA/MMSE). Returns total + subscale scores, MCID-based responder classification, and trajectory comparison vs NNIPPS/PPMI/ADNI reference cohorts. Integrates with jca_pico_scope for MSA (neurology_msa, orphan Phase 2 2028)/PD (neurology_pd)/AD (neurology_ad) indication categories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scale": {
+            "type": "string",
+            "enum": [
+              "umsars",
+              "updrs",
+              "mds_updrs",
+              "adas_cog",
+              "moca",
+              "mmse"
+            ],
+            "description": "Clinical outcome scale: umsars | updrs | mds_updrs | adas_cog | moca | mmse"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "part": {
+                  "type": "string",
+                  "description": "Scale part identifier, e.g. 'I', 'II', 'III', 'IV'"
+                },
+                "item_id": {
+                  "type": "string",
+                  "description": "Item identifier within the part, e.g. '1', '2', ...'12'"
+                },
+                "score": {
+                  "type": "number",
+                  "description": "Item score (range depends on scale and item)"
+                }
+              },
+              "required": [
+                "part",
+                "item_id",
+                "score"
+              ]
+            },
+            "description": "Per-item scores. Supply all items for complete scoring, or a subset for partial scoring with a note."
+          },
+          "baseline_items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "part": {
+                  "type": "string"
+                },
+                "item_id": {
+                  "type": "string"
+                },
+                "score": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "part",
+                "item_id",
+                "score"
+              ]
+            },
+            "description": "Optional: baseline scores for change-from-baseline and responder analysis."
+          },
+          "compare_cohort": {
+            "type": "string",
+            "enum": [
+              "nnipps",
+              "ppmi",
+              "adni",
+              "none"
+            ],
+            "description": "Natural-history reference cohort for trajectory comparison. nnipps=MSA, ppmi=PD, adni=AD."
+          },
+          "time_point_months": {
+            "type": "number",
+            "description": "Time point in months from baseline (used for trajectory comparison)."
+          }
+        },
+        "required": [
+          "scale",
+          "items"
+        ]
+      }
+    },
+    {
+      "name": "evidence.unmet_need",
+      "description": "Generate a structured unmet need section for HTA dossiers (NICE STA, EMA, FDA, IQWiG, HAS, JCA, GVD, AMCP). Consume-only: first retrieve evidence with literature_search, then pass only cited facts across 4 HEOR dimensions — disease burden, treatment landscape, QoL impact, economic burden. By default (auto_check_regulatory=true), automatically checks current regulatory status of comparators in treatment_landscape.current_soc via primary-source databases (OpenFDA/EMA EPI) and injects verbatim label quotes with auto-numbered citations. Degrades gracefully on API errors — never blocks dossier output. Set auto_check_regulatory:false to skip. Produces a standardised markdown section plus a 1-paragraph unmet_need_summary for downstream tools. Pipe unmet_need_summary into hta_dossier(unmet_need_summary:...) to pre-fill NICE Section B (unmet need) or GVD Section 4. Design log #23 + #26.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string",
+            "description": "Drug or intervention name"
+          },
+          "indication": {
+            "type": "string",
+            "description": "Disease/condition being treated"
+          },
+          "jurisdictions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "us",
+                "uk",
+                "de",
+                "fr",
+                "it",
+                "es",
+                "nl",
+                "jp",
+                "global"
+              ]
+            },
+            "minItems": 1,
+            "description": "Target market(s) for this unmet need assessment"
+          },
+          "disease_burden": {
+            "type": "object",
+            "description": "Epidemiology data for the indication",
+            "properties": {
+              "incidence_per_100k": {
+                "type": "number"
+              },
+              "prevalence_per_100k": {
+                "type": "number"
+              },
+              "annual_deaths": {
+                "type": "number"
+              },
+              "five_year_survival": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "0-1 scale; rendered as percentage"
+              },
+              "qualitative_summary": {
+                "type": "string"
+              },
+              "citations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "claim_anchor": {
+                      "type": "string"
+                    },
+                    "citation": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "claim_anchor",
+                    "citation"
+                  ]
+                }
+              }
+            }
+          },
+          "treatment_landscape": {
+            "type": "object",
+            "description": "Current standard of care and its limitations. Use only evidence retrieved by literature_search or other audited sources. Regulatory/approval claims require current label/regulatory citation support; if not confirmed, leave out rather than infer.",
+            "properties": {
+              "current_soc": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Molecule names for current standard of care, supported by cited guideline/label/HTA evidence where possible."
+              },
+              "response_rate_pct": {
+                "type": "number"
+              },
+              "median_pfs_months": {
+                "type": "number"
+              },
+              "treatment_failure_rate_pct": {
+                "type": "number"
+              },
+              "discontinuation_rate_pct": {
+                "type": "number"
+              },
+              "qualitative_summary": {
+                "type": "string",
+                "description": "Cited narrative summary only. Do not assert off-label/no pediatric approval/no approved options unless current regulatory sources confirmed it."
+              },
+              "citations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "claim_anchor": {
+                      "type": "string"
+                    },
+                    "citation": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "claim_anchor",
+                    "citation"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "current_soc"
+            ]
+          },
+          "qol_impact": {
+            "type": "object",
+            "description": "Patient-reported and health-related quality of life impact",
+            "properties": {
+              "eq5d_decrement": {
+                "type": "number",
+                "description": "EQ-5D utility decrement vs general population"
+              },
+              "productivity_loss_pct": {
+                "type": "number"
+              },
+              "caregiver_hours_per_week": {
+                "type": "number"
+              },
+              "qualitative_summary": {
+                "type": "string"
+              },
+              "citations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "claim_anchor": {
+                      "type": "string"
+                    },
+                    "citation": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "claim_anchor",
+                    "citation"
+                  ]
+                }
+              }
+            }
+          },
+          "economic_burden": {
+            "type": "object",
+            "description": "Direct and indirect economic burden of the disease",
+            "properties": {
+              "annual_direct_cost_per_patient": {
+                "type": "number"
+              },
+              "annual_indirect_cost_per_patient": {
+                "type": "number"
+              },
+              "currency": {
+                "type": "string",
+                "default": "USD",
+                "description": "ISO 4217 currency code"
+              },
+              "qualitative_summary": {
+                "type": "string"
+              },
+              "citations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "claim_anchor": {
+                      "type": "string"
+                    },
+                    "citation": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "claim_anchor",
+                    "citation"
+                  ]
+                }
+              }
+            }
+          },
+          "literature_evidence": {
+            "type": "array",
+            "description": "Optional: pass literature_search results here to include as supporting evidence",
+            "items": {
+              "type": "object"
+            }
+          },
+          "auto_check_regulatory": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true (default), automatically fans out regulatory.status_check for each drug in treatment_landscape.current_soc × inferred regions. Injects verbatim label quotes inline with auto-numbered citations. Set false to skip (pre-v1.10.1 behaviour). Design log #26."
+          }
+        },
+        "required": [
+          "drug",
+          "indication",
+          "jurisdictions"
+        ]
+      }
+    },
+    {
+      "name": "regulatory.status_check",
+      "description": "Look up current regulatory approval status for a drug from primary sources (OpenFDA for US, EMA EPI for EU). Returns approved indications, label text verbatim, age/weight/sex constraints, black-box warnings, REMS status, contraindications, source URLs, and fetch timestamp. Refuses to assert 'not approved' on database absence — emits 'unknown' instead. 24h cache with force_refresh flag. Use BEFORE any claim about approval status, pediatric indication, or regulatory restrictions. Design log #25.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string",
+            "description": "Drug name: INN (fremanezumab), INN+suffix (fremanezumab-vfrm), or brand (Ajovy, case-insensitive)."
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "us",
+              "eu",
+              "uk",
+              "global"
+            ],
+            "description": "Regulatory region. 'uk' deferred to v1.7.1 (no public eMC API). 'global' queries US."
+          },
+          "indication": {
+            "type": "string",
+            "description": "Optional: narrow results to indications containing this text (e.g., 'pediatric', 'migraine')."
+          },
+          "force_refresh": {
+            "type": "boolean",
+            "default": false,
+            "description": "Bypass 24h cache and re-fetch from primary source. Use for same-day label changes."
+          },
+          "include_label_history": {
+            "type": "boolean",
+            "default": false,
+            "description": "Reserved for v1.7.2 — ignored in v1.7.0."
+          }
+        },
+        "required": [
+          "drug",
+          "region"
+        ]
+      }
+    }
+  ]
+}

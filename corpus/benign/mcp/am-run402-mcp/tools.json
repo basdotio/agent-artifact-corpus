@@ -1,0 +1,4107 @@
+{
+  "package": "run402-mcp",
+  "tools": [
+    {
+      "name": "provision_postgres_project",
+      "description": "Provision a new Postgres database. Returns project credentials on success, or payment details if x402 payment is needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "enum": [
+              "prototype",
+              "hobby",
+              "team"
+            ],
+            "default": "prototype",
+            "description": "Database tier: prototype ($0.10/7d, free with testnet faucet), hobby ($5/30d), team ($20/30d)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional project name (auto-generated if omitted)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "run_sql",
+      "description": "Execute SQL (DDL or queries) against a provisioned project. Returns results as a markdown table.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID to run SQL against"
+          },
+          "sql": {
+            "type": "string",
+            "description": "SQL statement to execute (DDL or DML)"
+          },
+          "params": {
+            "type": "array",
+            "items": {},
+            "description": "Bind parameters for parameterized queries (e.g. [42, \"hello\"])"
+          }
+        },
+        "required": [
+          "project_id",
+          "sql"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "rest_query",
+      "description": "Query or mutate data via the PostgREST REST API. Supports GET/POST/PATCH/DELETE with query params.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "table": {
+            "type": "string",
+            "description": "Table name to query"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PATCH",
+              "DELETE"
+            ],
+            "default": "GET",
+            "description": "HTTP method"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "PostgREST query params (e.g. {select: 'id,name', order: 'id.asc', limit: '10'})"
+          },
+          "body": {
+            "description": "Request body for POST/PATCH (JSON object or array)"
+          },
+          "key_type": {
+            "type": "string",
+            "enum": [
+              "anon",
+              "service"
+            ],
+            "default": "anon",
+            "description": "Which key to use: anon (default, respects RLS) or service (bypasses RLS)"
+          }
+        },
+        "required": [
+          "project_id",
+          "table"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "apply_expose",
+      "description": "Apply a declarative authorization manifest to a project (POST /projects/v1/admin/:id/expose). The manifest describes the full authorization surface: tables (with policy, owner_column, force_owner_on_insert, i_understand_this_is_unrestricted, custom_sql), views (with base, select, filter), and rpcs (with signature, grant_to). Convergent: applying the same manifest twice is a no-op; items dropped between applies have their policies/grants/triggers/views revoked. Tables are dark by default — any table not declared with expose:true is unreachable via anon/authenticated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "manifest": {
+            "type": "object",
+            "properties": {
+              "$schema": {
+                "type": "string",
+                "description": "Optional editor/schema hint for the expose manifest JSON schema"
+              },
+              "version": {
+                "type": "string",
+                "const": "1",
+                "description": "Manifest version — always \"1\""
+              },
+              "tables": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Table name"
+                    },
+                    "expose": {
+                      "type": "boolean",
+                      "description": "true to expose the table; false to hide it (policies + grants revoked on apply)"
+                    },
+                    "policy": {
+                      "type": "string",
+                      "enum": [
+                        "user_owns_rows",
+                        "public_read_authenticated_write",
+                        "public_read_write_UNRESTRICTED",
+                        "custom"
+                      ],
+                      "description": "RLS policy template. Required when expose=true. user_owns_rows (users access only their own rows; requires owner_column), public_read_authenticated_write (anyone reads; any authenticated user can write ANY row), public_read_write_UNRESTRICTED (⚠ fully open; requires i_understand_this_is_unrestricted: true), custom (escape hatch; requires custom_sql)."
+                    },
+                    "owner_column": {
+                      "type": "string",
+                      "description": "Column containing the user ID (required for user_owns_rows)"
+                    },
+                    "force_owner_on_insert": {
+                      "type": "boolean",
+                      "description": "If true, an INSERT trigger sets owner_column to auth.uid() automatically"
+                    },
+                    "i_understand_this_is_unrestricted": {
+                      "type": "boolean",
+                      "description": "Required to be true when policy is public_read_write_UNRESTRICTED"
+                    },
+                    "custom_sql": {
+                      "type": "string",
+                      "description": "Raw SQL (CREATE POLICY statements) run after RLS is enabled. Required when policy=custom"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "expose"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Tables to declare (include everything you want exposed AND anything to drop from a prior manifest). Omitted means an empty section."
+              },
+              "views": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "View name"
+                    },
+                    "base": {
+                      "type": "string",
+                      "description": "Base table the view reads from"
+                    },
+                    "select": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Columns the view exposes"
+                    },
+                    "filter": {
+                      "type": "string",
+                      "description": "Optional SQL WHERE clause applied to the view"
+                    },
+                    "security_invoker": {
+                      "type": "boolean",
+                      "description": "Always coerced to true on apply (never bypass RLS)"
+                    },
+                    "expose": {
+                      "type": "boolean",
+                      "description": "Whether to grant SELECT to anon/authenticated (default true)"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "base",
+                    "select"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Views to declare (typed projections over tables). Omitted means an empty section."
+              },
+              "rpcs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "RPC (function) name"
+                    },
+                    "signature": {
+                      "type": "string",
+                      "description": "Argument list including parens, e.g. \"(user_id uuid)\" or \"()\""
+                    },
+                    "grant_to": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Roles to grant EXECUTE to, e.g. [\"authenticated\"]"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "signature",
+                    "grant_to"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "RPCs (PL/pgSQL functions) to expose with explicit grants. Omitted means an empty section."
+              }
+            },
+            "required": [
+              "version"
+            ],
+            "additionalProperties": false,
+            "description": "Full authorization manifest. Convergent: applying twice is a no-op; items removed between applies are dropped. Tables are dark by default — any table not listed with expose:true is unreachable via anon/authenticated."
+          }
+        },
+        "required": [
+          "project_id",
+          "manifest"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "validate_manifest",
+      "description": "Validate an auth/expose manifest without applying it. This checks the authorization manifest used by manifest.json, database.expose, and apply_expose; it is not deploy-manifest validation. Optional migration_sql is reference context only and is not executed. Use deploy planning/dry-run surfaces for deploy manifest questions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "manifest": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": {},
+                "description": "Auth/expose manifest object used by manifest.json, database.expose, and apply_expose."
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Auth/expose manifest as a JSON object or JSON string. This is not a deploy manifest."
+          },
+          "migration_sql": {
+            "type": "string",
+            "description": "Optional migration SQL used only as reference context for validation; it is not executed."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Optional project id for live-schema validation. Omit for projectless validation."
+          }
+        },
+        "required": [
+          "manifest"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_expose",
+      "description": "Get the current authorization manifest for a project (GET /projects/v1/admin/:id/expose). Returns the last-applied manifest from `internal.project_manifest`, or a manifest reconstructed by introspecting live DB state if none has ever been applied. The `source` field is `\"applied\"` or `\"introspected\"`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_schema",
+      "description": "Introspect the database schema — tables, columns, types, constraints, and RLS policies. Useful for understanding the database structure before writing queries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_usage",
+      "description": "Get project usage report — API calls, storage usage, limits, and lease expiry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assets_put",
+      "description": "Upload a blob (file or inline content) to project storage via direct-to-S3. Accepts local_path (any size up to 5 TiB) or content (≤ 1 MB inline). Public blobs get a CDN URL; private blobs require authenticated reads. Use `immutable: true` to produce a content-addressed URL that never needs cache invalidation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "key": {
+            "type": "string",
+            "description": "Destination key (path in the project's blob namespace). No leading slash. Example: 'images/logo.png' or 'circuits/v1.zkey'."
+          },
+          "local_path": {
+            "type": "string",
+            "description": "Path to a local file to upload. Mutually exclusive with `content`."
+          },
+          "content": {
+            "type": "string",
+            "description": "Inline content to upload (UTF-8 string). For small blobs ≤ 1 MB. Mutually exclusive with `local_path`."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "MIME type (auto-detected from file extension if omitted)."
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private"
+            ],
+            "description": "Default: public. Public blobs get a CDN URL; private blobs require authenticated reads."
+          },
+          "immutable": {
+            "type": "boolean",
+            "description": "When true, the returned URL includes a content-hash suffix so overwrites produce distinct URLs. CLI auto-computes sha256."
+          }
+        },
+        "required": [
+          "project_id",
+          "key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assets_get",
+      "description": "Download a blob to a local file path. Writes bytes directly to disk (no context-window bloat). Returns size + SHA-256 header (if the blob has one stored).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "key": {
+            "type": "string",
+            "description": "Blob key to download"
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Local filesystem path to write the bytes to. Parent directories will be created."
+          }
+        },
+        "required": [
+          "project_id",
+          "key",
+          "output_path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assets_ls",
+      "description": "List blobs in a project with optional prefix filter over a flat key namespace. Supports pagination via cursor.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Filter: only return blobs whose key starts with this prefix"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Max results (default 100, max 1000)"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Pagination cursor from a previous response's next_cursor"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assets_rm",
+      "description": "Delete a blob from project storage and decrement the project's storage_bytes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "key": {
+            "type": "string",
+            "description": "Blob key to delete"
+          }
+        },
+        "required": [
+          "project_id",
+          "key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assets_sign",
+      "description": "Generate a time-boxed S3 presigned GET URL for a blob. Use this to share a private blob externally without exposing your apikey. Default TTL 1 hour, max 7 days.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "key": {
+            "type": "string",
+            "description": "Blob key to sign a GET URL for"
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 604800,
+            "description": "URL lifetime in seconds (60 – 604 800, default 3600)"
+          }
+        },
+        "required": [
+          "project_id",
+          "key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "diagnose_public_url",
+      "description": "Returns the live CDN state for a public blob URL (probed once from gateway-us-east-1 — NOT a global view). Use this when a deployed asset shows the wrong version or you suspect cache staleness. The result includes `expectedSha256` (from gateway DB), `observedSha256` (what CloudFront just served), recent `invalidation` status, and a human-readable `hint` with actionable next-steps. The `probeMayHaveWarmedCache: true` field warns that the probe itself populates the cache, so subsequent reads from elsewhere may differ. URLs outside the requesting project return 403; non-`*.run402.com` URLs return 400 unless they're on one of your active custom domains.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID that owns the URL"
+          },
+          "url": {
+            "type": "string",
+            "description": "Full blob URL (e.g. https://app.run402.com/_blob/avatar.png)"
+          }
+        },
+        "required": [
+          "project_id",
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "wait_for_cdn_freshness",
+      "description": "Polls the CDN until a MUTABLE blob URL serves the expected SHA-256, or the timeout elapses. **For mutable URLs only** — for immutable URLs (the `immutableUrl` returned by `assets_put`), no waiting is needed; they're bound to a SHA at upload time and never previously cached. Use this after a re-upload to an existing public mutable key when an end-user-visible URL must reflect the new content before continuing. The probe is single-vantage (us-east-1). On timeout, the tool returns isError=true so an agent can branch into a fallback — typically: switch to the immutableUrl.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID that owns the URL"
+          },
+          "url": {
+            "type": "string",
+            "description": "Mutable blob URL to poll (e.g. https://app.run402.com/_blob/avatar.png)"
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Expected hex SHA-256 (from a preceding upload)"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 600000,
+            "description": "Max wait in milliseconds (1 000 – 600 000, default 60 000)"
+          }
+        },
+        "required": [
+          "project_id",
+          "url",
+          "sha256"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_function",
+      "description": "Deploy a serverless function (Node 22) to a project. Handler signature: export default async (req: Request) => Response. The function can `import { db, adminDb, getUser, email, ai } from '@run402/functions'` — auto-bundled by the platform. Additional npm packages are bundled at deploy time when listed in `deps` (bare names resolve to latest; pinned/range specs are honored verbatim; `@run402/functions` and `run402-functions` rejected; max 30 entries; native binaries rejected). The response includes `runtime_version` (the bundled `@run402/functions` version — surface as 'Functions runtime version', never bare 'runtime'), `deps_resolved` (map of dep name → installed concrete version), and an optional top-level `warnings` array (sibling to the function record).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID to deploy the function to"
+          },
+          "name": {
+            "type": "string",
+            "description": "Function name (URL-safe slug: lowercase, hyphens, alphanumeric, e.g. 'stripe-webhook')"
+          },
+          "code": {
+            "type": "string",
+            "description": "TypeScript or JavaScript source code. Must export a default async function: export default async (req: Request) => Response"
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "timeout": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Timeout in seconds (default: tier max)"
+              },
+              "memory": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Memory in MB (default: tier max)"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Optional function configuration"
+          },
+          "deps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional npm package specs to install and bundle. Bare names (e.g. 'lodash') resolve to latest at deploy time; pinned (e.g. 'lodash@4.17.21') or range specs ('date-fns@^3.0.0') are honored verbatim. '@run402/functions' (auto-bundled) and 'run402-functions' (legacy name) are rejected. Max 30 entries, max 200 chars per spec. Native binary modules (sharp, canvas, native bcrypt, etc.) are rejected."
+          },
+          "schedule": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cron expression (5-field, e.g. '*/15 * * * *') to run the function on a schedule. Pass null to remove an existing schedule."
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "code"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "invoke_function",
+      "description": "Invoke a deployed function via HTTP. Returns the function's response body and status code. Useful for testing functions without building a frontend.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Function name to invoke"
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method (default: POST)"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            ],
+            "description": "Request body (string or JSON object)"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Additional headers to send"
+          }
+        },
+        "required": [
+          "project_id",
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_function_logs",
+      "description": "Get recent logs from a deployed function. Shows console.log/error output and error stack traces from CloudWatch.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Function name to get logs for"
+          },
+          "tail": {
+            "type": "number",
+            "description": "Number of log lines to return (default: 50, max: 1000)"
+          },
+          "since": {
+            "type": "string",
+            "description": "Only return logs at or after this ISO 8601 timestamp (e.g. 2026-03-29T14:00:00Z). Invalid timestamps are rejected before the API call."
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^req_[A-Za-z0-9_-]{4,128}$",
+            "description": "Only return logs correlated to this routed/function request id, such as req_abc123."
+          }
+        },
+        "required": [
+          "project_id",
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_functions",
+      "description": "List all deployed functions for a project. Shows names, URLs, runtime, timeout, memory, and (for functions deployed under bundling-at-deploy) the Functions runtime version (`@run402/functions` version) and resolved direct deps. Functions deployed before that change have `runtime_version` and `deps_resolved` set to null.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_function",
+      "description": "Delete a deployed function from a project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Function name to delete"
+          }
+        },
+        "required": [
+          "project_id",
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_function",
+      "description": "Update a function's schedule, timeout, or memory without re-deploying code. Pass schedule as a cron expression to set/update, or null to remove.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Function name to update"
+          },
+          "schedule": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cron expression (5-field, e.g. '*/15 * * * *') to set or update the schedule. Pass null to remove an existing schedule."
+          },
+          "timeout": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Timeout in seconds (tier limits apply)"
+          },
+          "memory": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Memory in MB (tier limits apply)"
+          }
+        },
+        "required": [
+          "project_id",
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_secret",
+      "description": "Set a project secret (e.g. STRIPE_SECRET_KEY). Values are write-only and injected as process.env variables in functions. Setting an existing key overwrites it. Use this before deploy, then declare the key with secrets.require.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "key": {
+            "type": "string",
+            "description": "Secret key (uppercase alphanumeric + underscores, e.g. 'STRIPE_SECRET_KEY')"
+          },
+          "value": {
+            "type": "string",
+            "description": "Secret value (will be injected as process.env in functions)"
+          }
+        },
+        "required": [
+          "project_id",
+          "key",
+          "value"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_secrets",
+      "description": "List secret keys for a project. Values and value-derived hashes are never shown; use this only to check which keys are configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_secret",
+      "description": "Delete a secret from a project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "key": {
+            "type": "string",
+            "description": "Secret key to delete"
+          }
+        },
+        "required": [
+          "project_id",
+          "key"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jobs_submit",
+      "description": "Submit a fixed platform-managed job. The request must match the gateway jobs API shape: job_type, input with input.json, and max_cost_usd_micros. The SDK supplies the required idempotency header.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "request": {
+            "type": "object",
+            "properties": {
+              "job_type": {
+                "type": "string",
+                "const": "kysigned.fflonk_prove.v0_17_0",
+                "description": "Fixed platform-managed job type to run"
+              },
+              "input": {
+                "type": "object",
+                "properties": {
+                  "input.json": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": "JSON object passed to the managed job runner"
+                  }
+                },
+                "required": [
+                  "input.json"
+                ],
+                "additionalProperties": false,
+                "description": "Input files for the managed job"
+              },
+              "max_cost_usd_micros": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Hard customer charge ceiling in micro-USD"
+              }
+            },
+            "required": [
+              "job_type",
+              "input",
+              "max_cost_usd_micros"
+            ],
+            "additionalProperties": false,
+            "description": "Gateway-shaped managed job submit request"
+          }
+        },
+        "required": [
+          "project_id",
+          "request"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jobs_get",
+      "description": "Get a managed job run by id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "Managed job run ID"
+          }
+        },
+        "required": [
+          "project_id",
+          "job_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jobs_logs",
+      "description": "Read recent runner logs for a managed job. Use tail to cap entries and since for an epoch millisecond lower bound.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "Managed job run ID"
+          },
+          "tail": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Maximum number of log entries to return"
+          },
+          "since": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Only include logs at or after this epoch millisecond timestamp"
+          }
+        },
+        "required": [
+          "project_id",
+          "job_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jobs_cancel",
+      "description": "Cancel a queued or running managed job.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "Managed job run ID"
+          }
+        },
+        "required": [
+          "project_id",
+          "job_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_site",
+      "description": "Deploy a static site (HTML/CSS/JS) from inline file bytes. Files are staged to a temp directory, then uploaded via the v1.32 plan/commit transport — only bytes the gateway doesn't already have are PUT. Served at a unique URL via CloudFront. Free with active tier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project ID to link this deployment to"
+          },
+          "target": {
+            "type": "string",
+            "description": "Deprecated/unsupported: unified deploy v2 does not support deployment target labels. Passing this field returns an error."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "File path (e.g. 'index.html', 'assets/logo.png')"
+                },
+                "data": {
+                  "type": "string",
+                  "description": "File content (text or base64-encoded)"
+                },
+                "encoding": {
+                  "type": "string",
+                  "enum": [
+                    "utf-8",
+                    "base64"
+                  ],
+                  "description": "Encoding: 'utf-8' (default) for text, 'base64' for binary files"
+                }
+              },
+              "required": [
+                "file",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Array of files to deploy. Must include at least index.html."
+          }
+        },
+        "required": [
+          "project",
+          "files"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_site_dir",
+      "description": "Deploy a static site from a local directory. Walks the tree, hashes each file, and uploads only the bytes the gateway doesn't already have via the v1.32 plan/commit transport. Files named .git, node_modules, or .DS_Store are skipped; symlinks are rejected. Re-deploying an unchanged tree issues no S3 PUTs. Free with active tier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project ID to link this deployment to"
+          },
+          "dir": {
+            "type": "string",
+            "description": "Local directory to deploy. The SDK walks this directory, hashes each file, and uploads only bytes the gateway doesn't already have via the unified deploy primitive (CAS-backed). Files named .git, node_modules, or .DS_Store are skipped. Symlinks are rejected."
+          },
+          "target": {
+            "type": "string",
+            "description": "Deprecated/unsupported: unified deploy v2 does not support deployment target labels. Passing this field returns an error."
+          }
+        },
+        "required": [
+          "project",
+          "dir"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy",
+      "description": "Unified deploy primitive (v1.34+). Accepts a structured ReleaseSpec — database (migrations + expose), value-free secrets.require/delete declarations, functions, site, site.public_paths, subdomains, and routes.replace web routes — with explicit replace vs patch semantics per resource. Use site.public_paths for clean static URLs such as /events backed by release asset events.html; explicit mode does not expose /events.html unless separately declared, while mode: 'implicit' restores filename-derived reachability and can widen access. Route entries map exact/final-wildcard browser paths like /admin and /admin/* to Node 22 Fetch Request -> Response functions, or exact GET/HEAD method-aware static aliases such as /events to { type: 'static', file: 'events.html' }; intentional read-only GET/HEAD wildcard function routes may set acknowledge_readonly: true. Direct /functions/v1/:name remains API-key protected. Secret values must be set first with set_secret, never placed in deploy specs. All bytes ride through CAS (no inline-body cap). Returns release_id, URLs, warnings, and a structured progress-event log. Stops before upload/commit on confirmation-required warnings unless reviewed codes are passed with allow_warning_codes or allow_warnings is true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to deploy to (from provision)."
+          },
+          "base": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "release": {
+                    "type": "string",
+                    "enum": [
+                      "current",
+                      "empty"
+                    ]
+                  }
+                },
+                "required": [
+                  "release"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "release_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "release_id"
+                ],
+                "additionalProperties": false
+              }
+            ],
+            "description": "Diff base. Default `{ release: 'current' }`. Use `{ release: 'empty' }` for a fresh deploy that fails if a release already exists."
+          },
+          "database": {
+            "type": "object",
+            "properties": {
+              "migrations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Stable migration id (e.g. '001_init'). Same id+checksum across re-deploys is a registry noop; same id+different checksum is a hard error."
+                    },
+                    "sql": {
+                      "type": "string",
+                      "description": "Inline SQL (UTF-8). Either sql or sql_ref is required."
+                    },
+                    "sql_ref": {
+                      "type": "object",
+                      "properties": {
+                        "sha256": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "number"
+                        },
+                        "contentType": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "sha256",
+                        "size"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Pre-uploaded CAS reference. Mutually exclusive with sql."
+                    },
+                    "checksum": {
+                      "type": "string",
+                      "description": "Lowercase hex SHA-256 of the migration SQL. Computed from `sql` if omitted."
+                    },
+                    "transaction": {
+                      "type": "string",
+                      "enum": [
+                        "required",
+                        "none"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "expose": {
+                "type": "object",
+                "additionalProperties": {},
+                "description": "Declarative authorization manifest (see https://run402.com/schemas/manifest.v1.json)."
+              },
+              "zero_downtime": {
+                "type": "boolean",
+                "description": "Skip the migrate-gate phase. Only safe when migrations are declared backward-compatible."
+              }
+            },
+            "additionalProperties": false
+          },
+          "secrets": {
+            "type": "object",
+            "properties": {
+              "require": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Secret keys that must already exist. Set values first with `set_secret`; never put secret values in deploy specs."
+              },
+              "delete": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "functions": {
+            "type": "object",
+            "properties": {
+              "replace": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "runtime": {
+                      "type": "string",
+                      "const": "node22"
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "data": {
+                              "type": "string"
+                            },
+                            "encoding": {
+                              "type": "string",
+                              "enum": [
+                                "utf-8",
+                                "base64"
+                              ]
+                            },
+                            "contentType": {
+                              "type": "string",
+                              "description": "MIME type override. Auto-detected from the path's extension when omitted."
+                            }
+                          },
+                          "required": [
+                            "data"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ],
+                      "description": "Single-file function source. The SDK uploads it to CAS and references it in the release."
+                    },
+                    "files": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "$ref": "#/properties/functions/properties/replace/additionalProperties/properties/source"
+                      },
+                      "description": "Multi-file function. Provide `entrypoint` to designate the entry path."
+                    },
+                    "entrypoint": {
+                      "type": "string"
+                    },
+                    "config": {
+                      "type": "object",
+                      "properties": {
+                        "timeoutSeconds": {
+                          "type": "number"
+                        },
+                        "memoryMb": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "schedule": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Cron expression (5-field). Pass null to remove an existing schedule; omit in patch mode to leave it unchanged."
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "patch": {
+                "type": "object",
+                "properties": {
+                  "set": {
+                    "$ref": "#/properties/functions/properties/replace"
+                  },
+                  "delete": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "site": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "replace": {
+                    "$ref": "#/properties/functions/properties/replace/additionalProperties/properties/files"
+                  },
+                  "public_paths": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "const": "implicit",
+                            "description": "Restore filename-derived public reachability for static assets."
+                          }
+                        },
+                        "required": [
+                          "mode"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "const": "explicit",
+                            "description": "Use only the complete replace table as direct public static URLs."
+                          },
+                          "replace": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "asset": {
+                                  "type": "string",
+                                  "description": "Release static asset path, such as events.html. This is not a public URL."
+                                },
+                                "cache_class": {
+                                  "type": "string",
+                                  "description": "Optional static cache class, for example html, immutable_versioned, or revalidating_asset."
+                                }
+                              },
+                              "required": [
+                                "asset"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "Complete map from public browser paths such as /events to release static asset paths such as events.html."
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "replace"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "replace"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "patch": {
+                    "type": "object",
+                    "properties": {
+                      "put": {
+                        "$ref": "#/properties/functions/properties/replace/additionalProperties/properties/files"
+                      },
+                      "delete": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "public_paths": {
+                    "$ref": "#/properties/site/anyOf/0/properties/public_paths"
+                  }
+                },
+                "required": [
+                  "patch"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "public_paths": {
+                    "$ref": "#/properties/site/anyOf/0/properties/public_paths"
+                  }
+                },
+                "required": [
+                  "public_paths"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "assets": {
+            "type": "object",
+            "properties": {
+              "put": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "description": "Asset key (path under the project's asset namespace, no leading slash)."
+                    },
+                    "source": {
+                      "$ref": "#/properties/functions/properties/replace/additionalProperties/properties/source",
+                      "description": "Source bytes (SDK-input form). Mutually exclusive with sha256."
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "description": "Pre-uploaded CAS reference (wire form). Mutually exclusive with source."
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "description": "Required when using the wire form (sha256)."
+                    },
+                    "content_type": {
+                      "type": "string"
+                    },
+                    "visibility": {
+                      "type": "string",
+                      "enum": [
+                        "public",
+                        "private"
+                      ]
+                    },
+                    "immutable": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "key"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Per-key asset puts. Pass either { source } for the SDK to hash/upload, or { sha256, size_bytes } when bytes are already in CAS."
+              },
+              "delete": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Asset keys to remove in the activation transaction."
+              },
+              "sync": {
+                "type": "object",
+                "properties": {
+                  "prefix": {
+                    "type": "string",
+                    "description": "Prefix under which sync operates. Required."
+                  },
+                  "prune": {
+                    "type": "boolean",
+                    "const": true,
+                    "description": "Must be true to declare destructive sync intent."
+                  },
+                  "confirm": {
+                    "type": "object",
+                    "properties": {
+                      "base_revision": {
+                        "type": "string"
+                      },
+                      "delete_set_digest": {
+                        "type": "string"
+                      },
+                      "expected_delete_count": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "base_revision",
+                      "delete_set_digest",
+                      "expected_delete_count"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Confirmation token echoed back from a prior plan; required to commit a destructive sync."
+                  }
+                },
+                "required": [
+                  "prefix",
+                  "prune"
+                ],
+                "additionalProperties": false,
+                "description": "Declarative sync. With prune: true and no confirm, the plan returns an asset_sync block with the values to echo back."
+              }
+            },
+            "additionalProperties": false,
+            "description": "v1.48 unified-apply assets slice. Asset writes promote inside the same activation transaction as functions/site/secrets so a release flips atomically."
+          },
+          "subdomains": {
+            "type": "object",
+            "properties": {
+              "set": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "add": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "remove": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false,
+            "description": "At most one subdomain per project — multi-element `set` is rejected with SUBDOMAIN_MULTI_NOT_SUPPORTED."
+          },
+          "routes": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "replace": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "pattern": {
+                          "type": "string",
+                          "description": "Route pattern such as /api, /api/*, or /login. Prefix wildcards only use a final /*."
+                        },
+                        "methods": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "GET",
+                              "HEAD",
+                              "POST",
+                              "PUT",
+                              "PATCH",
+                              "DELETE",
+                              "OPTIONS"
+                            ]
+                          },
+                          "minItems": 1,
+                          "description": "Optional method allowlist. Omit to allow all supported methods; do not pass an empty array."
+                        },
+                        "target": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "function"
+                                },
+                                "name": {
+                                  "type": "string",
+                                  "description": "Materialized release function name, not a file name or handler export."
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "name"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "static"
+                                },
+                                "file": {
+                                  "type": "string",
+                                  "description": "Materialized static-site file path, relative to the site root. No leading slash, query, fragment, traversal, or directory shorthand."
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "file"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "acknowledge_readonly": {
+                          "type": "boolean",
+                          "const": true,
+                          "description": "Durable acknowledgement for intentional GET/HEAD final-wildcard function routes such as /share/*."
+                        }
+                      },
+                      "required": [
+                        "pattern",
+                        "target"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "replace"
+                ],
+                "additionalProperties": false
+              }
+            ],
+            "description": "Deploy-v2 web routes. Omit or pass null to carry forward base routes; pass { replace: [] } to clear routes; pass { replace: [{ pattern, methods?, target: { type: 'function', name } }] } for functions or exact GET/HEAD { target: { type: 'static', file } } entries for method-aware static route aliases. Prefer site.public_paths for ordinary clean static URLs."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Optional client idempotency key. Combined with the project id and gateway-computed manifest digest to deduplicate retries."
+          },
+          "allow_warnings": {
+            "type": "boolean",
+            "description": "Continue past plan warnings that require confirmation. Default false: the tool stops before upload/commit so an agent can set missing secrets or inspect warnings."
+          },
+          "allow_warning_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Continue past specific reviewed plan warning codes. Prefer this to allow_warnings when only one known warning class is intentional."
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_diagnose_url",
+      "description": "Read-only authenticated diagnostics for a Run402 public URL or host/path pair. Explains whether the current live release would serve the URL, including match, diagnostic body status, static manifest/cache metadata when returned, structured warnings for ignored query/fragment, and next steps. This does not fetch bytes, purge cache, mutate deploy state, or expose internal CAS URLs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID used for local apikey lookup. It is not sent as a query parameter."
+          },
+          "url": {
+            "type": "string",
+            "description": "Absolute HTTP(S) public URL to diagnose. Mutually exclusive with host/path."
+          },
+          "host": {
+            "type": "string",
+            "description": "Lower-level hostname form without scheme, path, query, or fragment."
+          },
+          "path": {
+            "type": "string",
+            "description": "Lower-level public URL path. Must start with '/' when supplied."
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method to diagnose. Defaults to gateway behavior when omitted."
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_resume",
+      "description": "Resume a deploy operation that ended in `activation_pending` or `schema_settling` (e.g. transient gateway failure between SQL commit and the pointer-swap activation). The gateway re-runs only the failed phase forward — SQL is never replayed. Idempotent: calling on an already-terminal operation returns the snapshot without re-running.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "description": "Operation id returned by a prior `deploy` call. Required."
+          }
+        },
+        "required": [
+          "operation_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_list",
+      "description": "List recent deploy operations for a project. Returns operation_id, status, release_id, and timestamps. Use this to build deploy-history UIs or to find a recent operation_id to feed into `deploy_resume` / `deploy_events`. Pass `limit` to bound the result set; the gateway also returns a `cursor` for pagination when there are more.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to list operations for. Required (apikey-gated)."
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Maximum number of operations to return. Forwarded to the gateway as `?limit=`; the gateway picks a default when omitted."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Pagination cursor returned by a previous deploy_list response. Forwarded to the gateway as `?cursor=`."
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_events",
+      "description": "Fetch the recorded phase-event stream for a deploy operation. Returns the same `DeployEvent` shapes the `deploy` tool emits inline during an in-flight deploy — useful for inspecting a deploy after the fact (e.g., a deploy that the agent didn't observe directly, or one being resumed from a different process).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "description": "Operation id returned by a prior `deploy` call. Must start with `op_`."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Project ID that owns the operation. Required (apikey-gated endpoint)."
+          }
+        },
+        "required": [
+          "operation_id",
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_release_get",
+      "description": "Fetch a release inventory by id. Returns release metadata, effective/desired state kind, site path inventory, function inventory, secret keys, subdomains, and applied migrations. Use `site_limit` to cap large site inventories. Canonical SDK errors are preserved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID that owns the release."
+          },
+          "release_id": {
+            "type": "string",
+            "description": "Release ID to inspect, e.g. rel_..."
+          },
+          "site_limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 25000,
+            "description": "Maximum site path entries to include. Gateway default: 5000."
+          }
+        },
+        "required": [
+          "project_id",
+          "release_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_release_active",
+      "description": "Fetch the current-live release inventory for a project. Returns `release_id: null` with an empty current-live inventory when no release is active yet. Use this before deploy diffs to understand what is currently serving. Canonical SDK errors are preserved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to inspect."
+          },
+          "site_limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 25000,
+            "description": "Maximum site path entries to include. Gateway default: 5000."
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_release_diff",
+      "description": "Diff two release targets for a project. `from` may be `empty`, `active`, or a release id; `to` may be `active` or a release id. Returns release-to-release diff buckets and `migrations.applied_between_releases`. Semantic gateway errors such as invalid targets, same-release diffs, or no active release are preserved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to inspect."
+          },
+          "from": {
+            "type": "string",
+            "description": "Diff source target: empty, active, or a release id."
+          },
+          "to": {
+            "type": "string",
+            "description": "Diff target: active or a release id."
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Maximum entries per site diff bucket. Gateway default: 1000."
+          }
+        },
+        "required": [
+          "project_id",
+          "from",
+          "to"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ci_create_binding",
+      "description": "Create a GitHub Actions CI/OIDC deploy binding by sending a locally signed delegation to the SDK. This MCP wrapper does not sign or broaden authority; the signed delegation defines the repository/branch or environment, allowed events/actions, and optional route_scopes. Without route_scopes, CI cannot deploy route declarations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID the CI binding may deploy to."
+          },
+          "provider": {
+            "type": "string",
+            "const": "github-actions",
+            "description": "CI provider. V1 supports only github-actions; omitted defaults to github-actions."
+          },
+          "subject_match": {
+            "type": "string",
+            "description": "GitHub Actions OIDC subject match, e.g. repo:owner/repo:ref:refs/heads/main."
+          },
+          "allowed_actions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "const": "deploy"
+            },
+            "description": "Allowed CI actions. V1 supports only deploy."
+          },
+          "allowed_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Allowed GitHub event names, typically push and workflow_dispatch."
+          },
+          "route_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional route delegation scopes, normalized by the SDK. Use exact paths like /admin or final wildcard prefixes like /api/*. Omit or pass [] for no CI route authority."
+          },
+          "github_repository_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Numeric GitHub repository id to pin the binding to, or null if absent."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional ISO timestamp when this binding expires."
+          },
+          "nonce": {
+            "type": "string",
+            "description": "Lowercase hex nonce included in the signed delegation."
+          },
+          "signed_delegation": {
+            "type": "string",
+            "description": "Base64 SIGN-IN-WITH-X delegation signed locally by the allowance wallet. This MCP tool does not sign; it only sends the signed delegation to the SDK."
+          }
+        },
+        "required": [
+          "project_id",
+          "subject_match",
+          "allowed_actions",
+          "allowed_events",
+          "nonce",
+          "signed_delegation"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ci_list_bindings",
+      "description": "List CI/OIDC deploy bindings for a project, including route_scopes when delegated. Use this to inspect which GitHub Actions subjects can deploy before editing bindings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID whose CI bindings should be listed."
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ci_get_binding",
+      "description": "Get one CI/OIDC deploy binding by id, including its subject, allowed events/actions, repository id, revocation state, and route_scopes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "binding_id": {
+            "type": "string",
+            "description": "CI binding id, e.g. cib_..."
+          }
+        },
+        "required": [
+          "binding_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ci_revoke_binding",
+      "description": "Revoke one CI/OIDC deploy binding. Revocation stops future CI gateway requests, but does not undo already deployed releases or rotate secrets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "binding_id": {
+            "type": "string",
+            "description": "CI binding id to revoke. Revocation stops future CI requests only."
+          }
+        },
+        "required": [
+          "binding_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "claim_subdomain",
+      "description": "Claim a custom subdomain (e.g. myapp.run402.com) and point it at an existing deployment. Free, requires service_key auth.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Custom subdomain name (e.g. 'myapp' → myapp.run402.com). 3-63 chars, lowercase alphanumeric + hyphens."
+          },
+          "deployment_id": {
+            "type": "string",
+            "description": "Deployment ID to point this subdomain at (e.g. 'dpl_1709337600000_a1b2c3')"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Optional project ID for ownership tracking. Uses stored service_key for auth."
+          }
+        },
+        "required": [
+          "name",
+          "deployment_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_subdomain",
+      "description": "Release a custom subdomain. The URL will stop serving content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Subdomain name to release (e.g. 'myapp')"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Optional project ID for ownership verification. Uses stored service_key for auth."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_subdomains",
+      "description": "List all subdomains claimed by a project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "add_custom_domain",
+      "description": "Register a custom domain (e.g. example.com) to point at a Run402 subdomain. Returns DNS instructions for the human to configure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The custom domain to register (e.g. 'example.com' or 'docs.example.com')"
+          },
+          "subdomain_name": {
+            "type": "string",
+            "description": "The Run402 subdomain to map this domain to (e.g. 'myapp' for myapp.run402.com)"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "The project ID that owns the subdomain"
+          }
+        },
+        "required": [
+          "domain",
+          "subdomain_name",
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_custom_domains",
+      "description": "List all custom domains registered for a project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_domain_status",
+      "description": "Check if a custom domain's DNS is configured and SSL is active. Poll this after registering a domain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The custom domain to check (e.g. 'example.com')"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "The project ID (for authentication)"
+          }
+        },
+        "required": [
+          "domain",
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "remove_custom_domain",
+      "description": "Release a custom domain mapping. Traffic to the domain will no longer route to Run402.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The custom domain to release (e.g. 'example.com')"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Optional project ID for ownership verification"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "browse_apps",
+      "description": "Browse public apps available for forking. Optionally filter by tags.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional tags to filter by (e.g. ['auth', 'rls'])"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "fork_app",
+      "description": "Fork a published app into a new project. Creates a full copy including database, functions, site, and optionally claims a subdomain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "version_id": {
+            "type": "string",
+            "description": "The app version ID to fork (from browse_apps)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name for the new forked project"
+          },
+          "subdomain": {
+            "type": "string",
+            "description": "Optional subdomain to claim for the forked app"
+          }
+        },
+        "required": [
+          "version_id",
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "publish_app",
+      "description": "Publish a project as a forkable app. Set visibility and tags for discoverability.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID to publish"
+          },
+          "description": {
+            "type": "string",
+            "description": "App description"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags for discoverability (e.g. ['auth', 'rls', 'todo'])"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "unlisted",
+              "private"
+            ],
+            "description": "Visibility: public (listed in browse_apps), unlisted (accessible by ID), private (default)"
+          },
+          "fork_allowed": {
+            "type": "boolean",
+            "description": "Whether other users can fork this app (default: false)"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_versions",
+      "description": "List published versions of a project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_quote",
+      "description": "Get tier pricing for Run402 projects. Free, no auth required. Shows prices, lease durations, storage limits, and API call limits.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "tier_status",
+      "description": "Check current tier subscription — tier name, status, expiry, usage, and function authoring caps when returned (max timeout, memory, scheduled functions, min cron interval). Requires allowance auth.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "set_tier",
+      "description": "Subscribe, renew, or upgrade tier. Auto-detects action based on allowance state. Returns success or payment details if x402 payment is needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "enum": [
+              "prototype",
+              "hobby",
+              "team"
+            ],
+            "description": "Target tier — subscribes, renews, or upgrades automatically based on wallet state"
+          }
+        },
+        "required": [
+          "tier"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_project",
+      "description": "Immediately and irreversibly delete a project: the gateway runs the full destructive cascade (drop tenant schema, delete Lambda functions, release subdomains, tombstone mailbox, remove sender domain, wipe secrets and app versions) and sets status=purged. This tool also removes the project from the local key store. Distinct from the automatic lease-expiry grace window — this action is the explicit purge and cannot be undone. To recover from a missed renewal use `set_tier` instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID to delete (irreversible cascade purge)"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pin_project",
+      "description": "Pin a project so it is not garbage-collected or expired. Admin only — uses the configured allowance wallet for run402 platform admin auth; project owners authenticating with service_key or a non-admin SIWX wallet will receive 403 admin_required. Not a self-service command for regular users.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID to pin. Admin only — uses the configured allowance wallet for run402 platform admin auth; project owners authenticating with service_key or a non-admin SIWX wallet will receive 403 admin_required."
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "promote_user",
+      "description": "Promote a user to project_admin role by email. Admins can manage secrets from the browser. Requires service_key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address of the user to promote to project_admin"
+          }
+        },
+        "required": [
+          "project_id",
+          "email"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "demote_user",
+      "description": "Demote a user from project_admin role by email. Reverts to default authenticated role. Requires service_key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address of the user to demote from project_admin"
+          }
+        },
+        "required": [
+          "project_id",
+          "email"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_balance",
+      "description": "Check billing account balance for an agent allowance address. Shows available and held funds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "Wallet address (0x...) to check billing balance for"
+          }
+        },
+        "required": [
+          "wallet"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_projects",
+      "description": "List all active projects for an agent allowance address.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "Wallet address (0x...) to list projects for"
+          }
+        },
+        "required": [
+          "wallet"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "allowance_status",
+      "description": "Check local agent allowance status — address, network, and funding status.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "allowance_create",
+      "description": "Create a new local agent allowance (Base Sepolia testnet). Generates a private key and derives the Ethereum address. Saved to ~/.config/run402/allowance.json.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "allowance_export",
+      "description": "Export the local agent allowance address. Safe to share publicly.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "request_faucet",
+      "description": "Request free testnet USDC from the Run402 faucet (Base Sepolia). Rate limit: 1 per IP per 24h. Returns 0.25 USDC — enough for 2 prototype databases.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Wallet address (0x...) to fund. If omitted, reads from local agent allowance file."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "generate_image",
+      "description": "Generate a PNG image from a text prompt. Costs $0.03 USDC via x402. Aspect ratios: square (1:1), landscape (16:9), portrait (9:16).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Image description. Max 1000 characters."
+          },
+          "aspect": {
+            "type": "string",
+            "enum": [
+              "square",
+              "landscape",
+              "portrait"
+            ],
+            "default": "square",
+            "description": "Aspect ratio: square (1:1), landscape (16:9), portrait (9:16)"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_mailbox",
+      "description": "Create a project-scoped email mailbox at <slug>@mail.run402.com. One mailbox per project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID to create a mailbox for"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Mailbox slug (3-63 chars, lowercase alphanumeric + hyphens, no consecutive hyphens). Creates <slug>@mail.run402.com"
+          }
+        },
+        "required": [
+          "project_id",
+          "slug"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "send_email",
+      "description": "Send an email from the project's mailbox. Two modes: template (project_invite, magic_link, notification) or raw HTML (subject + html). Optional from_name for display name. Single recipient only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "to": {
+            "type": "string",
+            "description": "Recipient email address (single recipient only)"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "project_invite",
+              "magic_link",
+              "notification"
+            ],
+            "description": "Email template (template mode). project_invite, magic_link, or notification"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Template variables (template mode). project_invite: project_name, invite_url. magic_link: project_name, link_url, expires_in. notification: project_name, message (max 500 chars)."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Email subject line (raw HTML mode, max 998 chars)"
+          },
+          "html": {
+            "type": "string",
+            "description": "HTML email body (raw HTML mode, max 1MB)"
+          },
+          "text": {
+            "type": "string",
+            "description": "Plain text fallback (raw HTML mode, auto-generated from HTML if omitted)"
+          },
+          "from_name": {
+            "type": "string",
+            "description": "Display name for From header, e.g. \"My App\" (max 78 chars)"
+          },
+          "in_reply_to": {
+            "type": "string",
+            "description": "ID of a prior message (typically inbound) to thread this one under. The server uses it to set RFC-822 In-Reply-To and References headers. Usually set via reply flows; leave empty for new threads."
+          }
+        },
+        "required": [
+          "project_id",
+          "to"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_emails",
+      "description": "List sent emails from the project's mailbox. Shows message ID, template, recipient, status, and timestamp.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 200,
+            "description": "Max messages to return (server caps at 200)"
+          },
+          "after": {
+            "type": "string",
+            "description": "Pagination cursor (message id from prior page)"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_email",
+      "description": "Get a sent email with details and any replies.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "message_id": {
+            "type": "string",
+            "description": "The message ID to retrieve"
+          }
+        },
+        "required": [
+          "project_id",
+          "message_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_email_raw",
+      "description": "Get the raw RFC-822 bytes of an inbound email message, base64-encoded. The decoded bytes are bit-identical to the DKIM-signed original — no parsing, normalization, or CRLF cleanup. Use this for cryptographic verification (DKIM checks, zk-email proofs). Inbound messages only; outbound returns 404. For display/threading, use get_email instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "message_id": {
+            "type": "string",
+            "description": "The message ID to retrieve raw bytes for (must be an inbound message)"
+          }
+        },
+        "required": [
+          "project_id",
+          "message_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_mailbox",
+      "description": "Get the project's mailbox info (ID, address, slug). Use to check if a mailbox exists.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_mailbox",
+      "description": "Delete the project's mailbox (irreversible — drops all messages and webhook subscriptions). Requires confirm=true. If mailbox_id is omitted, resolves the project's mailbox.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "mailbox_id": {
+            "type": "string",
+            "description": "Mailbox ID to delete (mbx_...). If omitted, resolves the project's mailbox from the keystore or via GET /mailboxes/v1."
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Must be true. Destructive: deleting a mailbox drops all messages and webhook subscriptions and is irreversible."
+          }
+        },
+        "required": [
+          "project_id",
+          "confirm"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "register_mailbox_webhook",
+      "description": "Register a webhook on the project's mailbox. Receives POST notifications for email events (delivery, bounced, complained, reply_received).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "url": {
+            "type": "string",
+            "description": "Webhook callback URL"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Events to subscribe to. Valid: delivery, bounced, complained, reply_received"
+          }
+        },
+        "required": [
+          "project_id",
+          "url",
+          "events"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_mailbox_webhooks",
+      "description": "List all webhooks registered on the project's mailbox.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_mailbox_webhook",
+      "description": "Get details of a specific webhook by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "webhook_id": {
+            "type": "string",
+            "description": "The webhook ID (whk_...)"
+          }
+        },
+        "required": [
+          "project_id",
+          "webhook_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_mailbox_webhook",
+      "description": "Delete a webhook. Idempotent — succeeds even if already deleted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "webhook_id": {
+            "type": "string",
+            "description": "The webhook ID (whk_...)"
+          }
+        },
+        "required": [
+          "project_id",
+          "webhook_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_mailbox_webhook",
+      "description": "Update a webhook's URL and/or events. At least one field required. Events is a full replacement, not a merge.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "webhook_id": {
+            "type": "string",
+            "description": "The webhook ID (whk_...)"
+          },
+          "url": {
+            "type": "string",
+            "description": "New webhook URL"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "New events array (full replacement). Valid: delivery, bounced, complained, reply_received"
+          }
+        },
+        "required": [
+          "project_id",
+          "webhook_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ai_translate",
+      "description": "Translate text to a target language. Requires service key and active AI Translation add-on. Supports optional source language and context hint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 10000,
+            "description": "Text to translate (max 10,000 characters)"
+          },
+          "to": {
+            "type": "string",
+            "description": "Target language (ISO 639-1 code, e.g. 'es', 'ja', 'fr')"
+          },
+          "from": {
+            "type": "string",
+            "description": "Source language (ISO 639-1 code). Auto-detected if omitted"
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Context hint for tone/register (max 200 chars, e.g. 'formal business email')"
+          }
+        },
+        "required": [
+          "project_id",
+          "text",
+          "to"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ai_moderate",
+      "description": "Run content moderation on text. Returns flagged status and category scores. Free for all projects, requires service key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "text": {
+            "type": "string",
+            "description": "Text content to check for moderation"
+          }
+        },
+        "required": [
+          "project_id",
+          "text"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ai_usage",
+      "description": "Get AI translation usage for the current billing period — used words, quota, and remaining balance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "send_message",
+      "description": "Send a message to the Run402 developers. Requires an active tier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Message to send to the Run402 developers"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_agent_contact",
+      "description": "Register agent contact info (name, email, webhook). New or changed emails start operator email reply verification. Free with allowance auth.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Agent name"
+          },
+          "email": {
+            "type": "string",
+            "description": "Contact email (optional; new or changed emails start reply verification)"
+          },
+          "webhook": {
+            "type": "string",
+            "description": "Webhook URL for notifications (optional)"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_agent_contact_status",
+      "description": "Get the current agent contact assurance state: wallet_only, email_pending, email_verified, passkey_pending, or operator_passkey.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "verify_agent_contact_email",
+      "description": "Start or resend the operator email reply challenge for the active agent contact email. Does not expose the challenge secret.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "start_operator_passkey_enrollment",
+      "description": "Email a short-lived Run402 operator passkey enrollment link to the verified contact email. Requires email_verified.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "create_checkout",
+      "description": "Create a Stripe checkout URL for your human to fund your agent allowance with a credit card.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "Wallet address (0x...) to fund"
+          },
+          "amount_usd_micros": {
+            "type": "number",
+            "description": "Amount in micro-USD (e.g. 5000000 = $5.00)"
+          }
+        },
+        "required": [
+          "wallet",
+          "amount_usd_micros"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "billing_history",
+      "description": "View billing transaction history for an agent allowance address.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "Wallet address (0x...) to get billing history for"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max entries to return (default: 20)"
+          }
+        },
+        "required": [
+          "wallet"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_version",
+      "description": "Update metadata (description, tags, visibility, fork_allowed) of a published app version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "version_id": {
+            "type": "string",
+            "description": "The version ID to update"
+          },
+          "description": {
+            "type": "string",
+            "description": "Updated description"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Updated tags"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "unlisted",
+              "private"
+            ],
+            "description": "Updated visibility"
+          },
+          "fork_allowed": {
+            "type": "boolean",
+            "description": "Whether forking is allowed"
+          }
+        },
+        "required": [
+          "project_id",
+          "version_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_version",
+      "description": "Delete a published app version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "version_id": {
+            "type": "string",
+            "description": "The version ID to delete"
+          }
+        },
+        "required": [
+          "project_id",
+          "version_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_app",
+      "description": "Inspect a specific published app — details, required secrets, fork pricing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "version_id": {
+            "type": "string",
+            "description": "The version ID of the app to inspect"
+          }
+        },
+        "required": [
+          "version_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "init",
+      "description": "Set up agent allowance, request faucet funding, and check tier status — single-call bootstrap. Idempotent, safe to re-run.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rail": {
+            "type": "string",
+            "enum": [
+              "x402",
+              "mpp"
+            ],
+            "description": "Payment rail: x402 (Base Sepolia, default) or mpp (Tempo Moderato)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "status",
+      "description": "Full account snapshot — allowance, billing balance, tier subscription, projects, and active project. Single-call overview.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "project_info",
+      "description": "Show local project details — REST URL, keys, site URL, and deployment info. Reads from local keystore only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to inspect"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "project_use",
+      "description": "Set the active/default project in the local keystore.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to set as active"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "project_keys",
+      "description": "Get anon_key and service_key for a project from the local keystore.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to get keys for"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "request_magic_link",
+      "description": "Send a passwordless login email (magic link) to a project user. Auto-creates the user on first verification. Rate limited per email (5/hr) and per project (by tier).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address to send the magic link to"
+          },
+          "redirect_url": {
+            "type": "string",
+            "description": "URL to redirect to after clicking the magic link. Must be an allowed origin for this project (localhost, claimed subdomain, or custom domain)."
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "signin",
+              "invite",
+              "claim",
+              "recovery"
+            ],
+            "description": "Magic-link intent. invite requires the service key and creates trusted invite state."
+          },
+          "client_state": {
+            "description": "Optional opaque app state preserved through token verification"
+          }
+        },
+        "required": [
+          "project_id",
+          "email",
+          "redirect_url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_magic_link",
+      "description": "Exchange a magic link token for access_token + refresh_token. Creates the user if they don't exist. Token is single-use and expires in 15 minutes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "token": {
+            "type": "string",
+            "description": "The magic link token from the email link URL (?token=...)"
+          }
+        },
+        "required": [
+          "project_id",
+          "token"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_auth_user",
+      "description": "Create or update a project auth user with the service key. Can set project_admin and optionally send a trusted invite.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address of the auth user to create or update"
+          },
+          "is_admin": {
+            "type": "boolean",
+            "description": "Set project_admin status for this user"
+          },
+          "send_invite": {
+            "type": "boolean",
+            "description": "Send a trusted invite magic link after creating/updating the user"
+          },
+          "redirect_url": {
+            "type": "string",
+            "description": "Required when send_invite=true. Must be an allowed project auth redirect origin."
+          },
+          "client_state": {
+            "description": "Optional opaque state preserved through trusted invite verification"
+          }
+        },
+        "required": [
+          "project_id",
+          "email"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "invite_auth_user",
+      "description": "Create/update a project auth user and send a trusted invite magic link. Requires service_key and an allowed redirect_url.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address of the auth user to invite"
+          },
+          "redirect_url": {
+            "type": "string",
+            "description": "Allowed auth redirect URL for the invite link"
+          },
+          "is_admin": {
+            "type": "boolean",
+            "description": "Set project_admin status before sending the invite"
+          },
+          "client_state": {
+            "description": "Optional opaque state preserved through invite verification"
+          }
+        },
+        "required": [
+          "project_id",
+          "email",
+          "redirect_url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_user_password",
+      "description": "Change, reset, or set a user's password. Change: provide current_password + new_password. Reset (via magic link login): just new_password. Set (passwordless user): requires allow_password_set=true on project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "access_token": {
+            "type": "string",
+            "description": "The user's access_token (Bearer token from login)"
+          },
+          "new_password": {
+            "type": "string",
+            "description": "The new password to set"
+          },
+          "current_password": {
+            "type": "string",
+            "description": "Current password (required for password change, omit for reset via magic link or initial set)"
+          }
+        },
+        "required": [
+          "project_id",
+          "access_token",
+          "new_password"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "auth_settings",
+      "description": "Update project auth settings: allow_password_set, preferred_sign_in_method, public_signup, and require_passkey_for_project_admin. Requires service_key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "allow_password_set": {
+            "type": "boolean",
+            "description": "Allow passwordless users (magic link / OAuth) to set a password. Default: false."
+          },
+          "preferred_sign_in_method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "password",
+                  "magic_link",
+                  "oauth_google",
+                  "passkey"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project UI hint for the preferred sign-in method."
+          },
+          "public_signup": {
+            "type": "string",
+            "enum": [
+              "open",
+              "known_email",
+              "invite_only"
+            ],
+            "description": "Public signup policy."
+          },
+          "require_passkey_for_project_admin": {
+            "type": "boolean",
+            "description": "Require eligible passkey login for project_admin sessions."
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "passkey_register_options",
+      "description": "Create WebAuthn passkey registration options for the authenticated user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "access_token": {
+            "type": "string",
+            "description": "Authenticated user's access_token"
+          },
+          "app_origin": {
+            "type": "string",
+            "description": "Exact app origin for the WebAuthn ceremony"
+          }
+        },
+        "required": [
+          "project_id",
+          "access_token",
+          "app_origin"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "passkey_register_verify",
+      "description": "Verify a browser WebAuthn registration response and store the user's passkey.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "access_token": {
+            "type": "string",
+            "description": "Authenticated user's access_token"
+          },
+          "challenge_id": {
+            "type": "string",
+            "description": "challenge_id returned by passkey_register_options"
+          },
+          "response": {
+            "description": "PublicKeyCredential registration response JSON from the browser"
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional passkey label"
+          }
+        },
+        "required": [
+          "project_id",
+          "access_token",
+          "challenge_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "passkey_login_options",
+      "description": "Create WebAuthn passkey login options for a project app origin.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "app_origin": {
+            "type": "string",
+            "description": "Exact app origin for the WebAuthn ceremony"
+          },
+          "email": {
+            "type": "string",
+            "description": "Optional email hint. Does not expose allowCredentials."
+          }
+        },
+        "required": [
+          "project_id",
+          "app_origin"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "passkey_login_verify",
+      "description": "Verify a browser WebAuthn assertion and return a normal Run402 auth session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "challenge_id": {
+            "type": "string",
+            "description": "challenge_id returned by passkey_login_options"
+          },
+          "response": {
+            "description": "PublicKeyCredential assertion response JSON from the browser"
+          }
+        },
+        "required": [
+          "project_id",
+          "challenge_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_passkeys",
+      "description": "List the authenticated user's active passkeys.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "access_token": {
+            "type": "string",
+            "description": "Authenticated user's access_token"
+          }
+        },
+        "required": [
+          "project_id",
+          "access_token"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_passkey",
+      "description": "Delete one authenticated-user passkey by id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "access_token": {
+            "type": "string",
+            "description": "Authenticated user's access_token"
+          },
+          "passkey_id": {
+            "type": "string",
+            "description": "Passkey ID to delete"
+          }
+        },
+        "required": [
+          "project_id",
+          "access_token",
+          "passkey_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "register_sender_domain",
+      "description": "Register a custom email sending domain for a project. Returns DNS records (DKIM CNAMEs + SPF/DMARC) to add. Once verified, email sends from your domain instead of mail.run402.com.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain to register for email sending (e.g., 'kysigned.com')"
+          }
+        },
+        "required": [
+          "project_id",
+          "domain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sender_domain_status",
+      "description": "Check the verification status of a project's custom sender domain. Polls SES for pending domains.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "remove_sender_domain",
+      "description": "Remove a project's custom sender domain. Email reverts to sending from mail.run402.com.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "enable_sender_domain_inbound",
+      "description": "Enable inbound email on a verified custom sender domain. Replies to <slug>@<your-domain> will route through run402. Requires DKIM-verified domain. Returns the MX record to add to DNS.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "domain": {
+            "type": "string",
+            "description": "The custom sender domain to enable inbound on (must be DKIM-verified)"
+          }
+        },
+        "required": [
+          "project_id",
+          "domain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "disable_sender_domain_inbound",
+      "description": "Disable inbound email on a custom sender domain. Replies to <slug>@<your-domain> will no longer be delivered.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "domain": {
+            "type": "string",
+            "description": "The custom sender domain to disable inbound on"
+          }
+        },
+        "required": [
+          "project_id",
+          "domain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_email_billing_account",
+      "description": "Create an email-based billing account (Stripe-only, no wallet required). Sends a verification email. Idempotent — duplicate emails return the existing account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Email address to create a billing account for (Stripe-only, no wallet)"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "link_wallet_to_account",
+      "description": "Link a wallet to an existing email billing account, enabling hybrid Stripe + x402 access. Fails if the wallet is already linked elsewhere.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "billing_account_id": {
+            "type": "string",
+            "description": "The billing account ID (from create_email_billing_account)"
+          },
+          "wallet": {
+            "type": "string",
+            "description": "The wallet address to link (0x...)"
+          }
+        },
+        "required": [
+          "billing_account_id",
+          "wallet"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "tier_checkout",
+      "description": "Subscribe/renew/upgrade to a run402 tier via Stripe credit card. Alternative to x402 on-chain payment. Supports wallet or email identifier. Returns a Stripe checkout URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "enum": [
+              "prototype",
+              "hobby",
+              "team"
+            ],
+            "description": "Tier name: prototype ($0.10/7d, free with testnet faucet), hobby ($5/30d), team ($20/30d)"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address (for email-based accounts)"
+          },
+          "wallet": {
+            "type": "string",
+            "description": "Wallet address (for wallet-based accounts)"
+          }
+        },
+        "required": [
+          "tier"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "buy_email_pack",
+      "description": "Buy a $5 email pack (10,000 emails, never expire). Pack credits activate when tier daily limit is exhausted AND a custom sender domain is verified. Returns a Stripe checkout URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Email address (for email-based accounts)"
+          },
+          "wallet": {
+            "type": "string",
+            "description": "Wallet address (for wallet-based accounts)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_auto_recharge",
+      "description": "Enable or disable automatic email pack repurchase when credits drop below a threshold. Requires a saved Stripe payment method.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "billing_account_id": {
+            "type": "string",
+            "description": "The billing account ID"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable (true) or disable (false) auto-recharge"
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Credit threshold to trigger auto-recharge (default 2000)"
+          }
+        },
+        "required": [
+          "billing_account_id",
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "provision_contract_wallet",
+      "description": "Provision an AWS KMS-backed Ethereum wallet for signing smart-contract write transactions. Private keys never leave KMS. Cost: $0.04/day rental ($1.20/month) plus $0.000005 per contract call. Requires $1.20 in cash credit at creation (30 days of rent). Non-custodial.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "chain": {
+            "type": "string",
+            "enum": [
+              "base-mainnet",
+              "base-sepolia"
+            ],
+            "description": "Which EVM chain. Cost: $0.04/day rental, requires $1.20 in cash credit at creation."
+          },
+          "recovery_address": {
+            "type": "string",
+            "description": "Optional 0x-prefixed address for auto-drain on day-90 deletion"
+          }
+        },
+        "required": [
+          "project_id",
+          "chain"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_contract_wallet",
+      "description": "Get a KMS contract wallet's metadata + live native-token balance + USD-micros (Chainlink-cached price).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "wallet_id": {
+            "type": "string",
+            "description": "The KMS contract wallet ID (cwlt_...)"
+          }
+        },
+        "required": [
+          "project_id",
+          "wallet_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_contract_wallets",
+      "description": "List all KMS contract wallets owned by the project, including deleted ones.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_recovery_address",
+      "description": "Set or clear the optional recovery address used for auto-drain on day-90 deletion of a KMS contract wallet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "wallet_id": {
+            "type": "string",
+            "description": "The KMS contract wallet ID"
+          },
+          "recovery_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "0x-prefixed address (or null to clear). Used for auto-drain on day-90 deletion."
+          }
+        },
+        "required": [
+          "project_id",
+          "wallet_id",
+          "recovery_address"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_low_balance_alert",
+      "description": "Set the low-balance threshold (in wei) for a KMS contract wallet. Email alerts fire when the wallet's native balance drops below this threshold.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "wallet_id": {
+            "type": "string",
+            "description": "The KMS contract wallet ID"
+          },
+          "threshold_wei": {
+            "type": "string",
+            "description": "Low-balance threshold in wei (decimal string)"
+          }
+        },
+        "required": [
+          "project_id",
+          "wallet_id",
+          "threshold_wei"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "contract_call",
+      "description": "Submit a smart-contract write call from a KMS wallet. The gateway encodes via viem, signs the digest via AWS KMS, and broadcasts. Idempotent on optional idempotency_key. Cost: chain gas at-cost + $0.000005 KMS sign fee per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "wallet_id": {
+            "type": "string",
+            "description": "The KMS contract wallet ID"
+          },
+          "chain": {
+            "type": "string",
+            "enum": [
+              "base-mainnet",
+              "base-sepolia"
+            ],
+            "description": "EVM chain"
+          },
+          "contract_address": {
+            "type": "string",
+            "description": "0x-prefixed contract address"
+          },
+          "abi_fragment": {
+            "type": "array",
+            "items": {},
+            "description": "ABI fragment containing the function definition"
+          },
+          "function_name": {
+            "type": "string",
+            "description": "Function name to invoke"
+          },
+          "args": {
+            "type": "array",
+            "items": {},
+            "description": "Function arguments (must match ABI)"
+          },
+          "value": {
+            "type": "string",
+            "description": "Optional native-token value in wei (decimal string)"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Optional idempotency key — same key returns same call_id without re-broadcasting"
+          }
+        },
+        "required": [
+          "project_id",
+          "wallet_id",
+          "chain",
+          "contract_address",
+          "abi_fragment",
+          "function_name",
+          "args"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "contract_read",
+      "description": "Read-only smart-contract call (view/pure functions). No signing, no gas, no billing — pure RPC convenience.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string",
+            "enum": [
+              "base-mainnet",
+              "base-sepolia"
+            ],
+            "description": "EVM chain"
+          },
+          "contract_address": {
+            "type": "string",
+            "description": "0x-prefixed contract address"
+          },
+          "abi_fragment": {
+            "type": "array",
+            "items": {},
+            "description": "ABI fragment containing the view/pure function"
+          },
+          "function_name": {
+            "type": "string",
+            "description": "Function name"
+          },
+          "args": {
+            "type": "array",
+            "items": {},
+            "description": "Function arguments"
+          }
+        },
+        "required": [
+          "chain",
+          "contract_address",
+          "abi_fragment",
+          "function_name",
+          "args"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_contract_call_status",
+      "description": "Look up a previously submitted contract call by call_id. Returns lifecycle state (pending/confirmed/failed), block number, gas used, gas cost in USD-micros, receipt, and any error.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "call_id": {
+            "type": "string",
+            "description": "The contract call ID (ccall_...)"
+          }
+        },
+        "required": [
+          "project_id",
+          "call_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "drain_contract_wallet",
+      "description": "Drain a KMS contract wallet's entire native-token balance to a destination address. Works on suspended wallets — the safety valve. Cost: chain gas + $0.000005 KMS sign fee.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "wallet_id": {
+            "type": "string",
+            "description": "The KMS contract wallet ID"
+          },
+          "destination_address": {
+            "type": "string",
+            "description": "Where to send the entire native-token balance. Cost: chain gas + $0.000005 KMS sign fee. Works on suspended wallets."
+          }
+        },
+        "required": [
+          "project_id",
+          "wallet_id",
+          "destination_address"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_contract_wallet",
+      "description": "Schedule the KMS key for a contract wallet for deletion (7-day AWS minimum window). Refused if the wallet has on-chain balance ≥ dust — drain first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The project ID"
+          },
+          "wallet_id": {
+            "type": "string",
+            "description": "The KMS contract wallet ID. Schedules KMS key deletion (7-day window). Refused if balance >= dust — drain first."
+          }
+        },
+        "required": [
+          "project_id",
+          "wallet_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "service_status",
+      "description": "Reports on the Run402 SERVICE (availability, capabilities, operator, deployment) — not your account. For your account status (allowance, tier, projects), use `status`. Reads public GET /status. No auth, no allowance required.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "service_health",
+      "description": "Liveness check for the Run402 SERVICE — not your account. For your account status (allowance, tier, projects), use `status`. Reads public GET /health with per-dependency check results. No auth required.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

@@ -1,0 +1,621 @@
+{
+  "package": "@nordsym/apiclaw",
+  "tools": [
+    {
+      "name": "apiclaw_help",
+      "description": "Get help and see available commands. Start here if you are new to APIClaw.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "discover_apis",
+      "description": "Find APIs by job-to-be-done. Use this when the user asks \"what API can do X?\", wants provider recommendations, or needs web search, scraping, email, SMS, speech, PDFs, browser automation, weather, finance, or other external capabilities.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language query describing what you need (e.g., \"send SMS to Sweden\", \"search the web\", \"generate speech from text\")"
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional category filter. Categories are case-sensitive — call list_categories first to see exact names (e.g., \"Utilities\", \"Analytics\", \"Development\", \"AI & ML\", \"Cloud\", \"Finance\", \"Communication\", \"Location\", \"Entertainment\", \"Security\", \"Health\")."
+          },
+          "callable_only": {
+            "type": "boolean",
+            "description": "Default true: only return APIs APIClaw can execute right now (~2,895 callable providers). Set false to also see the ~23,800 discovery-only registry entries — useful when scoping a manual integration, not for agents that want to act now.",
+            "default": true
+          },
+          "max_results": {
+            "type": "number",
+            "description": "Maximum number of results to return (default: 5)",
+            "default": 5
+          },
+          "region": {
+            "type": "string",
+            "description": "Filter by region (e.g., \"SE\", \"EU\", \"global\")"
+          },
+          "subagent_id": {
+            "type": "string",
+            "description": "Optional subagent identifier for multi-agent tracking"
+          },
+          "ai_backend": {
+            "type": "string",
+            "description": "AI backend making this request (e.g., \"claude-3-sonnet\", \"gpt-4\"). Used for analytics."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "get_api_details",
+      "description": "Inspect one provider after discovery. Good when the agent needs endpoint names, params, pricing, auth, or docs. Use compact=true to avoid oversized responses in Claude/Desktop.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "api_id": {
+            "type": "string",
+            "description": "The API provider ID (e.g., \"openrouter\", \"brave_search\", \"elevenlabs\")"
+          },
+          "compact": {
+            "type": "boolean",
+            "description": "If true, returns minified spec (strips examples, keeps essential params). Saves ~60% context window.",
+            "default": false
+          }
+        },
+        "required": [
+          "api_id"
+        ]
+      }
+    },
+    {
+      "name": "purchase_access",
+      "description": "Purchase access to an API using your credit balance. Returns API credentials on success.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "api_id": {
+            "type": "string",
+            "description": "The API provider ID to purchase access to"
+          },
+          "amount_usd": {
+            "type": "number",
+            "description": "Amount in USD to spend on this API"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Your agent identifier (optional, uses default if not provided)"
+          }
+        },
+        "required": [
+          "api_id",
+          "amount_usd"
+        ]
+      }
+    },
+    {
+      "name": "check_balance",
+      "description": "Check your credit balance and list active API purchases.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Your agent identifier (optional, uses default if not provided)"
+          }
+        }
+      }
+    },
+    {
+      "name": "add_credits",
+      "description": "Add credits to your workspace. (For testing/demo purposes)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "amount_usd": {
+            "type": "number",
+            "description": "Amount in USD to add to your balance"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Your agent identifier (optional, uses default if not provided)"
+          }
+        },
+        "required": [
+          "amount_usd"
+        ]
+      }
+    },
+    {
+      "name": "list_categories",
+      "description": "List API categories with total + callable counts. Lightweight by design — does NOT dump every API ID. Use discover_apis(query, category) to drill into a category.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "with_api_ids": {
+            "type": "boolean",
+            "description": "If true, include the full API id list per category (large response, will auto-compact). Default: false.",
+            "default": false
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "call_api",
+      "description": "Primary execution tool. Use this to actually do the job through APIClaw: live web search, scraping, email, SMS, speech, LLM calls, invoices, screenshots, currency, weather, and other external API work. Requires free registration; if not registered, call register_owner first.\n\nSINGLE CALL: Provide provider + action + params\nCHAIN: Provide chain array to execute multiple APIs in sequence/parallel with cross-step references.\n\nChain features:\n- Sequential: Steps execute in order, each can reference previous results via $stepId.property\n- Parallel: Use { parallel: [...steps] } to run concurrently\n- Conditional: Use { if: \"$step.success\", then: {...}, else: {...} }\n- Loops: Use { forEach: \"$step.results\", as: \"item\", do: {...} }\n- Error handling: Per-step retry/fallback via onError\n- Async: Set async: true to get chainId immediately, poll or use webhook\n\nExample chain:\n  chain: [\n    { id: \"search\", provider: \"brave_search\", action: \"search\", params: { query: \"AI agents\" } },\n    { id: \"summarize\", provider: \"openrouter\", action: \"chat\", params: { message: \"Summarize: $search.results\" } }\n  ]",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Provider ID (e.g., \"openrouter\", \"brave_search\", \"elevenlabs\", \"replicate\", \"firecrawl\", \"groq\", \"frankfurter\")"
+          },
+          "action": {
+            "type": "string",
+            "description": "Action to perform (e.g., \"send_sms\", \"search\", \"send_email\", \"chat\", \"send_invoice\", \"convert\")"
+          },
+          "params": {
+            "type": "object",
+            "description": "Parameters for the action. Varies by provider/action."
+          },
+          "customer_key": {
+            "type": "string",
+            "description": "Optional: Your own API key for providers that require customer authentication (e.g., CoAccept)."
+          },
+          "confirm_token": {
+            "type": "string",
+            "description": "Confirmation token from a previous call. Required to execute actions that cost money after reviewing the preview."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, shows what WOULD be sent without making actual API calls. Returns mock response and request details. Great for testing and debugging."
+          },
+          "chain": {
+            "type": "array",
+            "description": "Execute multiple API calls as a single chain. Each step can reference previous results via $stepId.property",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Step identifier for cross-step references"
+                },
+                "provider": {
+                  "type": "string",
+                  "description": "API provider"
+                },
+                "action": {
+                  "type": "string",
+                  "description": "Action to execute"
+                },
+                "params": {
+                  "type": "object",
+                  "description": "Action parameters. Use $stepId.path for references."
+                },
+                "parallel": {
+                  "type": "array",
+                  "description": "Steps to run in parallel"
+                },
+                "if": {
+                  "type": "string",
+                  "description": "Condition for conditional execution (e.g., \"$step1.success\")"
+                },
+                "then": {
+                  "type": "object",
+                  "description": "Step to execute if condition is true"
+                },
+                "else": {
+                  "type": "object",
+                  "description": "Step to execute if condition is false"
+                },
+                "forEach": {
+                  "type": "string",
+                  "description": "Array reference to iterate (e.g., \"$search.results\")"
+                },
+                "as": {
+                  "type": "string",
+                  "description": "Variable name for current item in loop"
+                },
+                "do": {
+                  "type": "object",
+                  "description": "Step to execute for each item"
+                },
+                "onError": {
+                  "type": "object",
+                  "description": "Error handling configuration",
+                  "properties": {
+                    "retry": {
+                      "type": "object",
+                      "properties": {
+                        "attempts": {
+                          "type": "number",
+                          "description": "Max retry attempts"
+                        },
+                        "backoff": {
+                          "type": "string",
+                          "description": "\"exponential\" or \"linear\" or array of ms delays"
+                        }
+                      }
+                    },
+                    "fallback": {
+                      "type": "object",
+                      "description": "Fallback step if this fails"
+                    },
+                    "abort": {
+                      "type": "boolean",
+                      "description": "Abort entire chain on failure"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "continueOnError": {
+            "type": "boolean",
+            "description": "Continue chain execution even if a step fails (default: false)"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Maximum execution time for the entire chain in milliseconds"
+          },
+          "async": {
+            "type": "boolean",
+            "description": "Return immediately with chainId. Use get_chain_status to poll or provide webhook."
+          },
+          "webhook": {
+            "type": "string",
+            "description": "URL to POST results when async chain completes"
+          },
+          "subagent_id": {
+            "type": "string",
+            "description": "Optional subagent identifier for multi-agent tracking"
+          },
+          "ai_backend": {
+            "type": "string",
+            "description": "AI backend making this request (e.g., \"claude-3-sonnet\", \"gpt-4\"). Used for analytics."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "list_connected",
+      "description": "Summary of providers callable right now through APIClaw with no key paste. Defaults to a compact summary (managed providers + open-API counts). Pass verbose=true only if the agent explicitly needs the full open-API list. Use discover_apis(query) for narrow lookups instead of dumping the whole catalog.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "verbose": {
+            "type": "boolean",
+            "description": "If true, also include the full keyless open-API list (large response, will auto-compact). Default: false.",
+            "default": false
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional category filter for the open-API list when verbose=true."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "capability",
+      "description": "Best default when you know the job but not the provider. Execute by intent such as sms, email, search, tts, invoice, or llm, and APIClaw picks the provider plus fallback automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "capability": {
+            "type": "string",
+            "description": "Capability ID: \"sms\", \"email\", \"search\", \"tts\", \"invoice\", \"llm\""
+          },
+          "action": {
+            "type": "string",
+            "description": "Action to perform: \"send\", \"search\", \"generate\", etc."
+          },
+          "params": {
+            "type": "object",
+            "description": "Parameters for the action (capability-standard params, not provider-specific)"
+          },
+          "preferences": {
+            "type": "object",
+            "description": "Optional routing preferences",
+            "properties": {
+              "region": {
+                "type": "string",
+                "description": "Preferred region: \"SE\", \"EU\", \"US\""
+              },
+              "maxPrice": {
+                "type": "number",
+                "description": "Max price per unit in cents/öre"
+              },
+              "preferredProvider": {
+                "type": "string",
+                "description": "Hint to prefer a specific provider"
+              },
+              "fallback": {
+                "type": "boolean",
+                "description": "Enable fallback to other providers (default: true)"
+              }
+            }
+          },
+          "subagent_id": {
+            "type": "string",
+            "description": "Optional subagent identifier for multi-agent tracking"
+          },
+          "ai_backend": {
+            "type": "string",
+            "description": "AI backend making this request (e.g., \"claude-3-sonnet\", \"gpt-4\"). Used for analytics."
+          }
+        },
+        "required": [
+          "capability",
+          "action",
+          "params"
+        ]
+      }
+    },
+    {
+      "name": "list_capabilities",
+      "description": "List high-level jobs APIClaw can do, such as sms, email, search, tts, invoice, or llm, and which providers back them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_models",
+      "description": "List every LLM the workspace can call through APIClaw — Anthropic, OpenAI, xAI/Grok, Groq, Mistral, Together, Cohere, Replicate, OpenRouter (800+ more), and any provider routed via the unified gateway. Returns OpenAI-compatible model objects.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Optional: filter to one provider (anthropic, openai, xai, groq, mistral, together, openrouter, …)"
+          }
+        }
+      }
+    },
+    {
+      "name": "register_owner",
+      "description": "REQUIRED before using any API. Register your email to create a workspace. A 6-digit verification code will be sent to your email. After calling this, ask the user for the code and call verify_code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Your email address (used for verification and account recovery)"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      }
+    },
+    {
+      "name": "verify_code",
+      "description": "Verify the 6-digit code sent to your email after register_owner. This completes registration and activates your workspace. Ask the user to check their email and paste the code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The email address used in register_owner"
+          },
+          "code": {
+            "type": "string",
+            "description": "The 6-digit verification code from the email"
+          }
+        },
+        "required": [
+          "email",
+          "code"
+        ]
+      }
+    },
+    {
+      "name": "check_workspace_status",
+      "description": "Check your workspace status, tier, and usage remaining.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "remind_owner",
+      "description": "Send a reminder email to verify workspace ownership (if verification is pending).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "setup_metered_billing",
+      "description": "Set up pay-per-call billing. Creates a subscription that charges $0.002 per API call at end of month.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Email for the billing account"
+          },
+          "success_url": {
+            "type": "string",
+            "description": "URL to redirect after successful setup",
+            "default": "https://apiclaw.cloud/billing/success"
+          },
+          "cancel_url": {
+            "type": "string",
+            "description": "URL to redirect if setup is cancelled",
+            "default": "https://apiclaw.cloud/billing/cancel"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      }
+    },
+    {
+      "name": "get_usage_summary",
+      "description": "Get current billing period usage and estimated cost for metered billing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subscription_id": {
+            "type": "string",
+            "description": "Stripe subscription ID (stored after setup_metered_billing)"
+          }
+        },
+        "required": [
+          "subscription_id"
+        ]
+      }
+    },
+    {
+      "name": "estimate_cost",
+      "description": "Estimate the cost for a given number of API calls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "call_count": {
+            "type": "number",
+            "description": "Number of API calls to estimate cost for"
+          }
+        },
+        "required": [
+          "call_count"
+        ]
+      }
+    },
+    {
+      "name": "start_mission",
+      "description": "Start a Control Plane mission — a structured, observable orchestration that runs on APIClaw's runtime. Use this when the user wants to spin up a multi-step task rather than a single API call. Returns a missionId you can poll with mission_status. Legacy templates run through the hand-coded path; data-driven templates run through the v2 composition runner when template_version is pinned.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string",
+            "description": "Template slug — call list_mission_templates to see what is available."
+          },
+          "template_version": {
+            "type": "number",
+            "description": "Optional pinned version for data-driven (v2) templates. Omit to use latest enabled."
+          },
+          "params": {
+            "type": "object",
+            "description": "Template-specific parameters (see list_mission_templates for the schema)."
+          }
+        },
+        "required": [
+          "template"
+        ]
+      }
+    },
+    {
+      "name": "list_mission_templates",
+      "description": "List the Control Plane mission templates available to your agent and the parameters each one accepts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "discover_missions",
+      "description": "Search mission templates by natural-language query. Returns ranked templates with slug, version, title, description, paramSchema, and match reasons. Ranking combines keyword relevance with live success-rate signal from providerHealth — templates whose steps call providers that have been degrading in the last 30 days slide down automatically. Use this to find the right template by intent before calling start_mission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural-language description of what the agent wants done."
+          },
+          "max_results": {
+            "type": "number",
+            "description": "Default 5, max 25.",
+            "default": 5
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "mission_status",
+      "description": "Check status, audit events, cost, and final result for a mission started via start_mission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mission_id": {
+            "type": "string",
+            "description": "Mission id from start_mission"
+          }
+        },
+        "required": [
+          "mission_id"
+        ]
+      }
+    },
+    {
+      "name": "list_missions",
+      "description": "List recent missions in the current workspace (most recent first).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Max rows (default 20, max 200)"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_chain_status",
+      "description": "Check the status of an async chain execution. Use the chainId returned from call_api with async: true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain_id": {
+            "type": "string",
+            "description": "Chain ID returned from async chain execution"
+          }
+        },
+        "required": [
+          "chain_id"
+        ]
+      }
+    },
+    {
+      "name": "resume_chain",
+      "description": "Resume a failed chain from the point of failure. Use the resumeToken from the error response. Requires the original chain definition.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resume_token": {
+            "type": "string",
+            "description": "Resume token from a failed chain (e.g., \"chain_xyz_step_2\")"
+          },
+          "original_chain": {
+            "type": "array",
+            "description": "The original chain definition that failed. Required to resume execution.",
+            "items": {
+              "type": "object"
+            }
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Optional parameter overrides for specific steps. Format: { \"stepId\": { ...newParams } }"
+          }
+        },
+        "required": [
+          "resume_token",
+          "original_chain"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,332 @@
+{
+  "package": "pretext-pdf-mcp",
+  "tools": [
+    {
+      "name": "generate_pdf",
+      "description": "Generate a PDF from a custom PdfDocument JSON descriptor. Use this for any layout not covered by generate_invoice or generate_report — e.g. resumes, contracts, certificates, presentations, or any multi-element composition. Returns base64-encoded PDF bytes. Call list_element_types first to see available elements and options.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "document": {
+            "type": "object",
+            "description": "A PdfDocument config object with content array and optional pageSize, margins, fonts, header, footer, watermark, encryption, etc."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Suggested filename (without .pdf extension)",
+            "default": "document"
+          }
+        },
+        "required": [
+          "document"
+        ]
+      }
+    },
+    {
+      "name": "generate_invoice",
+      "description": "Generate a professional invoice PDF. Accepts structured invoice data (from/to parties, line items, optional GST/tax). Returns base64-encoded PDF. Supports INR/USD/EUR/GBP currencies. Currency symbols (₹ $ € £) are guaranteed not to break away from adjacent numbers across line wraps. gst_rate on items creates a tax column — use it for any tax system (GST, VAT, sales tax). Per-item gst_rate is summed as IGST in the totals; CGST/SGST inter-vs-intra-state routing is not currently supported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "object",
+            "description": "Issuing party (your company)",
+            "properties": {
+              "company": {
+                "type": "string"
+              },
+              "address": {
+                "type": "string"
+              },
+              "gstin": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "company"
+            ]
+          },
+          "to": {
+            "type": "object",
+            "description": "Billing party (client)",
+            "properties": {
+              "company": {
+                "type": "string"
+              },
+              "address": {
+                "type": "string"
+              },
+              "gstin": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "company"
+            ]
+          },
+          "invoice_number": {
+            "type": "string",
+            "description": "Invoice identifier e.g. INV-2026-001"
+          },
+          "date": {
+            "type": "string",
+            "description": "Invoice date ISO format YYYY-MM-DD. Defaults to today."
+          },
+          "due_date": {
+            "type": "string",
+            "description": "Payment due date ISO format."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "INR",
+              "USD",
+              "EUR",
+              "GBP"
+            ],
+            "description": "Currency. Default: INR"
+          },
+          "items": {
+            "type": "array",
+            "description": "Line items",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "hsn_code": {
+                  "type": "string",
+                  "description": "HSN/SAC code for India GST"
+                },
+                "quantity": {
+                  "type": "number"
+                },
+                "rate": {
+                  "type": "number",
+                  "description": "Unit price"
+                },
+                "gst_rate": {
+                  "type": "number",
+                  "enum": [
+                    0,
+                    5,
+                    12,
+                    18,
+                    28
+                  ],
+                  "description": "GST rate %. If set, IGST is calculated."
+                }
+              },
+              "required": [
+                "description",
+                "quantity",
+                "rate"
+              ]
+            }
+          },
+          "notes": {
+            "type": "string",
+            "description": "Additional notes or payment terms."
+          },
+          "upi_qr_data": {
+            "type": "string",
+            "description": "UPI payment string for QR code, e.g. \"upi://pay?pa=merchant@upi&pn=Name&am=1000\". When provided, a scannable QR code is embedded in the PDF."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Suggested filename without .pdf extension."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "items"
+        ]
+      }
+    },
+    {
+      "name": "generate_report",
+      "description": "Generate a professional multi-section report PDF. Features: auto-generated TOC, per-section headings with PDF bookmarks, page-numbered footer, running header, optional tables and callout boxes per section. Returns base64-encoded PDF.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Report title"
+          },
+          "subtitle": {
+            "type": "string",
+            "description": "Report subtitle or description"
+          },
+          "author": {
+            "type": "string",
+            "description": "Author name"
+          },
+          "date": {
+            "type": "string",
+            "description": "Date string. Defaults to today."
+          },
+          "include_toc": {
+            "type": "boolean",
+            "description": "Include a Table of Contents page. Default: true",
+            "default": true
+          },
+          "sections": {
+            "type": "array",
+            "description": "Report sections",
+            "items": {
+              "type": "object",
+              "properties": {
+                "heading": {
+                  "type": "string",
+                  "description": "Section heading"
+                },
+                "body": {
+                  "type": "string",
+                  "description": "Section body text. Use double newlines (\\n\\n) to separate paragraphs."
+                },
+                "table": {
+                  "type": "object",
+                  "description": "Optional data table",
+                  "properties": {
+                    "headers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "headers",
+                    "rows"
+                  ]
+                },
+                "callout": {
+                  "type": "object",
+                  "description": "Optional callout / alert box",
+                  "properties": {
+                    "style": {
+                      "type": "string",
+                      "enum": [
+                        "info",
+                        "warning",
+                        "tip",
+                        "note"
+                      ]
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "style",
+                    "text"
+                  ]
+                }
+              },
+              "required": [
+                "heading",
+                "body"
+              ]
+            }
+          },
+          "filename": {
+            "type": "string",
+            "description": "Suggested filename without .pdf extension."
+          }
+        },
+        "required": [
+          "title",
+          "sections"
+        ]
+      }
+    },
+    {
+      "name": "generate_from_markdown",
+      "description": "Convert a Markdown string to a PDF. Supports headings, bold/italic, strikethrough, inline code, links, ordered/unordered lists (nested up to 3 levels), GFM tables (with column alignment), GFM task lists (☑/☐), blockquotes, fenced code blocks (rendered as plain indented text — not styled monospace), and horizontal rules. For richer layouts or styled code blocks, use generate_pdf instead. Returns a base64-encoded PDF.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "markdown": {
+            "type": "string",
+            "description": "Markdown source to convert. Max 100,000 characters."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Suggested filename without .pdf extension. Default: document"
+          },
+          "page_size": {
+            "type": "string",
+            "enum": [
+              "A4",
+              "Letter",
+              "Legal",
+              "A3",
+              "A5",
+              "Tabloid"
+            ],
+            "description": "Page size. Default: A4. Matches the NamedPageSize union exported by pretext-pdf."
+          },
+          "font_size": {
+            "type": "number",
+            "description": "Body font size in pt. Default: 12"
+          }
+        },
+        "required": [
+          "markdown"
+        ]
+      }
+    },
+    {
+      "name": "list_element_types",
+      "description": "Returns a markdown reference of all pretext-pdf element types and their key properties. Use this before calling generate_pdf to understand what elements and options are available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "validate_document",
+      "description": "Validate a pretext-pdf document schema without rendering it. Returns immediately with all validation errors — use this as a cheap preflight check before calling generate_pdf. Each error includes a structured path, message, and optional typo suggestion.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "document": {
+            "type": "object",
+            "description": "The pretext-pdf document to validate (same shape as generate_pdf.document)"
+          },
+          "strict": {
+            "type": "boolean",
+            "description": "When true, also report unknown/misspelled properties (default: false)"
+          }
+        },
+        "required": [
+          "document"
+        ]
+      }
+    }
+  ]
+}

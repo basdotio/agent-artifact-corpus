@@ -1,0 +1,1826 @@
+{
+  "package": "ollama-intern-mcp",
+  "tools": [
+    {
+      "name": "ollama_research",
+      "description": "FLAGSHIP. Answer a question grounded in specific files. Takes FILE PATHS (not raw text) — reads and chunks locally, returns a digest with validated citations. Use this to understand a repo/doc without burning Claude context on the full content. Citations outside source_paths are stripped server-side; cited line_ranges that point past EOF have the range dropped (path is kept) with a warning. Returns honest grounding signals: `weak: true` when an answer has zero validated citations (likely ungrounded); `abstained: true` when the model explicitly refused (citations cleared); `sources_address_question` is tri-state (null when unknown).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The question to answer."
+          },
+          "source_paths": {
+            "description": "Files the answer must be grounded in. Nothing outside this list is allowed as a source."
+          },
+          "max_words": {
+            "description": "Target answer length in words (default 300).",
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 1500
+          },
+          "per_file_max_chars": {
+            "description": "Chars to read per file (default 40k).",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "model": {
+            "description": "Optional per-call model override. When provided, overrides the tool's tier-resolved model for this call. The tier's timeout (TIER_TIMEOUT_MS) still applies. On timeout, fallback uses the tier-resolved model, NOT the override. Use for receipt-backed orchestration that requires explicit model identity (e.g., research-os reviewer profiles).",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "question",
+          "source_paths"
+        ]
+      }
+    },
+    {
+      "name": "ollama_corpus_search",
+      "description": "FLAGSHIP. Concept search over a persistent named corpus (e.g. 'memory', 'canon', 'handbook'). Pass `corpus` + `query`; returns ranked `[{id, path, score, chunk_index, preview?}]` drawn from the indexed corpus. Use this as your default for semantic recall — the corpus is persistent across sessions so you don't re-embed every call. Build or refresh a corpus with ollama_corpus_index first; see what's available with ollama_corpus_list.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "corpus": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Name of the corpus to search (e.g. 'memory', 'canon'). Must have been indexed first with ollama_corpus_index."
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Concept or question to search for (max 1000 chars)."
+          },
+          "mode": {
+            "description": "Ranking strategy. 'hybrid' (default) fuses dense + lexical via RRF — best for general queries. 'semantic' is dense-only. 'lexical' is BM25-only (no embed call). 'fact' is hybrid with exact-substring + short-chunk boosts for specific-fact lookups. 'title_path' searches only title/heading/path metadata (no embed call, sub-ms).",
+            "type": "string",
+            "enum": [
+              "semantic",
+              "lexical",
+              "hybrid",
+              "fact",
+              "title_path"
+            ]
+          },
+          "top_k": {
+            "description": "Return the top K chunks (default 10).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "preview_chars": {
+            "description": "Include this many chars of each chunk's text in the result (default 200).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "filter": {
+            "description": "Restrict which chunks participate in retrieval. Applied before RRF fusion so scores reflect the filtered set.",
+            "type": "object",
+            "properties": {
+              "path_glob": {
+                "description": "Minimatch-style glob applied to chunk.path. Supports **, *, ? (no braces). Applied BEFORE ranking.",
+                "type": "string",
+                "minLength": 1
+              },
+              "since": {
+                "description": "ISO timestamp. Keep only chunks whose source file mtime is ≥ this value.",
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "explain": {
+            "description": "When true, each top-5 hit gets a short LLM-generated 'why matched' explanation. Capped at 5 hits to bound cost. Fails soft — on LLM failure the hits return without why_matched and a warning is appended.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "corpus",
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "ollama_corpus_answer",
+      "description": "FLAGSHIP. Answer a question from a NAMED CORPUS with chunk-grounded citations. Retrieves via corpus_search, synthesizes with the Deep tier from the retrieved chunks ONLY, and returns `{answer, citations:[{path, chunk_index, heading_path, title, score}], covered_sources, omitted_sources, coverage_notes, retrieval:{retrieved, top_score, weak}, abstained}`. Per-citation `score` carries the retrieval relevance through. Distinct from ollama_research: research takes source paths you explicitly hand in; corpus_answer pulls from an already-indexed corpus. Weak retrieval degrades honestly — 0 hits short-circuits without invoking the model. New `min_top_score` floor: when supplied, top hits below the threshold also short-circuit with `abstained: true` instead of driving ungrounded synthesis (e.g. 5 hits @ 0.21 cosine on a 0.5 floor).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "corpus": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Name of the corpus to answer from (must have been indexed with ollama_corpus_index)."
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "The question to answer (max 1000 chars)."
+          },
+          "mode": {
+            "description": "Retrieval strategy passed through to ollama_corpus_search. Default: hybrid.",
+            "type": "string",
+            "enum": [
+              "semantic",
+              "lexical",
+              "hybrid",
+              "fact",
+              "title_path"
+            ]
+          },
+          "top_k": {
+            "description": "How many chunks to retrieve as grounding (default 5). Fewer chunks means tighter citation, more chunks means broader coverage.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "max_words": {
+            "description": "Target answer length in words (default 200).",
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 1000
+          },
+          "min_top_score": {
+            "description": "Topicality floor — if the top retrieval score is below this value, the tool short-circuits with `abstained: true` and `retrieval.weak: true` instead of invoking the model. Use this when low-relevance hits would otherwise drive ungrounded synthesis (e.g. 0.21 cosine on a 0.5 threshold). Absent → no floor; existing 0-hit short-circuit still fires.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "model": {
+            "description": "Optional per-call model override for the SYNTHESIS step (deep tier). Retrieval still runs on the embed tier's model. When provided, overrides the deep-tier model for synthesis. The tier's timeout (TIER_TIMEOUT_MS) still applies. On timeout, fallback uses the tier-resolved model, NOT the override. Use for receipt-backed orchestration that requires explicit model identity (e.g., research-os reviewer profiles). Short-circuit branches (empty question, zero hits, below min_top_score) do NOT invoke any model; the envelope still surfaces `model_requested` when set.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "corpus",
+          "question"
+        ]
+      }
+    },
+    {
+      "name": "ollama_incident_brief",
+      "description": "FLAGSHIP compound job. Produces a STRUCTURED OPERATOR BRIEF from log_text and/or source_paths, optionally blended with a named corpus for background context. Returns `{root_cause_hypotheses, affected_surfaces, timeline_clues, next_checks, evidence, weak, coverage_notes, corpus_used}`. Every hypothesis/surface/clue carries evidence_refs into the evidence array — refs to unknown ids are stripped server-side. Corpus-sourced evidence items carry retrieval `score` (and optionally `why_matched`). Optional `corpus_min_evidence_score` drops corpus chunks below the relevance floor before the model sees them, with a counted note in coverage_notes. Distinct from ollama_triage_logs (symptoms in one blob) and ollama_research (answer a specific question). Thin evidence degrades to weak=true with coverage_notes — never a smooth fake narrative. next_checks are INVESTIGATIVE, not remediations. If you pre-extracted claims via ollama_extract with a frame argument, drop off-topic items before assembling source_paths for this brief — there's no in-brief topicality gate for path/log inputs.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "log_text": {
+            "description": "Raw log blob to reason over. Combine with source_paths and/or corpus for a richer brief.",
+            "type": "string",
+            "minLength": 1
+          },
+          "source_paths": {
+            "description": "File paths read server-side (Claude does not preload). Use for config files, related source files, incident notes. Optional — log-driven calls work without it; runtime requires at least one of log_text or source_paths.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "corpus": {
+            "description": "Optional: named corpus (e.g. 'doctrine', 'memory') to pull background context from. Requires corpus_query when the log signal is too short to derive one.",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "corpus_query": {
+            "description": "Query used to pull chunks from the corpus. Defaults to a digest of the log head if not provided.",
+            "type": "string",
+            "minLength": 1
+          },
+          "per_file_max_chars": {
+            "description": "Chars per source file (default 20k).",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "max_hypotheses": {
+            "description": "Cap on root-cause hypotheses in the output (default 5).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "corpus_min_evidence_score": {
+            "description": "Minimum retrieval score (0–1) for a corpus chunk to enter evidence. Hits below the floor are dropped before the model sees them, with a counted note in coverage_notes. Use this when corpus retrieval may surface off-topic chunks. Absent → no relevance filter.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_repo_brief",
+      "description": "FLAGSHIP compound job. Produces an OPERATOR MAP of a repo: `{repo_thesis, key_surfaces, architecture_shape, risk_areas, read_next, evidence, weak, coverage_notes, corpus_used}`. Takes source_paths (typically README + key src entries + manifests + docs) and optionally a corpus for cross-cutting context. Corpus-sourced evidence items carry retrieval `score`. Optional `corpus_min_evidence_score` drops corpus chunks below the relevance floor before the model sees them. Not a research clone — research answers a specific question; repo_brief synthesizes orientation. Every key_surface and risk_area cites evidence. read_next is INVESTIGATIVE (files or sections to look at), never prescriptive fixes or refactors. Thin evidence → weak=true with coverage notes. If you pre-extracted claims via ollama_extract with a frame argument, drop off-topic items before assembling source_paths — there's no in-brief topicality gate for path inputs.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "source_paths": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Files the brief should read server-side. Typically README, key src/ entries, package/manifest files, docs. Claude does not preload them — that's the context-saving shape."
+          },
+          "corpus": {
+            "description": "Optional: named corpus (e.g. 'handbook', 'doctrine') for cross-cutting context beyond the repo's own files.",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "corpus_query": {
+            "description": "Query used to pull chunks from the corpus. Defaults to 'repo architecture and surfaces' when unspecified.",
+            "type": "string",
+            "minLength": 1
+          },
+          "per_file_max_chars": {
+            "description": "Chars per source file (default 20k).",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "max_key_surfaces": {
+            "description": "Cap on key_surfaces (default 8).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "max_risk_areas": {
+            "description": "Cap on risk_areas (default 5).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "max_read_next": {
+            "description": "Cap on read_next (default 8).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 15
+          },
+          "corpus_min_evidence_score": {
+            "description": "Minimum retrieval score (0–1) for a corpus chunk to enter evidence. Hits below the floor are dropped before the model sees them, with a counted note in coverage_notes. Absent → no relevance filter.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "source_paths"
+        ]
+      }
+    },
+    {
+      "name": "ollama_change_brief",
+      "description": "FLAGSHIP compound job. Produces a CHANGE IMPACT BRIEF: `{change_summary, affected_surfaces, why_it_matters, likely_breakpoints, validation_checks, release_note_draft, evidence, weak, coverage_notes, corpus_used}`. Accepts diff_text (split per file on `diff --git` markers) and/or source_paths (changed files), with an optional corpus for architecture context. Corpus-sourced evidence items carry retrieval `score`. Optional `corpus_min_evidence_score` drops corpus chunks below the relevance floor before the model sees them. Not a git chat bot — structured and reviewable. likely_breakpoints are INVESTIGATIVE reasoning about what could break; validation_checks are what to verify after the change. Never remedial (no 'apply this fix'). release_note_draft is a draft the operator reviews. If you pre-extracted claims via ollama_extract with a frame argument, drop off-topic items before assembling source_paths/diff_text — there's no in-brief topicality gate for diff/path inputs.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "diff_text": {
+            "description": "Unified-diff text (e.g. `git diff` output). Split per file on `diff --git` markers into numbered evidence items.",
+            "type": "string",
+            "minLength": 1
+          },
+          "source_paths": {
+            "description": "Changed files to read server-side. Use alongside diff_text when the full file context matters, or alone when no diff is available. Optional — diff-driven calls work without it; runtime requires at least one of diff_text or source_paths.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "corpus": {
+            "description": "Optional: named corpus (e.g. 'handbook', 'doctrine') for architecture and release-process context.",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "corpus_query": {
+            "description": "Query used to pull chunks from the corpus. Defaults to a digest of the diff/path heads.",
+            "type": "string",
+            "minLength": 1
+          },
+          "per_file_max_chars": {
+            "description": "Chars per source file (default 20k).",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "max_breakpoints": {
+            "description": "Cap on likely_breakpoints (default 6).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "max_validation_checks": {
+            "description": "Cap on validation_checks (default 8).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 15
+          },
+          "corpus_min_evidence_score": {
+            "description": "Minimum retrieval score (0–1) for a corpus chunk to enter evidence. Hits below the floor are dropped before the model sees them, with a counted note in coverage_notes. Absent → no relevance filter.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_incident_pack",
+      "description": "PACK. Runs the full incident job end-to-end: triage_logs → corpus_search → incident_brief → deterministic markdown+JSON artifact on disk. Single call, single completed job, single pair of files the operator can keep and diff. Response is compact ({artifact:{markdown_path,json_path}, summary, steps}) — the full brief lives in the artifact, not the MCP payload. Fixed pipeline, fixed markdown layout, no prose drift. Use this instead of calling triage_logs + incident_brief manually when you want one deliverable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "log_text": {
+            "description": "Raw log blob. Combine with source_paths and/or corpus for richer coverage.",
+            "type": "string",
+            "minLength": 1
+          },
+          "source_paths": {
+            "description": "File paths read server-side (related source, config, incident notes). Optional — log-driven calls work without it; runtime requires at least one of log_text or source_paths."
+          },
+          "corpus": {
+            "description": "Optional named corpus for background context (e.g. 'doctrine', 'memory').",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "corpus_query": {
+            "description": "Corpus query (defaults to the log head).",
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "description": "Short human title — used in the artifact header and filename slug.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "artifact_dir": {
+            "description": "Directory to write the incident.md + incident.json artifact pair. Defaults to ~/.ollama-intern/artifacts/incident/.",
+            "type": "string",
+            "minLength": 1
+          },
+          "per_file_max_chars": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "max_hypotheses": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_repo_pack",
+      "description": "PACK. Runs the full repo ONBOARDING job: corpus_search (if corpus given) → repo_brief → targeted ollama_extract (narrow onboarding schema: packages, entrypoints, scripts, config_files, exposed_surfaces, runtime_hints) → deterministic markdown+JSON artifact on disk. Corpus-first posture: when a corpus is given, it's the main working surface alongside source_paths. Not repo Q&A — this is `get me onboarded fast with a stable operator artifact`. Response is compact; full brief + extracted facts live in the artifact.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "source_paths": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Files the onboarding brief should read (README, key src entries, package/manifest, docs). Required — these are the repo's concrete source-of-truth."
+          },
+          "corpus": {
+            "description": "Optional named corpus (e.g. 'handbook', 'doctrine') for cross-cutting architecture context. When given, queried as the pack's main working surface alongside source_paths.",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "corpus_query": {
+            "description": "Corpus query (defaults to 'repo architecture and surfaces').",
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "description": "Short human title — used in the artifact header and filename slug. Defaults to the repo thesis head.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "artifact_dir": {
+            "description": "Directory to write the repo.md + repo.json artifact pair. Defaults to ~/.ollama-intern/artifacts/repo/.",
+            "type": "string",
+            "minLength": 1
+          },
+          "per_file_max_chars": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "max_key_surfaces": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "max_risk_areas": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "max_read_next": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 15
+          }
+        },
+        "required": [
+          "source_paths"
+        ]
+      }
+    },
+    {
+      "name": "ollama_change_pack",
+      "description": "PACK. Runs the full change REVIEW job: assemble evidence (diff + paths + corpus if given) → triage_logs ONLY when log_text is provided → change_brief → targeted ollama_extract (narrow review schema: scripts_touched, config_surfaces, runtime_hints) → deterministic markdown+JSON artifact on disk. Change-first, not repo-first — this is about the DELTA, not a tour. Release note draft is a blockquote-wrapped DRAFT (not marketing copy). No VCS integration — caller hands in diff_text / source_paths / optional log_text. Response is compact; full brief + extracted facts live in the artifact.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "diff_text": {
+            "description": "Unified-diff text (e.g. `git diff` output). Split per file on `diff --git` markers. At least one of diff_text or source_paths is required.",
+            "type": "string",
+            "minLength": 1
+          },
+          "source_paths": {
+            "description": "Changed files to read server-side (Claude does not preload). Alongside or instead of diff_text. Optional — diff-driven calls work without it; runtime requires at least one of diff_text or source_paths."
+          },
+          "log_text": {
+            "description": "Optional CI log that triggered this review. When present, triage_logs runs and its signal is surfaced in the Change section.",
+            "type": "string",
+            "minLength": 1
+          },
+          "corpus": {
+            "description": "Optional named corpus for architecture/doctrine context. Pulled in only when you need it to sharpen impact — this pack is about the delta, not a repo tour.",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "corpus_query": {
+            "description": "Corpus query (defaults to the head of diff_text or first source path).",
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "description": "Short human title — used in the artifact header and filename slug. Defaults to the change_summary head.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "artifact_dir": {
+            "description": "Directory to write the change.md + change.json artifact pair. Defaults to ~/.ollama-intern/artifacts/change/.",
+            "type": "string",
+            "minLength": 1
+          },
+          "per_file_max_chars": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "max_breakpoints": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "max_validation_checks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 15
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_artifact_list",
+      "description": "ARTIFACT. Metadata-only index of pack artifacts on disk. Returns one compact record per artifact: `{pack, slug, title, created_at, weak, corpus_used, evidence_count, section_counts, md_path, json_path}`. Filter by pack / date_after / date_before / weak_only / strong_only; sort is newest first. Scans ~/.ollama-intern/artifacts/{incident,repo,change} by default; pass extra_artifact_dirs for additional read-only search surfaces. Full payloads belong to ollama_artifact_read — listing stays cheap.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "pack": {
+            "description": "Filter to a single pack. Omit to include all three.",
+            "type": "string",
+            "enum": [
+              "incident_pack",
+              "repo_pack",
+              "change_pack"
+            ]
+          },
+          "date_after": {
+            "description": "ISO timestamp. Include only artifacts with created_at >= date_after.",
+            "type": "string"
+          },
+          "date_before": {
+            "description": "ISO timestamp. Include only artifacts with created_at <= date_before.",
+            "type": "string"
+          },
+          "weak_only": {
+            "description": "If true, keep only artifacts where the brief flagged weak=true.",
+            "type": "boolean"
+          },
+          "strong_only": {
+            "description": "If true, keep only artifacts where weak=false. Mutually exclusive with weak_only.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Cap on entries returned after sorting (default 50). Apply after filters.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "extra_artifact_dirs": {
+            "description": "Additional read-only search dirs. Canonical identity is still (pack, slug) — extras don't shift precedence.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_artifact_read",
+      "description": "ARTIFACT. Read a single pack artifact, typed by pack. Primary: `{pack, slug}` — identity-based, collisions fail loud. Secondary: `{json_path}` — absolute path, must live under a recognized artifact dir (canonical roots + extra_artifact_dirs), must end in .json, path-traversal rejected. Returns `{metadata, artifact}` where artifact is a discriminated union on `pack` (incident_pack / repo_pack / change_pack — payloads stay distinct, never flattened).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "pack": {
+            "description": "Pack identity. Pass WITH slug for the primary identity-based read.",
+            "type": "string",
+            "enum": [
+              "incident_pack",
+              "repo_pack",
+              "change_pack"
+            ]
+          },
+          "slug": {
+            "description": "Artifact slug (filename stem). Pass WITH pack.",
+            "type": "string",
+            "minLength": 1
+          },
+          "json_path": {
+            "description": "Absolute path to the artifact JSON file. Secondary escape hatch — must live under a recognized artifact dir; path-safety guarded.",
+            "type": "string",
+            "minLength": 1
+          },
+          "extra_artifact_dirs": {
+            "description": "Extra read-only search dirs (same as artifact_list). Applied to both identity resolution and path safety.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_artifact_diff",
+      "description": "ARTIFACT. Structured diff of two same-pack artifacts. Input: `{a: {pack, slug}, b: {pack, slug}}` — must share pack; cross-pack diffs refused loudly. Returns `{pack, a, b, weak, diff}` with weak flip surfaced at top level (strong→weak or weak→strong). Lists diff as {added, removed, unchanged} matched on primary key per item kind; narrative fields as {before, after}; release_note_draft also carries a compact LCS line_diff. Evidence is SUMMARIZED (counts + referenced_paths + path_delta), never exploded chunk-by-chunk. Deterministic ordering on every list.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "object",
+            "properties": {
+              "pack": {
+                "type": "string",
+                "enum": [
+                  "incident_pack",
+                  "repo_pack",
+                  "change_pack"
+                ],
+                "description": "Pack identity."
+              },
+              "slug": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Artifact slug (filename stem)."
+              }
+            },
+            "required": [
+              "pack",
+              "slug"
+            ],
+            "description": "First artifact identity."
+          },
+          "b": {
+            "type": "object",
+            "properties": {
+              "pack": {
+                "type": "string",
+                "enum": [
+                  "incident_pack",
+                  "repo_pack",
+                  "change_pack"
+                ],
+                "description": "Pack identity."
+              },
+              "slug": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Artifact slug (filename stem)."
+              }
+            },
+            "required": [
+              "pack",
+              "slug"
+            ],
+            "description": "Second artifact identity. Must share a.pack — cross-pack diffs are refused."
+          },
+          "extra_artifact_dirs": {
+            "description": "Extra read-only search dirs (same as artifact_list / artifact_read). Canonical identity is still (pack, slug).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "name": "ollama_artifact_export_to_path",
+      "description": "ARTIFACT. Writes the artifact's EXISTING markdown to a caller-specified path with a provenance header prepended. No re-render, no model call. Path safety is strict: target_path must be absolute, must end in .md, must live under one of `allowed_roots` (REQUIRED — caller declares intent). Overwrite is opt-in: existing files refuse by default so re-runs never clobber hand-edits. Not a generic file writer — export is the single handoff move.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "pack": {
+            "type": "string",
+            "enum": [
+              "incident_pack",
+              "repo_pack",
+              "change_pack"
+            ],
+            "description": "Pack identity of the source artifact."
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Source artifact slug."
+          },
+          "target_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute target path. Must end in .md, must live under one of allowed_roots, no '..' segments."
+          },
+          "allowed_roots": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Absolute directories the export may write into. REQUIRED — the caller declares intent; the tool never guesses a default. Empty list is refused."
+          },
+          "overwrite": {
+            "description": "If true, replace an existing file at target_path. Default false; existing files refuse the export so re-runs never clobber hand-edits.",
+            "type": "boolean"
+          },
+          "extra_artifact_dirs": {
+            "description": "Extra read-only search dirs for locating the source artifact (same as artifact_read).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "pack",
+          "slug",
+          "target_path",
+          "allowed_roots"
+        ]
+      }
+    },
+    {
+      "name": "ollama_artifact_incident_note_snippet",
+      "description": "ARTIFACT. Renders a compact incident-note markdown fragment from an incident_pack artifact — top hypotheses, affected surfaces, next checks, with an evidence-aware operator tone. No model call, no re-render; pure derivation from stored JSON. Returns `{rendered, metadata}`. For the full artifact use artifact_read; for the whole markdown as a reviewable file use artifact_export_to_path.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Slug of the source artifact (from artifact_list)."
+          },
+          "extra_artifact_dirs": {
+            "description": "Extra read-only search dirs (same as artifact_read).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "ollama_artifact_onboarding_section_snippet",
+      "description": "ARTIFACT. Renders a handbook-ready `## What this repo is` section from a repo_pack artifact — thesis, key surfaces, read-next, runtime hints. Investigative tone preserved (read-next is LOOK AT, not prescriptive). No model call. Returns `{rendered, metadata}`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Slug of the source artifact (from artifact_list)."
+          },
+          "extra_artifact_dirs": {
+            "description": "Extra read-only search dirs (same as artifact_read).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "ollama_artifact_release_note_snippet",
+      "description": "ARTIFACT. Renders the release-note draft from a change_pack artifact as a blockquote-wrapped DRAFT fragment with the caveat preserved. No model call, no polishing, no marketing lift. Returns `{rendered, metadata}` — operator reviews before publishing.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Slug of the source artifact (from artifact_list)."
+          },
+          "extra_artifact_dirs": {
+            "description": "Extra read-only search dirs (same as artifact_read).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "ollama_embed_search",
+      "description": "FLAGSHIP. Rank AD-HOC candidates by concept similarity to a query. Pass `query` + `candidates: [{id, text}]`; server embeds everything, computes cosine, returns ranked `[{id, score, preview?}]`. Use this when you have in-memory candidates to compare; for persistent recall over memory/canon/doctrine use ollama_corpus_search instead. Does NOT return raw vectors to you.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The question or concept to search for."
+          },
+          "candidates": {
+            "minItems": 1,
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Caller-chosen identifier returned unchanged in the ranking."
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Candidate text to compare against the query."
+                }
+              },
+              "required": [
+                "id",
+                "text"
+              ]
+            },
+            "description": "Candidates to rank. 1-256 items; text is what gets embedded, id is what gets ranked."
+          },
+          "top_k": {
+            "description": "Return only the top K candidates (default: all of them).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256
+          },
+          "preview_chars": {
+            "description": "Include this many chars of each candidate's text in the result (default 0 = no preview).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "query",
+          "candidates"
+        ]
+      }
+    },
+    {
+      "name": "ollama_corpus_index",
+      "description": "Build a persistent named corpus. Pass `name` + `paths: string[]`; the server chunks, embeds, stores the corpus at ~/.ollama-intern/corpora/<name>.json AND writes a manifest at <name>.manifest.json that captures the declared paths + chunk params + embed model. Idempotent — unchanged files are reused by sha256; changed files are re-embedded; paths not in the input are dropped. For day-to-day upkeep once a manifest exists, prefer `ollama_corpus_refresh` — it reconciles corpus vs manifest and reports drift.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Corpus name (e.g. 'memory', 'canon', 'handbook'). Maps to a file under ~/.ollama-intern/corpora/."
+          },
+          "paths": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Absolute file paths to include in the corpus. Pass an explicit list of files — corpus_index does NOT walk directories; you enumerate. Unchanged files are reused from the existing corpus by sha256."
+          },
+          "chunk_chars": {
+            "description": "Chars per chunk (default 800).",
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 8000
+          },
+          "chunk_overlap": {
+            "description": "Overlap between adjacent chunks (default 100).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          }
+        },
+        "required": [
+          "name",
+          "paths"
+        ]
+      }
+    },
+    {
+      "name": "ollama_corpus_refresh",
+      "description": "Reconcile a named corpus against its manifest (intent vs reality). Single arg: `name`. The manifest's declared paths, chunk params, and embed model are the source of truth — refresh doesn't accept them. Returns a drift report: added / changed / unchanged / deleted / missing (per-path lists) plus reused / reembedded / dropped (chunk-level counts) plus no_op. Idempotent: a no-change refresh is fast, boring, and makes zero embed calls.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Corpus to refresh. Must already have a manifest (created by ollama_corpus_index). Call ollama_corpus_list to see which corpora exist."
+          },
+          "retry_failed": {
+            "description": "When true, re-attempt any paths recorded as failed in the manifest (e.g. symlink rejects, TOCTOU races, oversized files). Default false — a normal refresh honors only the declared manifest paths. Use after you've fixed the underlying cause (resized the file, replaced the symlink, fixed permissions) to retry without re-indexing the whole corpus.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "ollama_corpus_list",
+      "description": "List named corpora on disk with stats. No Ollama call. Use to discover what's been indexed, check freshness (indexed_at), or verify a corpus exists before searching.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "ollama_corpus_health",
+      "description": "Health summary for indexed corpora. No Ollama call. Superset of ollama_corpus_list: staleness_days, embed_model_resolved, within-refresh :latest drift, failed_paths_count, write_complete, and per-corpus warnings[]. Optional `name` narrows to a single corpus (typos fail loud). Optional `detailed: true` adds a per-file list with mtime + stale_days. Use this as your go-to 'is anything broken?' check before search or refresh.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Single corpus to report on. When omitted, reports health for every corpus on disk.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "detailed": {
+            "description": "When true, each entry gets a per-file list with mtime + staleness days. Default false — cheaper.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_corpus_amend",
+      "description": "Update one file's chunks in a corpus without running a full refresh. INVARIANT CAVEAT: the corpus is normally a snapshot of disk — amend bypasses that. new_content doesn't have to match (or even exist on) disk. The manifest records has_amended_content: true so corpus_list / corpus_health surface the break; a subsequent clean index/refresh re-establishes the invariant. Takes the per-corpus lock. Re-chunks + re-embeds the new_content using the manifest's chunk params (unless explicitly overridden). Returns `{corpus, file_path, chunks_removed, chunks_added, embed_model_resolved}`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "corpus": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Corpus to mutate. Must already exist (ollama_corpus_index writes the initial manifest)."
+          },
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute file path this content is associated with. Validated against the manifest's allowed-roots policy even if no file exists there."
+          },
+          "new_content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000000,
+            "description": "The replacement text for this file's chunks. Re-chunked + re-embedded server-side. Does NOT have to match what's on disk."
+          },
+          "chunk_chars": {
+            "description": "Override the manifest's chunk_chars for this amend only. Prefer omitting — the manifest's value keeps the corpus internally consistent.",
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 8000
+          },
+          "chunk_overlap": {
+            "description": "Override the manifest's chunk_overlap for this amend only.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          }
+        },
+        "required": [
+          "corpus",
+          "file_path",
+          "new_content"
+        ]
+      }
+    },
+    {
+      "name": "ollama_corpus_amend_history",
+      "description": "Read-only companion to ollama_corpus_amend. Lists which paths have been amended on top of the disk snapshot, when each amendment happened, and the chunk-count delta. Use this before deciding whether to re-index — a clean ollama_corpus_index or ollama_corpus_refresh re-establishes the snapshot invariant and clears the history. No LLM call; pure manifest read.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "corpus": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Corpus name (as passed to ollama_corpus_index)."
+          }
+        },
+        "required": [
+          "corpus"
+        ]
+      }
+    },
+    {
+      "name": "ollama_corpus_rerank",
+      "description": "Post-retrieval re-sort of hits from a prior ollama_corpus_search. No Ollama call (no embed, no generate). Three modes: 'recency' (newer file mtime wins; stats the file), 'path_specificity' (deeper paths win), 'lexical_boost' (boosts hits whose preview/heading_path/title contains any lexical_terms — case-insensitive, word-boundary; lexical_terms REQUIRED for this mode). Preserves each hit's original score + original_rank; appends rerank_score + rank. Use after corpus_search when you need a different ordering heuristic than semantic similarity.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "hits": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "score": {
+                  "type": "number"
+                },
+                "chunk_index": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "preview": {
+                  "type": "string"
+                },
+                "heading_path": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "title": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "path",
+                "score",
+                "chunk_index"
+              ]
+            },
+            "description": "Hits from a prior ollama_corpus_search (or equivalent). Required fields: id, path, score, chunk_index. Optional: preview, heading_path, title."
+          },
+          "rerank_by": {
+            "type": "string",
+            "enum": [
+              "recency",
+              "path_specificity",
+              "lexical_boost"
+            ],
+            "description": "'recency' stats file mtime (newer wins). 'path_specificity' prefers deeper paths. 'lexical_boost' requires lexical_terms."
+          },
+          "lexical_terms": {
+            "description": "Required when rerank_by='lexical_boost'. Each term is matched case-insensitively with word-boundaries against preview + heading_path + title.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "hits",
+          "rerank_by"
+        ]
+      }
+    },
+    {
+      "name": "ollama_embed",
+      "description": "LOW-LEVEL primitive. Returns raw 768-dim vectors for one text or a batch. WARNING: raw vectors can overflow MCP tool-output limits on large batches — for concept search prefer `ollama_embed_search` (ephemeral candidates) or `ollama_corpus_search` (persistent corpora); both return ranked hits, not raw geometry. Use this only for building external vector indexes (sqlite-vss, pgvector) where you need the vectors themselves. Envelope emits a warnings[] entry when the serialized payload crosses ~500KB.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "input": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "minItems": 1,
+                "maxItems": 256,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ],
+            "description": "Text or batch of texts to embed."
+          }
+        },
+        "required": [
+          "input"
+        ]
+      }
+    },
+    {
+      "name": "ollama_classify",
+      "description": "Single-label classification with confidence. Single: pass `text`. BATCH: pass `items:[{id,text}]` — returns ONE envelope with `result.items[]` of `{id, ok, result|error}` plus `batch_count/ok_count/error_count`. Use the batch shape to chew through bulk labeling (commit types, PR titles, log severities) in one handoff instead of N round-trips. Set allow_none=true when weak guesses are worse than 'unsure' — label returns null below threshold (default 0.7). FRAME CONTRACT (optional): pass `frame` (the question / section purpose this label set is FOR) and the model first decides whether the input is on-topic. Off-topic inputs return label=null with `off_topic: true` + `off_topic_reason` regardless of label fit — distinct from below_threshold (weak fit within the right frame). Omitting `frame` preserves the legacy result shape.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "text": {
+            "description": "The single text to classify. Use this OR source_path OR items — exactly one.",
+            "type": "string",
+            "minLength": 1
+          },
+          "source_path": {
+            "description": "A single file path to read + classify server-side. Use this instead of `text` to save Claude context — the server reads the file, Claude never sees its contents.",
+            "type": "string",
+            "minLength": 1
+          },
+          "items": {
+            "description": "Batch of texts to classify. Each needs a stable caller-provided id so results join back to source inputs cleanly. Returns one batch envelope with per-item {id, ok, result|error} entries.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Caller-provided, unique within the batch."
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "id",
+                "text"
+              ]
+            }
+          },
+          "labels": {
+            "description": "Candidate labels — the model picks exactly one, or null if allow_none."
+          },
+          "allow_none": {
+            "description": "If true and confidence < threshold, return label=null instead of a weak guess.",
+            "type": "boolean"
+          },
+          "threshold": {
+            "description": "Confidence floor (default 0.7).",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "frame": {
+            "description": "The question / section purpose / topic this classification is FOR. When supplied, the model first determines on/off-topic for the frame, then picks a label only within that frame. Off-topic inputs return label=null with off_topic=true regardless of label fit.",
+            "type": "string"
+          },
+          "per_file_max_chars": {
+            "description": "Chars to read when source_path is used (default 40k).",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "model": {
+            "description": "Optional per-call model override. When provided, overrides the tool's tier-resolved model for this call. The tier's timeout (TIER_TIMEOUT_MS) still applies. On timeout, fallback uses the tier-resolved model, NOT the override. Use for receipt-backed orchestration that requires explicit model identity (e.g., research-os reviewer profiles).",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "labels"
+        ]
+      }
+    },
+    {
+      "name": "ollama_triage_logs",
+      "description": "Stable-shape log digest: {errors, warnings, suspected_root_cause}. Single: pass `log_text`. BATCH: pass `items:[{id,log_text}]` for triaging many log blobs at once (multiple CI runs, matrix legs, per-service logs) — returns one envelope with per-item entries. Use before grep-storms on long CI/test output.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "log_text": {
+            "description": "Single log output to triage. Use this OR items, not both. Max 5MB. Oversize inputs are refused with a hint pointing at batch-splitting or pre-filtering for ERROR/WARN lines.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000000
+          },
+          "items": {
+            "description": "Batch of log blobs, each with a stable id. Returns one batch envelope with per-item {id, ok, result|error} entries. Each log_text is capped at 5MB — oversize items refuse with a hint on splitting or pre-filtering.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Caller-provided, unique within the batch."
+                },
+                "log_text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 5000000
+                }
+              },
+              "required": [
+                "id",
+                "log_text"
+              ]
+            }
+          },
+          "patterns": {
+            "description": "Optional regex patterns the triage should bias toward — applied to every item in a batch."
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_summarize_fast",
+      "description": "Gist of short input (best under ~4k tokens). Use as a decision gate: 'is this file worth reading in full?' Summary carries source_preview so you can spot-check fabrication. FRAME CONTRACT (optional): pass `frame` (the question / section purpose this summary is FOR) and the model first decides whether the input addresses it. Off-topic inputs return summary='(off-topic for frame: ...)' with `on_topic: false` instead of paraphrasing unrelated content. Omitting `frame` preserves the legacy result shape.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Text to summarize (best under ~4k tokens — use summarize_deep for longer inputs)."
+          },
+          "max_words": {
+            "description": "Target summary length in words (default 80).",
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 400
+          },
+          "frame": {
+            "description": "The question / section purpose / topic this summary is FOR. When supplied, the summarizer first decides whether the text addresses the frame; if not, it refuses to paraphrase off-topic content and surfaces `on_topic: false` in the result.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Optional per-call model override. When provided, overrides the tool's tier-resolved model for this call. The tier's timeout (TIER_TIMEOUT_MS) still applies. On timeout, fallback uses the tier-resolved model, NOT the override. Use for receipt-backed orchestration that requires explicit model identity (e.g., research-os reviewer profiles).",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "ollama_summarize_deep",
+      "description": "Digest of long input with optional focus. Pass EXACTLY ONE of: `text` (raw content in hand), `source_path` (single file — server reads + chunks, Claude never pre-reads), or `source_paths[]` (multiple files). The path-based shapes save Claude context — the whole point of delegating summarization. Carries source_preview for fabrication spot-checks. FRAME CONTRACT (optional): pass `frame` (the question / section purpose this digest is FOR — distinct from `focus`, which is emphasis WITHIN an in-frame source). Sources that don't address the frame are dropped from the digest and listed under `unaddressed_sources`; if NO source addresses it, summary='' and `frame_addressed: false`. Omitting `frame` preserves the legacy result shape.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "text": {
+            "description": "Raw text to digest. Use this when you already have the content in hand.",
+            "type": "string",
+            "minLength": 1
+          },
+          "source_path": {
+            "description": "A single file path to read + chunk server-side. Shortcut for `source_paths: [one]` — use whichever reads more naturally. Closes adoption SEAM #2 (large single-file summaries no longer force Claude to pre-read the file).",
+            "type": "string",
+            "minLength": 1
+          },
+          "source_paths": {
+            "description": "File paths to read + chunk server-side. Use this instead of `text` to save Claude context — the tool reads the files, Claude never sees the raw content."
+          },
+          "focus": {
+            "description": "Optional aspect to emphasize (e.g. 'combat doctrine', 'auth flow').",
+            "type": "string"
+          },
+          "frame": {
+            "description": "The question / section purpose / topic this digest is FOR — distinct from `focus`, which is emphasis within an in-frame source. When supplied, sources that don't address the frame are dropped from the digest and listed under `unaddressed_sources` instead. If NO source addresses the frame, summary is empty.",
+            "type": "string"
+          },
+          "max_words": {
+            "description": "Target digest length in words (default 250).",
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 1500
+          },
+          "per_file_max_chars": {
+            "description": "Chars to read per file when source_paths is used (default 40k).",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "model": {
+            "description": "Optional per-call model override. When provided, overrides the tool's tier-resolved model for this call. The tier's timeout (TIER_TIMEOUT_MS) still applies. On timeout, fallback uses the tier-resolved model, NOT the override. Use for receipt-backed orchestration that requires explicit model identity (e.g., research-os reviewer profiles).",
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_draft",
+      "description": "DRAFT code or prose stubs (never autonomous — Claude reviews). Pass language for a server-side compile check: envelope returns {compiles, checker, stderr_tail}. target_path pointing into memory/, .claude/, docs/canon/, games/ requires confirm_write: true.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What to draft. Be concrete."
+          },
+          "language": {
+            "description": "If set, compile check runs and compiles/stderr_tail ride the envelope.",
+            "type": "string",
+            "enum": [
+              "typescript",
+              "javascript",
+              "python",
+              "rust",
+              "go"
+            ]
+          },
+          "style": {
+            "description": "'concise' for code-only, 'doc' for docstrings/prose.",
+            "type": "string",
+            "enum": [
+              "concise",
+              "doc"
+            ]
+          },
+          "target_path": {
+            "description": "If this draft is destined for a file, declare it — protected paths enforce confirm_write.",
+            "type": "string"
+          },
+          "confirm_write": {
+            "description": "Required when target_path is inside a protected path.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    },
+    {
+      "name": "ollama_extract",
+      "description": "Schema-constrained JSON extraction using Ollama's JSON mode. Single: pass `text`, returns `{ok: true, data}` or `{ok: false, error: 'unparseable'}` — never partial. BATCH: pass `items:[{id,text}]` with a shared schema — returns one envelope with per-item `{id, ok, result|error}`. Use the batch shape for any 10+-similar-inputs workload (frontmatter, package.json, release metadata) so you hand over the whole job, not N calls. FRAME CONTRACT (optional): pass `frame` (the question / section purpose this extraction is FOR). The model first judges on-topic vs off-topic; result lifts a top-level `frame_alignment: { on_topic, reason, unaddressed_aspects? }`. Off-topic sources return an empty data shape rather than paraphrasing unrelated content into the schema. Omitting `frame` preserves the legacy result shape.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "text": {
+            "description": "Text to extract structured data from. Use this OR source_path OR items — exactly one.",
+            "type": "string",
+            "minLength": 1
+          },
+          "source_path": {
+            "description": "A single file path to read + extract from server-side. Use this instead of `text` to save Claude context — the server reads the file, Claude never sees its contents.",
+            "type": "string",
+            "minLength": 1
+          },
+          "items": {
+            "description": "Batch of texts to extract from, each with a stable id. Returns one batch envelope with per-item {id, ok, result|error} entries.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Caller-provided, unique within the batch."
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "id",
+                "text"
+              ]
+            }
+          },
+          "schema": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "JSONSchema the output must conform to — shared across all items in a batch."
+          },
+          "hint": {
+            "description": "Optional field-by-field hint.",
+            "type": "string"
+          },
+          "frame": {
+            "description": "The question / section purpose / topic this extraction is FOR. When supplied, the model first determines on/off-topic, then extracts only fields the source addresses for that frame.",
+            "type": "string"
+          },
+          "per_file_max_chars": {
+            "description": "Chars to read when source_path is used (default 40k).",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "model": {
+            "description": "Optional per-call model override. When provided, overrides the tool's tier-resolved model for this call. The tier's timeout (TIER_TIMEOUT_MS) still applies. On timeout, fallback uses the tier-resolved model, NOT the override. Use for receipt-backed orchestration that requires explicit model identity (e.g., research-os reviewer profiles).",
+            "type": "string",
+            "minLength": 1
+          },
+          "tier_budget_ms_override": {
+            "description": "Optional per-call tier-budget override in milliseconds. When set, this value replaces the active profile's per-tier timeouts for THIS call only (both initial tier and any fallback tier visited). Other callers and tool invocations are unaffected. Omit to use the profile defaults (byte-identical to pre-R-019 behavior). Bounds: [1, 600000]. Use for client-orchestrated synth flows (e.g., research-os --planner-timeout-ms) where the operator's budget must reach the inner tier guardrail.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600000
+          }
+        },
+        "required": [
+          "schema"
+        ]
+      }
+    },
+    {
+      "name": "ollama_doctor",
+      "description": "OPS. First-run prerequisites + status snapshot for this MCP. No model call. Probes Ollama reachability (/api/ps + /api/tags), lists loaded vs pulled models, flags missing models against the active profile's tiers, and reports profile, tiers, OLLAMA_HOST, allowed_roots, artifact_root, log_path, plus the last 10 errors from ~/.ollama-intern/log.ndjson. Returns `{ollama, models:{required, pulled, loaded, missing, suggested_pulls}, profile, paths, recent_errors, healthy}`. Use this BEFORE the first real delegation to decide whether the operator needs to pull a model or start Ollama. Safe to call on every session start.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "ollama_artifact_prune",
+      "description": "OPS. Clean up ~/.ollama-intern/artifacts/. No model call. DRY-RUN BY DEFAULT — pass `dry_run: false` to actually delete. Filter by `older_than_days` (file mtime) and/or `pack_type` ('incident' | 'change' | 'repo' | 'all'). Deletes matched files in .md + .json pairs. Returns `{matched:[{pack, slug, age_days, bytes}], total_matched, total_bytes, dry_run, deleted, artifact_root}`. Use this when disk is creeping or the artifact dir has stale handoffs you don't need.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "older_than_days": {
+            "description": "Only match artifacts older than N days (by file mtime). Omit for no age filter.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3650
+          },
+          "pack_type": {
+            "description": "Limit prune to one pack directory. Default 'all' scans incident + change + repo.",
+            "type": "string",
+            "enum": [
+              "incident",
+              "change",
+              "repo",
+              "all"
+            ]
+          },
+          "dry_run": {
+            "description": "Report what would be deleted without touching disk. DEFAULTS TO true — pass false to actually delete.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_log_tail",
+      "description": "OPS. Structured tail of the NDJSON observability log at ~/.ollama-intern/log.ndjson (override via INTERN_LOG_PATH). No model call. Optional filters: `limit` (default 50, max 500), `filter_kind` ('call' | 'timeout' | 'fallback' | 'guardrail' | 'pack_step' | 'semaphore:wait' | 'prewarm' | 'prewarm:in_progress_request'), `filter_tool`, `since` (ISO-8601). Truncated final lines are skipped silently. Missing log file is a soft-empty case, not an error. Returns `{events, total_returned, log_path, log_present}`. Use this to debug why a call was slow / what timed out / what the last failures were.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "limit": {
+            "description": "Max events to return (newest first). Default 50, cap 500.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "filter_kind": {
+            "description": "Keep only events with this kind — e.g. 'call', 'timeout', 'fallback', 'pack_step', 'semaphore:wait'.",
+            "type": "string"
+          },
+          "filter_tool": {
+            "description": "Keep only events whose `tool` matches — e.g. 'ollama_research'.",
+            "type": "string"
+          },
+          "since": {
+            "description": "ISO-8601 timestamp. Keep only events with ts >= since. Invalid ISO → SCHEMA_INVALID.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ollama_code_map",
+      "description": "ORIENT. Fast structural summary of a repo — deterministic, no model call. Pass `source_paths: string[]` (files OR directories; directories are walked recursively, skipping node_modules/dist/target/.git/.venv) and optional `max_files` (default 500). Reads package.json / pyproject.toml / Cargo.toml / go.mod for framework hints; tallies files by extension; classifies entrypoints (cli/lib/web/test/config) by filename + manifest bin field; collects build_commands from package.json scripts. Returns `{languages, frameworks, entrypoints, build_commands, notable_files, total_files_scanned, max_files_hit}`. Cheap first pass before ollama_repo_pack or ollama_research. When the pass is partial (max_files_hit), the warning says so.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "source_paths": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Absolute or relative paths to scan (files or directories). Directories are walked recursively."
+          },
+          "max_files": {
+            "description": "Cap on total files scanned. Default 500 — raise for large repos, but this is a FAST pass, not an exhaustive crawl.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "source_paths"
+        ]
+      }
+    },
+    {
+      "name": "ollama_multi_file_refactor_propose",
+      "description": "REFACTOR. Coordinated multi-file refactor PLAN — NO WRITES. Server reads each file in `files` (1-20 paths, path validation via SOURCE_PATH_NOT_FOUND), hands the bodies + `change_description` to the Workhorse tier, and returns `{per_file_changes:[{file, before_summary, after_summary, risk_level, change_kinds[]}], cross_file_impact, affected_imports:[{from, to, files[]}], verification_steps, weak}`. change_kinds are normalized from {rename, signature-change, import-update, move, delete, new}. Files the model invents (not in input) are stripped. Thin output → weak=true. Use BEFORE touching files so Claude can see a coordinated plan. Pair with ollama_refactor_plan for sequencing and ollama_batch_proof_check for verification.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "files": {
+            "description": "Source file paths the refactor touches. Server reads them — Claude does not preload. Min 1, max 20."
+          },
+          "change_description": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 2000,
+            "description": "What the refactor should accomplish, in 20-2000 chars. Be specific — vague descriptions produce vague plans (likely weak=true)."
+          },
+          "per_file_max_chars": {
+            "description": "Chars to read per file (default 60_000).",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          }
+        },
+        "required": [
+          "files",
+          "change_description"
+        ]
+      }
+    },
+    {
+      "name": "ollama_batch_proof_check",
+      "description": "OPS. Parallel typecheck/lint/test across a file list. NO MODEL CALL. Pass `checks: ['typescript' | 'eslint' | 'pytest' | 'ruff' | 'cargo-check'][]` (min 1), optional `files[]` (scope filter for lint/test tools that accept it), optional `cwd` (default process.cwd()), optional `timeout_ms` (default 60_000 per check). Each check runs in parallel under its own timeout. Missing tools (ENOENT / exit 127) report as status:'missing' — NOT a fail. Timeouts are status:'timeout'. Returns `{checks:[{check, status:'pass'|'fail'|'timeout'|'missing', exit_code, stderr_tail, stdout_tail, elapsed_ms, failures?:[{file?, line?, message}]}], all_passed, any_missing}`. Use AFTER ollama_multi_file_refactor_propose to verify the refactor landed green.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "checks": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "typescript",
+                "eslint",
+                "pytest",
+                "ruff",
+                "cargo-check"
+              ]
+            },
+            "description": "Which proof tools to run. Each runs in parallel. Missing tools are reported as status:'missing', not 'fail'."
+          },
+          "files": {
+            "description": "Optional scope filter. When set, each tool is invoked with the file list appended (where the tool supports it). Tools that require whole-project invocation (e.g. tsc --noEmit) ignore this."
+          },
+          "cwd": {
+            "description": "Working directory for the spawned CLIs. Default: process.cwd().",
+            "type": "string",
+            "minLength": 1
+          },
+          "timeout_ms": {
+            "description": "Timeout per check in milliseconds. Default 60_000.",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 600000
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      }
+    },
+    {
+      "name": "ollama_refactor_plan",
+      "description": "REFACTOR. Phased SEQUENCING plan for a multi-file refactor — complement to multi_file_refactor_propose. Same inputs (`files`, `change_description`, optional `per_file_max_chars`) plus `priority: 'safety' | 'speed' | 'parallelism'` (default 'safety'). Server reads the files and asks the Workhorse tier for a phased plan: `{phases:[{phase, files_involved, reason, tests_to_write, parallelizable}], sequencing_notes, rollback_strategy, estimated_phases, weak}`. Phases are renumbered 1..N in arrival order. files_involved is strictly intersected with the input set. Missing rollback_strategy or empty tests with no sequencing notes → weak=true. Use this when you know WHAT to change (multi_file_refactor_propose covers that) but need HOW to land it safely.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "files": {
+            "description": "Source file paths the refactor touches. Min 1, max 20 — same envelope as multi_file_refactor_propose."
+          },
+          "change_description": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 2000,
+            "description": "What the refactor accomplishes. 20-2000 chars."
+          },
+          "per_file_max_chars": {
+            "description": "Chars to read per file (default 60_000).",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          },
+          "priority": {
+            "description": "Planning bias. 'safety' (default) sequences conservative phases with heavy tests-first. 'speed' compresses phases. 'parallelism' prefers splitting work across agents/files when possible.",
+            "type": "string",
+            "enum": [
+              "safety",
+              "speed",
+              "parallelism"
+            ]
+          }
+        },
+        "required": [
+          "files",
+          "change_description"
+        ]
+      }
+    },
+    {
+      "name": "ollama_code_citation",
+      "description": "RESEARCH. Answer a code question with PER-CLAIM CITATIONS (file + line range). Distinct from ollama_research: research cites files, code_citation cites LINES. Pass `question` (10-1000 chars), `source_paths[]`, optional `per_file_max_chars` (default 100_000). Server numbers each line 1-based in the prompt so the Deep tier can anchor claims exactly. Returns `{answer, citations:[{claim_fragment, file, start_line, end_line, excerpt}], uncited_fragments[], weak}`. Citations to files outside source_paths are stripped (same rule as ollama_research). Citations with line ranges outside the loaded file bounds are also stripped — each stripping reason lands in warnings[]. Empty answer or answer-without-citations flips weak=true.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 1000,
+            "description": "The code question to answer. 10-1000 chars — specific enough that citations can be anchored ('where does X get validated', not 'tell me about this code')."
+          },
+          "source_paths": {
+            "description": "Files the answer must be grounded in. Citations to files outside this list are stripped."
+          },
+          "per_file_max_chars": {
+            "description": "Chars to read per file (default 100_000). Bigger than research because citations need the lines to exist.",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 500000
+          },
+          "model": {
+            "description": "Optional per-call model override. When provided, overrides the tool's tier-resolved model for this call. The tier's timeout (TIER_TIMEOUT_MS) still applies. On timeout, fallback uses the tier-resolved model, NOT the override. Use for receipt-backed orchestration that requires explicit model identity (e.g., research-os reviewer profiles).",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "question",
+          "source_paths"
+        ]
+      }
+    },
+    {
+      "name": "ollama_code_review",
+      "description": "REVIEW. Given a unified diff (and optional source_paths for context), returns STRUCTURED FINDINGS: `{findings:[{severity, category, file, line?, symbol?, description, recommendation}], summary, diff_size_bytes}`. Severity enum critical|high|medium|low; category enum bug|security|performance|style|maintainability. Distinct from ollama_multi_file_refactor_propose (proposes refactors) — code_review flags issues to fix on the diff as-is. Optional `severity_floor` filters out below-floor findings; `max_findings` caps result. Diff capped at 2MB; source_paths max 50. Tier defaults to workhorse; pass `tier:'deep'` for high-stakes review. coerceReview drops malformed entries instead of throwing.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "diff_text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2097152,
+            "description": "Unified diff text (e.g. `git diff` output). Required. Max 2 MB to keep prompts within sensible context budgets — for larger reviews chunk the diff per logical change. Field name matches changePack / changeBrief convention."
+          },
+          "source_paths": {
+            "description": "Optional full source files for the changed locations. Provides the model with full context for cross-line/cross-symbol concerns (e.g. 'this rename breaks line 200 in the same file the diff only touches line 50'). Max 50 paths.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "severity_floor": {
+            "description": "Drop findings below this severity from the result. Default 'low' (returns everything).",
+            "default": "low",
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "max_findings": {
+            "description": "Cap on returned findings after filtering. Default 50, max 200. The cap protects against a chatty model on a small diff burying real signal.",
+            "default": 50,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "tier": {
+            "description": "Which tier to run on. 'workhorse' is the default; 'deep' is recommended for security-critical or high-stakes reviews; 'instant' for fast smoke passes on tiny diffs.",
+            "default": "workhorse",
+            "type": "string",
+            "enum": [
+              "instant",
+              "workhorse",
+              "deep"
+            ]
+          }
+        },
+        "required": [
+          "diff_text"
+        ]
+      }
+    },
+    {
+      "name": "ollama_hypothesis_drill",
+      "description": "DRILL. Zoom into ONE hypothesis from an existing incident_pack artifact. No re-running triage + brief. Pass `artifact_slug` (from ollama_artifact_list), `hypothesis_index` (0-based into that artifact's root_cause_hypotheses), optional `extra_artifact_dirs[]`. Server loads the artifact, extracts the targeted hypothesis + its linked evidence, and runs a Deep-tier focused sub-brief. Returns `{parent_artifact_slug, drilled_hypothesis:{statement, confidence, evidence_cited:[{id, preview}], supporting_reasoning, ruled_out_reasons?}, other_hypotheses_summary:[{index, summary}], weak}`. Invalid index → HYPOTHESIS_INDEX_INVALID with the valid range. Non-incident or missing slug → ARTIFACT_NOT_FOUND with a next-step hint.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "artifact_slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Slug of an existing incident_pack artifact. See ollama_artifact_list for available slugs."
+          },
+          "hypothesis_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "0-based index into the artifact's root_cause_hypotheses array."
+          },
+          "extra_artifact_dirs": {
+            "description": "Extra read-only search dirs (same semantics as artifact_list / artifact_read).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "artifact_slug",
+          "hypothesis_index"
+        ]
+      }
+    },
+    {
+      "name": "ollama_chat",
+      "description": "LAST RESORT catch-all. Prefer a specialty tool above when one fits. If you reach for this often, a specialty tool is missing and should be added.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "messages": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "system",
+                    "user",
+                    "assistant"
+                  ]
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "role",
+                "content"
+              ]
+            },
+            "description": "Chat messages. Last-resort shape — prefer a specialty tool when one fits."
+          },
+          "system": {
+            "description": "Optional system preface; merged with any existing system message.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Optional per-call model override. When provided, overrides the tool's tier-resolved model for this call. The tier's timeout (TIER_TIMEOUT_MS) still applies. On timeout, fallback uses the tier-resolved model, NOT the override. Use for receipt-backed orchestration that requires explicit model identity (e.g., research-os reviewer profiles).",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "messages"
+        ]
+      }
+    }
+  ]
+}

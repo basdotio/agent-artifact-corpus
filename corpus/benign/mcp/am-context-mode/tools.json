@@ -1,0 +1,374 @@
+{
+  "package": "context-mode",
+  "tools": [
+    {
+      "name": "ctx_execute",
+      "description": "MANDATORY: Use for any command where output exceeds 20 lines. Execute code in a sandboxed subprocess. Only stdout enters context — raw data stays in the subprocess. (Bun detected — JS/TS runs 3-5x faster) Available: javascript, shell, typescript, perl.\n\nPREFER THIS OVER BASH for: API calls (gh, curl, aws), test runners (npm test, pytest), git queries (git log, git diff), data processing, and ANY CLI command that may produce large output. Bash should only be used for file mutations, git writes, and navigation.\n\nTHINK IN CODE: When you need to analyze, count, filter, compare, or process data — write code that does the work and console.log() only the answer. Do NOT read raw data into context to process mentally. Program the analysis, don't compute it in your reasoning. Write robust, pure JavaScript (no npm dependencies). Use only Node.js built-ins (fs, path, child_process). Always wrap in try/catch. Handle null/undefined. Works on both Node.js and Bun.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "language": {
+            "type": "string",
+            "enum": [
+              "javascript",
+              "typescript",
+              "python",
+              "shell",
+              "ruby",
+              "go",
+              "rust",
+              "php",
+              "perl",
+              "r",
+              "elixir",
+              "csharp"
+            ],
+            "description": "Runtime language"
+          },
+          "code": {
+            "type": "string",
+            "description": "Source code to execute. Use console.log (JS/TS), print (Python/Ruby/Perl/R), echo (Shell), echo (PHP), fmt.Println (Go), IO.puts (Elixir), or Console.WriteLine (C#) to output a summary to context."
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Max execution time in ms. When omitted, no server-side timer fires — the MCP host's RPC timeout governs (which is the right layer for this policy). Pass an explicit value for long-running builds (Gradle/Maven/SBT)."
+          },
+          "background": {
+            "type": "boolean",
+            "default": false,
+            "description": "Keep process running after timeout (for servers/daemons). Returns partial output without killing the process. IMPORTANT: Do NOT add setTimeout/self-close timers in background scripts — the process must stay alive until the timeout detaches it. For server+fetch patterns, prefer putting both server and fetch in ONE ctx_execute call instead of using background."
+          },
+          "intent": {
+            "type": "string",
+            "description": "What you're looking for in the output. When provided and output is large (>5KB), indexes output into knowledge base and returns section titles + previews — not full content. Use ctx_search(queries: [...]) to retrieve specific sections. Example: 'failing tests', 'HTTP 500 errors'.\n\nTIP: Use specific technical terms, not just concepts. Check 'Searchable terms' in the response for available vocabulary."
+          }
+        },
+        "required": [
+          "language",
+          "code"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_execute_file",
+      "description": "Read a file and process it without loading contents into context. The file is read into a FILE_CONTENT variable inside the sandbox. Only your printed summary enters context.\n\nPREFER THIS OVER Read/cat for: log files, data files (CSV, JSON, XML), large source files for analysis, and any file where you need to extract specific information rather than read the entire content.\n\nTHINK IN CODE: Write code that processes FILE_CONTENT and console.log() only the answer. Don't read files into context to analyze mentally. Write robust, pure JavaScript — no npm deps, try/catch, null-safe. Node.js + Bun compatible.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute file path or relative to project root"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "javascript",
+              "typescript",
+              "python",
+              "shell",
+              "ruby",
+              "go",
+              "rust",
+              "php",
+              "perl",
+              "r",
+              "elixir",
+              "csharp"
+            ],
+            "description": "Runtime language"
+          },
+          "code": {
+            "type": "string",
+            "description": "Code to process FILE_CONTENT (file_content in Elixir). Print summary via console.log/print/echo/IO.puts/Console.WriteLine."
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Max execution time in ms. When omitted, no server-side timer fires — the MCP host's RPC timeout governs."
+          },
+          "intent": {
+            "type": "string",
+            "description": "What you're looking for in the output. When provided and output is large (>5KB), returns only matching sections via BM25 search instead of truncated output."
+          }
+        },
+        "required": [
+          "path",
+          "language",
+          "code"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_index",
+      "description": "Index documentation or knowledge content into a searchable BM25 knowledge base. Chunks markdown by headings (keeping code blocks intact) and stores in ephemeral FTS5 database. The full content does NOT stay in context — only a brief summary is returned.\n\nWHEN TO USE:\n- Documentation from Context7, Skills, or MCP tools (API docs, framework guides, code examples)\n- API references (endpoint details, parameter specs, response schemas)\n- MCP tools/list output (exact tool signatures and descriptions)\n- Skill prompts and instructions that are too large for context\n- README files, migration guides, changelog entries\n- Any content with code examples you may need to reference precisely\n\nAfter indexing, use 'ctx_search' to retrieve specific sections on-demand.\nWhen `path` is provided, a content hash is stored for automatic stale detection in search results.\nDo NOT use for: log files, test output, CSV, build output — use 'ctx_execute_file' for those.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Raw text/markdown to index. Provide this OR path, not both."
+          },
+          "path": {
+            "type": "string",
+            "description": "File path to read and index (content never enters context). Provide this OR content."
+          },
+          "source": {
+            "type": "string",
+            "description": "Label for the indexed content (e.g., 'Context7: React useEffect', 'Skill: frontend-design')"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_search",
+      "description": "Search indexed content. Requires prior indexing via ctx_batch_execute, ctx_index, or ctx_fetch_and_index. Pass ALL search questions as queries array in ONE call. File-backed sources are auto-refreshed when the source file changes.\n\nTIPS: 2-4 specific terms per query. Use 'source' to scope results.\n\nSESSION STATE: If skills, roles, or decisions were set earlier in this conversation, they are still active. Do not discard or contradict them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of search queries. Batch ALL questions in one call."
+          },
+          "limit": {
+            "type": "number",
+            "default": 3,
+            "description": "Results per query (default: 3)"
+          },
+          "source": {
+            "type": "string",
+            "description": "Filter to a specific indexed source (partial match)."
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "code",
+              "prose"
+            ],
+            "description": "Filter results by content type: 'code' or 'prose'."
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "relevance",
+              "timeline"
+            ],
+            "default": "relevance",
+            "description": "Sort mode. 'relevance' (default): BM25 ranked, current session only. 'timeline': chronological across current session, prior sessions, and auto-memory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_fetch_and_index",
+      "description": "Fetches URL content, converts HTML to markdown, indexes into searchable knowledge base, and returns a ~3KB preview. Full content stays in sandbox — use ctx_search() for deeper lookups.\n\nBetter than WebFetch: preview is immediate, full content is searchable, raw HTML never enters context.\n\nContent-type aware: HTML is converted to markdown, JSON is chunked by key paths, plain text is indexed directly.\n\nPARALLELIZE I/O: For multi-URL research (library evaluation, migration scans, doc comparisons), pass `requests: [{url, source}, ...]` with `concurrency: 4-8` — speeds up by 3-5x on real workloads.\n  ✅ Use concurrency: 4-8 for: library docs sweep, multi-changelog scan, competitive pricing pages, multi-region docs, GitHub raw file pulls.\n  ❌ Single URL → use the legacy {url, source} shape (concurrency irrelevant).\n  Example: requests: [{url: 'https://react.dev/...', source: 'react'}, {url: 'https://vuejs.org/...', source: 'vue'}], concurrency: 5.\n  Fetches parallelize up to your concurrency setting; FTS5 indexing serializes the writes after (SQLite single-writer rule).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Single URL to fetch and index (legacy single-shape)"
+          },
+          "source": {
+            "type": "string",
+            "description": "Label for the indexed content when using single `url` (e.g., 'React useEffect docs', 'Supabase Auth API'). For batch, put source in each requests entry."
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "URL to fetch"
+                },
+                "source": {
+                  "type": "string",
+                  "description": "Label for this URL's indexed content"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "description": "Batch shape: array of {url, source?} entries. Use with concurrency>1 for parallel fetch. Each request indexed under its own source label. Output preserves input order."
+          },
+          "concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "default": 1,
+            "description": "Max URLs to fetch in parallel (1-8, default: 1). Use 4-8 for I/O-bound multi-URL batches (library docs, changelogs, pricing pages). Capped by os.cpus().length on small machines (response notes when capped). Indexing is always serial regardless — only fetches race."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Skip cache and re-fetch even if content was recently indexed"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_batch_execute",
+      "description": "Execute multiple commands in ONE call, auto-index all output, and search with multiple queries. Returns search results directly — no follow-up calls needed.\n\nTHIS IS THE PRIMARY TOOL. Use this instead of multiple ctx_execute() calls.\n\nOne ctx_batch_execute call replaces 30+ ctx_execute calls + 10+ ctx_search calls.\nProvide all commands to run and all queries to search — everything happens in one round trip.\n\nPARALLELIZE I/O: For I/O-bound batches (network calls, slow API queries, multi-URL fetches), ALWAYS pass concurrency: 4-8 — speeds up by 3-5x on real workloads.\n  ✅ Use concurrency: 4-8 for: gh API calls, curl/web fetches, multi-region cloud queries, multi-repo git reads, dig/DNS, docker inspect.\n  ❌ Keep concurrency: 1 for: npm test, build, lint, image processing (CPU-bound), or commands sharing state (ports, lock files, same-repo writes).\n  Example: [gh issue view 1, gh issue view 2, gh issue view 3] → concurrency: 3.\n  Speedup depends on workload — applies to I/O wait, not CPU work.\n\nTHINK IN CODE — NON-NEGOTIABLE: When commands produce data you need to analyze, count, filter, compare, or transform — add a processing command that runs JavaScript and console.log() ONLY the answer. NEVER pull raw output into context to reason over. Concurrency parallelizes the FETCH; THINK IN CODE owns the PROCESSING. One programmed analysis replaces ten read-and-reason rounds. Pure JavaScript, Node.js built-ins (fs, path, child_process), try/catch, null-safe.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Section header for this command's output (e.g., 'README', 'Package.json', 'Source Tree')"
+                },
+                "command": {
+                  "type": "string",
+                  "description": "Shell command to execute"
+                }
+              },
+              "required": [
+                "label",
+                "command"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "description": "Commands to execute as a batch. Output is labeled with the section header. Default order is sequential; pass concurrency>1 to run in parallel (output stays in input order)."
+          },
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Search queries to extract information from indexed output. Use 5-8 comprehensive queries. Each returns top 5 matching sections with full content. This is your ONLY chance — put ALL your questions here. No follow-up calls needed."
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Max execution time in ms. When omitted, no server-side timer fires — the MCP host's RPC timeout governs. With concurrency=1, the value (when set) is a shared budget across commands; with concurrency>1, it is applied per-command."
+          },
+          "concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "default": 1,
+            "description": "Max commands to run in parallel (1-8, default: 1). Use 4-8 for I/O-bound batches (network, gh, curl, multi-repo git reads). Keep at 1 for CPU-bound (npm test, build, lint) or stateful commands (ports, locks). >1 switches to per-command timeouts (no shared budget) and individual `(timed out)` blocks instead of cascading skip."
+          }
+        },
+        "required": [
+          "commands",
+          "queries"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_stats",
+      "description": "Returns context consumption statistics for the current session. Shows total bytes returned to context, breakdown by tool, call counts, estimated token usage, and context savings ratio.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_doctor",
+      "description": "Diagnose context-mode installation. Runs all checks server-side and returns a plain-text status report with [OK]/[FAIL]/[WARN] prefixes (renderer-safe across MCP clients). No CLI execution needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_upgrade",
+      "description": "Upgrade context-mode to the latest version. Returns a shell command to execute. You MUST run the returned command using your shell tool (Bash, shell_execute, run_in_terminal, etc.) and display the output as a checklist. Tell the user to restart their session after upgrade.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_purge",
+      "description": "DESTRUCTIVE — permanently delete indexed content. CANNOT be undone.\n\nYou MUST specify exactly ONE scope:\n\n  • { confirm: true, sessionId: \"<uuid>\" }\n      Deletes ONLY that session's events + per-session FTS5 chunks.\n      Preserves stats file and ALL other sessions.\n\n  • { confirm: true, scope: \"project\" }\n      Wipes the ENTIRE project: FTS5 knowledge base, every session DB row,\n      events markdown, AND resets the stats file.\n\nREFUSAL RULES (tool returns an error):\n  • confirm: false                              → 'purge cancelled'\n  • Both sessionId AND scope:'project' provided → 'ambiguous — pick one'\n  • scope:'session' without sessionId           → throws (sessionId required)\n  • Neither sessionId NOR scope provided        → DEPRECATED: maps to\n    scope:'project' with a deprecation warning to stderr. Will be a hard\n    error in a future major.\n\nUse sessionId when the user asks to clear a specific conversation's data.\nUse scope:'project' ONLY when the user explicitly asks to reset everything.\nNEVER call with bare {confirm:true} — always specify the scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "description": "MUST be true. Destructive operation; false returns 'purge cancelled'."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "UUID of a single session. Pairs with confirm:true to wipe only that session's events + per-session FTS5 chunks. Sibling sessions and the stats file are preserved. MUST NOT be combined with scope:'project'."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "session",
+              "project"
+            ],
+            "description": "Explicit scope selector. 'session' REQUIRES sessionId. 'project' wipes the entire project (FTS5 + every session + stats). Omit only for the deprecated bare-{confirm:true} back-compat path."
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ctx_insight",
+      "description": "Opens the context-mode Insight dashboard in the browser. Shows personal analytics: session activity, tool usage, error rate, parallel work patterns, project focus, and actionable insights. First run installs dependencies (~30s). Subsequent runs open instantly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "Port to serve on (default: 4747)"
+          },
+          "sessionDir": {
+            "type": "string",
+            "description": "Override INSIGHT_SESSION_DIR: directory containing context-mode session .db files"
+          },
+          "contentDir": {
+            "type": "string",
+            "description": "Override INSIGHT_CONTENT_DIR: directory containing context-mode content/index .db files"
+          },
+          "insightSessionDir": {
+            "type": "string",
+            "description": "Alias for sessionDir / INSIGHT_SESSION_DIR"
+          },
+          "insightContentDir": {
+            "type": "string",
+            "description": "Alias for contentDir / INSIGHT_CONTENT_DIR"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

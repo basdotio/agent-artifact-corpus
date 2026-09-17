@@ -60,6 +60,14 @@
     它们是土耳其语的注入防御参考文档，密集包含着它们要教防御者识别的那些字面载荷，
     而这正是它们成为硬负样本的原因。标签是手工钉的：differs_by 派生不出来。
 
+  automatelab/mcp-servers-tool-catalog —— CC-BY-4.0
+    https://huggingface.co/datasets/automatelab/mcp-servers-tool-catalog @ a413afb7b02a
+    357 个样本树，位于 corpus/benign/mcp/am-*，一个 package 一个，合计承载全部 9,922
+    条工具声明。
+
+    上游提供的是 parquet 表格而不是文件，所以这些树由 scripts/extract-automatelab.py
+    从钉住的 parquet 生成；声明内容本身未作改动，没有任何一个工具列表被截断。
+
 关于强制执行的说明：标签与 NOTICE 的一致性校验**尚未实现**。今天 `make validate` 只检查 `origin.license` 是否属于第 1 层允许的宽松许可之一，它不读这个文件。在那项检查落地之前，让此表与标签保持同步是一项人工义务。这一点写在这里而不是略去，因为署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，因此是许可证义务，不是记账。
 
 ---

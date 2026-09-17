@@ -1,0 +1,528 @@
+{
+  "package": "@onesub/mcp-server",
+  "tools": [
+    {
+      "name": "onesub_setup",
+      "description": "Analyze the current project and generate onesub integration code. Detects framework (Expo, React Native CLI, bare RN) and generates appropriate setup code.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute path to the project root directory"
+          },
+          "productId": {
+            "type": "string",
+            "description": "Your subscription product ID (e.g. \"com.yourapp.pro_monthly\")"
+          },
+          "price": {
+            "type": "string",
+            "description": "Display price for the subscription (e.g. \"$4.99/month\")"
+          },
+          "serverUrl": {
+            "description": "URL where @onesub/server is hosted (default: http://localhost:4100)",
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "projectPath",
+          "productId",
+          "price"
+        ]
+      }
+    },
+    {
+      "name": "onesub_add_paywall",
+      "description": "Generate a customized paywall screen for the app.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Main headline shown on the paywall (e.g. \"Unlock Premium\")"
+          },
+          "features": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of benefit strings shown to the user (e.g. [\"Unlimited scans\", \"No ads\"])"
+          },
+          "price": {
+            "type": "string",
+            "description": "Price string displayed to the user (e.g. \"$4.99/month\")"
+          },
+          "style": {
+            "description": "Visual style of the paywall screen: 'minimal' (default), 'gradient', or 'card'",
+            "type": "string",
+            "enum": [
+              "minimal",
+              "gradient",
+              "card"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "features",
+          "price"
+        ]
+      }
+    },
+    {
+      "name": "onesub_check_status",
+      "description": "Check a user's subscription status via the onesub server.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "serverUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Base URL of the onesub validation server (e.g. \"https://api.yourapp.com\")"
+          },
+          "userId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The user ID to check subscription status for"
+          }
+        },
+        "required": [
+          "serverUrl",
+          "userId"
+        ]
+      }
+    },
+    {
+      "name": "onesub_troubleshoot",
+      "description": "Diagnose common IAP issues and provide solutions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "issue": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Describe the problem (e.g. \"Purchase failed\", \"Receipt validation failed\", \"Paywall showing for subscribed user\")"
+          },
+          "platform": {
+            "description": "Target platform: 'ios', 'android', or 'both' (default)",
+            "type": "string",
+            "enum": [
+              "ios",
+              "android",
+              "both"
+            ]
+          },
+          "logs": {
+            "description": "Any relevant error logs or stack traces to help with diagnosis",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue"
+        ]
+      }
+    },
+    {
+      "name": "onesub_create_product",
+      "description": "Create a subscription, consumable, or non-consumable IAP product on Apple App Store Connect and/or Google Play Console. Accepts either appleAppId (numeric) or appleBundleId for Apple. Automatically sets the price and adds Korean localization for KRW products. Use productType to select subscription (default), consumable, or non_consumable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "apple",
+              "google",
+              "both"
+            ],
+            "description": "Target platform"
+          },
+          "productId": {
+            "type": "string",
+            "description": "Product ID (e.g. \"premium_monthly\")"
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name (e.g. \"Premium Monthly\")"
+          },
+          "price": {
+            "type": "number",
+            "description": "Price in the smallest unit (e.g. 499 for $4.99, 4900 for ₩4,900)"
+          },
+          "currency": {
+            "default": "USD",
+            "description": "Currency code (USD, KRW, etc.)",
+            "type": "string"
+          },
+          "productType": {
+            "default": "subscription",
+            "description": "Product type: subscription (auto-renewable), consumable (can be bought multiple times), or non_consumable (one-time purchase)",
+            "type": "string",
+            "enum": [
+              "subscription",
+              "consumable",
+              "non_consumable"
+            ]
+          },
+          "period": {
+            "default": "monthly",
+            "description": "Billing period — only applies to subscriptions",
+            "type": "string",
+            "enum": [
+              "monthly",
+              "yearly"
+            ]
+          },
+          "extraRegions": {
+            "description": "Additional region prices, e.g. [{ currency: \"KRW\", price: 4900 }, { currency: \"JPY\", price: 600 }]",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "currency": {
+                  "type": "string"
+                },
+                "price": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "currency",
+                "price"
+              ]
+            }
+          },
+          "appleKeyId": {
+            "description": "App Store Connect API Key ID",
+            "type": "string"
+          },
+          "appleIssuerId": {
+            "description": "App Store Connect Issuer ID",
+            "type": "string"
+          },
+          "applePrivateKey": {
+            "description": "P8 private key contents",
+            "type": "string"
+          },
+          "appleAppId": {
+            "description": "App Store Connect numeric App ID (e.g. \"6504191153\")",
+            "type": "string"
+          },
+          "appleBundleId": {
+            "description": "iOS bundle ID (e.g. \"gg.pryzm.carrot\") — auto-resolves to App ID if appleAppId is not provided",
+            "type": "string"
+          },
+          "googlePackageName": {
+            "description": "Android package name",
+            "type": "string"
+          },
+          "googleServiceAccountKey": {
+            "description": "Google service account JSON key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "productId",
+          "name",
+          "price"
+        ]
+      }
+    },
+    {
+      "name": "onesub_list_products",
+      "description": "List all IAP products (subscriptions, consumables, non-consumables) registered on Apple App Store Connect and/or Google Play Console",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "platform": {
+            "default": "both",
+            "type": "string",
+            "enum": [
+              "apple",
+              "google",
+              "both"
+            ]
+          },
+          "appleKeyId": {
+            "type": "string"
+          },
+          "appleIssuerId": {
+            "type": "string"
+          },
+          "applePrivateKey": {
+            "type": "string"
+          },
+          "appleAppId": {
+            "type": "string"
+          },
+          "googlePackageName": {
+            "type": "string"
+          },
+          "googleServiceAccountKey": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "onesub_view_subscribers",
+      "description": "View current subscription status and subscriber count from the onesub server",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "serverUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "onesub server URL"
+          },
+          "userId": {
+            "description": "Check specific user (omit for summary)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "serverUrl"
+        ]
+      }
+    },
+    {
+      "name": "onesub_simulate_purchase",
+      "description": "Simulate a purchase against a onesub server running in mockMode (started via `npx @onesub/cli dev`). Drives the full validation flow with no real App Store / Play Store credentials — sends a MOCK_* receipt that the server's mock provider decodes into the chosen outcome (new / revoked / expired / invalid / network_error / sandbox). Use to exercise app error paths, verify integration, or drive end-to-end test scenarios from an AI agent.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "serverUrl": {
+            "default": "http://localhost:4100",
+            "description": "Base URL of the onesub server running in mockMode (default: http://localhost:4100 from `npx @onesub/cli dev`)",
+            "type": "string",
+            "format": "uri"
+          },
+          "userId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "User ID to associate the purchase with"
+          },
+          "productId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Product ID (arbitrary in mockMode, but must match what your app uses)"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "apple",
+              "google"
+            ],
+            "description": "Store platform to simulate"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "consumable",
+              "non_consumable"
+            ],
+            "description": "Purchase type. `subscription` hits /onesub/validate; consumable/non_consumable hit /onesub/purchase/validate"
+          },
+          "scenario": {
+            "default": "new",
+            "description": "Which mock outcome to exercise. Uses MOCK_* receipt prefixes — see docs/RECEIPT-ERRORS.md",
+            "type": "string",
+            "enum": [
+              "new",
+              "revoked",
+              "expired",
+              "invalid",
+              "network_error",
+              "sandbox"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "productId",
+          "platform",
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "onesub_simulate_webhook",
+      "description": "Send a simulated Apple or Google webhook notification to an onesub server to test lifecycle transitions without real store credentials. Builds a fake (unsigned) payload and POSTs it to /onesub/webhook/apple or /onesub/webhook/google. Requires the server to have skipJwsVerification: true (set automatically by `npx @onesub/cli dev`). Apple types: SUBSCRIBED, DID_RENEW, DID_RECOVER, OFFER_REDEEMED, DID_FAIL_TO_RENEW, GRACE_PERIOD_EXPIRED, EXPIRED, REFUND, REVOKE. Google types: purchased, renewed, recovered, restarted, canceled, revoked, expired, on_hold, grace_period, paused, price_change_confirmed.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "serverUrl": {
+            "default": "http://localhost:4100",
+            "description": "Base URL of the onesub server (default: http://localhost:4100). Apple webhooks require skipJwsVerification: true in the server config (set automatically by `npx @onesub/cli dev`).",
+            "type": "string",
+            "format": "uri"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "apple",
+              "google"
+            ],
+            "description": "Store platform to simulate."
+          },
+          "notificationType": {
+            "type": "string",
+            "description": "Notification type to send.\nApple types: SUBSCRIBED, DID_RENEW, DID_RECOVER, OFFER_REDEEMED, DID_FAIL_TO_RENEW, GRACE_PERIOD_EXPIRED, EXPIRED, REFUND, REVOKE\nGoogle types: purchased, renewed, recovered, restarted, canceled, revoked, expired, on_hold, grace_period, paused, price_change_confirmed"
+          },
+          "transactionId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "originalTransactionId (Apple) or purchaseToken (Google). Must match an existing record in the server store for the status update to apply."
+          },
+          "productId": {
+            "default": "pro_monthly",
+            "description": "Subscription product ID (Apple: used in signedTransactionInfo; Google: subscriptionId).",
+            "type": "string"
+          },
+          "subtype": {
+            "description": "Apple only — subtype for DID_FAIL_TO_RENEW. Pass \"GRACE_PERIOD\" to land in grace_period status; omit for on_hold.",
+            "type": "string"
+          },
+          "bundleId": {
+            "default": "com.example.app",
+            "description": "Apple only — bundle ID embedded in the fake JWS payload.",
+            "type": "string"
+          },
+          "packageName": {
+            "default": "com.example.app",
+            "description": "Google only — package name embedded in the Pub/Sub message.",
+            "type": "string"
+          },
+          "expiresInDays": {
+            "default": 30,
+            "description": "Apple only — how many days from now to set expiresDate in the fake JWS (default 30). Use a negative number to simulate an already-expired receipt.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "platform",
+          "notificationType",
+          "transactionId"
+        ]
+      }
+    },
+    {
+      "name": "onesub_inspect_state",
+      "description": "Read the current subscription + one-time purchase state for a user from the onesub server in one call. Useful after simulating purchases to confirm the server recorded them, or when debugging 'isActive' mismatches.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "serverUrl": {
+            "default": "http://localhost:4100",
+            "description": "Base URL of the onesub server (default: http://localhost:4100)",
+            "type": "string",
+            "format": "uri"
+          },
+          "userId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "User ID to look up"
+          }
+        },
+        "required": [
+          "userId"
+        ]
+      }
+    },
+    {
+      "name": "onesub_manage_product",
+      "description": "Update or delete an existing IAP product on Apple App Store Connect and/or Google Play Console. Use action=\"update\" to rename a product, or action=\"delete\" to remove it. Note: Apple products that are already approved (READY_FOR_SALE) cannot be deleted via the API — use App Store Connect to remove them manually.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "update",
+              "delete"
+            ],
+            "description": "\"update\" to rename a product, \"delete\" to remove it"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "apple",
+              "google",
+              "both"
+            ],
+            "description": "Target platform"
+          },
+          "productId": {
+            "type": "string",
+            "description": "Product ID to update or delete"
+          },
+          "productType": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "consumable",
+              "non_consumable"
+            ],
+            "description": "Product type — required to route to the correct API endpoint"
+          },
+          "name": {
+            "description": "New display name (required for update action)",
+            "type": "string"
+          },
+          "appleKeyId": {
+            "description": "App Store Connect API Key ID",
+            "type": "string"
+          },
+          "appleIssuerId": {
+            "description": "App Store Connect Issuer ID",
+            "type": "string"
+          },
+          "applePrivateKey": {
+            "description": "P8 private key contents",
+            "type": "string"
+          },
+          "appleAppId": {
+            "description": "App Store Connect numeric App ID",
+            "type": "string"
+          },
+          "appleBundleId": {
+            "description": "iOS bundle ID (used to resolve App ID if appleAppId is not provided)",
+            "type": "string"
+          },
+          "googlePackageName": {
+            "description": "Android package name",
+            "type": "string"
+          },
+          "googleServiceAccountKey": {
+            "description": "Google service account JSON key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "platform",
+          "productId",
+          "productType"
+        ]
+      }
+    }
+  ]
+}

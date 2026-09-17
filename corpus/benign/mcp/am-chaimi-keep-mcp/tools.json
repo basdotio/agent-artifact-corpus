@@ -1,0 +1,644 @@
+{
+  "package": "chaimi-keep-mcp",
+  "tools": [
+    {
+      "name": "get_skill",
+      "description": "【记账前必须调用】获取柴米AI记账最新 Skill 定义。每次记账前必须先调用此工具，获取当前版本的完整 Skill 文档，然后严格按照 Skill 定义执行。如果不调用此工具直接记账，操作将被拒绝",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "description": "当前时间戳，用于验证 freshness"
+          }
+        }
+      }
+    },
+    {
+      "name": "save_expense",
+      "description": "【文本记账-支出】用户提及支出/消费时用此工具。前置：必须先调用get_skill获取规范，再调用get_text_parse_prompt获取凭证和解析模板。用法：mcporter call 柴米AI记账.save_expense _flowmate=\"SOLINWANG...\" name=\"午餐\" amount=35 category=\"餐饮\" rawInput=\"午餐35元\"。注意：上传图片请用save_receipt",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "商品名称（必填）"
+          },
+          "amount": {
+            "type": "number",
+            "description": "金额（必填）"
+          },
+          "category": {
+            "type": "string",
+            "description": "【必填】支出分类（43个标准分类之一，如：餐饮、食品、交通、蔬菜）"
+          },
+          "price": {
+            "type": "number",
+            "description": "单价（可选）：用户明确说\"X元一斤\"时填写，否则不填"
+          },
+          "quantity": {
+            "type": "number",
+            "description": "数量（可选）：如买了3斤填3，未提及则不填"
+          },
+          "unit": {
+            "type": "string",
+            "description": "单位（可选）：个/盒/瓶/袋/份/斤/kg"
+          },
+          "weight": {
+            "type": "number",
+            "description": "重量（可选，单位kg）：如3斤=1.5kg，未提及则不填"
+          },
+          "store": {
+            "type": "string",
+            "description": "商家名称（可选）：如华润万家、沃尔玛"
+          },
+          "date": {
+            "type": "number",
+            "description": "【必填】消费时间（毫秒级时间戳，13位数字。必须根据实际年月日时分秒计算，不允许复制示例数字）"
+          },
+          "note": {
+            "type": "string",
+            "description": "备注（可选）"
+          },
+          "agentType": {
+            "type": "string",
+            "description": "【必填】Agent类型，如：claude-desktop、cursor、openclaw、workbuddy、trae"
+          },
+          "apiProvider": {
+            "type": "string",
+            "description": "【必填】AI服务提供商，如：anthropic、openai、doubao、aliyun"
+          },
+          "rawInput": {
+            "type": "string",
+            "description": "【必填】用户的原始输入内容，用于记录用户原始请求"
+          },
+          "_flowmate": {
+            "type": "string",
+            "description": "【必填】流程凭证，从get_text_parse_prompt获取的myflowmate值"
+          }
+        },
+        "required": [
+          "name",
+          "amount",
+          "category",
+          "agentType",
+          "apiProvider",
+          "rawInput",
+          "_flowmate"
+        ]
+      }
+    },
+    {
+      "name": "save_receipt",
+      "description": "【图片记账-小票】用户上传小票/发票/收据图片时用此工具。前置：必须先调用get_skill获取规范，再调用get_parse_prompt获取凭证和解析模板。用法：mcporter call 柴米AI记账.save_receipt _flowmate=\"SOLINWANG...\" store=\"超市\" totalAmount=156.5 items=\"[...]\"。注意：文字描述请用save_expense/save_income",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "store": {
+            "type": "string",
+            "description": "商家名称（必填）"
+          },
+          "date": {
+            "type": "number",
+            "description": "消费时间（毫秒级时间戳，13位数字。如提供 date_components 可不传此字段）"
+          },
+          "date_components": {
+            "type": "object",
+            "description": "【推荐】消费时间组件。包含：year、month、day、hour、minute、second。服务端会自动转换为时间戳"
+          },
+          "totalAmount": {
+            "type": "number",
+            "description": "（必填）总金额（所有商品amount之和）"
+          },
+          "originalAmount": {
+            "type": "number",
+            "description": "（必填）应付金额（优惠前）"
+          },
+          "discountAmount": {
+            "type": "number",
+            "description": "（必填）优惠金额"
+          },
+          "actualAmount": {
+            "type": "number",
+            "description": "（必填）实付金额（优惠后）"
+          },
+          "storeCategory": {
+            "type": "string",
+            "description": "【必填】店铺一级分类（购物/美食/生活服务/其他）"
+          },
+          "storeSubCategory": {
+            "type": "string",
+            "description": "【必填】店铺二级分类（超市/便利店/中餐厅/药店等）"
+          },
+          "paymentMethod": {
+            "type": "string",
+            "description": "支付方式，如：微信支付、支付宝"
+          },
+          "receiptNo": {
+            "type": "string",
+            "description": "小票编号"
+          },
+          "items": {
+            "type": [
+              "array",
+              "string"
+            ],
+            "description": "【必填】商品列表，支持数组或JSON字符串格式（某些Agent如Claude Code可能传递JSON字符串）。每个商品必须包含：name、amount、price、quantity。⚠️ 注意：amount=price×quantity。示例数组：[{\"name\":\"苹果\",\"amount\":5.5,\"price\":5.5,\"quantity\":1}]",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "【必填】商品名称"
+                },
+                "originalName": {
+                  "type": "string",
+                  "description": "原始商品名称（含规格）"
+                },
+                "price": {
+                  "type": "number",
+                  "description": "【必填】单价"
+                },
+                "quantity": {
+                  "type": "number",
+                  "description": "【必填】数量"
+                },
+                "unit": {
+                  "type": "string",
+                  "description": "【必填】计价单位（如：元/500g、元/个、元/盒、元/袋）"
+                },
+                "amount": {
+                  "type": "number",
+                  "description": "【必填】金额，必须等于 price × quantity"
+                },
+                "weight": {
+                  "type": "number",
+                  "description": "【可选】重量（单位kg，如：0.6，算不出则填null）"
+                },
+                "marketPrice": {
+                  "type": "number",
+                  "description": "【必填】市场单价（单位元/500g，如：49.8，非重量商品填写amount÷quantity）"
+                },
+                "productCategory": {
+                  "type": "string",
+                  "description": "【必填】商品一级分类（如：蔬菜、肉类、水果、日化用品）"
+                },
+                "productSubCategory": {
+                  "type": "string",
+                  "description": "商品二级分类（如：叶菜类、根茎类、家居清洁）"
+                },
+                "category": {
+                  "type": "string",
+                  "description": "【必填】记账分类（43个标准分类之一，如：蔬菜、购物、餐饮）"
+                }
+              },
+              "required": [
+                "name",
+                "amount",
+                "price",
+                "quantity",
+                "unit",
+                "marketPrice",
+                "productCategory",
+                "category"
+              ]
+            }
+          },
+          "agentType": {
+            "type": "string",
+            "description": "【必填】Agent类型：claude-desktop、cursor、openclaw、workbuddy、trae"
+          },
+          "apiProvider": {
+            "type": "string",
+            "description": "【必填】AI服务提供商：anthropic、openai、doubao、aliyun"
+          },
+          "rawInput": {
+            "type": "string",
+            "description": "【必填】用户的原始输入内容"
+          },
+          "_flowmate": {
+            "type": "string",
+            "description": "【必填】流程凭证，从get_parse_prompt获取的myflowmate值"
+          }
+        },
+        "required": [
+          "store",
+          "items",
+          "storeCategory",
+          "storeSubCategory",
+          "agentType",
+          "apiProvider",
+          "rawInput",
+          "_flowmate"
+        ]
+      }
+    },
+    {
+      "name": "get_expenses",
+      "description": "查询消费记录（支持周/月周期）。支持按周/月或日期范围筛选，可查看分类、商家、来源等多维度数据。新功能：新增 period 参数，以及消费模式分析（高频商家、消费时间等）。返回格式：本工具只返回原始数据，不返回格式化消息。Agent必须使用get_skill获取SKILL.md中的\"七、回复规范\"，再读取references/response-templates.md中的模板自行渲染回复。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "description": "统计周期（推荐使用）：this_week(本周)、last_week(上周)、this_month(本月)、last_month(上月)，与startDate/endDate二选一",
+            "enum": [
+              "this_week",
+              "last_week",
+              "this_month",
+              "last_month"
+            ]
+          },
+          "limit": {
+            "type": "number",
+            "description": "返回数量限制，默认10条，最大100",
+            "default": 10
+          },
+          "skip": {
+            "type": "number",
+            "description": "跳过条数，用于分页",
+            "default": 0
+          },
+          "startDate": {
+            "type": "string",
+            "description": "开始日期（ISO格式，如：2026-04-01）"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "结束日期（ISO格式，如：2026-04-30）"
+          },
+          "category": {
+            "type": "string",
+            "description": "按分类筛选（如：餐饮、食品、交通）"
+          },
+          "store": {
+            "type": "string",
+            "description": "按商家名称筛选"
+          },
+          "source": {
+            "type": "string",
+            "description": "按来源筛选（如：mcp_txt_expense、mcp_receipt）"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "按商品名称关键词搜索"
+          },
+          "orderBy": {
+            "type": "string",
+            "description": "排序方式：date_desc(默认)、date_asc、amount_desc、amount_asc",
+            "enum": [
+              "date_desc",
+              "date_asc",
+              "amount_desc",
+              "amount_asc"
+            ],
+            "default": "date_desc"
+          },
+          "includeFlags": {
+            "type": "boolean",
+            "description": "是否包含消费标记，默认true",
+            "default": true
+          }
+        }
+      }
+    },
+    {
+      "name": "get_receipt_list",
+      "description": "获取小票列表。支持按日期范围、商家、金额等多维度筛选。返回格式：本工具只返回原始数据，不返回格式化消息。Agent必须使用get_skill获取SKILL.md中的\"七、回复规范\"，再读取references/response-templates.md中的模板自行渲染回复。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "返回数量限制，默认5条，最大50",
+            "default": 5
+          },
+          "skip": {
+            "type": "number",
+            "description": "跳过条数，用于分页",
+            "default": 0
+          },
+          "startDate": {
+            "type": "string",
+            "description": "开始日期（ISO格式，如：2026-04-01）"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "结束日期（ISO格式，如：2026-04-30）"
+          },
+          "store": {
+            "type": "string",
+            "description": "按商家名称筛选"
+          },
+          "minAmount": {
+            "type": "number",
+            "description": "最小金额筛选"
+          },
+          "maxAmount": {
+            "type": "number",
+            "description": "最大金额筛选"
+          },
+          "orderBy": {
+            "type": "string",
+            "description": "排序方式：date_desc(默认)、date_asc、amount_desc、amount_asc",
+            "enum": [
+              "date_desc",
+              "date_asc",
+              "amount_desc",
+              "amount_asc"
+            ],
+            "default": "date_desc"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_statistics",
+      "description": "获取消费统计（支持周/月周期）。支持按周/月或日期范围统计，可查看分类占比、消费趋势等。新功能：新增 period 参数（this_week、last_week、this_month、last_month），以及 insights 洞察数据。返回格式：本工具只返回原始数据，不返回格式化消息。Agent必须使用get_skill获取SKILL.md中的\"七、回复规范\"，再读取references/response-templates.md中的模板自行渲染回复。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "description": "统计周期（推荐使用）：this_week(本周)、last_week(上周)、this_month(本月)、last_month(上月)，与yearMonth或startDate/endDate二选一",
+            "enum": [
+              "this_week",
+              "last_week",
+              "this_month",
+              "last_month"
+            ]
+          },
+          "yearMonth": {
+            "type": "string",
+            "description": "年月（如：2026-03），与period或startDate/endDate二选一"
+          },
+          "startDate": {
+            "type": "string",
+            "description": "开始日期（ISO格式），与period或yearMonth二选一"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "结束日期（ISO格式），与period或yearMonth二选一"
+          },
+          "includeInsights": {
+            "type": "boolean",
+            "description": "是否包含洞察数据，默认true",
+            "default": true
+          },
+          "type": {
+            "type": "string",
+            "description": "统计维度：item(商品明细)、receipt(小票汇总)、category(分类统计)、daily(每日趋势)、store(商家统计)",
+            "enum": [
+              "item",
+              "receipt",
+              "category",
+              "daily",
+              "store"
+            ],
+            "default": "category"
+          },
+          "category": {
+            "type": "string",
+            "description": "按特定分类筛选统计"
+          },
+          "store": {
+            "type": "string",
+            "description": "按特定商家筛选统计"
+          },
+          "groupBy": {
+            "type": "string",
+            "description": "分组方式：category(分类)、date(日期)、store(商家)",
+            "enum": [
+              "category",
+              "date",
+              "store"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "get_insights",
+      "description": "【新功能】获取消费洞察线索（包含趋势、模式、健康、优化建议）。纯云端计算，零AI成本！返回洞察线索，供 Agent 结合用户大模型进行深度分析。返回格式：本工具只返回原始数据，不返回格式化消息。Agent必须使用get_skill获取SKILL.md中的\"七、回复规范\"，再读取references/response-templates.md中的模板自行渲染回复。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "description": "统计周期：this_week(本周)、last_week(上周)、this_month(本月)、last_month(上月)",
+            "enum": [
+              "this_week",
+              "last_week",
+              "this_month",
+              "last_month"
+            ],
+            "default": "this_week"
+          },
+          "types": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "洞察类型：trend(趋势)、pattern(模式)、health(健康)、optimization(优化)，默认为全部",
+            "default": [
+              "trend",
+              "pattern",
+              "health",
+              "optimization"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "export_data",
+      "description": "【新功能】导出完整的消费数据，供 Agent 深度分析（零AI成本！）。支持导出完整的消费记录和小票数据，然后在用户侧使用大模型进行深度分析。返回格式：本工具只返回原始数据，不返回格式化消息。Agent必须使用get_skill获取SKILL.md中的\"七、回复规范\"，再读取references/response-templates.md中的模板自行渲染回复。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "description": "周期：all(全部)、this_year(今年)、last_year(去年)、custom(自定义)",
+            "enum": [
+              "all",
+              "this_year",
+              "last_year",
+              "custom"
+            ],
+            "default": "this_year"
+          },
+          "format": {
+            "type": "string",
+            "description": "导出格式：json 或 csv",
+            "enum": [
+              "json",
+              "csv"
+            ],
+            "default": "json"
+          },
+          "includeReceipts": {
+            "type": "boolean",
+            "description": "是否包含小票记录，默认true",
+            "default": true
+          },
+          "startDate": {
+            "type": "string",
+            "description": "开始日期（period=custom时必填）"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "结束日期（period=custom时必填）"
+          }
+        }
+      }
+    },
+    {
+      "name": "save_income",
+      "description": "【文本记账-收入】用户提及收入关键词（工资、红包、转账、退款等）时用此工具。前置：必须先调用get_skill获取规范，再调用get_text_parse_prompt获取凭证和解析模板。用法：mcporter call 柴米AI记账.save_income _flowmate=\"SOLINWANG...\" name=\"红包\" amount=100 category=\"红包\" rawInput=\"收红包100元\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "收入来源（如：工资、奖金、红包）（必填）"
+          },
+          "amount": {
+            "type": "number",
+            "description": "收入金额（必填）"
+          },
+          "category": {
+            "type": "string",
+            "description": "【必填】收入分类（8个标准分类之一：工资、兼职、奖金、红包、退款、理财、转账、其他）"
+          },
+          "price": {
+            "type": "number",
+            "description": "单价（可选）：用户明确说\"X元一件\"时填写，否则不填"
+          },
+          "quantity": {
+            "type": "number",
+            "description": "数量（可选）：如卖了3件填3，未提及则不填"
+          },
+          "unit": {
+            "type": "string",
+            "description": "单位（可选）：个/件/批/单"
+          },
+          "weight": {
+            "type": "number",
+            "description": "重量（可选，单位kg）：如货物重量，未提及则不填"
+          },
+          "store": {
+            "type": "string",
+            "description": "付款方（如：公司名称）（可选）"
+          },
+          "date": {
+            "type": "number",
+            "description": "【必填】收入时间（毫秒级时间戳，13位数字。必须根据实际年月日时分秒计算，不允许复制示例数字）"
+          },
+          "note": {
+            "type": "string",
+            "description": "备注（可选）"
+          },
+          "agentType": {
+            "type": "string",
+            "description": "【必填】Agent类型，如：claude-desktop、cursor、openclaw、workbuddy、trae"
+          },
+          "apiProvider": {
+            "type": "string",
+            "description": "【必填】AI服务提供商，如：anthropic、openai、doubao、aliyun"
+          },
+          "rawInput": {
+            "type": "string",
+            "description": "【必填】用户的原始输入内容，用于记录用户原始请求"
+          },
+          "_flowmate": {
+            "type": "string",
+            "description": "【必填】流程凭证，从get_text_parse_prompt获取的myflowmate值"
+          }
+        },
+        "required": [
+          "name",
+          "amount",
+          "category",
+          "agentType",
+          "apiProvider",
+          "rawInput",
+          "_flowmate"
+        ]
+      }
+    },
+    {
+      "name": "get_text_parse_prompt",
+      "description": "【不调用100%失败】获取文字记账解析的Prompt模板和流程凭证。⚠️ 文字/语音记账必须先调用此工具获取凭证，AI解析时必须返回_flowmate字段，否则save_expense/save_income会报MISSING_TOKEN错误！",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentType": {
+            "type": "string",
+            "description": "【推荐自动填充】Agent类型，如：claude-desktop、cursor、openclaw、workbuddy、trae"
+          },
+          "apiProvider": {
+            "type": "string",
+            "description": "【推荐自动填充】AI服务提供商，如：anthropic、openai、doubao、aliyun"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_parse_prompt",
+      "description": "【不调用100%失败】获取小票图片解析的Prompt模板和流程凭证。⚠️ 小票记账必须先调用此工具获取凭证，AI解析时必须返回_flowmate字段，否则save_receipt会报MISSING_TOKEN错误！",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Prompt类型，如：parseReceipt",
+            "default": "parseReceipt"
+          }
+        }
+      }
+    },
+    {
+      "name": "submit_feedback",
+      "description": "提交反馈、建议或问题报告。当用户遇到记账问题、有功能建议或发现异常时，可使用此工具提交反馈。反馈类型包括：bug(问题报告)、feature(功能建议)、improvement(优化建议)、other(其他)。提交成功后会返回反馈编号，可用于查询处理进度。注意：反馈内容不要超过150个字符，超过部分会被截断。返回格式：本工具只返回原始数据，不返回格式化消息。Agent必须使用get_skill获取SKILL.md中的\"七、回复规范\"，再读取references/response-templates.md中的模板自行渲染回复。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "反馈内容，详细描述问题或建议（必填，最多150个字符）"
+          },
+          "type": {
+            "type": "string",
+            "description": "反馈类型：bug(问题报告)、feature(功能建议)、improvement(优化建议)、other(其他)，默认other",
+            "enum": [
+              "bug",
+              "feature",
+              "improvement",
+              "other"
+            ],
+            "default": "other"
+          },
+          "contact": {
+            "type": "string",
+            "description": "联系方式（可选），如邮箱、微信等，方便后续沟通"
+          },
+          "context": {
+            "type": "string",
+            "description": "上下文信息（可选），如相关记账记录ID、错误截图描述等"
+          },
+          "agentType": {
+            "type": "string",
+            "description": "【推荐自动填充】Agent类型，如：claude-desktop、cursor、openclaw、workbuddy、trae"
+          },
+          "apiProvider": {
+            "type": "string",
+            "description": "【推荐自动填充】AI服务提供商，如：anthropic、openai、doubao、aliyun"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    }
+  ]
+}

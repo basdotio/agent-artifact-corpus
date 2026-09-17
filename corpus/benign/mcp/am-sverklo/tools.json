@@ -1,0 +1,967 @@
+{
+  "package": "sverklo",
+  "tools": [
+    {
+      "name": "sverklo_context",
+      "description": "Umbrella context bundler. Give a task description and get a single curated bundle: codebase overview header, semantically relevant code, related symbols, and matching saved memories — in one round trip. Use this as the FIRST call when you start working on a new task and want to orient quickly. PASS `budget` for a PageRank-pruned repo map fit to a token budget — the ideal way to give an agent a complete mental model of an unfamiliar codebase in one call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Free-form description of what you're trying to do, e.g. 'add rate limiting to the login endpoint' or 'understand how billing webhooks are processed'. When `budget` is set and no task is given, returns a pure PageRank-ordered repo map."
+          },
+          "detail_level": {
+            "type": "string",
+            "enum": [
+              "minimal",
+              "normal",
+              "full"
+            ],
+            "description": "How much to return. minimal=fast/cheap (good for snap orientation); normal=balanced (default); full=adds dependency neighbours. Ignored when `budget` is set."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Optional path prefix to constrain the search (e.g. 'src/api/')."
+          },
+          "budget": {
+            "type": "number",
+            "description": "When set, returns a PageRank-pruned repo map greedily filled to this token budget (inspired by aider's repo-map). Files are ordered by PageRank importance, optionally biased toward `task`. Only symbol signatures are rendered — use the atomic tools for full bodies. Typical values: 4000 (snap map), 8000 (full mental model), 16000 (deep context)."
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Path substrings to exclude from the repo map (e.g. ['test', 'migration'])."
+          }
+        }
+      }
+    },
+    {
+      "name": "sverklo_search",
+      "description": "Hybrid semantic + text search with PageRank ranking. WORKS WELL for: exploratory questions where you don't know the exact symbol ('how does auth work', 'find anything related to billing', 'where's the retry logic'), anti-pattern discovery ('swallowed exceptions', 'silent null returns'), and cross-file semantic matches. STRUGGLES WITH: framework registration and wiring questions ('how is X registered as a bean', 'where is this interceptor configured'). For those, grep the specific annotation (@Component, @Configuration, etc.) directly. Response includes a confidence signal and a fallback hint when the query shape is one we know semantic search handles poorly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language query or code pattern"
+          },
+          "token_budget": {
+            "type": "number",
+            "description": "Max tokens to return (default: 4000)"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Limit to path prefix, e.g. 'src/api/'"
+          },
+          "language": {
+            "type": "string",
+            "description": "Filter by language, e.g. 'typescript'"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "type",
+              "interface",
+              "method",
+              "any"
+            ],
+            "description": "Filter by symbol type (default: any)"
+          },
+          "current_file": {
+            "type": "string",
+            "description": "Optional: repo-relative path of the file the user is currently editing. When provided, results closer to this file (in directory distance) get a small ranking boost — useful for breaking ties between equally-relevant candidates."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ],
+            "description": "compact (default) elides long bodies, dedups similar chunks, and groups 3+ results from the same directory into a hub+count. full returns every match with complete bodies — use when the agent needs to see everything."
+          },
+          "bundle_tokens": {
+            "type": "number",
+            "description": "When > 0, attaches up to this many extra tokens of context to the response: adjacent chunks in the same file + 1-hop import-graph neighbors. Useful for onboarding or 'show me more' flows; defaults to 0 (off)."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "refs",
+              "full"
+            ],
+            "description": "refs returns hits without bodies (file:line + score + name) — same latency as full, ~half the payload tokens. full (default) returns the same hits with their bodies. Borrowed from iwe-org/iwe's find/retrieve split; use refs when you only need to triage the hit list and intend to follow up with ctx_slice on a specific hit."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_overview",
+      "description": "Get a structural map of the codebase. Shows the most important files and their key symbols ranked by dependency importance (PageRank). Use this FIRST when starting work on an unfamiliar codebase or directory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory to overview (default: project root)"
+          },
+          "token_budget": {
+            "type": "number",
+            "description": "Max tokens to return (default: 3000)"
+          },
+          "depth": {
+            "type": "number",
+            "description": "Progressive disclosure: 1 = directories only, 2 = directories + filenames, 3 (default) = directories + files + top symbols, 4 = include all named exports. Borrowed from iwe-org/iwe's `squash`/`tree` pattern. Lower depth costs fewer tokens — use the cheapest depth that still answers the question."
+          }
+        }
+      }
+    },
+    {
+      "name": "sverklo_lookup",
+      "description": "Look up a specific symbol (function, class, type, variable) by name. Returns its full definition, signature, and location.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name to look up (exact or prefix match)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "type",
+              "interface",
+              "method",
+              "variable",
+              "any"
+            ],
+            "description": "Filter by symbol type"
+          },
+          "token_budget": {
+            "type": "number",
+            "description": "Max tokens to return (default: 2000)"
+          }
+        },
+        "required": [
+          "symbol"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_refs",
+      "description": "Find all references to a symbol across the codebase. Shows where a function, class, or type is imported, called, or used. Matches on identifier word boundaries by default — `embed` does NOT match `embeddingStore`. Pass `exact: false` to opt into substring matching.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name to find references for"
+          },
+          "exact": {
+            "type": "boolean",
+            "description": "When true (default), match on whole-identifier boundaries — `embed` won't match `embeddingStore`. When false, substring-match like the old behavior."
+          },
+          "token_budget": {
+            "type": "number",
+            "description": "Max tokens to return (default: 2000)"
+          }
+        },
+        "required": [
+          "symbol"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_deps",
+      "description": "Show what a file imports/depends on and what depends on it. Helps understand the impact of changing a file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path to analyze"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "imports",
+              "importers",
+              "both"
+            ],
+            "description": "Direction of dependencies (default: both)"
+          },
+          "depth": {
+            "type": "number",
+            "description": "How many levels deep to traverse (default: 1)"
+          },
+          "token_budget": {
+            "type": "number",
+            "description": "Max tokens to return (default: 1500)"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_status",
+      "description": "Project state + tool usage guide. Returns index health (files, chunks, languages), memory summary, and specific tool recommendations tailored to this codebase. Call this first when starting a new session to understand what sverklo knows about the project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "sverklo_remember",
+      "description": "Save a persistent memory tied to git state. Auto-invalidates conflicting prior memories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The memory to save"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "decision",
+              "preference",
+              "pattern",
+              "context",
+              "todo",
+              "procedural",
+              "correction"
+            ],
+            "description": "Default: context. Use procedural for 'always do X' rules. Use correction when the user is fixing a prior model mistake (\"stop using em-dashes\", \"never call this method again\") — mirrors the AI Edge memory taxonomy and the bench:research Corrections category in markdown export."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional tags"
+          },
+          "related_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Files this memory relates to (enables staleness detection)"
+          },
+          "confidence": {
+            "type": "number",
+            "description": "0.0-1.0, default 1.0"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "core",
+              "archive"
+            ],
+            "description": "core auto-injects each session, archive is searched on demand"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "episodic",
+              "semantic",
+              "procedural"
+            ],
+            "description": "Cognitive-science axis: episodic = a moment-bound event/decision, semantic = a timeless fact/rule, procedural = a how-to. Defaults from category (procedural→procedural, preference/pattern→semantic, else→episodic)."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "workspace"
+            ],
+            "description": "project (default) saves to this repo's memory store. workspace saves to a shared store at ~/.sverklo/workspaces/<name>/memories.db, discoverable across every other repo in the same workspace. Use workspace for cross-repo decisions ('we use Postgres everywhere'); use project for repo-specific context."
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_recall",
+      "description": "Search memories semantically. Finds past decisions, preferences, and patterns relevant to a query. Supports two specialized modes: `mode=core` returns only the always-on project invariants (fast, no query needed — use at session start); `mode=archival` searches the full archive with semantic ranking; `mode=all` (default) searches both. Use core for 'what are the project-wide rules I must not violate' and archival for 'what did we decide about X on this codebase'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to search for in memories (optional when mode=core)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "core",
+              "archival",
+              "all"
+            ],
+            "description": "Which memory tier to search. 'core' = always-on invariants only, 'archival' = searchable long tail, 'all' = both (default)."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "decision",
+              "preference",
+              "pattern",
+              "context",
+              "todo",
+              "procedural",
+              "any"
+            ],
+            "description": "Filter by category (default: 'any')"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max memories to return (default: 10)"
+          },
+          "include_stale": {
+            "type": "boolean",
+            "description": "Include stale memories (default: false)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "episodic",
+              "semantic",
+              "procedural",
+              "any"
+            ],
+            "description": "Cognitive-axis filter (default: 'any'). episodic = moment-bound events, semantic = timeless facts/rules, procedural = how-tos. Orthogonal to category."
+          }
+        }
+      }
+    },
+    {
+      "name": "sverklo_forget",
+      "description": "Permanently delete a memory after recall returned a stale or wrong entry. Prefer sverklo_remember (with the new content) over forget+remember when superseding a decision — supersession preserves the audit trail via valid_until_sha + superseded_by; forget loses it. Get IDs from sverklo_recall or sverklo_memories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Memory ID to delete (from recall results)"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_memories",
+      "description": "List all memories for the current project, or surface conflict candidates. Default mode shows memory health (staleness, confidence, access frequency). Pass `mode: \"conflicts\"` to surface pairs of active memories that share a pin and may contradict — the bi-temporal model preserves both, so this is a review prompt for the agent or human, not an auto-resolution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "list",
+              "conflicts"
+            ],
+            "description": "list (default): show active memories. conflicts: pairs of active memories sharing a pin that may contradict (decision/preference/pattern categories only)."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "decision",
+              "preference",
+              "pattern",
+              "context",
+              "todo",
+              "procedural",
+              "any"
+            ],
+            "description": "Filter by category in list mode (default: 'any')"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max memories (list mode) or conflict pairs (conflicts mode) to return (default: 50 / 25)"
+          },
+          "stale_only": {
+            "type": "boolean",
+            "description": "List mode: only show stale memories (default: false)"
+          }
+        }
+      }
+    },
+    {
+      "name": "sverklo_promote",
+      "description": "Promote a memory to the core tier. Core memories are auto-injected into every session via sverklo://context resource — use for project invariants that should always be in the AI's context (style rules, framework conventions, 'never do X' rules).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Memory ID to promote (from recall/memories results)"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_demote",
+      "description": "Demote a memory from core to archive tier. Archive memories are only retrieved on demand via sverklo_recall — not automatically injected. Use for memories that no longer need to be in every session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "Memory ID to demote"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_impact",
+      "description": "Refactor blast-radius: callers of a symbol with confidence scoring. Run before editing. Use cross_repo:true to see impact across linked projects in a workspace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "The function/class/type name to find references for"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max references to return (default 50)"
+          },
+          "cross_repo": {
+            "type": "boolean",
+            "description": "Include cross-repo impact from workspace projects (default false)"
+          },
+          "partition_threshold": {
+            "type": "number",
+            "description": "When the caller count exceeds this, return a partition plan instead of a raw list (default 80). Set to 0 to disable partitioning and always dump the raw list."
+          }
+        },
+        "required": [
+          "symbol"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_audit",
+      "description": "One-call codebase health report: god nodes (highest blast-radius symbols), hub files (highest PageRank), orphan symbols (likely dead code), and language/memory stats. Use as the seed for a code-quality pass — pair with sverklo_impact for blast-radius and sverklo_deps for fan-in/fan-out. Cheaper than running overview + impact + dependencies separately.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token_budget": {
+            "type": "number",
+            "description": "Max tokens to return (default: 4000)"
+          }
+        }
+      }
+    },
+    {
+      "name": "sverklo_wakeup",
+      "description": "500-token codebase summary suitable for pasting into a system prompt when the agent has no MCP access. Use this when integrating sverklo intelligence into Cursor, Codex, or a CI bot that can't run the MCP server. For MCP-connected agents, prefer sverklo_status and the richer per-tool surfaces — they return more and stay in budget.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "plain"
+            ],
+            "description": "Output format (default: markdown)"
+          },
+          "max_tokens": {
+            "type": "number",
+            "description": "Approximate max tokens (default: 500 — intentionally small for system-prompt use)"
+          }
+        }
+      }
+    },
+    {
+      "name": "sverklo_review_diff",
+      "description": "Diff-aware context bundler for code review. Takes a git ref or range and returns: changed files, semantic delta (added/removed/modified symbols), dangling references for removed symbols, impact set for modified symbols, and similar-symbol detection for added ones. Replaces 10-20 grep+read calls with one structured response. Use this FIRST when reviewing an MR/PR — it surfaces blast radius and convention violations grep cannot see.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Git ref or range. Examples: 'HEAD' (uncommitted + last commit), 'main..HEAD' (branch vs main), 'abc123..def456'. Default: main..HEAD."
+          },
+          "include_added_similarity": {
+            "type": "boolean",
+            "description": "Detect duplicates among added symbols. Default: true."
+          },
+          "max_files": {
+            "type": "number",
+            "description": "Cap on number of files to analyze. Default: 25."
+          },
+          "token_budget": {
+            "type": "number",
+            "description": "Max tokens to return. Default: 4000."
+          }
+        }
+      }
+    },
+    {
+      "name": "sverklo_diff_search",
+      "description": "Semantic search scoped to files in a git diff (and optionally their dependency closure). Use this when reviewing an MR/PR and you need to find code related to a query — but only within the changed files, not the entire codebase. Cuts noise from global search and lets you ask questions like 'find all lock acquisitions in the changed files' or 'where do these new functions get called from existing code'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language query or code pattern"
+          },
+          "ref": {
+            "type": "string",
+            "description": "Git ref or range. Default: main..HEAD"
+          },
+          "include_callers": {
+            "type": "number",
+            "description": "Also include files that import the changed files, N hops out. Default: 0 (only changed files). Use 1 to include direct callers, 2 for transitive."
+          },
+          "token_budget": {
+            "type": "number",
+            "description": "Max tokens to return. Default: 3000."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "type",
+              "interface",
+              "method",
+              "any"
+            ],
+            "description": "Filter by symbol type"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_test_map",
+      "description": "Map a git diff to its test coverage. Given a ref/range, lists which tests likely cover each changed source file (via name heuristics + import graph), flags changed source files with NO matching tests, and shows which test files were modified in the diff. Use this during MR/PR review to answer 'what tests should I run?' and 'is this change tested?' without grepping the whole repo. Coverage is heuristic — sverklo doesn't run code, so treat results as candidates, not ground truth.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Git ref or range. Default: main..HEAD"
+          },
+          "include_importers": {
+            "type": "boolean",
+            "description": "Also surface test files that import the changed file via the dependency graph (not just name matches). Default: true."
+          }
+        }
+      }
+    },
+    {
+      "name": "sverklo_ast_grep",
+      "description": "Find code by AST shape, not text — e.g. 'every console.log($X)', 'every catch (e) { return null }'. Requires ast-grep on PATH. Pick this over sverklo_search when you need exact structural matches (consistent transformations, lint-style queries) and over Grep when you need to ignore identifier names or whitespace. Falls back to a clear error if ast-grep is missing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "e.g. 'console.log($A)'"
+          },
+          "language": {
+            "type": "string",
+            "description": "typescript, python, rust, go, …"
+          },
+          "path": {
+            "type": "string",
+            "description": "Default: project root"
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_clusters",
+      "description": "Group files into modules by graph-community detection (label propagation over the import graph). Returns 3+ file clusters with their hub file. Use this on first contact with an unfamiliar repo — pair with sverklo_concepts (after running `sverklo concept-index`) for an LLM-named summary of each cluster. Skip if the codebase has fewer than ~20 source files; structure won't be informative.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "min_size": {
+            "type": "number",
+            "description": "Minimum cluster size to show (default 3)"
+          }
+        }
+      }
+    },
+    {
+      "name": "sverklo_pin",
+      "description": "Pin a memory to a specific file or symbol. Pinned memories surface automatically when recalling by that file path or symbol name, without needing semantic search.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "number",
+            "description": "Memory ID to pin (from recall/memories results)"
+          },
+          "target": {
+            "type": "string",
+            "description": "File path or symbol name to pin the memory to"
+          }
+        },
+        "required": [
+          "memory_id",
+          "target"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_unpin",
+      "description": "Remove a pin from a memory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "number",
+            "description": "Memory ID to unpin"
+          },
+          "target": {
+            "type": "string",
+            "description": "File path or symbol name to unpin from"
+          }
+        },
+        "required": [
+          "memory_id",
+          "target"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_investigate",
+      "description": "Single-call research primitive: fans out to BM25, embeddings, symbol lookup, and reference-expansion in parallel; RRF-fuses the candidates; returns one ranked bundle with per-hit provenance (which retriever(s) found it). Cheaper than running sverklo_search + sverklo_refs + sverklo_lookup back-to-back. WORKS WELL for open-ended questions where you don't yet know whether the answer lives in code, callers, or documentation — the `found_by` tags tell you which signal agreed. Use sverklo_search instead when you already know you want pure text/semantic retrieval.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural-language question or exploration target."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Optional path prefix to limit all retrievers to, e.g. 'src/api/'."
+          },
+          "budget": {
+            "type": "number",
+            "description": "Max candidates per sub-retriever (default 50). Higher = broader fusion at some latency cost."
+          },
+          "max_hits": {
+            "type": "number",
+            "description": "Max hits to display in the response (default 10)."
+          },
+          "expand_graph": {
+            "type": "boolean",
+            "description": "Run a 5th retriever that expands top hits one hop along typed edges (calls/documents/imports/extends). Improves recall on multi-hop questions at small latency cost. Default false."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_search_iterative",
+      "description": "Wider-pool, iterative-friendly variant of sverklo_search. Returns a ctx:// handle to the top-200 candidate pool plus refinement hints (co-occurring symbols, dominant directories, concept overlap). Use ctx_grep / ctx_slice to refine without firing another retrieval. Worth the extra latency (~50ms) on hard multi-hop questions; for single-shot lookups use sverklo_search.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Optional path prefix."
+          },
+          "pool": {
+            "type": "number",
+            "description": "Candidate pool size (default 200). Capped at 500."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_ask",
+      "description": "Natural-language router over sverklo's existing primitives. Maps a question to (a) the closest concept (if the concept index exists), (b) an investigate fan-out, and (c) refs/impact on the top symbols surfaced. Returns a structured answer with evidence — no generated prose. Use when you want a single keystroke that exercises the whole stack; for fine-grained control prefer sverklo_search / sverklo_investigate / sverklo_refs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural-language question."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Optional path prefix."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "thorough"
+            ],
+            "description": "fast (default): one investigate pass + concept lookup. thorough: also expand-graph + a refs probe on top symbols."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_verify",
+      "description": "Check whether one or more evidence ids (from a prior search-family tool's ```evidence block) still point to the same code they did at retrieval time. Returns unchanged / moved / modified / deleted / file_missing per id. Use this to prevent hallucinated citations after code changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of ev_xxxxxx ids to verify."
+          },
+          "claim": {
+            "type": "string",
+            "description": "Optional human-readable claim the ids support. Echoed back in the header — useful for audit logs."
+          }
+        },
+        "required": [
+          "evidence_ids"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_critique",
+      "description": "Deterministic coverage check for an agent's answer. Takes the evidence ids the agent cited plus the symbols it discussed; verifies each evidence is still current and flags whether the answer missed high-PageRank hubs, symbol definitions, or related doc mentions. Returns a structured critique — no LLM call on the server side.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Evidence ids (from the fenced evidence blocks) that the agent cited."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbols the agent discussed by name. Used for hub / doc-coverage checks."
+          },
+          "claim": {
+            "type": "string",
+            "description": "Optional summary of the agent's claim. Echoed in the critique header."
+          }
+        },
+        "required": [
+          "evidence_ids"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_concepts",
+      "description": "Semantic search over LLM-labeled subsystem concepts. Returns the clusters whose label/summary best matches the query, along with each cluster's hub file. Requires the concept index to have been built: run `sverklo concept-index` once per repo. If no index exists, returns a helpful bootstrapping message.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural-language question: 'where does caching live?', 'show me the auth subsystem', etc."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max concepts to return (default 5)."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_patterns",
+      "description": "Query the LLM-derived design-pattern annotations on indexed symbols. Pass a `pattern` from the closed taxonomy (observer, repository, validator, ...) to list every symbol tagged with it; pass no args to see the taxonomy + counts. Requires `sverklo enrich-patterns` to have been run.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "One of: factory, builder, singleton, prototype, object_pool, adapter, decorator, facade, proxy, composite, bridge, flyweight, observer, strategy, command, iterator, state, template_method, visitor, mediator, chain_of_responsibility, memento, repository, service, controller, middleware, validator, serializer, event_handler, router, store, view."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max rows to return (default 25)."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "sverklo_grep_results",
+      "description": "Filter the result blocks of a prior sverklo tool call by a regex pattern — operates on the cached text so no second retrieval happens. Pass the response_id returned on any search/refs/impact call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "response_id": {
+            "type": "string",
+            "description": "The rsp_... id from an earlier call."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Regex (or literal if regex is invalid)."
+          }
+        },
+        "required": [
+          "response_id",
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_head_results",
+      "description": "Keep only the top N result blocks of a prior sverklo tool call. Cheap way to shrink a chatty response when you just need the top hit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "response_id": {
+            "type": "string"
+          },
+          "n": {
+            "type": "number",
+            "description": "Max blocks to keep."
+          }
+        },
+        "required": [
+          "response_id",
+          "n"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_ctx_peek",
+      "description": "Return a byte-slice from a single result block of a prior tool call. Use when the agent needs to inspect a specific offset without the full body.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "response_id": {
+            "type": "string"
+          },
+          "hit_index": {
+            "type": "number",
+            "description": "0-based index into the block list."
+          },
+          "offset": {
+            "type": "number",
+            "description": "Byte offset into the block body."
+          },
+          "len": {
+            "type": "number",
+            "description": "Byte length to return."
+          }
+        },
+        "required": [
+          "response_id",
+          "hit_index",
+          "offset",
+          "len"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_ctx_slice",
+      "description": "Return a byte-slice of a context handle (ctx://<tool>/<id>). Use to drill into the body without rerunning the original retrieval. Returns 'expired' if the handle's pinned SHA no longer matches.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "ctx://<tool>/<id> URI"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Byte offset (default 0)"
+          },
+          "length": {
+            "type": "number",
+            "description": "Byte length (default 4000)"
+          }
+        },
+        "required": [
+          "uri"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_ctx_grep",
+      "description": "Filter the result blocks of a context handle by regex. Operates on the cached body — no second retrieval. Returns the narrowed body inline.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Regex (or literal if regex is invalid)."
+          },
+          "head": {
+            "type": "number",
+            "description": "Optional cap on returned blocks."
+          }
+        },
+        "required": [
+          "uri",
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "sverklo_ctx_stats",
+      "description": "Inspect a context handle without consuming it: tool, age, block count, byte size, fresh/expired.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri"
+        ]
+      }
+    }
+  ]
+}

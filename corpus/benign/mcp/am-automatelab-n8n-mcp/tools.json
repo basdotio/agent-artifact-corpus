@@ -1,0 +1,205 @@
+{
+  "package": "@automatelab/n8n-mcp",
+  "tools": [
+    {
+      "name": "n8n_scaffold_node",
+      "description": "Scaffold a TypeScript skeleton for an n8n custom node from a plain-English description. Returns a single TypeScript file implementing INodeType with description, credentials reference, and an execute method stub.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Plain-English description of what the node should do."
+          },
+          "nodeName": {
+            "type": "string",
+            "description": "Optional PascalCase node class name, e.g. 'DiscordRateLimited'. Derived from the description if omitted."
+          }
+        },
+        "required": [
+          "description"
+        ]
+      }
+    },
+    {
+      "name": "n8n_generate_workflow",
+      "description": "Generate a valid n8n workflow JSON from a plain-English description. Handles webhook/schedule/RSS triggers, common action nodes (Slack, Google Sheets, Discord, Gmail, Notion, HTTP), and AI Agent setups (LangChain root agent + chat model + memory + optional HTTP tool, wired with ai_languageModel / ai_memory / ai_tool connections). Returns workflow JSON with unique node IDs, connections, positions, and typeVersion on every node.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Plain-English workflow description, e.g. 'Stripe webhook -> Slack message + Google Sheets row'."
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional workflow name. Derived from the first sentence of the description if omitted."
+          }
+        },
+        "required": [
+          "description"
+        ]
+      }
+    },
+    {
+      "name": "n8n_lint_workflow",
+      "description": "Lint an n8n workflow JSON. Returns concrete errors and warnings: missing credentials, deprecated node types (Function -> Code, spreadsheetFile -> convertToFile/extractFromFile), broken connections, missing or non-numeric typeVersion, duplicate node names or IDs, AI Agent missing ai_languageModel sub-node, Webhook missing webhookId, IF node still on v1 condition schema.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflow": {
+            "description": "n8n workflow as either a parsed object or a JSON string.",
+            "oneOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "workflow"
+        ]
+      }
+    },
+    {
+      "name": "n8n_explain_execution",
+      "description": "Diagnose a failed or surprising n8n execution. Paste the execution JSON (from the n8n UI 'Show details' or `GET /executions/:id?includeData=true`); returns a per-node summary highlighting nodes that returned 0 items, unresolved `={{ ... }}` expressions, errors with hints, and LLM token usage. Hits the most common debugging pain point: items 'silently disappearing' between nodes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "execution": {
+            "description": "n8n execution object as either a parsed object or a JSON string. Accepts both the REST API shape (`{ data: { resultData: { runData, error, lastNodeExecuted } }, finished, status, ... }`) and the raw `executionData` body returned by the UI.",
+            "oneOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "execution"
+        ]
+      }
+    },
+    {
+      "name": "n8n_list_workflows",
+      "description": "List workflows from a live n8n instance (requires N8N_API_URL + N8N_API_KEY env vars). Returns id, name, active, nodeCount, updatedAt, tags. Filter by active, tags, name. Use this when the user asks 'what workflows do I have?' or before n8n_get_workflow.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Filter by active status. Omit to return both."
+          },
+          "tags": {
+            "type": "string",
+            "description": "Comma-separated tag names to filter by."
+          },
+          "name": {
+            "type": "string",
+            "description": "Filter by exact workflow name."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Page size (n8n default: 100, max: 250)."
+          }
+        }
+      }
+    },
+    {
+      "name": "n8n_get_workflow",
+      "description": "Fetch a single workflow JSON by id from a live n8n instance (requires N8N_API_URL + N8N_API_KEY). Returns the full nodes/connections payload — pair with n8n_lint_workflow to audit a deployed workflow.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Workflow ID."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "n8n_create_workflow",
+      "description": "Create a workflow on a live n8n instance (requires N8N_API_URL + N8N_API_KEY). Strips read-only fields (id, active, createdAt, ...) before posting. Workflows are created inactive — call n8n_activate_workflow afterward. Pairs with n8n_generate_workflow for end-to-end 'describe -> deploy'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflow": {
+            "description": "Workflow JSON to create (typically the output of n8n_generate_workflow). Either a parsed object or a JSON string.",
+            "oneOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "workflow"
+        ]
+      }
+    },
+    {
+      "name": "n8n_activate_workflow",
+      "description": "Activate or deactivate a workflow on a live n8n instance (requires N8N_API_URL + N8N_API_KEY). Pass `active: false` to deactivate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Workflow ID."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Defaults to true (activate). Set false to deactivate."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "n8n_list_executions",
+      "description": "List recent executions from a live n8n instance (requires N8N_API_URL + N8N_API_KEY). Filter by workflowId, status (success|error|waiting), limit. Pass `includeData: true` to get the full execution body (large) — pair with n8n_explain_execution to diagnose a specific failure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "description": "Filter by workflow ID."
+          },
+          "status": {
+            "type": "string",
+            "description": "Filter by status: success | error | waiting.",
+            "enum": [
+              "success",
+              "error",
+              "waiting"
+            ]
+          },
+          "limit": {
+            "type": "number",
+            "description": "Page size (n8n default: 100, max: 250)."
+          },
+          "includeData": {
+            "type": "boolean",
+            "description": "Include full execution data (large). Default false — pair with n8n_explain_execution."
+          }
+        }
+      }
+    }
+  ]
+}

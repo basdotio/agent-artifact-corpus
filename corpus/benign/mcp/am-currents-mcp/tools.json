@@ -1,0 +1,1784 @@
+{
+  "package": "@currents/mcp",
+  "tools": [
+    {
+      "name": "currents-list-actions",
+      "description": "List all actions for a project with optional filtering. Actions are rules that automatically modify test behavior (skip, quarantine, tag). Supports filtering by status (active/disabled/archived/expired) and search by name. Requires a projectId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to fetch actions from."
+          },
+          "status": {
+            "description": "Filter actions by status (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "active",
+                "disabled",
+                "archived",
+                "expired"
+              ]
+            }
+          },
+          "search": {
+            "description": "Search actions by name.",
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "projectId"
+        ]
+      }
+    },
+    {
+      "name": "currents-create-action",
+      "description": "Create a new action for a project. Actions define rules that automatically skip, quarantine, or tag tests based on conditions like test title, file path, git branch, etc. Requires projectId, name, action array, and matcher object.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to create the action for."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "Human-readable name for the action."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional description for the action."
+          },
+          "action": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "skip"
+                    }
+                  },
+                  "required": [
+                    "op"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "quarantine"
+                    }
+                  },
+                  "required": [
+                    "op"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "tag"
+                    },
+                    "details": {
+                      "type": "object",
+                      "properties": {
+                        "tags": {
+                          "maxItems": 10,
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Tags to add to matching tests"
+                        }
+                      },
+                      "required": [
+                        "tags"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "details"
+                  ]
+                }
+              ]
+            },
+            "description": "Actions to perform when conditions match."
+          },
+          "matcher": {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "AND",
+                  "OR"
+                ],
+                "description": "How to combine multiple conditions"
+              },
+              "cond": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "testId",
+                        "project",
+                        "title",
+                        "file",
+                        "git_branch",
+                        "git_authorName",
+                        "git_authorEmail",
+                        "git_remoteOrigin",
+                        "git_message",
+                        "error_message",
+                        "titlePath",
+                        "annotation",
+                        "tag"
+                      ]
+                    },
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "neq",
+                        "any",
+                        "empty",
+                        "in",
+                        "notIn",
+                        "inc",
+                        "notInc",
+                        "incAll",
+                        "notIncAll"
+                      ]
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "op"
+                  ]
+                },
+                "description": "List of conditions to match"
+              }
+            },
+            "required": [
+              "op",
+              "cond"
+            ],
+            "description": "Matcher defining which tests this action applies to."
+          },
+          "expiresAfter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional expiration date in ISO 8601 format."
+          }
+        },
+        "required": [
+          "projectId",
+          "name",
+          "action",
+          "matcher"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-action",
+      "description": "Get a single action by ID. The actionId is globally unique, so projectId is not required. Returns full action details including matcher conditions and current status.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "actionId": {
+            "type": "string",
+            "description": "The action ID to fetch."
+          }
+        },
+        "required": [
+          "actionId"
+        ]
+      }
+    },
+    {
+      "name": "currents-update-action",
+      "description": "Update an existing action. The actionId is globally unique. You can update name, description, action array, matcher, or expiration date. All fields are optional.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "actionId": {
+            "type": "string",
+            "description": "The action ID to update."
+          },
+          "name": {
+            "description": "Human-readable name for the action.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional description for the action."
+          },
+          "action": {
+            "description": "Actions to perform when conditions match.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "skip"
+                    }
+                  },
+                  "required": [
+                    "op"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "quarantine"
+                    }
+                  },
+                  "required": [
+                    "op"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "tag"
+                    },
+                    "details": {
+                      "type": "object",
+                      "properties": {
+                        "tags": {
+                          "maxItems": 10,
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Tags to add to matching tests"
+                        }
+                      },
+                      "required": [
+                        "tags"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "details"
+                  ]
+                }
+              ]
+            }
+          },
+          "matcher": {
+            "description": "Matcher defining which tests this action applies to.",
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "AND",
+                  "OR"
+                ],
+                "description": "How to combine multiple conditions"
+              },
+              "cond": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "testId",
+                        "project",
+                        "title",
+                        "file",
+                        "git_branch",
+                        "git_authorName",
+                        "git_authorEmail",
+                        "git_remoteOrigin",
+                        "git_message",
+                        "error_message",
+                        "titlePath",
+                        "annotation",
+                        "tag"
+                      ]
+                    },
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "neq",
+                        "any",
+                        "empty",
+                        "in",
+                        "notIn",
+                        "inc",
+                        "notInc",
+                        "incAll",
+                        "notIncAll"
+                      ]
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "op"
+                  ]
+                },
+                "description": "List of conditions to match"
+              }
+            },
+            "required": [
+              "op",
+              "cond"
+            ]
+          },
+          "expiresAfter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional expiration date in ISO 8601 format."
+          }
+        },
+        "required": [
+          "actionId"
+        ]
+      }
+    },
+    {
+      "name": "currents-delete-action",
+      "description": "Delete (archive) an action. This is a soft delete - the action will be marked as archived but not permanently removed. The actionId is globally unique.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "actionId": {
+            "type": "string",
+            "description": "The action ID to delete (archive)."
+          }
+        },
+        "required": [
+          "actionId"
+        ]
+      }
+    },
+    {
+      "name": "currents-enable-action",
+      "description": "Enable a disabled action. Changes the action status from disabled to active, making it apply to matching tests again. The actionId is globally unique.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "actionId": {
+            "type": "string",
+            "description": "The action ID to enable."
+          }
+        },
+        "required": [
+          "actionId"
+        ]
+      }
+    },
+    {
+      "name": "currents-disable-action",
+      "description": "Disable an active action. Changes the action status to disabled, temporarily preventing it from applying to tests. The actionId is globally unique.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "actionId": {
+            "type": "string",
+            "description": "The action ID to disable."
+          }
+        },
+        "required": [
+          "actionId"
+        ]
+      }
+    },
+    {
+      "name": "currents-list-affected-tests",
+      "description": "List tests affected by actions (quarantine, skip, tag) for a project within a date range. Returns aggregated data grouped by test signature. Supports filtering by action types, action ID, status, and search. Requires projectId, date_start, and date_end.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to fetch affected tests from."
+          },
+          "date_start": {
+            "type": "string",
+            "description": "Start date in ISO 8601 format (required)."
+          },
+          "date_end": {
+            "type": "string",
+            "description": "End date in ISO 8601 format (required)."
+          },
+          "page": {
+            "description": "Page number (0-indexed). Defaults to 0.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "description": "Maximum number of results (1-100). Defaults to 25.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "search": {
+            "description": "Search by spec file path, test title, or action name (case-insensitive).",
+            "type": "string",
+            "maxLength": 100
+          },
+          "action_type": {
+            "description": "Filter by action types (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "quarantine",
+                "skip",
+                "tag"
+              ]
+            }
+          },
+          "action_id": {
+            "description": "Filter by a specific action ID.",
+            "type": "string"
+          },
+          "dir": {
+            "description": "Sort direction for lastSeen. Defaults to 'desc'.",
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "status": {
+            "description": "Filter by action status. Accepts multiple values. Omit for all statuses.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "active",
+                "disabled",
+                "expired",
+                "archived"
+              ]
+            }
+          }
+        },
+        "required": [
+          "projectId",
+          "date_start",
+          "date_end"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-affected-test-executions",
+      "description": "Get execution details for a specific affected test (by signature) within a date range. Returns individual test execution records with action info. Uses cursor-based pagination. Requires projectId, signature, date_start, and date_end.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID."
+          },
+          "signature": {
+            "type": "string",
+            "description": "The test signature hash to fetch affected executions for."
+          },
+          "date_start": {
+            "type": "string",
+            "description": "Start date in ISO 8601 format (required)."
+          },
+          "date_end": {
+            "type": "string",
+            "description": "End date in ISO 8601 format (required)."
+          },
+          "limit": {
+            "description": "Maximum number of executions (1-50). Defaults to 25.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "starting_after": {
+            "description": "Cursor for pagination. Returns items after this cursor value.",
+            "type": "string"
+          },
+          "ending_before": {
+            "description": "Cursor for pagination. Returns items before this cursor value.",
+            "type": "string"
+          },
+          "search": {
+            "description": "Search by action name (case-insensitive).",
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "projectId",
+          "signature",
+          "date_start",
+          "date_end"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-affected-test-executions-by-action",
+      "description": "List test executions where a specific action/rule was applied, within a date range. Uses cursor-based pagination. Requires actionId, date_start, and date_end.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "actionId": {
+            "type": "string",
+            "description": "The action ID to fetch affected test executions for."
+          },
+          "date_start": {
+            "type": "string",
+            "description": "Start date in ISO 8601 format (required)."
+          },
+          "date_end": {
+            "type": "string",
+            "description": "End date in ISO 8601 format (required)."
+          },
+          "limit": {
+            "description": "Maximum number of executions (1-50). Defaults to 25.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "starting_after": {
+            "description": "Cursor for pagination. Returns items after this cursor value.",
+            "type": "string"
+          },
+          "ending_before": {
+            "description": "Cursor for pagination. Returns items before this cursor value.",
+            "type": "string"
+          },
+          "search": {
+            "description": "Search by action name (case-insensitive).",
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "actionId",
+          "date_start",
+          "date_end"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-projects",
+      "description": "Retrieves projects available in the Currents platform. Supports cursor-based pagination with limit, starting_after, ending_before parameters, or set fetchAll=true for automatic pagination. This is a prerequisite for using any other tools that require project-specific information.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "limit": {
+            "description": "Maximum number of items to return (default: 10, max: 100).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "starting_after": {
+            "description": "Cursor for pagination. Returns items after this cursor value.",
+            "type": "string"
+          },
+          "ending_before": {
+            "description": "Cursor for pagination. Returns items before this cursor value.",
+            "type": "string"
+          },
+          "fetchAll": {
+            "description": "If true, fetches all projects using automatic pagination. Ignores limit, starting_after, and ending_before.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "currents-get-project",
+      "description": "Get a single project by ID. Returns project details including name, creation date, failFast setting, inactivity timeout, and default branch name.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to fetch details for."
+          }
+        },
+        "required": [
+          "projectId"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-project-insights",
+      "description": "Get aggregated run and test metrics for a project within a date range. Returns overall metrics and timeline data with configurable resolution (1h/1d/1w). Supports filtering by tags, branches, groups, and authors. Requires projectId, date_start, and date_end.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to fetch insights for."
+          },
+          "date_start": {
+            "type": "string",
+            "description": "Start date in ISO 8601 format (required)."
+          },
+          "date_end": {
+            "type": "string",
+            "description": "End date in ISO 8601 format (required)."
+          },
+          "resolution": {
+            "description": "Time resolution for histogram data. Defaults to '1d'.",
+            "type": "string",
+            "enum": [
+              "1h",
+              "1d",
+              "1w"
+            ]
+          },
+          "tags": {
+            "description": "Filter by tags (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "branches": {
+            "description": "Filter by branches (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "description": "Filter by groups (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authors": {
+            "description": "Filter by git authors (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "projectId",
+          "date_start",
+          "date_end"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-runs",
+      "description": "Retrieves a list of runs for a specific project with optional filtering. Supports filtering by branch, tags (with AND/OR operators), status (PASSED/FAILED/RUNNING/FAILING), completion state, date range, commit author, and search by ciBuildId or commit message. Requires a projectId. If the projectId is not known, first call 'currents-get-projects' and ask the user to select the project.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to fetch runs from."
+          },
+          "limit": {
+            "description": "The maximum number of results to return per page (default: 10, max: 100).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "starting_after": {
+            "description": "Cursor for pagination. Returns items after this cursor value.",
+            "type": "string"
+          },
+          "ending_before": {
+            "description": "Cursor for pagination. Returns items before this cursor value.",
+            "type": "string"
+          },
+          "branches": {
+            "description": "Filter runs by git branch names (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "description": "Filter runs by tags (can be specified multiple times). Use tag_operator to control matching behavior.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tag_operator": {
+            "description": "Logical operator for tag filtering. AND requires all tags to be present (default), OR requires any tag to be present.",
+            "type": "string",
+            "enum": [
+              "AND",
+              "OR"
+            ]
+          },
+          "search": {
+            "description": "Search runs by ciBuildId or commit message. Case-insensitive.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "pr_id": {
+            "description": "Filter runs by normalized pull request id (meta.pr.id). Printable ASCII only, max 128 characters.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[!-~]+$"
+          },
+          "authors": {
+            "description": "Filter runs by git commit author names (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "description": "Filter runs by status. PASSED: all tests passed, FAILED: some tests failed, RUNNING: run is in progress and passing, FAILING: run is in progress but has failures.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "PASSED",
+                "FAILED",
+                "RUNNING",
+                "FAILING"
+              ]
+            }
+          },
+          "completion_state": {
+            "description": "Filter runs by completion state. COMPLETE: run finished normally, IN_PROGRESS: run is still executing, CANCELED: run was canceled, TIMEOUT: run timed out.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "COMPLETE",
+                "IN_PROGRESS",
+                "CANCELED",
+                "TIMEOUT"
+              ]
+            }
+          },
+          "date_start": {
+            "description": "Filter runs created on or after this date (ISO 8601 format).",
+            "type": "string"
+          },
+          "date_end": {
+            "description": "Filter runs created before this date (ISO 8601 format).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-run-details",
+      "description": "Retrieves details of a specific test run. Requires a user-provided runId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The run ID to fetch details for."
+          }
+        },
+        "required": [
+          "runId"
+        ]
+      }
+    },
+    {
+      "name": "currents-find-run",
+      "description": "Find a run by query parameters. Returns the most recent completed run matching the criteria. Can search by ciBuildId (exact match) or by branch/tags. Supports pwLastRun flag for Playwright last run info. Requires projectId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to search for runs in."
+          },
+          "ciBuildId": {
+            "description": "The CI build ID. If provided, returns the run with this exact ciBuildId.",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Git branch name. Used when ciBuildId is not provided.",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Run tags to filter by (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pwLastRun": {
+            "description": "If true, includes information about failed tests from the last run (Playwright only).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "projectId"
+        ]
+      }
+    },
+    {
+      "name": "currents-cancel-run",
+      "description": "Cancel a run in progress. This will stop the run and mark it as cancelled. Requires runId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The run ID to cancel."
+          }
+        },
+        "required": [
+          "runId"
+        ]
+      }
+    },
+    {
+      "name": "currents-reset-run",
+      "description": "Reset failed spec files in a run to allow re-execution. Requires runId and machineId array (1-63 machine IDs). Optionally supports batched orchestration.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The run ID to reset."
+          },
+          "machineId": {
+            "minItems": 1,
+            "maxItems": 63,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Machine ID(s) to reset."
+          },
+          "isBatchedOr8n": {
+            "description": "Whether to use batched orchestration.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "runId",
+          "machineId"
+        ]
+      }
+    },
+    {
+      "name": "currents-delete-run",
+      "description": "Delete a run and all associated data. This is a permanent deletion. Requires runId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The run ID to delete."
+          }
+        },
+        "required": [
+          "runId"
+        ]
+      }
+    },
+    {
+      "name": "currents-cancel-run-github-ci",
+      "description": "Cancel a run by GitHub Actions workflow run ID and attempt number. Optionally scope by projectId or ciBuildId. Requires githubRunId and githubRunAttempt.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "githubRunId": {
+            "type": "string",
+            "description": "GitHub Actions workflow run ID."
+          },
+          "githubRunAttempt": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "GitHub Actions workflow run attempt number."
+          },
+          "projectId": {
+            "description": "Optional project ID to scope the cancellation.",
+            "type": "string"
+          },
+          "ciBuildId": {
+            "description": "Optional CI build ID to scope the cancellation.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "githubRunId",
+          "githubRunAttempt"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-spec-instance",
+      "description": "Retrieves debugging data from a specific execution of a test spec file by instanceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "instanceId": {
+            "type": "string",
+            "description": "The instance ID to fetch debugging data from."
+          }
+        },
+        "required": [
+          "instanceId"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-spec-files-performance",
+      "description": "Retrieves spec files performance metrics for a specific project within a date range. Supports ordering by avgDuration, failedExecutions, failureRate, flakeRate, flakyExecutions, fullyReported, overallExecutions, suiteSize, timeoutExecutions, or timeoutRate. Supports filtering by tags, branches, groups, and authors. Requires a projectId. If the projectId is not known, first call 'currents-get-projects' and ask the user to select the project.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to fetch spec files performance metrics from."
+          },
+          "date_start": {
+            "type": "string",
+            "description": "The start of the date range to fetch the metrics from. ISO 8601 date format (required)."
+          },
+          "date_end": {
+            "type": "string",
+            "description": "The end of the date range to fetch the metrics from. ISO 8601 date format (required)."
+          },
+          "specNameFilter": {
+            "description": "Filter spec files by name (partial match).",
+            "type": "string"
+          },
+          "order": {
+            "description": "The field to order the spec files by. Defaults to 'avgDuration'.",
+            "type": "string",
+            "enum": [
+              "avgDuration",
+              "failedExecutions",
+              "failureRate",
+              "flakeRate",
+              "flakyExecutions",
+              "fullyReported",
+              "overallExecutions",
+              "suiteSize",
+              "timeoutExecutions",
+              "timeoutRate"
+            ]
+          },
+          "dir": {
+            "description": "The direction to sort the results in. Defaults to 'desc'.",
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "limit": {
+            "description": "The maximum number of results to return per page (default: 50, max: 50).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "page": {
+            "description": "The page number to fetch (0-indexed). Defaults to 0.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "tags": {
+            "description": "Filter results by tags (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "branches": {
+            "description": "Filter results by branches (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "description": "Filter results by groups (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authors": {
+            "description": "Filter results by git authors (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "includeFailedInDuration": {
+            "description": "Include failed executions in duration calculation. Defaults to false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "projectId",
+          "date_start",
+          "date_end"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-tests-performance",
+      "description": "Retrieves aggregated test metrics for a specific project within a date range. Supports ordering by failures, passes, flakiness, duration, executions, title, and various delta metrics. Supports filtering by spec name, test title, tags, branches, groups, authors, minimum executions, test state, and annotations. Requires a projectId. If the projectId is not known, first call 'currents-get-projects' and ask the user to select the project.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to fetch test performance metrics from."
+          },
+          "date_start": {
+            "type": "string",
+            "description": "The start of the date range to fetch the metrics from. ISO 8601 date format (required)."
+          },
+          "date_end": {
+            "type": "string",
+            "description": "The end of the date range to fetch the metrics from. ISO 8601 date format (required)."
+          },
+          "spec": {
+            "description": "Filter tests by spec file name (partial match).",
+            "type": "string"
+          },
+          "title": {
+            "description": "Filter tests by title (partial match).",
+            "type": "string"
+          },
+          "order": {
+            "description": "The field to order the results by. Defaults to 'title'.",
+            "type": "string",
+            "enum": [
+              "failures",
+              "passes",
+              "flakiness",
+              "flakinessXSamples",
+              "failRateXSamples",
+              "duration",
+              "durationDelta",
+              "flakinessRateDelta",
+              "failureRateDelta",
+              "durationXSamples",
+              "executions",
+              "title"
+            ]
+          },
+          "dir": {
+            "description": "The direction to sort the results in. Defaults to 'desc'.",
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "limit": {
+            "description": "The maximum number of results to return per page (default: 50).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "page": {
+            "description": "The page number to fetch (0-indexed). Defaults to 0.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "tags": {
+            "description": "Filter results by tags (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "branches": {
+            "description": "Filter results by branches (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "description": "Filter results by groups (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authors": {
+            "description": "Filter results by git authors (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "min_executions": {
+            "description": "Minimum number of executions to include.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "test_state": {
+            "description": "Filter by test state (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "passed",
+                "failed",
+                "pending",
+                "skipped"
+              ]
+            }
+          },
+          "metric_settings": {
+            "description": "Override which test statuses are included in metric calculations. Pass a JSON object with optional keys: executions, avgDuration, flakinessRate, failureRate. Each value is an array of status strings: passed, failed, pending, skipped. Example: {\"executions\":[\"failed\",\"passed\"],\"failureRate\":[\"failed\"]}",
+            "type": "string"
+          },
+          "annotations": {
+            "description": "Filter by test annotations. JSON-stringified array of objects: [{\"type\": \"string\", \"description\": \"string\" | [\"string\"] or null}]. Omit description or set to null to match any value for that annotation type.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "date_start",
+          "date_end"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-tests-signatures",
+      "description": "Generates a unique test signature based on project, spec file path, and test title. The test title can be a string or array of strings (for nested describe blocks). Requires a projectId. If the projectId is not known, first call 'currents-get-projects' and ask the user to select the project.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to generate the test signature for."
+          },
+          "specFilePath": {
+            "type": "string",
+            "description": "Full path to the spec file."
+          },
+          "testTitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Test title or array of titles (for nested describe blocks)."
+          }
+        },
+        "required": [
+          "projectId",
+          "specFilePath",
+          "testTitle"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-test-results",
+      "description": "Retrieves historical test execution results for a specific test signature. Supports filtering by date range, branch, tags, git author, test status (passed/failed/pending/skipped), run group, flaky status, and annotations. Requires the test signature. If the signature is not known, first call 'currents-get-tests-signatures'.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "signature": {
+            "type": "string",
+            "description": "The test signature."
+          },
+          "date_start": {
+            "type": "string",
+            "description": "Start date in ISO 8601 format (required)."
+          },
+          "date_end": {
+            "type": "string",
+            "description": "End date in ISO 8601 format (required)."
+          },
+          "limit": {
+            "description": "Maximum number of items to return (default: 10, max: 100).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "starting_after": {
+            "description": "Cursor for pagination. Returns items after this cursor value.",
+            "type": "string"
+          },
+          "ending_before": {
+            "description": "Cursor for pagination. Returns items before this cursor value.",
+            "type": "string"
+          },
+          "branches": {
+            "description": "Filter by git branches (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "description": "Filter by run tags (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authors": {
+            "description": "Filter by git authors (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "description": "Filter by test status (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "passed",
+                "failed",
+                "pending",
+                "skipped"
+              ]
+            }
+          },
+          "groups": {
+            "description": "Filter by run groups (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "flaky": {
+            "description": "Filter by flaky status. When true, returns only flaky tests. When false, returns only non-flaky tests. When omitted, returns all tests regardless of flaky status.",
+            "type": "boolean"
+          },
+          "annotations": {
+            "description": "Filter by test annotations. JSON-stringified array of objects: [{\"type\": \"string\", \"description\": \"string\" | [\"string\"] or null}]. Omit description or set to null to match any value for that annotation type.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signature",
+          "date_start",
+          "date_end"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-errors-explorer",
+      "description": "Get aggregated error metrics for a project within a date range. Supports filtering by error_target, error_message, error_category, error_action, tags, branches, authors, and groups. Supports grouping by target, action, category, or message. Returns error counts, affected tests and branches, with timeline data. Requires projectId, date_start, and date_end.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to fetch error metrics from."
+          },
+          "date_start": {
+            "type": "string",
+            "description": "Start date in ISO 8601 format (required)."
+          },
+          "date_end": {
+            "type": "string",
+            "description": "End date in ISO 8601 format (required)."
+          },
+          "page": {
+            "description": "Page number (0-indexed). Defaults to 0.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "description": "Maximum number of results (1-100). Defaults to 50.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "tags": {
+            "description": "Filter by tags (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags_logical_operator": {
+            "description": "Logical operator for tags filter: OR (match any) or AND (match all). Default: OR.",
+            "type": "string",
+            "enum": [
+              "OR",
+              "AND"
+            ]
+          },
+          "branches": {
+            "description": "Filter by branches (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "description": "Filter by groups (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authors": {
+            "description": "Filter by git authors (can be specified multiple times).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "error_target": {
+            "description": "Filter by error target (e.g. CSS selector, URL).",
+            "type": "string"
+          },
+          "error_message": {
+            "description": "Filter by error message (case-insensitive partial match).",
+            "type": "string"
+          },
+          "error_category": {
+            "description": "Filter by error category.",
+            "type": "string"
+          },
+          "error_action": {
+            "description": "Filter by error action.",
+            "type": "string"
+          },
+          "order_by": {
+            "description": "Field to order results by. Defaults to 'count'.",
+            "type": "string",
+            "enum": [
+              "count",
+              "tests",
+              "branches",
+              "error"
+            ]
+          },
+          "dir": {
+            "description": "Sort direction. Defaults to 'desc'.",
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "group_by": {
+            "description": "Group results by dimension (can be specified multiple times). Order matters: the first value is the primary grouping and filters out nulls for that dimension.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "target",
+                "action",
+                "category",
+                "message"
+              ]
+            }
+          },
+          "metric": {
+            "description": "Metric used for timeline ranking. Defaults to 'occurrence'.",
+            "type": "string",
+            "enum": [
+              "occurrence",
+              "test",
+              "branch"
+            ]
+          },
+          "top_n": {
+            "description": "Maximum number of top errors per timeline bucket (1-50). Default: 5.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "projectId",
+          "date_start",
+          "date_end"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-context",
+      "description": "Retrieve structured test failure context for AI debugging (GET /context). Supports run-level (run_id only), instance-level (run_id + instance_id), or test-level (instance_id + test_id). Optional format json|md, detail default|compact|summary, and pagination limit/page for run/instance levels.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "description": "Run identifier. Required for run-level (run_id only) and instance-level (run_id + instance_id, no test_id). Omit for test-level (instance_id + test_id).",
+            "type": "string"
+          },
+          "instance_id": {
+            "description": "Instance identifier. Required for instance-level and test-level. Omit for run-level (use run_id only).",
+            "type": "string"
+          },
+          "test_id": {
+            "description": "Test identifier. When set, selects test-level detail and requires instance_id. run_id is not required in this case.",
+            "type": "string"
+          },
+          "attempt": {
+            "description": "Attempt number (0-indexed); defaults to latest.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "format": {
+            "description": "Response format. Falls back to Accept header when absent. Defaults to json.",
+            "type": "string",
+            "enum": [
+              "json",
+              "md"
+            ]
+          },
+          "detail": {
+            "description": "Controls output verbosity. default returns all available data; compact omits full steps and limits assets; summary minimizes output. Defaults to default.",
+            "type": "string",
+            "enum": [
+              "default",
+              "compact",
+              "summary"
+            ]
+          },
+          "limit": {
+            "description": "Maximum number of failed tests per page (run-level and instance-level only). Default 10.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "page": {
+            "description": "Page number for failed tests pagination, 0-indexed (run-level and instance-level only). Default 0.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "max_length": {
+            "description": "Truncate markdown response to this character limit (only applies when format=md).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          }
+        }
+      }
+    },
+    {
+      "name": "currents-list-webhooks",
+      "description": "List all webhooks for a project. Webhooks allow you to receive HTTP POST notifications when certain events occur in your test runs: RUN_FINISH (run completed), RUN_START (run started), RUN_TIMEOUT (run timed out), RUN_CANCELED (run was cancelled). Requires a projectId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to fetch webhooks from."
+          }
+        },
+        "required": [
+          "projectId"
+        ]
+      }
+    },
+    {
+      "name": "currents-create-webhook",
+      "description": "Create a new webhook for a project. Specify the URL to receive POST notifications, optional custom headers (as JSON string), events to trigger on (RUN_FINISH, RUN_START, RUN_TIMEOUT, RUN_CANCELED), and an optional label. Requires projectId and url.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "The project ID to create the webhook for."
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "URL to send webhook POST requests to."
+          },
+          "headers": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Custom headers as a JSON object string (e.g., {\"Authorization\": \"Bearer token\"})."
+          },
+          "hookEvents": {
+            "description": "Events that trigger this webhook. Options: RUN_FINISH (run completed), RUN_START (run started), RUN_TIMEOUT (run timed out), RUN_CANCELED (run was cancelled).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "RUN_FINISH",
+                "RUN_START",
+                "RUN_TIMEOUT",
+                "RUN_CANCELED"
+              ]
+            }
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable label for the webhook."
+          }
+        },
+        "required": [
+          "projectId",
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "currents-get-webhook",
+      "description": "Get a single webhook by ID. The hookId is a UUID. Returns full webhook details including url, headers, events, label, and timestamps.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "hookId": {
+            "type": "string",
+            "description": "The webhook ID (UUID)."
+          }
+        },
+        "required": [
+          "hookId"
+        ]
+      }
+    },
+    {
+      "name": "currents-update-webhook",
+      "description": "Update an existing webhook. You can update the url, headers (as JSON string), hookEvents array, or label. All fields are optional. The hookId is a UUID.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "hookId": {
+            "type": "string",
+            "description": "The webhook ID (UUID)."
+          },
+          "url": {
+            "description": "URL to send webhook POST requests to.",
+            "type": "string",
+            "maxLength": 2048
+          },
+          "headers": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Custom headers as a JSON object string (e.g., {\"Authorization\": \"Bearer token\"})."
+          },
+          "hookEvents": {
+            "description": "Events that trigger this webhook. Options: RUN_FINISH (run completed), RUN_START (run started), RUN_TIMEOUT (run timed out), RUN_CANCELED (run was cancelled).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "RUN_FINISH",
+                "RUN_START",
+                "RUN_TIMEOUT",
+                "RUN_CANCELED"
+              ]
+            }
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable label for the webhook."
+          }
+        },
+        "required": [
+          "hookId"
+        ]
+      }
+    },
+    {
+      "name": "currents-delete-webhook",
+      "description": "Delete a webhook. This permanently removes the webhook. The hookId is a UUID.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "hookId": {
+            "type": "string",
+            "description": "The webhook ID (UUID)."
+          }
+        },
+        "required": [
+          "hookId"
+        ]
+      }
+    }
+  ]
+}

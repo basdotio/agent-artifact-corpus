@@ -1,0 +1,2999 @@
+{
+  "package": "@okx_ai/okx-trade-mcp",
+  "tools": [
+    {
+      "name": "spot_place_order",
+      "description": "Place a spot order. Attach TP/SL via tpTriggerPx/slTriggerPx. [CAUTION] Executes real trades.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT"
+          },
+          "tdMode": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "cross",
+              "isolated"
+            ],
+            "description": "cash=regular spot, cross/isolated=margin"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ]
+          },
+          "ordType": {
+            "type": "string",
+            "enum": [
+              "market",
+              "limit",
+              "post_only",
+              "fok",
+              "ioc"
+            ],
+            "description": "market(no px)|limit(px req)|post_only(maker)|fok(all-or-cancel)|ioc(partial fill)"
+          },
+          "sz": {
+            "type": "string",
+            "description": "Buy market: quote amount, all others: base amount"
+          },
+          "tgtCcy": {
+            "type": "string",
+            "enum": [
+              "base_ccy",
+              "quote_ccy"
+            ],
+            "description": "Size unit. base_ccy(default): sz in base (e.g. BTC), quote_ccy: sz in quote (e.g. USDT)"
+          },
+          "px": {
+            "type": "string",
+            "description": "Required for limit/post_only/fok/ioc"
+          },
+          "clOrdId": {
+            "type": "string",
+            "description": "Client order ID (max 32 chars)"
+          },
+          "tpTriggerPx": {
+            "type": "string",
+            "description": "TP trigger price"
+          },
+          "tpOrdPx": {
+            "type": "string",
+            "description": "TP order price, -1=market"
+          },
+          "tpOrdKind": {
+            "type": "string",
+            "enum": [
+              "condition",
+              "limit"
+            ],
+            "description": "condition(default)=trigger-based TP; limit=immediate limit order (no trigger phase)"
+          },
+          "tpTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "TP trigger price source: last(default)|index|mark"
+          },
+          "slTriggerPx": {
+            "type": "string",
+            "description": "SL trigger price"
+          },
+          "slOrdPx": {
+            "type": "string",
+            "description": "SL order price, -1=market"
+          },
+          "slTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "SL trigger price source: last(default)|index|mark"
+          },
+          "stpMode": {
+            "type": "string",
+            "enum": [
+              "cancel_maker",
+              "cancel_taker",
+              "cancel_both"
+            ],
+            "description": "Self-trade prevention: cancel_maker|cancel_taker|cancel_both"
+          }
+        },
+        "required": [
+          "instId",
+          "tdMode",
+          "side",
+          "ordType",
+          "sz"
+        ]
+      }
+    },
+    {
+      "name": "spot_cancel_order",
+      "description": "Cancel an unfilled spot order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT"
+          },
+          "ordId": {
+            "type": "string"
+          },
+          "clOrdId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "instId"
+        ]
+      }
+    },
+    {
+      "name": "spot_amend_order",
+      "description": "Amend an unfilled spot order (modify price or size). To modify attached TP/SL, use the corresponding algo amend tool: spot_amend_algo_order (spot), swap_amend_algo_order (swap), futures_amend_algo_order (futures), option_amend_algo_order (option). Use spot_get_algo_orders to find the algoId for spot orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT"
+          },
+          "ordId": {
+            "type": "string"
+          },
+          "clOrdId": {
+            "type": "string"
+          },
+          "newSz": {
+            "type": "string",
+            "description": "New size in base currency"
+          },
+          "newPx": {
+            "type": "string",
+            "description": "New price"
+          },
+          "newClOrdId": {
+            "type": "string",
+            "description": "Replacement client order ID"
+          }
+        },
+        "required": [
+          "instId"
+        ]
+      }
+    },
+    {
+      "name": "spot_get_orders",
+      "description": "Query spot orders. status: open(active)|history(7d)|archive(3mo).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "history",
+              "archive"
+            ]
+          },
+          "instId": {
+            "type": "string",
+            "description": "Instrument ID filter"
+          },
+          "ordType": {
+            "type": "string",
+            "description": "Order type filter"
+          },
+          "state": {
+            "type": "string",
+            "description": "canceled|filled"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor: older than this order ID"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor: newer than this order ID"
+          },
+          "begin": {
+            "type": "string",
+            "description": "Start time (ms)"
+          },
+          "end": {
+            "type": "string",
+            "description": "End time (ms)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 100)"
+          }
+        }
+      }
+    },
+    {
+      "name": "spot_place_algo_order",
+      "description": "Place a spot algo order. [CAUTION] Executes real trades. conditional: single TP/SL. oco: TP+SL pair. move_order_stop: trailing stop. trigger: pending order at triggerPx. chase: follow best bid/ask. iceberg: split large order into child orders. twap: time-weighted split.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT"
+          },
+          "tdMode": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "cross",
+              "isolated"
+            ],
+            "description": "cash(default)=spot, cross/isolated=margin"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ]
+          },
+          "ordType": {
+            "type": "string",
+            "enum": [
+              "conditional",
+              "oco",
+              "move_order_stop",
+              "trigger",
+              "chase",
+              "iceberg",
+              "twap"
+            ],
+            "description": "conditional=single TP/SL, oco=TP+SL pair, move_order_stop=trailing stop, trigger=pending order, chase=follow best bid/ask, iceberg=split order, twap=time-weighted split"
+          },
+          "sz": {
+            "type": "string",
+            "description": "Quantity in base currency"
+          },
+          "tpTriggerPx": {
+            "type": "string",
+            "description": "TP trigger price (conditional/oco only)"
+          },
+          "tpOrdPx": {
+            "type": "string",
+            "description": "TP order price, -1=market (conditional/oco only)"
+          },
+          "tpOrdKind": {
+            "type": "string",
+            "enum": [
+              "condition",
+              "limit"
+            ],
+            "description": "condition(default)=trigger-based TP; limit=immediate limit order (no trigger phase)"
+          },
+          "tpTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "TP trigger price source: last(default)|index|mark"
+          },
+          "slTriggerPx": {
+            "type": "string",
+            "description": "SL trigger price (conditional/oco only)"
+          },
+          "slOrdPx": {
+            "type": "string",
+            "description": "SL order price, -1=market (conditional/oco only)"
+          },
+          "slTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "SL trigger price source: last(default)|index|mark"
+          },
+          "stpMode": {
+            "type": "string",
+            "enum": [
+              "cancel_maker",
+              "cancel_taker",
+              "cancel_both"
+            ],
+            "description": "Self-trade prevention: cancel_maker|cancel_taker|cancel_both"
+          },
+          "tgtCcy": {
+            "type": "string",
+            "enum": [
+              "base_ccy",
+              "quote_ccy"
+            ],
+            "description": "Size unit. base_ccy(default): sz in base (e.g. BTC), quote_ccy: sz in quote (e.g. USDT)"
+          },
+          "callbackRatio": {
+            "type": "string",
+            "description": "Callback ratio e.g. 0.01=1%, use ratio or spread (move_order_stop only)"
+          },
+          "callbackSpread": {
+            "type": "string",
+            "description": "Callback spread in price units, use ratio or spread (move_order_stop only)"
+          },
+          "activePx": {
+            "type": "string",
+            "description": "Activation price, trailing starts when market hits this (move_order_stop only)"
+          },
+          "triggerPx": {
+            "type": "string",
+            "description": "Activation price; order submits when market hits this level (trigger only)"
+          },
+          "orderPx": {
+            "type": "string",
+            "description": "Order price submitted when trigger fires; -1=market (trigger only)"
+          },
+          "advanceOrdType": {
+            "type": "string",
+            "enum": [
+              "fok",
+              "ioc"
+            ],
+            "description": "Execution qualifier for triggered order: fok=fill-or-kill, ioc=immediate-or-cancel (trigger only)"
+          },
+          "triggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "Price type used to evaluate trigger: last(default)|index|mark (trigger only)"
+          },
+          "chaseType": {
+            "type": "string",
+            "enum": [
+              "distance",
+              "ratio"
+            ],
+            "description": "Chase unit: distance=price ticks, ratio=proportion of price (chase only, default distance)"
+          },
+          "chaseVal": {
+            "type": "string",
+            "description": "Chase amount matching chaseType (e.g. 0.5 ticks for distance, 0.001 for ratio) (chase only)"
+          },
+          "maxChaseType": {
+            "type": "string",
+            "enum": [
+              "distance",
+              "ratio"
+            ],
+            "description": "Upper-bound unit for chase (chase only)"
+          },
+          "maxChaseVal": {
+            "type": "string",
+            "description": "Upper-bound value for chase (chase only)"
+          },
+          "pxVar": {
+            "type": "string",
+            "description": "Price variance % [0.0001, 0.01]; provide pxVar OR pxSpread (iceberg/twap only)"
+          },
+          "pxSpread": {
+            "type": "string",
+            "description": "Price variance constant >= 0; provide pxVar OR pxSpread (iceberg/twap only)"
+          },
+          "szLimit": {
+            "type": "string",
+            "description": "Average per-child-order size (iceberg/twap only)"
+          },
+          "pxLimit": {
+            "type": "string",
+            "description": "Order price ceiling >= 0 (iceberg/twap only)"
+          },
+          "timeInterval": {
+            "type": "string",
+            "description": "Seconds between child orders (iceberg/twap only)"
+          }
+        },
+        "required": [
+          "instId",
+          "side",
+          "ordType",
+          "sz"
+        ]
+      }
+    },
+    {
+      "name": "spot_amend_algo_order",
+      "description": "Amend a pending spot algo order (modify TP/SL prices or size). Also covers TP/SL orders attached when placing the main order — look up algoId via spot_get_algo_orders first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT"
+          },
+          "algoId": {
+            "type": "string"
+          },
+          "newSz": {
+            "type": "string",
+            "description": "New size in base currency"
+          },
+          "newTpTriggerPx": {
+            "type": "string",
+            "description": "New TP trigger price"
+          },
+          "newTpOrdPx": {
+            "type": "string",
+            "description": "New TP order price, -1=market"
+          },
+          "newSlTriggerPx": {
+            "type": "string",
+            "description": "New SL trigger price"
+          },
+          "newSlOrdPx": {
+            "type": "string",
+            "description": "New SL order price, -1=market"
+          }
+        },
+        "required": [
+          "instId",
+          "algoId"
+        ]
+      }
+    },
+    {
+      "name": "spot_cancel_algo_order",
+      "description": "Cancel a spot algo order (TP/SL).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT"
+          },
+          "algoId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "instId",
+          "algoId"
+        ]
+      }
+    },
+    {
+      "name": "spot_get_algo_orders",
+      "description": "Query spot algo orders (TP/SL) — pending or history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "history"
+            ],
+            "description": "pending=active (default), history=completed"
+          },
+          "instId": {
+            "type": "string",
+            "description": "Instrument ID filter"
+          },
+          "ordType": {
+            "type": "string",
+            "enum": [
+              "conditional",
+              "oco",
+              "move_order_stop"
+            ],
+            "description": "Filter by type"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor: older than this algo ID"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor: newer than this algo ID"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 100)"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "effective",
+              "canceled",
+              "order_failed"
+            ],
+            "description": "Required for history. effective=triggered, canceled, order_failed. Default: effective."
+          }
+        }
+      }
+    },
+    {
+      "name": "spot_get_fills",
+      "description": "Get spot transaction fills. archive=false(3d, default)|true(up to 3mo).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "archive": {
+            "type": "boolean",
+            "description": "true=up to 3mo, false=3d (default)"
+          },
+          "instId": {
+            "type": "string",
+            "description": "Instrument ID filter"
+          },
+          "ordId": {
+            "type": "string",
+            "description": "Order ID filter"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor: older than this bill ID"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor: newer than this bill ID"
+          },
+          "begin": {
+            "type": "string",
+            "description": "Start time (ms)"
+          },
+          "end": {
+            "type": "string",
+            "description": "End time (ms)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 100 or 20 for archive)"
+          }
+        }
+      }
+    },
+    {
+      "name": "spot_batch_orders",
+      "description": "[CAUTION] Batch place/cancel/amend up to 20 spot orders. action: place|cancel|amend.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "place",
+              "cancel",
+              "amend"
+            ]
+          },
+          "orders": {
+            "type": "array",
+            "description": "Array (max 20). place: {instId,side,ordType,sz,tdMode(default cash; use cross for unified/margin accounts),px?,clOrdId?,tpTriggerPx?,tpOrdPx?,slTriggerPx?,slOrdPx?}. cancel: {instId,ordId|clOrdId}. amend: {instId,ordId|clOrdId,newSz?,newPx?}.",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "spot_get_order",
+      "description": "Get details of a single spot order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT"
+          },
+          "ordId": {
+            "type": "string",
+            "description": "Provide ordId or clOrdId"
+          },
+          "clOrdId": {
+            "type": "string",
+            "description": "Provide ordId or clOrdId"
+          }
+        },
+        "required": [
+          "instId"
+        ]
+      }
+    },
+    {
+      "name": "spot_batch_amend",
+      "description": "[CAUTION] Batch amend up to 20 unfilled spot orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "description": "Array (max 20): {instId, ordId?, clOrdId?, newSz?, newPx?}",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "spot_batch_cancel",
+      "description": "[CAUTION] Batch cancel up to 20 spot orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "description": "Array (max 20): {instId, ordId?, clOrdId?}",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "spot_set_leverage",
+      "description": "Set leverage for SPOT margin trading. Provide exactly ONE of instId (pair-level) or ccy (currency-level cross, requires borrow-enabled account / multi-ccy / portfolio margin). [CAUTION] Changes risk parameters.\nScenarios:\n  • instId + mgnMode=isolated → pair-level isolated margin\n  • instId + mgnMode=cross    → pair-level cross margin (contract-mode account)\n  • ccy    + mgnMode=cross    → currency-level cross margin (spot-with-borrow / multi-ccy / portfolio margin)\nWhen ccy is supplied, mgnMode MUST be cross. posSide is never applicable to spot margin.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "Spot pair, e.g. BTC-USDT. Provide instId OR ccy, not both."
+          },
+          "ccy": {
+            "type": "string",
+            "description": "Margin currency, e.g. BTC. Required only for currency-level cross margin (borrow-enabled / multi-ccy / portfolio margin). Mutually exclusive with instId."
+          },
+          "lever": {
+            "type": "string",
+            "description": "Leverage multiplier as a positive number string, e.g. '3'. Max depends on the pair (query market_get_instruments → lever) or the account policy for ccy-level."
+          },
+          "mgnMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ],
+            "description": "cross or isolated. Must be cross when ccy is supplied."
+          }
+        },
+        "required": [
+          "lever",
+          "mgnMode"
+        ]
+      }
+    },
+    {
+      "name": "swap_place_order",
+      "description": "Place SWAP/FUTURES order. Attach TP/SL via tpTriggerPx/slTriggerPx. Before placing, use market_get_instruments to get ctVal (contract face value) — do NOT assume contract sizes. [CAUTION] Executes real trades.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "tdMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ],
+            "description": "cross|isolated margin"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "description": "buy=long, sell=short; hedge: use with posSide"
+          },
+          "posSide": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short",
+              "net"
+            ],
+            "description": "net=one-way (default); long/short=hedge mode"
+          },
+          "ordType": {
+            "type": "string",
+            "enum": [
+              "market",
+              "limit",
+              "post_only",
+              "fok",
+              "ioc"
+            ],
+            "description": "market=no px; limit/fok/ioc=px req; post_only=maker"
+          },
+          "sz": {
+            "type": "string",
+            "description": "Number of contracts. Each contract = ctVal units (e.g. 0.1 ETH for ETH-USDT-SWAP). Query market_get_instruments for exact ctVal. Set tgtCcy=quote_ccy to specify sz in USDT notional value; set tgtCcy=margin to specify sz as margin cost (notional = sz * leverage)."
+          },
+          "tgtCcy": {
+            "type": "string",
+            "enum": [
+              "base_ccy",
+              "quote_ccy",
+              "margin"
+            ],
+            "description": "Size unit. base_ccy(default): sz in contracts; quote_ccy: sz in USDT notional value; margin: sz in USDT margin cost (actual position = sz * leverage)"
+          },
+          "px": {
+            "type": "string",
+            "description": "Required for limit/post_only/fok/ioc"
+          },
+          "reduceOnly": {
+            "type": "boolean",
+            "description": "Close/reduce only, no new position (one-way mode)"
+          },
+          "clOrdId": {
+            "type": "string",
+            "description": "Client order ID (max 32 chars)"
+          },
+          "tpTriggerPx": {
+            "type": "string",
+            "description": "TP trigger price"
+          },
+          "tpOrdPx": {
+            "type": "string",
+            "description": "TP order price; -1=market"
+          },
+          "tpOrdKind": {
+            "type": "string",
+            "enum": [
+              "condition",
+              "limit"
+            ],
+            "description": "condition(default)=trigger-based TP; limit=immediate limit order (no trigger phase)"
+          },
+          "tpTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "TP trigger price source: last(default)|index|mark"
+          },
+          "slTriggerPx": {
+            "type": "string",
+            "description": "SL trigger price"
+          },
+          "slOrdPx": {
+            "type": "string",
+            "description": "SL order price; -1=market"
+          },
+          "slTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "SL trigger price source: last(default)|index|mark"
+          },
+          "stpMode": {
+            "type": "string",
+            "enum": [
+              "cancel_maker",
+              "cancel_taker",
+              "cancel_both"
+            ],
+            "description": "Self-trade prevention: cancel_maker|cancel_taker|cancel_both"
+          }
+        },
+        "required": [
+          "instId",
+          "tdMode",
+          "side",
+          "ordType",
+          "sz"
+        ]
+      }
+    },
+    {
+      "name": "swap_cancel_order",
+      "description": "Cancel an unfilled SWAP/FUTURES order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "ordId": {
+            "type": "string"
+          },
+          "clOrdId": {
+            "type": "string",
+            "description": "Client order ID"
+          }
+        },
+        "required": [
+          "instId"
+        ]
+      }
+    },
+    {
+      "name": "swap_get_order",
+      "description": "Get details of a single SWAP/FUTURES order by ordId or clOrdId.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "ordId": {
+            "type": "string",
+            "description": "Provide ordId or clOrdId"
+          },
+          "clOrdId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "instId"
+        ]
+      }
+    },
+    {
+      "name": "swap_get_orders",
+      "description": "Query SWAP/FUTURES open orders, history (last 7 days), or archive (up to 3 months).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "history",
+              "archive"
+            ],
+            "description": "open=active, history=7d, archive=3mo"
+          },
+          "instType": {
+            "type": "string",
+            "enum": [
+              "SWAP",
+              "FUTURES"
+            ],
+            "description": "SWAP (default) or FUTURES"
+          },
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "ordType": {
+            "type": "string",
+            "description": "Order type filter"
+          },
+          "state": {
+            "type": "string",
+            "description": "canceled|filled"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor: return older"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor: return newer"
+          },
+          "begin": {
+            "type": "string",
+            "description": "Start time (ms)"
+          },
+          "end": {
+            "type": "string",
+            "description": "End time (ms)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 100)"
+          }
+        }
+      }
+    },
+    {
+      "name": "swap_get_positions",
+      "description": "Get current SWAP/FUTURES positions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instType": {
+            "type": "string",
+            "enum": [
+              "SWAP",
+              "FUTURES"
+            ],
+            "description": "SWAP (default) or FUTURES"
+          },
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "posId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "swap_get_fills",
+      "description": "Get SWAP/FUTURES fill details. archive=false (default): last 3 days; archive=true: up to 3 months.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "archive": {
+            "type": "boolean",
+            "description": "true=up to 3 months; false=last 3 days (default)"
+          },
+          "instType": {
+            "type": "string",
+            "enum": [
+              "SWAP",
+              "FUTURES"
+            ],
+            "description": "SWAP (default) or FUTURES"
+          },
+          "instId": {
+            "type": "string",
+            "description": "Instrument ID filter"
+          },
+          "ordId": {
+            "type": "string",
+            "description": "Order ID filter"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor: return older"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor: return newer"
+          },
+          "begin": {
+            "type": "string",
+            "description": "Start time (ms)"
+          },
+          "end": {
+            "type": "string",
+            "description": "End time (ms)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 100 or 20 for archive)"
+          }
+        }
+      }
+    },
+    {
+      "name": "swap_close_position",
+      "description": "[CAUTION] Close entire SWAP/FUTURES position at market.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "mgnMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ]
+          },
+          "posSide": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short",
+              "net"
+            ],
+            "description": "long/short=hedge mode; omit for one-way (net)"
+          },
+          "autoCxl": {
+            "type": "boolean",
+            "description": "Cancel pending orders for this instrument on close"
+          },
+          "clOrdId": {
+            "type": "string",
+            "description": "Client order ID for close order"
+          }
+        },
+        "required": [
+          "instId",
+          "mgnMode"
+        ]
+      }
+    },
+    {
+      "name": "swap_set_leverage",
+      "description": "Set leverage for a SWAP/FUTURES instrument or position. [CAUTION] Changes risk parameters.\nScenarios (SWAP/FUTURES only):\n  • cross + any instId under the index → sets leverage at the index level\n  • isolated + buy-sell (net) posMode → instId only\n  • isolated + long-short (hedge) posMode → instId + posSide=long|short (BOTH directions must be set separately)\nNot supported: PORTFOLIO MARGIN accounts cannot adjust cross leverage for SWAP/FUTURES — the request will be rejected by OKX. Use account_get_config first if unsure of the account's margin mode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "lever": {
+            "type": "string",
+            "description": "Leverage multiplier as a positive number string, e.g. '10'. Max value depends on the instrument (query market_get_instruments → lever)."
+          },
+          "mgnMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ]
+          },
+          "posSide": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ],
+            "description": "REQUIRED when mgnMode=isolated AND the account is in hedge (long/short) position mode. Use 'long' or 'short' — setting one side does NOT auto-apply to the other. Omit entirely for one-way (net) position mode or for cross margin."
+          }
+        },
+        "required": [
+          "instId",
+          "lever",
+          "mgnMode"
+        ]
+      }
+    },
+    {
+      "name": "swap_get_leverage",
+      "description": "Get current leverage for a SWAP/FUTURES instrument.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "mgnMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ]
+          }
+        },
+        "required": [
+          "instId",
+          "mgnMode"
+        ]
+      }
+    },
+    {
+      "name": "swap_batch_amend",
+      "description": "[CAUTION] Batch amend up to 20 unfilled SWAP/FUTURES orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "description": "Array (max 20): {instId, ordId?, clOrdId?, newSz?, newPx?}",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "swap_batch_cancel",
+      "description": "[CAUTION] Batch cancel up to 20 SWAP/FUTURES orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "description": "Array (max 20): {instId, ordId?, clOrdId?}",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "swap_amend_algo_order",
+      "description": "Amend a pending SWAP/FUTURES algo order (modify TP/SL prices or size). Also covers TP/SL orders attached when placing the main order — look up algoId via swap_get_algo_orders first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "algoId": {
+            "type": "string",
+            "description": "Algo order ID"
+          },
+          "newSz": {
+            "type": "string",
+            "description": "New contracts count"
+          },
+          "newTpTriggerPx": {
+            "type": "string",
+            "description": "New TP trigger price"
+          },
+          "newTpOrdPx": {
+            "type": "string",
+            "description": "New TP order price; -1=market"
+          },
+          "newSlTriggerPx": {
+            "type": "string",
+            "description": "New SL trigger price"
+          },
+          "newSlOrdPx": {
+            "type": "string",
+            "description": "New SL order price; -1=market"
+          }
+        },
+        "required": [
+          "instId",
+          "algoId"
+        ]
+      }
+    },
+    {
+      "name": "swap_batch_orders",
+      "description": "[CAUTION] Batch place/cancel/amend SWAP/FUTURES orders (max 20). action=place|cancel|amend.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "place",
+              "cancel",
+              "amend"
+            ]
+          },
+          "orders": {
+            "type": "array",
+            "description": "Max 20. place:{instId,tdMode,side,ordType,sz,...}; cancel:{instId,ordId|clOrdId}; amend:{instId,ordId|clOrdId,newSz?,newPx?}.",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "option_place_order",
+      "description": "Place OPTION order. instId: {uly}-{expiry}-{strike}-C/P, e.g. BTC-USD-241227-50000-C. Before placing, use market_get_instruments to get ctVal (contract face value) — do NOT assume contract sizes. [CAUTION] Executes real trades.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USD-241227-50000-C"
+          },
+          "tdMode": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "cross",
+              "isolated"
+            ],
+            "description": "cash=buyer full premium; cross/isolated=seller margin"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ]
+          },
+          "ordType": {
+            "type": "string",
+            "enum": [
+              "market",
+              "limit",
+              "post_only",
+              "fok",
+              "ioc"
+            ],
+            "description": "market=no px; limit/fok/ioc=px req; post_only=maker"
+          },
+          "sz": {
+            "type": "string",
+            "description": "Contracts count by default. Set tgtCcy=quote_ccy to specify USDT notional value; set tgtCcy=margin to specify USDT margin cost (notional = sz * leverage)."
+          },
+          "tgtCcy": {
+            "type": "string",
+            "enum": [
+              "base_ccy",
+              "quote_ccy",
+              "margin"
+            ],
+            "description": "Size unit. base_ccy(default): sz in contracts; quote_ccy: sz in USDT notional value; margin: sz in USDT margin cost (actual position = sz * leverage)"
+          },
+          "px": {
+            "type": "string",
+            "description": "Required for limit/post_only/fok/ioc"
+          },
+          "reduceOnly": {
+            "type": "boolean",
+            "description": "Reduce/close only"
+          },
+          "clOrdId": {
+            "type": "string",
+            "description": "Client order ID (max 32 chars)"
+          },
+          "tpTriggerPx": {
+            "type": "string",
+            "description": "TP trigger price"
+          },
+          "tpOrdPx": {
+            "type": "string",
+            "description": "TP order price; -1=market"
+          },
+          "tpOrdKind": {
+            "type": "string",
+            "enum": [
+              "condition",
+              "limit"
+            ],
+            "description": "condition(default)=trigger-based TP; limit=immediate limit order (no trigger phase)"
+          },
+          "tpTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "TP trigger price source: last(default)|index|mark"
+          },
+          "slTriggerPx": {
+            "type": "string",
+            "description": "SL trigger price"
+          },
+          "slOrdPx": {
+            "type": "string",
+            "description": "SL order price; -1=market"
+          },
+          "slTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "SL trigger price source: last(default)|index|mark"
+          },
+          "stpMode": {
+            "type": "string",
+            "enum": [
+              "cancel_maker",
+              "cancel_taker",
+              "cancel_both"
+            ],
+            "description": "Self-trade prevention: cancel_maker|cancel_taker|cancel_both"
+          }
+        },
+        "required": [
+          "instId",
+          "tdMode",
+          "side",
+          "ordType",
+          "sz"
+        ]
+      }
+    },
+    {
+      "name": "option_cancel_order",
+      "description": "Cancel an unfilled OPTION order. Provide ordId or clOrdId.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USD-241227-50000-C"
+          },
+          "ordId": {
+            "type": "string"
+          },
+          "clOrdId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "instId"
+        ]
+      }
+    },
+    {
+      "name": "option_batch_cancel",
+      "description": "[CAUTION] Batch cancel up to 20 OPTION orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "description": "Array (max 20): {instId, ordId?, clOrdId?}",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "option_amend_order",
+      "description": "Amend an unfilled OPTION order (price and/or size). Provide ordId or clOrdId. To modify attached TP/SL, use option_amend_algo_order with the algoId from option_get_algo_orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USD-241227-50000-C"
+          },
+          "ordId": {
+            "type": "string"
+          },
+          "clOrdId": {
+            "type": "string"
+          },
+          "newSz": {
+            "type": "string",
+            "description": "New contracts count"
+          },
+          "newPx": {
+            "type": "string",
+            "description": "New price"
+          }
+        },
+        "required": [
+          "instId"
+        ]
+      }
+    },
+    {
+      "name": "option_get_order",
+      "description": "Get details of a single OPTION order by ordId or clOrdId.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USD-241227-50000-C"
+          },
+          "ordId": {
+            "type": "string",
+            "description": "Provide ordId or clOrdId"
+          },
+          "clOrdId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "instId"
+        ]
+      }
+    },
+    {
+      "name": "option_get_orders",
+      "description": "List OPTION orders. status: live=pending (default), history=7d, archive=3mo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "live",
+              "history",
+              "archive"
+            ],
+            "description": "live=pending (default), history=7d, archive=3mo"
+          },
+          "uly": {
+            "type": "string",
+            "description": "Underlying filter, e.g. BTC-USD"
+          },
+          "instId": {
+            "type": "string",
+            "description": "Instrument filter"
+          },
+          "ordType": {
+            "type": "string",
+            "description": "Order type filter"
+          },
+          "state": {
+            "type": "string",
+            "description": "canceled|filled"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor: return older"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor: return newer"
+          },
+          "begin": {
+            "type": "string",
+            "description": "Start time (ms)"
+          },
+          "end": {
+            "type": "string",
+            "description": "End time (ms)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 100)"
+          }
+        }
+      }
+    },
+    {
+      "name": "option_get_positions",
+      "description": "Get current OPTION positions including Greeks (delta, gamma, theta, vega).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "Filter by specific contract"
+          },
+          "uly": {
+            "type": "string",
+            "description": "Filter by underlying, e.g. BTC-USD"
+          }
+        }
+      }
+    },
+    {
+      "name": "option_get_fills",
+      "description": "Get OPTION fill history. archive=false: last 3 days (default); archive=true: up to 3 months.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "archive": {
+            "type": "boolean",
+            "description": "true=up to 3 months; false=last 3 days (default)"
+          },
+          "instId": {
+            "type": "string",
+            "description": "Instrument filter"
+          },
+          "ordId": {
+            "type": "string",
+            "description": "Order ID filter"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor: return older"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor: return newer"
+          },
+          "begin": {
+            "type": "string",
+            "description": "Start time (ms)"
+          },
+          "end": {
+            "type": "string",
+            "description": "End time (ms)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results"
+          }
+        }
+      }
+    },
+    {
+      "name": "option_get_instruments",
+      "description": "List available OPTION contracts for a given underlying (option chain). Use to find valid instIds before placing orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uly": {
+            "type": "string",
+            "description": "Underlying, e.g. BTC-USD or ETH-USD"
+          },
+          "expTime": {
+            "type": "string",
+            "description": "Filter by expiry date, e.g. 241227"
+          }
+        },
+        "required": [
+          "uly"
+        ]
+      }
+    },
+    {
+      "name": "option_get_greeks",
+      "description": "Get implied volatility and Greeks (delta, gamma, theta, vega) for OPTION contracts by underlying.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uly": {
+            "type": "string",
+            "description": "Underlying, e.g. BTC-USD or ETH-USD"
+          },
+          "expTime": {
+            "type": "string",
+            "description": "Filter by expiry date, e.g. 241227"
+          }
+        },
+        "required": [
+          "uly"
+        ]
+      }
+    },
+    {
+      "name": "option_place_algo_order",
+      "description": "Place OPTION TP/SL algo order (conditional/oco). [CAUTION] Executes real trades. conditional=single TP/SL; oco=TP+SL pair. -1=market.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USD-241227-50000-C"
+          },
+          "tdMode": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "cross",
+              "isolated"
+            ],
+            "description": "cash=buyer full premium; cross/isolated=seller margin"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "description": "sell=close long, buy=close short"
+          },
+          "ordType": {
+            "type": "string",
+            "enum": [
+              "conditional",
+              "oco"
+            ],
+            "description": "conditional=single TP/SL or both; oco=TP+SL pair (first trigger cancels other)"
+          },
+          "sz": {
+            "type": "string",
+            "description": "Contracts count (NOT USDT). Use market_get_instruments for ctVal."
+          },
+          "tpTriggerPx": {
+            "type": "string",
+            "description": "TP trigger price"
+          },
+          "tpOrdPx": {
+            "type": "string",
+            "description": "TP order price; -1=market"
+          },
+          "tpTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ]
+          },
+          "slTriggerPx": {
+            "type": "string",
+            "description": "SL trigger price"
+          },
+          "slOrdPx": {
+            "type": "string",
+            "description": "SL order price; -1=market"
+          },
+          "slTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ]
+          },
+          "tgtCcy": {
+            "type": "string",
+            "enum": [
+              "base_ccy",
+              "quote_ccy",
+              "margin"
+            ],
+            "description": "Size unit. base_ccy(default): sz in contracts; quote_ccy: sz in USDT notional value; margin: sz in USDT margin cost (actual position = sz * leverage)"
+          },
+          "reduceOnly": {
+            "type": "boolean",
+            "description": "Ensure order only reduces position"
+          },
+          "clOrdId": {
+            "type": "string",
+            "description": "Client order ID (max 32 chars)"
+          }
+        },
+        "required": [
+          "instId",
+          "tdMode",
+          "side",
+          "ordType",
+          "sz"
+        ]
+      }
+    },
+    {
+      "name": "option_amend_algo_order",
+      "description": "Amend a pending OPTION algo order (modify TP/SL prices or size). Also covers TP/SL orders attached when placing the main order — look up algoId via option_get_algo_orders first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USD-241227-50000-C"
+          },
+          "algoId": {
+            "type": "string",
+            "description": "Algo order ID"
+          },
+          "newSz": {
+            "type": "string",
+            "description": "New contracts count"
+          },
+          "newTpTriggerPx": {
+            "type": "string",
+            "description": "New TP trigger price"
+          },
+          "newTpOrdPx": {
+            "type": "string",
+            "description": "New TP order price; -1=market"
+          },
+          "newSlTriggerPx": {
+            "type": "string",
+            "description": "New SL trigger price"
+          },
+          "newSlOrdPx": {
+            "type": "string",
+            "description": "New SL order price; -1=market"
+          }
+        },
+        "required": [
+          "instId",
+          "algoId"
+        ]
+      }
+    },
+    {
+      "name": "option_cancel_algo_orders",
+      "description": "Cancel OPTION algo orders (TP/SL). Each item: {algoId, instId}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "description": "Array of {algoId, instId} to cancel.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "algoId": {
+                  "type": "string",
+                  "description": "Algo order ID"
+                },
+                "instId": {
+                  "type": "string",
+                  "description": "e.g. BTC-USD-241227-50000-C"
+                }
+              },
+              "required": [
+                "algoId",
+                "instId"
+              ]
+            }
+          }
+        },
+        "required": [
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "option_get_algo_orders",
+      "description": "Query pending or completed OPTION algo orders (TP/SL, OCO).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "history"
+            ],
+            "description": "pending=active (default); history=completed"
+          },
+          "ordType": {
+            "type": "string",
+            "enum": [
+              "conditional",
+              "oco"
+            ],
+            "description": "Filter by type; omit for all"
+          },
+          "instId": {
+            "type": "string",
+            "description": "Instrument ID filter"
+          },
+          "algoId": {
+            "type": "string",
+            "description": "Filter by algo order ID"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor: return older"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor: return newer"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 100)"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "effective",
+              "canceled",
+              "order_failed"
+            ],
+            "description": "When history: effective|canceled|order_failed"
+          }
+        }
+      }
+    },
+    {
+      "name": "swap_place_algo_order",
+      "description": "Place a SWAP/FUTURES algo order. [CAUTION] Executes real trades. conditional: single TP, single SL, or both on one order. oco: TP+SL simultaneously — first trigger cancels the other. move_order_stop: trailing stop (callbackRatio or callbackSpread). trigger: pending order activated when triggerPx is hit (provide triggerPx + orderPx). chase: smart-follow best bid/ask. iceberg: split large order into child orders at intervals. twap: time-weighted average price order splitting.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "tdMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ],
+            "description": "cross|isolated margin"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "description": "sell=close long, buy=close short"
+          },
+          "posSide": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short",
+              "net"
+            ],
+            "description": "net=one-way (default); long/short=hedge mode"
+          },
+          "ordType": {
+            "type": "string",
+            "enum": [
+              "conditional",
+              "oco",
+              "move_order_stop",
+              "trigger",
+              "chase",
+              "iceberg",
+              "twap"
+            ],
+            "description": "conditional=single TP/SL or both; oco=TP+SL pair; move_order_stop=trailing stop; trigger=pending order; chase=follow best bid/ask; iceberg=split order; twap=time-weighted split"
+          },
+          "sz": {
+            "type": "string",
+            "description": "Number of contracts to close (NOT USDT amount). Use market_get_instruments to get ctVal for conversion."
+          },
+          "tpTriggerPx": {
+            "type": "string",
+            "description": "TP trigger price (conditional/oco only)"
+          },
+          "tpOrdPx": {
+            "type": "string",
+            "description": "TP order price; -1=market (conditional/oco only)"
+          },
+          "tpOrdKind": {
+            "type": "string",
+            "enum": [
+              "condition",
+              "limit"
+            ],
+            "description": "condition(default)=trigger-based TP; limit=immediate limit order (no trigger phase)"
+          },
+          "tpTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "TP trigger price source: last(default)|index|mark"
+          },
+          "slTriggerPx": {
+            "type": "string",
+            "description": "SL trigger price (conditional/oco only)"
+          },
+          "slOrdPx": {
+            "type": "string",
+            "description": "SL order price; -1=market (recommended) (conditional/oco only)"
+          },
+          "slTriggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "SL trigger price source: last(default)|index|mark"
+          },
+          "stpMode": {
+            "type": "string",
+            "enum": [
+              "cancel_maker",
+              "cancel_taker",
+              "cancel_both"
+            ],
+            "description": "Self-trade prevention: cancel_maker|cancel_taker|cancel_both"
+          },
+          "cxlOnClosePos": {
+            "type": "boolean",
+            "description": "Auto-cancel TP/SL when associated position closes (algo only)"
+          },
+          "callbackRatio": {
+            "type": "string",
+            "description": "Callback ratio (e.g. '0.01'=1%); provide either ratio or spread (move_order_stop only)"
+          },
+          "callbackSpread": {
+            "type": "string",
+            "description": "Callback spread in price units; provide either ratio or spread (move_order_stop only)"
+          },
+          "activePx": {
+            "type": "string",
+            "description": "Activation price; tracking starts after market reaches this level (move_order_stop only)"
+          },
+          "triggerPx": {
+            "type": "string",
+            "description": "Activation price; order submits when market hits this level (trigger only)"
+          },
+          "orderPx": {
+            "type": "string",
+            "description": "Order price submitted when trigger fires; -1=market (trigger only)"
+          },
+          "advanceOrdType": {
+            "type": "string",
+            "enum": [
+              "fok",
+              "ioc"
+            ],
+            "description": "Execution qualifier for triggered order: fok=fill-or-kill, ioc=immediate-or-cancel (trigger only)"
+          },
+          "triggerPxType": {
+            "type": "string",
+            "enum": [
+              "last",
+              "index",
+              "mark"
+            ],
+            "description": "Price type used to evaluate trigger: last(default)|index|mark (trigger only)"
+          },
+          "chaseType": {
+            "type": "string",
+            "enum": [
+              "distance",
+              "ratio"
+            ],
+            "description": "Chase unit: distance=price ticks, ratio=proportion of price (chase only, default distance)"
+          },
+          "chaseVal": {
+            "type": "string",
+            "description": "Chase amount matching chaseType (e.g. 0.5 ticks for distance, 0.001 for ratio) (chase only)"
+          },
+          "maxChaseType": {
+            "type": "string",
+            "enum": [
+              "distance",
+              "ratio"
+            ],
+            "description": "Upper-bound unit for chase (chase only)"
+          },
+          "maxChaseVal": {
+            "type": "string",
+            "description": "Upper-bound value for chase (chase only)"
+          },
+          "pxVar": {
+            "type": "string",
+            "description": "Price variance % [0.0001, 0.01]; provide pxVar OR pxSpread (iceberg/twap only)"
+          },
+          "pxSpread": {
+            "type": "string",
+            "description": "Price variance constant >= 0; provide pxVar OR pxSpread (iceberg/twap only)"
+          },
+          "szLimit": {
+            "type": "string",
+            "description": "Average per-child-order size (iceberg/twap only)"
+          },
+          "pxLimit": {
+            "type": "string",
+            "description": "Order price ceiling >= 0 (iceberg/twap only)"
+          },
+          "timeInterval": {
+            "type": "string",
+            "description": "Seconds between child orders (iceberg/twap only)"
+          },
+          "tgtCcy": {
+            "type": "string",
+            "enum": [
+              "base_ccy",
+              "quote_ccy",
+              "margin"
+            ],
+            "description": "Size unit. base_ccy(default): sz in contracts; quote_ccy: sz in USDT notional value; margin: sz in USDT margin cost (actual position = sz * leverage)"
+          },
+          "reduceOnly": {
+            "type": "boolean",
+            "description": "Ensure order only reduces position"
+          },
+          "clOrdId": {
+            "type": "string",
+            "description": "Client order ID (max 32 chars)"
+          }
+        },
+        "required": [
+          "instId",
+          "tdMode",
+          "side",
+          "ordType",
+          "sz"
+        ]
+      }
+    },
+    {
+      "name": "swap_place_move_stop_order",
+      "description": "[DEPRECATED] Use swap_place_algo_order with ordType='move_order_stop' instead. Place a SWAP/FUTURES trailing stop order. [CAUTION] Executes real trades. Specify callbackRatio (e.g. '0.01'=1%) or callbackSpread (fixed price distance), not both. Optionally set activePx so tracking starts once market reaches that price.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "tdMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ],
+            "description": "cross|isolated margin"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "description": "sell=close long, buy=close short"
+          },
+          "posSide": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short",
+              "net"
+            ],
+            "description": "net=one-way (default); long/short=hedge mode"
+          },
+          "sz": {
+            "type": "string",
+            "description": "Number of contracts (NOT USDT amount). Use market_get_instruments to get ctVal for conversion."
+          },
+          "callbackRatio": {
+            "type": "string",
+            "description": "Callback ratio (e.g. '0.01'=1%); provide either ratio or spread"
+          },
+          "callbackSpread": {
+            "type": "string",
+            "description": "Callback spread in price units; provide either ratio or spread"
+          },
+          "activePx": {
+            "type": "string",
+            "description": "Activation price; tracking starts after market reaches this level"
+          },
+          "reduceOnly": {
+            "type": "boolean",
+            "description": "Ensure order only reduces position"
+          },
+          "clOrdId": {
+            "type": "string",
+            "description": "Client order ID (max 32 chars)"
+          }
+        },
+        "required": [
+          "instId",
+          "tdMode",
+          "side",
+          "sz"
+        ]
+      }
+    },
+    {
+      "name": "swap_cancel_algo_orders",
+      "description": "Cancel one or more pending SWAP/FUTURES algo orders (TP/SL). Accepts a list of {algoId, instId} objects.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "description": "List of algo orders to cancel. Each item: {algoId, instId}.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "algoId": {
+                  "type": "string",
+                  "description": "Algo order ID"
+                },
+                "instId": {
+                  "type": "string",
+                  "description": "e.g. BTC-USDT-SWAP"
+                }
+              },
+              "required": [
+                "algoId",
+                "instId"
+              ]
+            }
+          }
+        },
+        "required": [
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "swap_get_algo_orders",
+      "description": "Query pending or completed SWAP/FUTURES algo orders (TP/SL, OCO, trailing stop).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "history"
+            ],
+            "description": "pending=active (default); history=completed"
+          },
+          "instType": {
+            "type": "string",
+            "enum": [
+              "SWAP",
+              "FUTURES"
+            ],
+            "description": "SWAP (default) or FUTURES"
+          },
+          "ordType": {
+            "type": "string",
+            "enum": [
+              "conditional",
+              "oco",
+              "move_order_stop"
+            ],
+            "description": "Filter by type; omit for all"
+          },
+          "instId": {
+            "type": "string",
+            "description": "Instrument ID filter"
+          },
+          "algoId": {
+            "type": "string",
+            "description": "Filter by algo order ID"
+          },
+          "after": {
+            "type": "string",
+            "description": "Pagination: before this algo ID"
+          },
+          "before": {
+            "type": "string",
+            "description": "Pagination: after this algo ID"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 100)"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "effective",
+              "canceled",
+              "order_failed"
+            ],
+            "description": "Required when status=history. effective=triggered, canceled, order_failed. Defaults to effective."
+          }
+        }
+      }
+    },
+    {
+      "name": "account_get_balance",
+      "description": "Get account balance for trading account. Returns balances for all currencies or a specific one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ccy": {
+            "type": "string",
+            "description": "e.g. BTC or BTC,ETH. Omit for all."
+          }
+        }
+      }
+    },
+    {
+      "name": "account_transfer",
+      "description": "Transfer funds between accounts (trading, funding, etc.). [CAUTION] Moves real funds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ccy": {
+            "type": "string",
+            "description": "e.g. USDT"
+          },
+          "amt": {
+            "type": "string",
+            "description": "Transfer amount"
+          },
+          "from": {
+            "type": "string",
+            "description": "Source account: 6=funding, 18=trading (unified)"
+          },
+          "to": {
+            "type": "string",
+            "description": "Destination account: 6=funding, 18=trading (unified)"
+          },
+          "type": {
+            "type": "string",
+            "description": "0=main account (default), 1=main→sub, 2=sub→main, 3=sub→sub"
+          },
+          "subAcct": {
+            "type": "string",
+            "description": "Sub-account name. Required when type=1/2/3"
+          },
+          "clientId": {
+            "type": "string",
+            "description": "Client ID (max 32 chars)"
+          }
+        },
+        "required": [
+          "ccy",
+          "amt",
+          "from",
+          "to"
+        ]
+      }
+    },
+    {
+      "name": "account_get_max_size",
+      "description": "Get max buy/sell order size for a SWAP/FUTURES instrument given current balance and leverage. Useful before placing orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "tdMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ]
+          },
+          "px": {
+            "type": "string",
+            "description": "Limit order price (omit for market)"
+          },
+          "leverage": {
+            "type": "string",
+            "description": "Leverage (defaults to account setting)"
+          },
+          "ccy": {
+            "type": "string",
+            "description": "Margin currency. Required for isolated mode."
+          }
+        },
+        "required": [
+          "instId",
+          "tdMode"
+        ]
+      }
+    },
+    {
+      "name": "account_get_asset_balance",
+      "description": "Get funding account balance (asset account). Different from account_get_balance which queries the trading account. Optionally includes total asset valuation across all account types (trading, funding, earn, etc.).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ccy": {
+            "type": "string",
+            "description": "e.g. BTC or BTC,ETH. Omit for all."
+          },
+          "showValuation": {
+            "type": "boolean",
+            "description": "Include total asset valuation breakdown by account type (trading/funding/earn). Default false."
+          },
+          "valuationCcy": {
+            "type": "string",
+            "description": "Currency used to denominate the total asset valuation (e.g. USDT, BTC). Default USDT. Only applies when showValuation=true."
+          }
+        }
+      }
+    },
+    {
+      "name": "account_get_bills",
+      "description": "Get account ledger: fees paid, funding charges, realized PnL, transfers, etc. Default 20 records (last 7 days), max 100.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instType": {
+            "type": "string",
+            "enum": [
+              "SPOT",
+              "MARGIN",
+              "SWAP",
+              "FUTURES",
+              "OPTION",
+              "EVENTS"
+            ]
+          },
+          "ccy": {
+            "type": "string",
+            "description": "e.g. USDT"
+          },
+          "mgnMode": {
+            "type": "string",
+            "enum": [
+              "isolated",
+              "cross"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "description": "1=transfer,2=trade,3=delivery,4=auto convert,5=liquidation,6=margin transfer,7=interest,8=funding fee,9=adl,10=clawback,11=sys convert,12=strategy transfer,13=ddh"
+          },
+          "after": {
+            "type": "string",
+            "description": "Pagination: before this bill ID"
+          },
+          "before": {
+            "type": "string",
+            "description": "Pagination: after this bill ID"
+          },
+          "begin": {
+            "type": "string",
+            "description": "Start time (ms)"
+          },
+          "end": {
+            "type": "string",
+            "description": "End time (ms)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 20)"
+          }
+        }
+      }
+    },
+    {
+      "name": "account_get_positions_history",
+      "description": "Get closed position history for SWAP or FUTURES. Default 20 records, max 100.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instType": {
+            "type": "string",
+            "enum": [
+              "SWAP",
+              "FUTURES",
+              "MARGIN",
+              "OPTION",
+              "EVENTS"
+            ],
+            "description": "Default SWAP"
+          },
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "mgnMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "description": "1=close long,2=close short,3=liq long,4=liq short,5=ADL long,6=ADL short"
+          },
+          "posId": {
+            "type": "string"
+          },
+          "after": {
+            "type": "string",
+            "description": "Pagination: before this timestamp (ms)"
+          },
+          "before": {
+            "type": "string",
+            "description": "Pagination: after this timestamp (ms)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 20)"
+          }
+        }
+      }
+    },
+    {
+      "name": "account_get_trade_fee",
+      "description": "Get maker/taker fee rates for the account. Useful to understand your fee tier before trading.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instType": {
+            "type": "string",
+            "enum": [
+              "SPOT",
+              "MARGIN",
+              "SWAP",
+              "FUTURES",
+              "OPTION",
+              "EVENTS"
+            ]
+          },
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          }
+        },
+        "required": [
+          "instType"
+        ]
+      }
+    },
+    {
+      "name": "account_get_config",
+      "description": "Get account configuration: position mode (net vs hedge), account level, auto-loan settings, etc. Note: `settleCcy` is the current settlement currency for USDS-margined contracts. `settleCcyList` is the list of available settlement currencies to choose from. These fields only apply to USDS-margined contracts and can be ignored for standard USDT/coin-margined trading.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "account_get_max_withdrawal",
+      "description": "Get maximum withdrawable amount for a currency from the trading account. Useful before initiating a transfer or withdrawal.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ccy": {
+            "type": "string",
+            "description": "e.g. USDT or BTC,ETH. Omit for all."
+          }
+        }
+      }
+    },
+    {
+      "name": "account_get_max_avail_size",
+      "description": "Get maximum available size for opening or reducing a position. Different from account_get_max_size which calculates new order size.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP or BTC-USDT"
+          },
+          "tdMode": {
+            "type": "string",
+            "enum": [
+              "cross",
+              "isolated",
+              "cash"
+            ],
+            "description": "cash=spot"
+          },
+          "ccy": {
+            "type": "string",
+            "description": "Margin currency. Required for isolated MARGIN mode."
+          },
+          "reduceOnly": {
+            "type": "boolean",
+            "description": "true=calculate max size for closing position"
+          }
+        },
+        "required": [
+          "instId",
+          "tdMode"
+        ]
+      }
+    },
+    {
+      "name": "account_get_positions",
+      "description": "Get current open positions across all instrument types (MARGIN, SWAP, FUTURES, OPTION, EVENTS). Use swap_get_positions for SWAP/FUTURES-only queries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instType": {
+            "type": "string",
+            "enum": [
+              "MARGIN",
+              "SWAP",
+              "FUTURES",
+              "OPTION",
+              "EVENTS"
+            ]
+          },
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT-SWAP"
+          },
+          "posId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "account_get_bills_archive",
+      "description": "Get archived account ledger (bills older than 7 days, up to 3 months). Use account_get_bills for recent 7-day records. Default 20 records, max 100.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instType": {
+            "type": "string",
+            "enum": [
+              "SPOT",
+              "MARGIN",
+              "SWAP",
+              "FUTURES",
+              "OPTION"
+            ]
+          },
+          "ccy": {
+            "type": "string",
+            "description": "e.g. USDT"
+          },
+          "mgnMode": {
+            "type": "string",
+            "enum": [
+              "isolated",
+              "cross"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "description": "1=transfer,2=trade,3=delivery,4=auto convert,5=liquidation,6=margin transfer,7=interest,8=funding fee,9=adl,10=clawback,11=sys convert,12=strategy transfer,13=ddh"
+          },
+          "after": {
+            "type": "string",
+            "description": "Pagination: before this bill ID"
+          },
+          "before": {
+            "type": "string",
+            "description": "Pagination: after this bill ID"
+          },
+          "begin": {
+            "type": "string",
+            "description": "Start time (ms)"
+          },
+          "end": {
+            "type": "string",
+            "description": "End time (ms)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 20)"
+          }
+        }
+      }
+    },
+    {
+      "name": "account_set_position_mode",
+      "description": "Switch between net position mode and long/short hedge mode. net: one position per instrument (default). long_short_mode: separate long and short positions. [CAUTION] Requires no open positions or pending orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "posMode": {
+            "type": "string",
+            "enum": [
+              "long_short_mode",
+              "net_mode"
+            ],
+            "description": "long_short_mode=hedge; net_mode=one-way"
+          }
+        },
+        "required": [
+          "posMode"
+        ]
+      }
+    },
+    {
+      "name": "grid_get_orders",
+      "description": "List grid bots. status='active' for running; 'history' for stopped.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "algoOrdType": {
+            "type": "string",
+            "enum": [
+              "grid",
+              "contract_grid"
+            ],
+            "description": "grid=Spot, contract_grid=Contract"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "history"
+            ],
+            "description": "active=running (default); history=stopped"
+          },
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT, BTC-USD-SWAP"
+          },
+          "algoId": {
+            "type": "string",
+            "description": "Grid bot algo order ID (not a trade ordId)"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor for older records"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor for newer records"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Default 100"
+          }
+        },
+        "required": [
+          "algoOrdType"
+        ]
+      }
+    },
+    {
+      "name": "grid_get_order_details",
+      "description": "Get grid bot detail by algo ID. Returns config, status, PnL, and position.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "algoOrdType": {
+            "type": "string",
+            "enum": [
+              "grid",
+              "contract_grid"
+            ],
+            "description": "grid=Spot, contract_grid=Contract"
+          },
+          "algoId": {
+            "type": "string",
+            "description": "Grid bot algo order ID (not a trade ordId)"
+          }
+        },
+        "required": [
+          "algoOrdType",
+          "algoId"
+        ]
+      }
+    },
+    {
+      "name": "grid_get_sub_orders",
+      "description": "Query sub-orders (grid trades) of a bot. type='filled' for executed; 'live' for pending.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "algoOrdType": {
+            "type": "string",
+            "enum": [
+              "grid",
+              "contract_grid"
+            ],
+            "description": "grid=Spot, contract_grid=Contract"
+          },
+          "algoId": {
+            "type": "string",
+            "description": "Grid bot algo order ID (not a trade ordId)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "filled",
+              "live"
+            ],
+            "description": "filled=executed trades (default); live=pending"
+          },
+          "groupId": {
+            "type": "string",
+            "description": "A buy-sell pair shares the same groupId"
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor for older records"
+          },
+          "before": {
+            "type": "string",
+            "description": "Cursor for newer records"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Default 100"
+          }
+        },
+        "required": [
+          "algoOrdType",
+          "algoId"
+        ]
+      }
+    },
+    {
+      "name": "grid_create_order",
+      "description": "Create grid bot (spot, USDT-margined, or coin-margined contract). [CAUTION] Locks funds. Spot: quoteSz|baseSz. Contract: direction+lever+sz.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instId": {
+            "type": "string",
+            "description": "e.g. BTC-USDT, BTC-USDT-SWAP, BTC-USD-SWAP (coin-margined)"
+          },
+          "algoOrdType": {
+            "type": "string",
+            "enum": [
+              "grid",
+              "contract_grid"
+            ],
+            "description": "grid=Spot, contract_grid=Contract"
+          },
+          "maxPx": {
+            "type": "string",
+            "description": "Upper price"
+          },
+          "minPx": {
+            "type": "string",
+            "description": "Lower price"
+          },
+          "gridNum": {
+            "type": "string",
+            "description": "Number of grids"
+          },
+          "runType": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2"
+            ],
+            "description": "1=arithmetic (default); 2=geometric"
+          },
+          "quoteSz": {
+            "type": "string",
+            "description": "Spot: quote amount (e.g. USDT)"
+          },
+          "baseSz": {
+            "type": "string",
+            "description": "Spot: base amount (e.g. BTC)"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short",
+              "neutral"
+            ],
+            "description": "Contract only"
+          },
+          "lever": {
+            "type": "string",
+            "description": "Leverage. Contract only"
+          },
+          "sz": {
+            "type": "string",
+            "description": "Margin in USDT or base coin (CoinM). Contract only"
+          },
+          "basePos": {
+            "type": "boolean",
+            "description": "Open base position for contract. Default: true"
+          },
+          "tpTriggerPx": {
+            "type": "string",
+            "description": "TP trigger price"
+          },
+          "slTriggerPx": {
+            "type": "string",
+            "description": "SL trigger price"
+          },
+          "tpRatio": {
+            "type": "string",
+            "description": "TP ratio e.g. 0.1=10%. Contract only"
+          },
+          "slRatio": {
+            "type": "string",
+            "description": "SL ratio e.g. 0.1=10%. Contract only"
+          },
+          "algoClOrdId": {
+            "type": "string",
+            "description": "User-defined ID. Alphanumeric, max 32, unique per user"
+          }
+        },
+        "required": [
+          "instId",
+          "algoOrdType",
+          "maxPx",
+          "minPx",
+          "gridNum"
+        ]
+      }
+    },
+    {
+      "name": "grid_amend_order",
+      "description": "Amend a running grid bot. [CAUTION] Modifies a running bot. Use grid_list_orders to confirm the bot is running and obtain the algoId before calling.\nSupports two modes, which can be combined in a single call:\n• Price-range mode (maxPx+minPx+gridNum): change upper/lower price boundary and grid count. Contract grid: if new range requires more margin, pass topUpAmt; omit to auto-use the minimum required. Spot grid: topUpAmt is not supported.\n• TP/SL mode (instId + any of tpTriggerPx/slTriggerPx/tpRatio/slRatio): update take-profit and/or stop-loss. Pass '-1' to explicitly clear an existing TP or SL. tpTriggerPx/slTriggerPx are absolute prices; tpRatio/slRatio are profit ratios (e.g. '0.1' = 10%).\nWhen both sets of params are provided, both APIs are called sequentially.\nDo NOT use to create a new grid bot — use grid_create_order instead. Do NOT use to stop a grid bot — use grid_stop_order instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "algoId": {
+            "type": "string",
+            "description": "Grid bot algo order ID (required)"
+          },
+          "maxPx": {
+            "type": "string",
+            "description": "[Price-range mode] New upper price boundary. Triggers amend-algo-basic-param when provided."
+          },
+          "minPx": {
+            "type": "string",
+            "description": "[Price-range mode] New lower price boundary. Required when maxPx is set."
+          },
+          "gridNum": {
+            "type": "string",
+            "description": "[Price-range mode] New number of grid intervals (integer). Required when maxPx is set."
+          },
+          "instId": {
+            "type": "string",
+            "description": "[TP/SL mode] Instrument ID, e.g. BTC-USDT. Required when setting TP/SL."
+          },
+          "tpTriggerPx": {
+            "type": "string",
+            "description": "[TP/SL mode] Take-profit trigger price (absolute). Pass '-1' to clear."
+          },
+          "slTriggerPx": {
+            "type": "string",
+            "description": "[TP/SL mode] Stop-loss trigger price (absolute). Pass '-1' to clear."
+          },
+          "tpRatio": {
+            "type": "string",
+            "description": "[TP/SL mode] Take-profit ratio, e.g. '0.1' = 10% profit. Pass '-1' to clear."
+          },
+          "slRatio": {
+            "type": "string",
+            "description": "[TP/SL mode] Stop-loss ratio, e.g. '0.1' = 10% drawdown. Pass '-1' to clear."
+          },
+          "topUpAmt": {
+            "type": "string",
+            "description": "Top-up amount. In price-range mode maps to topupAmount (contract grid only; omit to use minimum required). In TP/SL mode maps to topUpAmt."
+          }
+        },
+        "required": [
+          "algoId"
+        ]
+      }
+    },
+    {
+      "name": "grid_stop_order",
+      "description": "Stop a running grid bot. [CAUTION] This stops the strategy and handles open orders/positions according to stopType. Default (stopType='1') closes all positions immediately — use this for a clean exit. stopType='2' stops the strategy without selling: spot grid keeps all base assets as-is (no sell-back to quote); contract grid cancels all grid orders but leaves the position open for manual close later.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "algoId": {
+            "type": "string",
+            "description": "Grid bot algo order ID (not a trade ordId)"
+          },
+          "algoOrdType": {
+            "type": "string",
+            "enum": [
+              "grid",
+              "contract_grid"
+            ],
+            "description": "grid=Spot grid, contract_grid=Contract grid"
+          },
+          "instId": {
+            "type": "string",
+            "description": "Instrument ID, e.g. BTC-USDT, BTC-USDT-SWAP"
+          },
+          "stopType": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2"
+            ],
+            "description": "'1' (default): stop strategy and sell — spot grid sells all base assets back to quote; contract grid market-closes all positions. '2': stop strategy without selling — spot grid keeps base assets as-is; contract grid cancels all grid orders but leaves the position open. After stopType='2', the remaining position can be closed manually from the Positions page."
+          }
+        },
+        "required": [
+          "algoId",
+          "algoOrdType",
+          "instId"
+        ]
+      }
+    },
+    {
+      "name": "trade_get_history",
+      "description": "Query local audit log of tool calls made through this MCP server. Returns recent operations with timestamps, duration, params, and results. Use to review what trades or queries were executed in this session or past sessions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 20)"
+          },
+          "tool": {
+            "type": "string",
+            "description": "e.g. swap_place_order"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "INFO",
+              "WARN",
+              "ERROR",
+              "DEBUG"
+            ]
+          },
+          "since": {
+            "type": "string",
+            "description": "ISO 8601 timestamp lower bound"
+          }
+        }
+      }
+    },
+    {
+      "name": "skills_get_categories",
+      "description": "List all available skill categories in OKX Skills Marketplace. Use the returned categoryId as input to skills_search for category filtering. Do NOT use for searching or downloading skills — use skills_search or skills_download.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "skills_search",
+      "description": "Search for skills in OKX Skills Marketplace by keyword or category. To get valid category IDs, call skills_get_categories first. Returns skill names for use with skills_download. Do NOT use for downloading — use skills_download.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "Search keyword (matches name, description, tags)"
+          },
+          "categories": {
+            "type": "string",
+            "description": "Filter by category ID"
+          },
+          "page": {
+            "type": "string",
+            "description": "Page number, starting from 1. Default: 1"
+          },
+          "limit": {
+            "type": "string",
+            "description": "Results per page. Default: 20, max: 100"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "skills_download",
+      "description": "Download a skill package from OKX Skills Marketplace to a local directory. Always call skills_search first to confirm the skill name exists. Downloads the latest approved version. NOTE: Downloads third-party developer content — does NOT install to agents. For full installation use CLI: okx skill add <name>. Use when the user wants to inspect or manually install a skill package.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Skill name (unique identifier)"
+          },
+          "targetDir": {
+            "type": "string",
+            "description": "Directory path where the file will be saved"
+          },
+          "format": {
+            "type": "string",
+            "description": "Output file format: 'zip' or 'skill' (default: 'skill')",
+            "enum": [
+              "zip",
+              "skill"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "targetDir"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "system_get_capabilities",
+      "description": "Return machine-readable server capabilities and module availability for agent planning.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    }
+  ]
+}

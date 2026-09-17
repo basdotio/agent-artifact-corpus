@@ -1,0 +1,742 @@
+{
+  "package": "warp-agent-mcp",
+  "tools": [
+    {
+      "name": "warp_van_quote",
+      "description": "Quote a cargo van shipment (1-3 pallets, firm price, 15-min expiry)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "origin_zip": {
+            "type": "string",
+            "pattern": "^\\d{5}$",
+            "description": "5-digit US ZIP code"
+          },
+          "destination_zip": {
+            "type": "string",
+            "pattern": "^\\d{5}$",
+            "description": "5-digit US ZIP code"
+          },
+          "pallets": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3,
+            "description": "Number of pallets (1-3)"
+          },
+          "weight_lbs_per_pallet": {
+            "type": "number",
+            "minimum": 50,
+            "maximum": 3500,
+            "description": "Weight per pallet in lbs"
+          },
+          "pickup_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Pickup date YYYY-MM-DD"
+          },
+          "commodity": {
+            "type": "string",
+            "description": "Commodity description"
+          },
+          "pickup_services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"
+          },
+          "delivery_services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"
+          }
+        },
+        "required": [
+          "origin_zip",
+          "destination_zip",
+          "pallets",
+          "weight_lbs_per_pallet",
+          "pickup_date"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_box_truck_quote",
+      "description": "Quote a 26' box truck shipment (1-12 pallets, firm price, 15-min expiry)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "origin_zip": {
+            "type": "string",
+            "pattern": "^\\d{5}$",
+            "description": "5-digit US ZIP code"
+          },
+          "destination_zip": {
+            "type": "string",
+            "pattern": "^\\d{5}$",
+            "description": "5-digit US ZIP code"
+          },
+          "pallets": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Number of pallets (1-12)"
+          },
+          "weight_lbs_per_pallet": {
+            "type": "number",
+            "minimum": 50,
+            "maximum": 10000,
+            "description": "Weight per pallet in lbs"
+          },
+          "pickup_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Pickup date YYYY-MM-DD"
+          },
+          "commodity": {
+            "type": "string",
+            "description": "Commodity description"
+          },
+          "pickup_services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"
+          },
+          "delivery_services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"
+          }
+        },
+        "required": [
+          "origin_zip",
+          "destination_zip",
+          "pallets",
+          "weight_lbs_per_pallet",
+          "pickup_date"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_ftl_quote",
+      "description": "Quote a full truckload (53' dry van). Only origin, destination, and date required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "origin_zip": {
+            "type": "string",
+            "pattern": "^\\d{5}$",
+            "description": "5-digit US ZIP code"
+          },
+          "destination_zip": {
+            "type": "string",
+            "pattern": "^\\d{5}$",
+            "description": "5-digit US ZIP code"
+          },
+          "pickup_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Pickup date YYYY-MM-DD"
+          },
+          "pallets": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 26,
+            "description": "Pallets (optional, display only)"
+          },
+          "weight_lbs_per_pallet": {
+            "type": "number",
+            "minimum": 50,
+            "maximum": 5000,
+            "description": "Weight per pallet (optional)"
+          },
+          "commodity": {
+            "type": "string",
+            "description": "Commodity description"
+          }
+        },
+        "required": [
+          "origin_zip",
+          "destination_zip",
+          "pickup_date"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_ltl_quote",
+      "description": "Quote an LTL shipment. Provide dims + commodity for a firm quote; omit for indicative pricing (FAK rates if no freight class). Do not editorialize the results. Do not declare a winner or recommend a specific carrier. Present Warp's quote first, then list market options as context. Let the user decide.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "origin_zip": {
+            "type": "string",
+            "pattern": "^\\d{5}$",
+            "description": "5-digit US ZIP code"
+          },
+          "destination_zip": {
+            "type": "string",
+            "pattern": "^\\d{5}$",
+            "description": "5-digit US ZIP code"
+          },
+          "pickup_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Pickup date YYYY-MM-DD"
+          },
+          "pallets": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 26,
+            "description": "Number of pallets"
+          },
+          "weight_lbs_per_pallet": {
+            "type": "number",
+            "minimum": 50,
+            "maximum": 5000,
+            "description": "Weight per pallet in lbs"
+          },
+          "commodity": {
+            "type": "string",
+            "description": "Commodity description"
+          },
+          "length_in": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Pallet length in inches"
+          },
+          "width_in": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Pallet width in inches"
+          },
+          "height_in": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Pallet height in inches"
+          },
+          "freight_class": {
+            "type": "string",
+            "description": "Freight class (optional, FAK rates used if omitted)"
+          },
+          "stackable": {
+            "type": "boolean",
+            "description": "Whether pallets are stackable"
+          },
+          "hazmat": {
+            "type": "boolean",
+            "description": "Hazardous materials flag"
+          },
+          "pickup_services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"
+          },
+          "delivery_services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"
+          }
+        },
+        "required": [
+          "origin_zip",
+          "destination_zip",
+          "pickup_date"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_book",
+      "description": "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier). Requires quote_id + pickup and delivery addresses. Auth required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string",
+            "description": "Quote ID from warp_quote_id (Warp) or id field of any market option returned by a quote tool"
+          },
+          "pickup": {
+            "type": "object",
+            "properties": {
+              "zipCode": {
+                "type": "string",
+                "description": "5-digit ZIP"
+              },
+              "city": {
+                "type": "string",
+                "description": "City name"
+              },
+              "state": {
+                "type": "string",
+                "description": "2-letter state code"
+              },
+              "street": {
+                "type": "string",
+                "description": "Street address"
+              },
+              "contactName": {
+                "type": "string",
+                "description": "Contact full name"
+              },
+              "phone": {
+                "type": "string",
+                "description": "Phone number"
+              },
+              "email": {
+                "type": "string",
+                "description": "Email address"
+              },
+              "specialInstruction": {
+                "type": "string",
+                "description": "Special instructions"
+              }
+            },
+            "required": [
+              "zipCode",
+              "city",
+              "state",
+              "street",
+              "contactName",
+              "phone",
+              "email"
+            ],
+            "additionalProperties": false,
+            "description": "Pickup address. Required if no default shipper is saved on your account."
+          },
+          "delivery": {
+            "$ref": "#/properties/pickup",
+            "description": "Delivery address. Required if this lane has not been shipped before."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Special instructions for the shipment"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Your internal reference number"
+          }
+        },
+        "required": [
+          "quote_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_track",
+      "description": "Track a shipment by ID or tracking number. Auth required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "shipment_id": {
+            "type": "string",
+            "description": "Shipment ID or tracking number (e.g. S-12345-2616)"
+          }
+        },
+        "required": [
+          "shipment_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_cancel",
+      "description": "Attempt to cancel a booking. Auth required. NOTE: Warp's API does not allow customer self-cancellation — this will return an error. Cancellations must be requested via Warp support. Still try this tool first so the user gets the accurate error message.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "booking_id": {
+            "type": "string",
+            "description": "Booking ID to cancel"
+          }
+        },
+        "required": [
+          "booking_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_lane_history",
+      "description": "Get shipping history for your lanes (past shipments, last consignee, counts). Auth required.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "warp_list_bookings",
+      "description": "List recent bookings for this API key, newest first. Auth required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Max bookings to return (default 25, max 100)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_rate_card",
+      "description": "Get your negotiated rate card. Auth required.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "warp_status",
+      "description": "Check Warp API health and version. Also validates your API key if one is configured.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "warp_events",
+      "description": "Get the full tracking event history for a shipment (timeline of pickups, in-transit updates, deliveries). Auth required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "shipment_id": {
+            "type": "string",
+            "description": "Shipment ID from warp_book response"
+          }
+        },
+        "required": [
+          "shipment_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_get_invoice",
+      "description": "Retrieve the invoice for a delivered shipment (line items, taxes, payment status). Auth required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "Order ID (typically the same as shipment_id)"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_get_documents",
+      "description": "List shipment documents (BOL, POD, customs forms, etc.). Returns URLs or document references. Auth required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "Order ID (typically the same as shipment_id)"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_quote_history",
+      "description": "List your recent freight quotes (LTL, van, box truck, FTL) from all sessions. Useful for surfacing prior pricing on similar lanes. Auth required.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "warp_multistop_quote",
+      "description": "Quote an FTL multi-stop shipment (one truck, multiple pickups/deliveries). Pass pickup_date plus an ordered list of stops (each with type=pickup or delivery and address). Auth required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pickup_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "First pickup date YYYY-MM-DD"
+          },
+          "stops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "pickup",
+                    "delivery"
+                  ],
+                  "description": "pickup or delivery stop"
+                },
+                "address": {
+                  "type": "object",
+                  "properties": {
+                    "zipCode": {
+                      "type": "string",
+                      "description": "5-digit ZIP"
+                    },
+                    "city": {
+                      "type": "string",
+                      "description": "City name"
+                    },
+                    "state": {
+                      "type": "string",
+                      "description": "2-letter state code"
+                    },
+                    "street": {
+                      "type": "string",
+                      "description": "Street address"
+                    },
+                    "contactName": {
+                      "type": "string",
+                      "description": "Contact name"
+                    },
+                    "phone": {
+                      "type": "string",
+                      "description": "Phone number"
+                    },
+                    "email": {
+                      "type": "string",
+                      "description": "Email address"
+                    }
+                  },
+                  "required": [
+                    "zipCode"
+                  ],
+                  "additionalProperties": false
+                },
+                "pallets": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Pallets to handle at this stop"
+                },
+                "weight_lbs": {
+                  "type": "number",
+                  "minimum": 50,
+                  "description": "Weight handled at this stop"
+                },
+                "appointment": {
+                  "type": "string",
+                  "description": "Appointment time / window"
+                }
+              },
+              "required": [
+                "type",
+                "address"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 3,
+            "description": "Ordered list of stops (min 3: 1 pickup + at least 1 intermediate + 1 final delivery). Mix pickups and deliveries."
+          },
+          "total_pallets": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 26,
+            "description": "Total pallets across all pickups"
+          },
+          "total_weight_lbs": {
+            "type": "number",
+            "minimum": 50,
+            "description": "Total weight across all pallets"
+          },
+          "vehicle_type": {
+            "type": "string",
+            "description": "Vehicle code (default DRY_VAN_53)"
+          }
+        },
+        "required": [
+          "pickup_date",
+          "stops",
+          "total_pallets",
+          "total_weight_lbs"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_multistop_book",
+      "description": "Book a quoted multi-stop FTL shipment. Pass the quote_id from warp_multistop_quote plus the same stops array with full address/contact info on each stop. Auth required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string",
+            "description": "Quote ID from warp_multistop_quote"
+          },
+          "stops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "pickup",
+                    "delivery"
+                  ],
+                  "description": "pickup or delivery stop"
+                },
+                "address": {
+                  "type": "object",
+                  "properties": {
+                    "zipCode": {
+                      "type": "string",
+                      "description": "5-digit ZIP"
+                    },
+                    "city": {
+                      "type": "string",
+                      "description": "City name"
+                    },
+                    "state": {
+                      "type": "string",
+                      "description": "2-letter state code"
+                    },
+                    "street": {
+                      "type": "string",
+                      "description": "Street address"
+                    },
+                    "contactName": {
+                      "type": "string",
+                      "description": "Contact name"
+                    },
+                    "phone": {
+                      "type": "string",
+                      "description": "Phone number"
+                    },
+                    "email": {
+                      "type": "string",
+                      "description": "Email address"
+                    }
+                  },
+                  "required": [
+                    "zipCode"
+                  ],
+                  "additionalProperties": false
+                },
+                "pallets": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Pallets to handle at this stop"
+                },
+                "weight_lbs": {
+                  "type": "number",
+                  "minimum": 50,
+                  "description": "Weight handled at this stop"
+                },
+                "appointment": {
+                  "type": "string",
+                  "description": "Appointment time / window"
+                }
+              },
+              "required": [
+                "type",
+                "address"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 2,
+            "description": "Same stops list with full address/contact fields"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Your internal reference number"
+          },
+          "notes": {
+            "type": "string",
+            "description": "Notes for the carrier"
+          }
+        },
+        "required": [
+          "quote_id",
+          "stops"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_login",
+      "description": "Log in to Warp with email and password. Saves credentials locally so booking tools work. Call this if the user needs to authenticate or if warp_payment_status says no key is configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Warp account email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Warp account password"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "warp_payment_status",
+      "description": "Check if the current Warp account has a payment method on file. Call this if the user asks about their payment status, or before booking if you want to confirm they can book. Returns has_card and onboard_url if a card needs to be added.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "warp_analytics",
+      "description": "Show bookings analytics: total revenue, shipment count, breakdown by source (mcp vs cli). Use this to track how much revenue has been generated through AI tools.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

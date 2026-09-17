@@ -1,0 +1,418 @@
+{
+  "package": "agent-recall-mcp",
+  "tools": [
+    {
+      "name": "project_board",
+      "description": "Get the status of all active projects — pending work, blockers, and what to work on next. Use this at the start of every session BEFORE session_start. Returns a numbered list of projects so you can pick one and call session_start with that slug. Each entry includes: number (for selection), slug, status (active/blocked/complete/stale), date, and next action.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "project_status",
+      "description": "Get the current operational status of a project — last trajectory, active blockers, next steps, and palace room freshness. Use this when starting work on a long-running project to orient quickly without reading multiple sources.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "default": "auto",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "session_start",
+      "description": "Load project context for a new session. Returns identity, top insights, active rooms, recent activity, P0 corrections (behavioral rules), and predictive watch_for warnings. One call for cold-start context.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "default": "auto",
+            "type": "string"
+          },
+          "context": {
+            "description": "Optional context for matching cross-project insights",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "remember",
+      "description": "Save any memory — auto-classifies and routes. Use this for unstructured notes, lessons, and quick captures. Use `context: 'architecture'` or `context: 'decision'` for palace routing. Use `context: 'qa'` for Q&A capture. Pass context hint to override auto-routing.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "What to remember.",
+            "type": "string"
+          },
+          "context": {
+            "description": "Routing hint. Values: 'architecture' or 'decision' → palace/architecture room. 'blocker' or 'blocked' → palace/blockers room. 'goal' → palace/goals room. 'lesson' or 'insight' → awareness. 'qa' or 'capture' → Q&A log. Omit for auto-classification.",
+            "type": "string"
+          },
+          "project": {
+            "default": "auto",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "recall",
+      "description": "Search all memory stores at once. Returns ranked results from palace, journal, and insights.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "What to search for.",
+            "type": "string"
+          },
+          "project": {
+            "default": "auto",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max results returned after RRF merge. Each source (palace, journal, insights) contributes up to limit×2 candidates before fusion.",
+            "default": 10,
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "feedback": {
+            "description": "Rate previous results: was each result useful?",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "Result ID from previous recall (preferred).",
+                  "type": "string"
+                },
+                "title": {
+                  "description": "Result title (fallback if no ID).",
+                  "type": "string"
+                },
+                "useful": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "useful"
+              ]
+            }
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "session_end",
+      "description": "Save session summary, insights, and trajectory. Writes journal, updates awareness, consolidates to palace.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "summary": {
+            "description": "What happened this session. Simple session: 2-3 sentences. Multi-phase session: one paragraph per completed phase (e.g. 'Phase 1 — Name: what happened. Phase 2 — Name: what happened. Decisions: X. Blockers: Y.'). Never compress a multi-phase session to 2 sentences — it makes the journal useless.",
+            "type": "string"
+          },
+          "insights": {
+            "description": "Insights learned this session.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "string"
+                },
+                "applies_when": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "severity": {
+                  "default": "important",
+                  "type": "string",
+                  "enum": [
+                    "critical",
+                    "important",
+                    "minor"
+                  ]
+                }
+              },
+              "required": [
+                "title",
+                "evidence",
+                "applies_when"
+              ]
+            }
+          },
+          "trajectory": {
+            "description": "Where is the work heading next.",
+            "type": "string"
+          },
+          "project": {
+            "default": "auto",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "check",
+      "description": "TWO USE CASES: (1) Goal verification — record what you think the human wants, get warnings from past corrections. Use before starting work: check({ goal: '...', confidence: 'high/medium/low' }). (2) Decision trail — track a decision with Bayesian prior/posterior/evidence for calibrated judgment. Use when making important technical or product decisions: add prior (0-1), evidence items, and posterior. Set outcome when decision resolves to close the trail.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "goal": {
+            "description": "What you think the human wants.",
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "assumptions": {
+            "description": "Key assumptions you're making.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "human_correction": {
+            "description": "After human responds: what they actually wanted (or 'confirmed').",
+            "type": "string"
+          },
+          "delta": {
+            "description": "The gap between your understanding and reality (or 'none').",
+            "type": "string"
+          },
+          "project": {
+            "default": "auto",
+            "type": "string"
+          },
+          "prior": {
+            "description": "Initial probability estimate (0-1). Start of Bayesian decision trail.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {
+            "description": "Evidence collected since prior. Each entry shifts probability.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "factor": {
+                  "description": "What was observed",
+                  "type": "string"
+                },
+                "direction": {
+                  "description": "Does this support or weaken the hypothesis?",
+                  "type": "string",
+                  "enum": [
+                    "supports",
+                    "weakens"
+                  ]
+                },
+                "weight": {
+                  "description": "How much it shifts (0-1, default 0.1)",
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "factor",
+                "direction"
+              ]
+            }
+          },
+          "posterior": {
+            "description": "Updated probability after considering evidence (0-1).",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "outcome": {
+            "description": "Final decision result: 'confirmed', 'rejected', 'partial', or free text. Triggers decision trail persistence.",
+            "type": "string"
+          },
+          "decision_id": {
+            "description": "Link multiple check calls to the same decision. Auto-generated if not provided.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "goal",
+          "confidence"
+        ]
+      }
+    },
+    {
+      "name": "digest",
+      "description": "Context cache — store or recall pre-computed analysis results. Use 'store' after expensive operations (subagent explorations, code analysis) to cache the result. Use 'recall' before starting work to check if a cached result already exists. Use 'read' to get full content of a specific digest. Use 'invalidate' to mark a digest as stale.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "action": {
+            "description": "Operation to perform.",
+            "type": "string",
+            "enum": [
+              "store",
+              "recall",
+              "read",
+              "invalidate"
+            ]
+          },
+          "title": {
+            "description": "Digest title (store).",
+            "type": "string"
+          },
+          "scope": {
+            "description": "What this digest covers (store).",
+            "type": "string"
+          },
+          "content": {
+            "description": "Full digest body — markdown (store).",
+            "type": "string"
+          },
+          "source_agent": {
+            "description": "Agent that produced this (store).",
+            "type": "string"
+          },
+          "source_query": {
+            "description": "Original query/task (store).",
+            "type": "string"
+          },
+          "ttl_hours": {
+            "description": "Time-to-live in hours. 0 = never expires. Default 168 (7 days).",
+            "type": "number"
+          },
+          "global": {
+            "description": "Store as cross-project digest (store).",
+            "type": "boolean"
+          },
+          "query": {
+            "description": "What to search for (recall).",
+            "type": "string"
+          },
+          "include_stale": {
+            "description": "Include stale results (recall). Default false.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Max results (recall). Default 5.",
+            "type": "number"
+          },
+          "digest_id": {
+            "description": "Digest ID (read, invalidate).",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why invalidating (invalidate).",
+            "type": "string"
+          },
+          "project": {
+            "default": "auto",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "bootstrap_scan",
+      "description": "Discover existing projects on this machine — git repos, Claude memory, CLAUDE.md files. Returns what CAN be imported into AgentRecall. Read-only, no writes. Run this first if AgentRecall is empty.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scan_dirs": {
+            "description": "Additional directories to scan (default: ~/Projects/, ~/work/, ~/code/, ~/dev/)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_depth": {
+            "description": "Maximum directory depth to scan (default: 3, max: 5)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "bootstrap_import",
+      "description": "Import discovered projects into AgentRecall. Call bootstrap_scan first, then pass the scan results here. Creates palace entries, identity files, and initial journals for selected projects.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scan_result": {
+            "description": "BootstrapScanResult from bootstrap_scan — accepts either the parsed object or JSON string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            ]
+          },
+          "project_slugs": {
+            "description": "Import only these projects (default: all new)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "item_types": {
+            "description": "Import only these item types: identity, memory, architecture, trajectory",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "scan_result"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,640 @@
+{
+  "package": "@h-ear/mcp-server",
+  "tools": [
+    {
+      "name": "healthCheck",
+      "description": "Check H-ear API health and liveness. No authentication required. Returns `{ apiStatus, apiVersion, apiDeployedTimestamp, mcpClientVersion }` — the `api*` fields come from `/v1/health`; `mcpClientVersion` is the version of the locally-installed `@h-ear/mcp-server` package the host pulled (read from its `package.json` at process start), used to verify `--pull` loaded the expected dist-tag.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "listClasses",
+      "description": "List supported audio classification classes. Default taxonomy: audioset-yamnet-521 (521 classes across 7 categories). Also available: audioset-panns-527 (527 classes), species (6522 bird species). Each class has a tierDepth (1–5) indicating its position in the AudioSet hierarchy, but filtering in getJobEvents and webhook notifications is supported up to tier 3 only. Response fields: total and totalFiltered both reflect the post-filter count; totalAvailable is the unfiltered class count for the entire taxonomy. Some AudioSet indices are retired and absent (e.g. 79, 83, 87) — this is normal, do not treat index gaps as errors. No authentication required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taxonomy": {
+            "type": "string",
+            "enum": [
+              "audioset-yamnet-521",
+              "audioset-panns-527",
+              "species"
+            ],
+            "description": "Taxonomy to query. Defaults to audioset-yamnet-521."
+          },
+          "category": {
+            "type": "string",
+            "description": "Filter by category name (case-insensitive partial match). E.g. \"Animal\", \"Human sounds\", \"Music\"."
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Max classes to return (pagination)."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of classes to skip (pagination)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "classifyAudio",
+      "description": "Classify a local audio file or public URL for noise/sound detection. Provide filePath (stdio + local FS) OR url (any transport — server marshals bytes via Azure Storage appendBlockFromURL, no client IO). With url, pass fileName so the job persists a display name in the UI; otherwise it defaults to \"api-upload\". Formats: MP3, WAV, FLAC, OGG, M4A, AAC, MP4, MOV, WEBM. Files over 25MB on filePath auto-split into 25 MB byte slices client-side; url has no client chunking. Returns { requestId, status } — poll getJob(requestId) until status='completed'. filePath returns 'uploading' while bytes arrive; url returns 'processing' immediately. Both transition to 'completed'. Requires API key (HEAR_API_KEY).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Path to a local audio file (Desktop/CLI only — requires local filesystem access). The server reads and encodes it automatically. Large files are split into chunks. Use url for web/mobile clients."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL (or SAS URL) to an audio file. The server fetches bytes server-side via Azure Storage `appendBlockFromURL` (URL-marshal) — no bytes pass through the API host or the MCP client. Use this from web/mobile/sandboxed clients with no filesystem; also valid from stdio."
+          },
+          "fileName": {
+            "type": "string",
+            "description": "**When using `url`, pass `fileName`** (URL basename, e.g. \"morning-0400.mp3\") so the snippet/job persists a meaningful name in the UI. Otherwise it defaults to \"api-upload.mp3\". With `filePath`, it is auto-derived from the basename and may be omitted."
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.3,
+            "description": "Confidence threshold (0.0-1.0). Only classes above this score are returned."
+          },
+          "filterMinDurationSeconds": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 595,
+            "description": "Minimum event duration filter in seconds."
+          },
+          "waitForResult": {
+            "default": false,
+            "description": "If true, polls until classification completes (up to 30s — strict cap to stay within the MCP tool wall budget). On timeout returns the AsyncAccepted shape ({requestId, status:\"processing\", pollUrl}); call getJob(requestId) externally to keep watching. For jobs likely to take longer than 30s, use callbackUrl for webhook delivery instead. Default false — returns immediately with requestId."
+          },
+          "callbackUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Webhook URL (HTTPS) for async result delivery. When provided, the server POSTs classification results to this URL on completion — no polling needed. Use getJob to check status manually."
+          },
+          "callbackSecret": {
+            "type": "string",
+            "description": "HMAC-SHA256 secret for webhook signature verification. Only used with callbackUrl."
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90,
+            "description": "GPS latitude (decimal degrees, -90 to 90). Tag the recording location. Must be paired with longitude."
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180,
+            "description": "GPS longitude (decimal degrees, -180 to 180). Tag the recording location. Must be paired with latitude."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "classifyBatch",
+      "description": "Classify multiple audio files. Provide filePaths (local files, recommended) or files (URL entries). For URL entries, pass each file's basename in fileName so jobs persist meaningful names; otherwise they default to \"api-upload.mp3\". Local files: submits all then polls each sequentially (may take minutes), or pass callbackUrl to skip polling and deliver results via webhook. URL files: returns immediately with batch ID (results via webhook). Max 50 files. Requires API key (HEAR_API_KEY).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Array of local audio file paths to classify (Desktop/CLI only — requires local filesystem access). Use files with URLs for web/mobile clients."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "Public URL to audio file."
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Client-provided tracking ID."
+                },
+                "fileName": {
+                  "type": "string",
+                  "description": "**Pass `fileName`** (URL basename, e.g. \"morning-0400.mp3\") so the snippet/job persists a meaningful name in the UI. Otherwise it defaults to \"api-upload.mp3\"."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Array of public audio URLs (alternative to filePaths). Requires callbackUrl."
+          },
+          "callbackUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Webhook URL (HTTPS) for async result delivery. Required for URL-based files. Optional for local files — when provided, skips polling and delivers results via webhook instead."
+          },
+          "callbackSecret": {
+            "type": "string",
+            "description": "HMAC-SHA256 secret for webhook signature verification."
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.3,
+            "description": "Confidence threshold for all files."
+          },
+          "filterMinDurationSeconds": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 595,
+            "description": "Minimum event duration filter in seconds."
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90,
+            "description": "GPS latitude (decimal degrees, -90 to 90). Applied to all files in the batch. Must be paired with longitude."
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180,
+            "description": "GPS longitude (decimal degrees, -180 to 180). Applied to all files in the batch. Must be paired with latitude."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "usage",
+      "description": "Get H-ear API usage statistics. Returns `{ tier, daily:{used,limit,remaining}, period:{minutesUsed,minutesLimit}, activeKeys? }`. **What counts toward `daily.used`:** every authenticated `/v1/*` call increments it — `listJobs`, `getJob`, `getJobEvents`, `getJobAudio`, `getJobWaveform`, `getJobReport`, `classifyAudio`, `classifyBatch`, **and `usage` itself** (the call you just made to read this value is already in the count). **What does NOT count:** unauthenticated endpoints (`healthCheck`, `listClasses`) and webhook CRUD. `period.minutesUsed` is separate — billable ML compute minutes only. Requires API key (HEAR_API_KEY).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "listJobs",
+      "description": "List recent classification jobs with status, file name, event count, and timestamps. Supports pagination. Requires API key (HEAR_API_KEY).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100,
+            "default": 10,
+            "description": "Max jobs to return (1-100, default 10)."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Number of jobs to skip (pagination)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "description": "Filter by job status."
+          },
+          "batchId": {
+            "type": "string",
+            "description": "Filter by batch ID (from classifyBatch)."
+          },
+          "startDate": {
+            "type": "string",
+            "description": "ISO8601 date range start — jobs created on or after this date (e.g. \"2026-01-01T00:00:00Z\")."
+          },
+          "endDate": {
+            "type": "string",
+            "description": "ISO8601 date range end — jobs created on or before this date (e.g. \"2026-04-04T23:59:59Z\")."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getJob",
+      "description": "Get job metadata for a classification job: status, fileName, duration, eventCount, modelId, reportUrl, location, timestamps. Per-event records are NOT returned — `eventCount` is the total; call `getJobEvents(jobId)` for the per-event records (served as a SAS-URL envelope per ARCH-015). Requires API key (HEAR_API_KEY).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The job ID returned from classifyAudio or classifyBatch."
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getJobEvents",
+      "description": "Get noise events for a completed job — 100 per page, timeline order, no sort. Walk with `offset`; hasMore=false is the last page. Filters (category, tier2, tier3, minConfidence, startTime, endTime, sourceId, taxonomy) apply server-side. matchedTotal is exact when matchedTotalExact=true; otherwise it is a lower bound until hasMore=false. Tier filters (category/tier2/tier3) are exact from page 0 (denormalised summary); other filters become exact on the final page. summary.totalEvents is the unfiltered job total. downloadUrl is a SAS URL to the full events.json blob for SDK one-shot fetch — sandboxed callers (claude.ai connector, web HTTPS MCP) ignore it and walk pages instead. Time window is inclusive overlap, not strict containment. API key required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Job ID from classifyAudio, classifyBatch, or listJobs."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Pagination offset. Each call returns up to 100 events; pass offset=100 for the next page, etc. Walk until hasMore is false."
+          },
+          "taxonomy": {
+            "type": "string",
+            "description": "Filter by taxonomy: audioset-yamnet-521, audioset-panns-527, or species."
+          },
+          "minConfidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Minimum confidence threshold (0.0–1.0). e.g. 0.7 returns only events ≥70% confidence."
+          },
+          "category": {
+            "type": "string",
+            "description": "Filter by tier1 category (e.g. \"Animal\", \"Music\", \"Vehicle\", \"Nature\")."
+          },
+          "tier2": {
+            "type": "string",
+            "description": "Filter by tier2 subcategory (e.g. \"Domestic animals, pets\", \"Wild animals\"). Narrows within a tier1 category."
+          },
+          "tier3": {
+            "type": "string",
+            "description": "Filter by tier3 class (e.g. \"Dog\", \"Cat\", \"Bird\"). Finest supported filter depth — tiers 4-5 exist in the taxonomy but are not filterable."
+          },
+          "startTime": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Only return events overlapping at or after this time in seconds (window is inclusive overlap, not strict containment)."
+          },
+          "endTime": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Only return events overlapping at or before this time in seconds (window is inclusive overlap, not strict containment)."
+          },
+          "sourceId": {
+            "type": "string",
+            "description": "Filter by noise source cluster ID."
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getJobAudio",
+      "description": "Get a time-limited SAS URL for streaming the source audio of a classification job. Returns a 1-hour URL for direct audio playback via HTML5 <audio> element or fetch. The URL supports HTTP Range requests — browsers can seek without downloading the full file. For event-specific playback, append a Media Fragment time range to the URL: audioUrl + \"#t=1.92,5.76\". Returns 200 + audioUrl for both file-uploaded and URL-submitted jobs (URL submissions persist an AppendBlob via appendBlockFromURL). 404 only fires for legacy URL jobs that pre-date URL-marshal. Requires API key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Job ID from classifyAudio, classifyBatch, or listJobs."
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getJobWaveform",
+      "description": "Get pre-computed waveform data and audio URL for a completed classification job. Returns waveformUrl (peaks.js-compatible .dat binary) and audioUrl for synchronized playback. Initialize peaks.js with: Peaks.init({ dataUri: { arraybuffer: waveformUrl }, mediaElement: audioEl }). If waveformUrl is null, use wavesurfer.js with audioUrl instead (decodes via Web Audio API). Zoom controls resolution: 256=high detail, 1024=standard (default), 4096=overview. Both URLs expire in 1 hour. For event navigation, combine with getJobEvents to get startTime values for seeking. Requires API key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Job ID from classifyAudio, classifyBatch, or listJobs."
+          },
+          "zoom": {
+            "type": "number",
+            "enum": [
+              256,
+              1024,
+              4096
+            ],
+            "default": 1024,
+            "description": "Waveform resolution in samples-per-pixel: 256 (high detail), 1024 (default), 4096 (overview)."
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getJobReport",
+      "description": "Get a 7-day SAS URL to download the Excel analysis report for a completed classification job. Returns `{ jobId, reportUrl, expiresIn }`. Returns 409 if the job is still processing, 404 if the report blob is missing. Requires API key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Job ID from classifyAudio, classifyBatch, or listJobs."
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "createWebhook",
+      "description": "Create an enterprise webhook registration for async event delivery (job.completed, job.failed, etc.). Returns webhook details and a signing secret shown ONCE — save it immediately. Supports taxonomy and tier-based notification filtering. Requires API key or Bearer token (enterprise subscription).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "HTTPS webhook URL where events will be POSTed."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event types to subscribe to (e.g. job.completed, job.failed). Defaults to all events if omitted."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Human-readable description for this webhook."
+          },
+          "taxonomyFilter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scope notifications to specific taxonomies (e.g. audioset-yamnet-521, species)."
+          },
+          "notificationTierDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3,
+            "description": "AudioSet tier depth for filtering: 1=coarse (Animal), 2=mid (Domestic animals, pets), 3=fine (Dog). Max depth is 3 — the taxonomy has tiers 4-5 but webhook filtering does not extend beyond tier 3. Must pair with notificationTierValues."
+          },
+          "notificationTierValues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tier labels to match at the specified depth (e.g. [\"Animal\", \"Music\"]). Must pair with notificationTierDepth."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "listWebhooks",
+      "description": "List all enterprise webhook registrations. Shows URL, subscribed events, status, failure count, and notification filter config. Requires API key or Bearer token (enterprise subscription).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "getWebhook",
+      "description": "Get detailed information about a specific enterprise webhook, including delivery stats, notification filters, and status. Requires API key or Bearer token (enterprise subscription).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webhookId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The webhook ID to retrieve."
+          }
+        },
+        "required": [
+          "webhookId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "updateWebhook",
+      "description": "Update an enterprise webhook registration. Change events, URL, status (active/paused), or notification filters. Set status to \"paused\" to temporarily disable without deleting. Requires API key or Bearer token (enterprise subscription).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webhookId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The webhook ID to update."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "New HTTPS webhook URL."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "New event types to subscribe to."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "paused"
+            ],
+            "description": "Set to \"paused\" to disable or \"active\" to re-enable."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Updated description."
+          },
+          "taxonomyFilter": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scope to taxonomies. Pass null to clear filter."
+          },
+          "notificationTierDepth": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "AudioSet tier depth (1=coarse, 2=mid, 3=fine). Max depth is 3 — tiers 4-5 exist in the taxonomy but are not supported for webhook filtering. Pass null to clear. Must pair with notificationTierValues."
+          },
+          "notificationTierValues": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tier labels to match. Pass null to clear. Must pair with notificationTierDepth."
+          }
+        },
+        "required": [
+          "webhookId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deleteWebhook",
+      "description": "Permanently delete an enterprise webhook registration. This action cannot be undone. Requires API key or Bearer token (enterprise subscription).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webhookId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The webhook ID to delete."
+          }
+        },
+        "required": [
+          "webhookId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pingWebhook",
+      "description": "Send a test ping event to an enterprise webhook to verify connectivity. Returns delivery result with response status and timing. Requires API key or Bearer token (enterprise subscription).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webhookId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The webhook ID to ping."
+          }
+        },
+        "required": [
+          "webhookId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "listWebhookDeliveries",
+      "description": "List recent delivery attempts for an enterprise webhook. Shows event type, HTTP response status, success/failure, timing, and attempt count for audit trail. Requires API key or Bearer token (enterprise subscription).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webhookId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The webhook ID to get deliveries for."
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100,
+            "default": 20,
+            "description": "Max deliveries to return (1-100, default 20)."
+          }
+        },
+        "required": [
+          "webhookId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getUploadStatus",
+      "description": "Diagnostic endpoint — returns fine-grained slice-level upload progress for a chunked upload (fileName, totalSlices, slicesUploaded, totalBytes, requestId). Not required for the happy path: classifyAudio returns requestId on the FIRST chunk response, and getJob(requestId) reflects the upload → processing → completed lifecycle. State lives in the MCP server process — if the process restarted since the upload started, the session will not be found.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uploadSessionId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The uploadSessionId returned by classifyAudio for large files."
+          }
+        },
+        "required": [
+          "uploadSessionId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

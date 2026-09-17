@@ -1,0 +1,2265 @@
+{
+  "package": "@hanna84/mcp-writing",
+  "tools": [
+    {
+      "name": "describe_workflows",
+      "description": "Return the default workflow map and current project context for this server. Call this first in most sessions and again whenever you are unsure what to do next. Never write scripts to invoke tools — call them directly.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "sync",
+      "description": "Re-scan the sync folder and update the scene/character/place index from disk. Call this after making edits in Scrivener or updating sidecar files outside the MCP.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "diagnose_structure",
+      "description": "Run read-only structure diagnostics against the current index and sync files. Reports canonical drift, ambiguous folder-derived structure, unknown chapter links, epigraph conflicts, and compatibility chapter mismatches without repairing files or mutating the database.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "description": "Optional project ID to limit diagnostics to one project.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "import_scrivener_sync",
+      "description": "[STABLE] Import Scrivener External Folder Sync Draft files into this server's WRITING_SYNC_DIR by generating scene sidecars and reconciling by Scrivener binder ID. This is the recommended default path for first-time setup before sync().",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "source_dir": {
+            "type": "string",
+            "description": "Path to Scrivener external sync folder (the folder that contains Draft/, or Draft/ itself)."
+          },
+          "project_id": {
+            "description": "Project ID override (e.g. 'the-lamb'). Defaults to a slug derived from WRITING_SYNC_DIR.",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "If true, reports planned writes without changing files.",
+            "type": "boolean"
+          },
+          "auto_sync": {
+            "description": "If true (default), runs sync() after import when not dry-run.",
+            "type": "boolean"
+          },
+          "preflight": {
+            "description": "If true, returns a list of files that would be processed without doing any work. Use to verify scope before a large import.",
+            "type": "boolean"
+          },
+          "ignore_patterns": {
+            "description": "Array of regex patterns matched against filenames. Files matching any pattern are excluded from import. Useful to skip fragments, beat-sheet notes, or feedback files.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "source_dir"
+        ]
+      }
+    },
+    {
+      "name": "import_scrivener_sync_async",
+      "description": "[STABLE] Start an asynchronous Scrivener External Folder Sync import job. This is the recommended default import path when the sync tree is large. Returns immediately with a job_id to poll via get_async_job_status.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "source_dir": {
+            "type": "string",
+            "description": "Path to Scrivener external sync folder (the folder that contains Draft/, or Draft/ itself)."
+          },
+          "project_id": {
+            "description": "Project ID override (e.g. 'the-lamb' or 'universe-1/book-1-the-lamb').",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "If true, reports planned writes without changing files.",
+            "type": "boolean"
+          },
+          "auto_sync": {
+            "description": "If true, runs sync() after a non-dry-run async import finishes.",
+            "type": "boolean"
+          },
+          "preflight": {
+            "description": "If true, returns a list of files that would be processed without doing any work.",
+            "type": "boolean"
+          },
+          "ignore_patterns": {
+            "description": "Array of regex patterns matched against filenames. Files matching any pattern are excluded from import.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "source_dir"
+        ]
+      }
+    },
+    {
+      "name": "merge_scrivener_project_beta",
+      "description": "Merge metadata directly from a Scrivener .scriv project into existing scene sidecars by starting a background job. This path is opt-in and requires sidecars to already exist (for example, from import_scrivener_sync). Returns immediately with a job_id to poll via get_async_job_status.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "source_project_dir": {
+            "type": "string",
+            "description": "Path to a Scrivener .scriv bundle directory."
+          },
+          "project_id": {
+            "description": "Project ID containing existing sidecars (e.g. 'the-lamb' or 'universe-1/book-1-the-lamb').",
+            "type": "string"
+          },
+          "scenes_dir": {
+            "description": "Absolute path to the scenes directory containing .meta.yaml sidecars. Overrides the path derived from project_id.",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "If true (default), reports planned merges without writing files.",
+            "type": "boolean"
+          },
+          "auto_sync": {
+            "description": "If true, runs sync() after a non-dry-run async merge finishes.",
+            "type": "boolean"
+          },
+          "organize_by_chapters": {
+            "description": "If true (default false), relocate scene files into chapter-based folder hierarchies. Chapter metadata is always extracted to sidecars.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_project_dir"
+        ]
+      }
+    },
+    {
+      "name": "enrich_scene_characters_batch",
+      "description": "Start an asynchronous batch job that infers scene character mentions and updates scene metadata links. Version 1 uses canonical character names only (no aliases). Defaults to dry_run=true.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID (e.g. 'the-lamb' or 'universe-1/book-1-the-lamb')."
+          },
+          "scene_ids": {
+            "description": "Optional allowlist of scene IDs to process before other filters are applied.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "part": {
+            "description": "Optional part number filter.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter": {
+            "description": "Optional compatibility chapter number resolved through canonical chapter identity.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter_id": {
+            "description": "Optional canonical chapter identifier.",
+            "type": "string"
+          },
+          "only_stale": {
+            "description": "If true, only process scenes currently marked metadata_stale.",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "description": "If true (default), returns preview results without writing sidecars.",
+            "type": "boolean"
+          },
+          "replace_mode": {
+            "description": "merge (default): add inferred IDs; replace: overwrite characters with inferred IDs.",
+            "type": "string",
+            "enum": [
+              "merge",
+              "replace"
+            ]
+          },
+          "max_scenes": {
+            "description": "Hard guardrail for resolved scene count (default: 200).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "include_match_details": {
+            "description": "If true, include extra match diagnostics per scene.",
+            "type": "boolean"
+          },
+          "confirm_replace": {
+            "description": "Must be true when replace_mode=replace.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project_id"
+        ]
+      }
+    },
+    {
+      "name": "get_async_job_status",
+      "description": "Get status and result for an asynchronous job started by async tools such as import_scrivener_sync_async, merge_scrivener_project_beta, or enrich_scene_characters_batch. Use this to poll job progress after receiving a job_id. Common next step: if status is still running, call this tool again; if status is completed inspect result, and if status is failed or cancelled inspect job/result diagnostics.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Job ID returned by an async start tool."
+          },
+          "include_result": {
+            "description": "If true (default), includes completed result payload when available.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      }
+    },
+    {
+      "name": "list_async_jobs",
+      "description": "List asynchronous jobs currently known to this server. Use this when you lost a job_id or need a dashboard view of running/completed jobs. Returns an object envelope containing a jobs array of job objects sorted by newest first.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "include_results": {
+            "description": "If true, includes completed result payloads.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel_async_job",
+      "description": "Cancel a running asynchronous job. Use this when an import/merge/batch run was started with overly broad scope or is no longer needed. Returns the updated job state; cancellation is cooperative and may transition through 'cancelling' before 'cancelled'.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Job ID returned by an async start tool."
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      }
+    },
+    {
+      "name": "enrich_scene",
+      "description": "Re-derive lightweight scene metadata from current prose (logline and character mentions) and clear metadata_stale for that scene. Only available when the sync dir is writable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "Scene to enrich (e.g. 'sc-011-sebastian')."
+          },
+          "project_id": {
+            "description": "Project ID. Required when scene_id is duplicated across projects.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scene_id"
+        ]
+      }
+    },
+    {
+      "name": "find_scenes",
+      "description": "Find scenes by filtering on character, Save the Cat beat, tags, chapter identity, numeric compatibility chapter, or POV. Returns ordered scene metadata only — no prose. Most filters are optional and combinable. `chapter_id` requires `project_id`, and mixed `chapter_id`/`chapter` filters must resolve to the same canonical chapter. Supports pagination via page/page_size and auto-paginates large result sets with total_count. Warns if any matching scenes have stale metadata. Response shape note: always returns a structured envelope (`results`, `total_count`, with pagination fields when paging is active).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "description": "Project ID (e.g. 'the-lamb'). Use to scope results to one project.",
+            "type": "string"
+          },
+          "character": {
+            "description": "A character_id (e.g. 'char-mira-nystrom'). Returns only scenes that character appears in. Use list_characters first to find valid IDs.",
+            "type": "string"
+          },
+          "beat": {
+            "description": "Save the Cat beat name (e.g. 'Opening Image'). Exact match.",
+            "type": "string"
+          },
+          "tag": {
+            "description": "Scene tag to filter by. Exact match.",
+            "type": "string"
+          },
+          "part": {
+            "description": "Part number (integer, e.g. 1). Chapters are numbered globally across the whole project.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter": {
+            "description": "Compatibility chapter number resolved from canonical chapter sort order.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter_id": {
+            "description": "Canonical chapter identifier. Requires project_id. Use list_chapters to find valid values.",
+            "type": "string"
+          },
+          "pov": {
+            "description": "POV character_id. Use list_characters first to find valid IDs.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Optional page number for paginated responses (1-based).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "page_size": {
+            "description": "Optional page size for paginated responses (default: 20, max: 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      }
+    },
+    {
+      "name": "get_scene_prose",
+      "description": "Load the full prose text of a single scene. Use this for close reading, continuity checks, or when you need the actual writing. For overview or filtering, use find_scenes instead — it is much cheaper. Optionally retrieve a past version from git history. If scene IDs are reused across projects, omitting project_id returns CONFLICT with candidate project_ids.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "The scene_id to retrieve (e.g. 'sc-001-prologue'). Get this from find_scenes or get_arc."
+          },
+          "project_id": {
+            "description": "Optional project ID to disambiguate duplicate scene IDs across projects.",
+            "type": "string"
+          },
+          "commit": {
+            "description": "Optional git commit hash to retrieve a past version. Use list_snapshots to find valid hashes. If omitted, returns the current prose.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scene_id"
+        ]
+      }
+    },
+    {
+      "name": "get_chapter_prose",
+      "description": "Load the full prose for every scene in a chapter, concatenated in order. Provide chapter_id or chapter, plus project_id. Canonical targeting uses chapter_id; numeric chapter remains available as a compatibility alias resolved from canonical sort order. Expensive — only use when you need to read an entire chapter. Capped at 10 scenes. Use find_scenes first to confirm the chapter exists.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID (e.g. 'the-lamb')."
+          },
+          "chapter_id": {
+            "description": "Canonical chapter identifier.",
+            "type": "string"
+          },
+          "chapter": {
+            "description": "Compatibility chapter number resolved from canonical sort order.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "project_id"
+        ]
+      }
+    },
+    {
+      "name": "list_chapters",
+      "description": "List canonical chapters for a project. Returns chapter_id plus compatibility sort order so callers can migrate from numeric chapter targeting without losing orientation.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID."
+          }
+        },
+        "required": [
+          "project_id"
+        ]
+      }
+    },
+    {
+      "name": "find_epigraphs",
+      "description": "List canonical epigraphs for a project, optionally narrowed to a canonical chapter_id or compatibility chapter number.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID."
+          },
+          "chapter_id": {
+            "description": "Canonical chapter identifier.",
+            "type": "string"
+          },
+          "chapter": {
+            "description": "Compatibility chapter number resolved from canonical sort order.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "project_id"
+        ]
+      }
+    },
+    {
+      "name": "get_arc",
+      "description": "Get every scene a character appears in, ordered by part/chapter/position. Returns scene metadata only — no prose. Use this as the primary structural entry point when the question is about a character's progression through the manuscript. Supports pagination via page/page_size and auto-paginates large result sets with total_count. Use list_characters only when you need help finding a character_id. Response shape note: always returns a structured envelope (`results`, `total_count`, with pagination fields when paging is active).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "character_id": {
+            "type": "string",
+            "description": "The character_id to trace (e.g. 'char-mira-nystrom'). Use list_characters to find valid IDs."
+          },
+          "project_id": {
+            "description": "Limit to a specific project (e.g. 'the-lamb').",
+            "type": "string"
+          },
+          "page": {
+            "description": "Optional page number for paginated responses (1-based).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "page_size": {
+            "description": "Optional page size for paginated responses (default: 20, max: 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "character_id"
+        ]
+      }
+    },
+    {
+      "name": "list_characters",
+      "description": "List indexed characters with their character_id, name, role, and arc_summary. Use this mainly as a lookup and disambiguation helper when you need to find a character_id for a broader reasoning task. Response shape note: returns a structured envelope (`results`, `total_count`).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "description": "Limit to a specific project (e.g. 'the-lamb').",
+            "type": "string"
+          },
+          "universe_id": {
+            "description": "Limit to a specific universe (if using cross-project world-building).",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_character_sheet",
+      "description": "Get full character details: role, arc_summary, traits, the canonical sheet content, and any adjacent support notes when the character uses a folder-based layout. Use this when the reasoning task needs the character's canonical profile rather than only their scene progression. Response shape note: returns a structured envelope (`results`, `total_count`) with one result row.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "character_id": {
+            "type": "string",
+            "description": "The character_id to look up (e.g. 'char-sebastian'). Use list_characters to find valid IDs."
+          }
+        },
+        "required": [
+          "character_id"
+        ]
+      }
+    },
+    {
+      "name": "list_places",
+      "description": "List indexed places with their place_id and name. Use this mainly as a lookup and disambiguation helper when place context becomes relevant to the current reasoning task. Response shape note: returns a structured envelope (`results`, `total_count`).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "description": "Limit to a specific project (e.g. 'the-lamb').",
+            "type": "string"
+          },
+          "universe_id": {
+            "description": "Limit to a specific universe.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_place_sheet",
+      "description": "Get full place details: associated_characters, tags, the canonical sheet content, and any adjacent support notes when the place uses a folder-based layout. Use this when the current scene or question makes the place itself materially relevant. Response shape note: returns a structured envelope (`results`, `total_count`) with one result row.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "place_id": {
+            "type": "string",
+            "description": "The place_id to look up (e.g. 'place-harbor-district'). Use list_places to find valid IDs."
+          }
+        },
+        "required": [
+          "place_id"
+        ]
+      }
+    },
+    {
+      "name": "search_metadata",
+      "description": "Full-text search across scene titles, loglines (synopsis/logline text fields), and metadata keywords (tags/characters/places/versions). Use this when you don't know the exact scene_id or chapter but want to find scenes by topic, theme, or metadata keyword. Not a prose search — use get_scene_prose to read actual text. Supports pagination via page/page_size and auto-paginates large result sets with total_count.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search terms (e.g. 'hospital' or 'Sebastian feeding'). FTS5 syntax supported."
+          },
+          "page": {
+            "description": "Optional page number for paginated responses (1-based).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "page_size": {
+            "description": "Optional page size for paginated responses (default: 20, max: 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "search_reference",
+      "description": "Full-text search across indexed reference document titles, summaries, and tags. Use this to discover world-building notes, continuity references, research docs, and other reference material without loading full file contents. Response shape note: returns a structured envelope (`results`, `total_count`).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search terms (e.g. 'vampirism' or 'blood replacement'). FTS5 syntax supported."
+          },
+          "type": {
+            "description": "Optional reference type filter (for example: 'world', 'continuity', 'research', 'style').",
+            "type": "string"
+          },
+          "tag": {
+            "description": "Optional exact tag filter.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "list_scene_references",
+      "description": "List direct reference documents linked from a scene via metadata (for example, reference_ids). Returns only one-hop scene -> reference links and does not recursively traverse related references. If scene IDs are reused across projects, omitting project_id returns CONFLICT with candidate project_ids. Response shape note: returns a structured envelope (`results`, `total_count`) plus the resolved `scene_id` and `project_id` context.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "Scene ID to inspect."
+          },
+          "project_id": {
+            "description": "Optional project ID to disambiguate duplicate scene IDs across projects.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scene_id"
+        ]
+      }
+    },
+    {
+      "name": "get_reference_doc",
+      "description": "Get metadata for a reference document by doc_id. Optionally includes exactly one hop of related reference docs.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "description": "Reference document ID."
+          },
+          "include_related": {
+            "description": "If true, include one-hop related reference docs.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "doc_id"
+        ]
+      }
+    },
+    {
+      "name": "list_threads",
+      "description": "List subplot/storyline threads for a project. Returns a structured JSON envelope with results and total_count. Use this mainly as a lookup and disambiguation helper before deeper thread reasoning with get_thread_arc. Supports pagination via page/page_size.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID."
+          },
+          "page": {
+            "description": "Optional page number for paginated responses (1-based).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "page_size": {
+            "description": "Optional page size for paginated responses (default: 20, max: 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "project_id"
+        ]
+      }
+    },
+    {
+      "name": "get_thread_arc",
+      "description": "Get ordered scene metadata for all scenes belonging to a thread, including the per-thread beat. Returns a structured JSON envelope with thread metadata, results, and total_count. Use this when the question is about subplot movement, continuity, or recurring storyline structure across scenes. Supports pagination via page/page_size.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "description": "Thread ID."
+          },
+          "page": {
+            "description": "Optional page number for paginated responses (1-based).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "page_size": {
+            "description": "Optional page size for paginated responses (default: 20, max: 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "thread_id"
+        ]
+      }
+    },
+    {
+      "name": "get_relationship_arc",
+      "description": "Show how the relationship between two characters evolves across scenes, in order. Uses explicitly recorded relationship entries — returns a NO_RESULTS error if no entries exist yet. Use list_characters to get character_id values. Response shape note: returns a structured envelope { results, total_count, from_character, to_character }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "from_character": {
+            "type": "string",
+            "description": "character_id of the first character (e.g. 'char-sebastian')."
+          },
+          "to_character": {
+            "type": "string",
+            "description": "character_id of the second character (e.g. 'char-mira-nystrom')."
+          },
+          "project_id": {
+            "description": "Limit to a specific project (e.g. 'the-lamb').",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_character",
+          "to_character"
+        ]
+      }
+    },
+    {
+      "name": "suggest_scene_references",
+      "description": "Suggest reference documents for a scene by aggregating links from the scene's characters and places. Returns weighted candidates ranked by how many entities in the scene link to each reference. Excludes any explicit scene → reference links already present. In apply mode, can persist selected suggestions as explicit scene links in one call.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "Scene ID (e.g. 'sc-011-sebastian')."
+          },
+          "project_id": {
+            "description": "Optional project scope to disambiguate an ambiguous scene_id across projects.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Use 'preview' (default) to list candidates only, or 'apply' to persist selected suggestions as explicit scene links.",
+            "type": "string",
+            "enum": [
+              "preview",
+              "apply"
+            ]
+          },
+          "selected_doc_ids": {
+            "description": "Optional allowlist of doc_ids to apply when mode='apply'. If omitted, applies top-ranked candidates.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_apply": {
+            "description": "Optional cap for how many candidates to apply when mode='apply'.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "min_score": {
+            "description": "Optional minimum candidate score. Candidates below this are excluded from preview/apply. Defaults to 1.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "scene_id"
+        ]
+      }
+    },
+    {
+      "name": "create_character_sheet",
+      "description": "Create or reuse a canonical character sheet folder with sheet.md and sheet.meta.yaml so the character can be indexed immediately. If the folder already exists, missing canonical files are backfilled and the existing sheet is preserved.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name of the character (e.g. 'Mira Nystrom')."
+          },
+          "project_id": {
+            "description": "Project scope for a book-local character (e.g. 'universe-1/book-1-the-lamb' or 'test-novel').",
+            "type": "string"
+          },
+          "universe_id": {
+            "description": "Universe scope for a cross-book shared character (e.g. 'universe-1').",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Optional starter prose content for sheet.md.",
+            "type": "string"
+          },
+          "fields": {
+            "description": "Optional starter metadata fields for the character sidecar.",
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "arc_summary": {
+                "type": "string"
+              },
+              "first_appearance": {
+                "type": "string"
+              },
+              "traits": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "create_place_sheet",
+      "description": "Create or reuse a canonical place sheet folder with sheet.md and sheet.meta.yaml so the place can be indexed immediately. If the folder already exists, missing canonical files are backfilled and the existing sheet is preserved.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name of the place (e.g. 'University Hospital')."
+          },
+          "project_id": {
+            "description": "Project scope for a book-local place (e.g. 'universe-1/book-1-the-lamb' or 'test-novel').",
+            "type": "string"
+          },
+          "universe_id": {
+            "description": "Universe scope for a cross-book shared place (e.g. 'universe-1').",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Optional starter prose content for sheet.md.",
+            "type": "string"
+          },
+          "fields": {
+            "description": "Optional starter metadata fields for the place sidecar.",
+            "type": "object",
+            "properties": {
+              "associated_characters": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "upsert_thread_link",
+      "description": "Create or update a thread and link it to a scene. Idempotent: if the link already exists, updates its beat. Only available when the sync dir is writable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project the thread belongs to (e.g. 'the-lamb')."
+          },
+          "thread_id": {
+            "type": "string",
+            "description": "Thread ID (e.g. 'thread-reconciliation')."
+          },
+          "thread_name": {
+            "type": "string",
+            "description": "Thread display name."
+          },
+          "scene_id": {
+            "type": "string",
+            "description": "Scene to link to the thread (e.g. 'sc-011-sebastian')."
+          },
+          "beat": {
+            "description": "Optional thread-specific beat label for this scene.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Thread status (e.g. 'active', 'resolved'). Defaults to 'active'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "thread_id",
+          "thread_name",
+          "scene_id"
+        ]
+      }
+    },
+    {
+      "name": "upsert_reference_link",
+      "description": "Create or update an explicit reference link from a scene, character, place, or reference doc to a target reference doc. If a link already exists between the same source and target, this updates the relation. Only available when the sync dir is writable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "source_kind": {
+            "type": "string",
+            "enum": [
+              "scene",
+              "character",
+              "place",
+              "reference"
+            ],
+            "description": "Link source kind."
+          },
+          "source_id": {
+            "type": "string",
+            "description": "Source scene_id, character_id, place_id, or reference doc_id."
+          },
+          "source_project_id": {
+            "description": "Optional project scope for the source. For scene/character/place sources, use this to disambiguate an ambiguous source_id across projects. For reference sources, when provided, it is treated as an ownership check and must match the source reference doc's project.",
+            "type": "string"
+          },
+          "target_doc_id": {
+            "type": "string",
+            "description": "Target reference doc_id."
+          },
+          "relation": {
+            "type": "string",
+            "description": "Relationship label (for example: 'informs', 'related', 'history_of'). The value is trimmed and lowercased before validation."
+          }
+        },
+        "required": [
+          "source_kind",
+          "source_id",
+          "target_doc_id",
+          "relation"
+        ]
+      }
+    },
+    {
+      "name": "assign_scene_to_chapter",
+      "description": "Assign a scene to a canonical chapter through the explicit structure workflow. Writes chapter_id plus compatibility chapter/chapter_title fields to the scene sidecar and refreshes the index. Pass chapter_id=null to clear an explicit chapter link on an unchaptered scene. Use list_chapters first to choose a valid canonical chapter_id.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "The scene_id to assign (e.g. 'sc-011-sebastian')."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Project the scene belongs to (e.g. 'the-lamb')."
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical chapter identifier. Use list_chapters to find valid values. Pass null to clear an explicit chapter link on an unchaptered scene."
+          }
+        },
+        "required": [
+          "scene_id",
+          "project_id",
+          "chapter_id"
+        ]
+      }
+    },
+    {
+      "name": "update_scene_metadata",
+      "description": "Update one or more metadata fields for a scene. Writes to the .meta.yaml sidecar — never modifies prose. Changes are immediately reflected in the index. Only available when the sync dir is writable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "The scene_id to update (e.g. 'sc-011-sebastian')."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Project the scene belongs to (e.g. 'the-lamb')."
+          },
+          "fields": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "logline": {
+                "type": "string"
+              },
+              "status": {
+                "description": "Workflow status (e.g. 'draft', 'revision', 'complete'). Free text — no fixed vocabulary.",
+                "type": "string"
+              },
+              "save_the_cat_beat": {
+                "type": "string"
+              },
+              "pov": {
+                "type": "string"
+              },
+              "part": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "chapter": {
+                "description": "Compatibility chapter number. When it resolves to a canonical chapter, update_scene_metadata also persists the matching chapter_id.",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "chapter_id": {
+                "description": "Canonical chapter identifier. Use list_chapters to find valid values. Pass null to clear an explicit chapter link on an unchaptered scene.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "timeline_position": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "story_time": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "characters": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "places": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Fields to update. Only supplied keys are changed."
+          }
+        },
+        "required": [
+          "scene_id",
+          "project_id",
+          "fields"
+        ]
+      }
+    },
+    {
+      "name": "update_character_sheet",
+      "description": "Update structured metadata fields for a character (role, arc_summary, traits, etc). Writes to the .meta.yaml sidecar — never modifies the prose notes file. Changes are immediately reflected in the index. Only available when the sync dir is writable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "character_id": {
+            "type": "string",
+            "description": "The character_id to update (e.g. 'char-mira-nystrom'). Use list_characters to find valid IDs."
+          },
+          "fields": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "arc_summary": {
+                "type": "string"
+              },
+              "first_appearance": {
+                "type": "string"
+              },
+              "traits": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Fields to update. Only supplied keys are changed."
+          }
+        },
+        "required": [
+          "character_id",
+          "fields"
+        ]
+      }
+    },
+    {
+      "name": "update_place_sheet",
+      "description": "Update structured metadata fields for a place (name, associated_characters, tags). Writes to the .meta.yaml sidecar — never modifies the prose notes file. Changes are immediately reflected in the index. Only available when the sync dir is writable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "place_id": {
+            "type": "string",
+            "description": "The place_id to update (e.g. 'place-harbor-district'). Use list_places to find valid IDs."
+          },
+          "fields": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "associated_characters": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Fields to update. Only supplied keys are changed."
+          }
+        },
+        "required": [
+          "place_id",
+          "fields"
+        ]
+      }
+    },
+    {
+      "name": "flag_scene",
+      "description": "Attach a continuity or review note to a scene. Flags are appended to the sidecar file and accumulate over time — they are never overwritten. Use this to record continuity problems, revision notes, or questions you want to revisit.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "The scene_id to flag (e.g. 'sc-012-open-to-anyone')."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Project the scene belongs to (e.g. 'the-lamb')."
+          },
+          "note": {
+            "type": "string",
+            "description": "The flag note (e.g. 'Victor knows Mira’s name here, but they haven’t been introduced yet — contradicts sc-006')."
+          }
+        },
+        "required": [
+          "scene_id",
+          "project_id",
+          "note"
+        ]
+      }
+    },
+    {
+      "name": "preview_review_bundle",
+      "description": "Dry-run planning tool for review bundles. Resolves scene scope, deterministic ordering, warnings, and planned output filenames without writing files. Rendering options are accepted for API consistency and reflected in resolved_scope.options, but do not change planning output.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to scope the review bundle (e.g. 'test-novel')."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "outline_discussion",
+              "editor_detailed",
+              "beta_reader_personalized"
+            ],
+            "description": "Bundle profile: outline_discussion, editor_detailed, or beta_reader_personalized."
+          },
+          "part": {
+            "description": "Optional part filter.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter": {
+            "description": "Optional compatibility chapter number resolved through canonical chapter identity.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter_id": {
+            "description": "Optional canonical chapter identifier.",
+            "type": "string"
+          },
+          "chapters": {
+            "description": "Optional compatibility chapter-set filter resolved through canonical chapter identities. Use this for one/few specific chapters. Do not combine with chapter or chapter_id.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "tag": {
+            "description": "Optional tag filter (exact match).",
+            "type": "string"
+          },
+          "scene_ids": {
+            "description": "Optional explicit scene_id allowlist. Intersects with other filters.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "strictness": {
+            "description": "Strictness mode: warn (default) or fail.",
+            "type": "string",
+            "enum": [
+              "warn",
+              "fail"
+            ]
+          },
+          "include_scene_ids": {
+            "description": "Rendering option (default true for editor_detailed; false for outline_discussion). beta_reader_personalized always resolves this to false, even when true is passed. Echoed in resolved_scope.options for downstream rendering; does not change planning results.",
+            "type": "boolean"
+          },
+          "include_metadata_sidebar": {
+            "description": "Rendering option (default false). Echoed in resolved_scope.options for downstream rendering; does not change planning results.",
+            "type": "boolean"
+          },
+          "include_paragraph_anchors": {
+            "description": "Rendering option (default false). Echoed in resolved_scope.options for downstream rendering; does not change planning results.",
+            "type": "boolean"
+          },
+          "recipient_name": {
+            "description": "Optional recipient display name for beta_reader_personalized profile.",
+            "type": "string"
+          },
+          "beta_accountability": {
+            "description": "Enable accountability footer + fingerprint metadata for beta_reader_personalized output (default true for beta profile).",
+            "type": "boolean"
+          },
+          "bundle_name": {
+            "description": "Optional output bundle base name override (slugified in planned outputs).",
+            "type": "string"
+          },
+          "bundle_title": {
+            "description": "Optional book or document title for the cover page (outline_discussion PDF only).",
+            "type": "string"
+          },
+          "author_name": {
+            "description": "Optional author name for the cover page (outline_discussion PDF only).",
+            "type": "string"
+          },
+          "format": {
+            "description": "Planned output format: pdf (default), markdown, or both. Affects planned_outputs filenames only; preview_review_bundle does not render artifacts.",
+            "type": "string",
+            "enum": [
+              "pdf",
+              "markdown",
+              "both"
+            ]
+          }
+        },
+        "required": [
+          "project_id",
+          "profile"
+        ]
+      }
+    },
+    {
+      "name": "create_review_bundle",
+      "description": "Generate review bundle artifacts (PDF/markdown) from planned scene scope. Writes files only under output_dir and returns manifest/provenance details.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to scope the review bundle (e.g. 'test-novel')."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "outline_discussion",
+              "editor_detailed",
+              "beta_reader_personalized"
+            ],
+            "description": "Bundle profile: outline_discussion, editor_detailed, or beta_reader_personalized."
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "Directory path to write bundle artifacts into."
+          },
+          "part": {
+            "description": "Optional part filter.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter": {
+            "description": "Optional compatibility chapter number resolved through canonical chapter identity.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter_id": {
+            "description": "Optional canonical chapter identifier.",
+            "type": "string"
+          },
+          "chapters": {
+            "description": "Optional compatibility chapter-set filter resolved through canonical chapter identities. Use this for one/few specific chapters. Do not combine with chapter or chapter_id.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "tag": {
+            "description": "Optional tag filter (exact match).",
+            "type": "string"
+          },
+          "scene_ids": {
+            "description": "Optional explicit scene_id allowlist. Intersects with other filters.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "strictness": {
+            "description": "Strictness mode: warn (default) or fail.",
+            "type": "string",
+            "enum": [
+              "warn",
+              "fail"
+            ]
+          },
+          "include_scene_ids": {
+            "description": "Include scene IDs in headings (default true for editor_detailed; false for outline_discussion). beta_reader_personalized always resolves this to false, even when true is passed. Applies to both PDF and markdown.",
+            "type": "boolean"
+          },
+          "include_metadata_sidebar": {
+            "description": "Include metadata sidebar in markdown output (default false). Markdown only — no effect on PDF.",
+            "type": "boolean"
+          },
+          "include_paragraph_anchors": {
+            "description": "Include paragraph anchors in markdown output (default false). Markdown only — no effect on PDF.",
+            "type": "boolean"
+          },
+          "recipient_name": {
+            "description": "Optional recipient display name for beta_reader_personalized profile.",
+            "type": "string"
+          },
+          "beta_accountability": {
+            "description": "Enable accountability footer + fingerprint metadata for beta_reader_personalized output (default true for beta profile).",
+            "type": "boolean"
+          },
+          "bundle_name": {
+            "description": "Optional output bundle base name override (slugified in filenames).",
+            "type": "string"
+          },
+          "bundle_title": {
+            "description": "Optional book or document title for the cover page (outline_discussion PDF only).",
+            "type": "string"
+          },
+          "author_name": {
+            "description": "Optional author name for the cover page (outline_discussion PDF only).",
+            "type": "string"
+          },
+          "source_commit": {
+            "description": "Optional explicit source commit for provenance. Defaults to current HEAD when available.",
+            "type": "string"
+          },
+          "format": {
+            "description": "Output format: pdf (default), markdown, or both.",
+            "type": "string",
+            "enum": [
+              "pdf",
+              "markdown",
+              "both"
+            ]
+          }
+        },
+        "required": [
+          "project_id",
+          "profile",
+          "output_dir"
+        ]
+      }
+    },
+    {
+      "name": "setup_prose_styleguide_config",
+      "description": "Create prose-styleguide.config.yaml at sync root or project root using language defaults plus optional explicit overrides.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scope": {
+            "description": "Config write target scope. Defaults to project_root when project_id is supplied, otherwise sync_root.",
+            "type": "string",
+            "enum": [
+              "sync_root",
+              "project_root"
+            ]
+          },
+          "project_id": {
+            "description": "Project ID when writing project_root config (e.g. 'the-lamb' or 'universe-1/book-1').",
+            "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "english_us",
+              "english_uk",
+              "english_au",
+              "english_ca",
+              "swedish",
+              "norwegian",
+              "danish",
+              "finnish",
+              "french",
+              "italian",
+              "russian",
+              "portuguese_pt",
+              "portuguese_br",
+              "german",
+              "dutch",
+              "polish",
+              "czech",
+              "hungarian",
+              "spanish",
+              "irish",
+              "japanese",
+              "korean",
+              "chinese_traditional",
+              "chinese_simplified"
+            ],
+            "description": "Primary writing language. Seeds language-specific defaults."
+          },
+          "overrides": {
+            "description": "Optional overrides layered on top of language defaults.",
+            "type": "object",
+            "properties": {
+              "spelling": {
+                "type": "string",
+                "enum": [
+                  "uk",
+                  "us",
+                  "au",
+                  "ca"
+                ]
+              },
+              "quotation_style": {
+                "type": "string",
+                "enum": [
+                  "double",
+                  "single",
+                  "guillemets",
+                  "low9",
+                  "dialogue_dash_en",
+                  "dialogue_dash_em",
+                  "corner_brackets"
+                ]
+              },
+              "quotation_style_nested": {
+                "type": "string",
+                "enum": [
+                  "double",
+                  "single",
+                  "guillemets_single",
+                  "low9_single",
+                  "corner_brackets_double"
+                ]
+              },
+              "em_dash_spacing": {
+                "type": "string",
+                "enum": [
+                  "closed",
+                  "spaced"
+                ]
+              },
+              "ellipsis_style": {
+                "type": "string",
+                "enum": [
+                  "three_periods",
+                  "ellipsis_char",
+                  "spaced"
+                ]
+              },
+              "abbreviation_periods": {
+                "type": "string",
+                "enum": [
+                  "with",
+                  "without"
+                ]
+              },
+              "oxford_comma": {
+                "type": "string",
+                "enum": [
+                  "yes",
+                  "no"
+                ]
+              },
+              "numbers": {
+                "type": "string",
+                "enum": [
+                  "spell_under_10",
+                  "spell_under_100",
+                  "always_spell",
+                  "numerals"
+                ]
+              },
+              "date_format": {
+                "type": "string",
+                "enum": [
+                  "mdy",
+                  "dmy"
+                ]
+              },
+              "time_format": {
+                "type": "string",
+                "enum": [
+                  "12h",
+                  "24h"
+                ]
+              },
+              "tense": {
+                "type": "string"
+              },
+              "pov": {
+                "type": "string",
+                "enum": [
+                  "first",
+                  "third_limited",
+                  "third_omniscient"
+                ]
+              },
+              "dialogue_tags": {
+                "type": "string",
+                "enum": [
+                  "minimal",
+                  "expressive"
+                ]
+              },
+              "sentence_fragments": {
+                "type": "string",
+                "enum": [
+                  "disallow",
+                  "intentional"
+                ]
+              }
+            }
+          },
+          "voice_notes": {
+            "description": "Optional freeform voice notes to include in config.",
+            "type": "string"
+          },
+          "overwrite": {
+            "description": "If true, replaces an existing config file at the target location.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "language"
+        ]
+      }
+    },
+    {
+      "name": "get_prose_styleguide_config",
+      "description": "Resolve prose-styleguide.config.yaml with cascading precedence (sync root, then universe root, then project root). Applies language-derived defaults and nested quotation defaults when omitted.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "description": "Optional project ID for project-scoped resolution (e.g. 'the-lamb' or 'universe-1/book-1').",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "summarize_prose_styleguide_config",
+      "description": "Summarize the currently resolved prose styleguide config in plain language for review or confirmation.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "description": "Optional project ID for project-scoped resolution (e.g. 'the-lamb' or 'universe-1/book-1').",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "bootstrap_prose_styleguide_config",
+      "description": "Detect dominant prose conventions from existing scenes and suggest initial prose-styleguide config values.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to analyze (e.g. 'the-lamb' or 'universe-1/book-1')."
+          },
+          "scene_ids": {
+            "description": "Optional scene_id allowlist to analyze.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "part": {
+            "description": "Optional part filter.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter": {
+            "description": "Optional compatibility chapter number resolved through canonical chapter identity.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter_id": {
+            "description": "Optional canonical chapter identifier.",
+            "type": "string"
+          },
+          "max_scenes": {
+            "description": "Maximum number of scenes to analyze (default: 50).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "min_agreement": {
+            "description": "Minimum agreement ratio for suggested fields (default: 0.6).",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "min_evidence": {
+            "description": "Minimum number of observed scenes per field before suggesting it (default: 3).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "include_scene_signals": {
+            "description": "If true, include per-scene detected signals in the response.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project_id"
+        ]
+      }
+    },
+    {
+      "name": "update_prose_styleguide_config",
+      "description": "Update an existing prose-styleguide.config.yaml at sync-root or project-root scope by writing only explicit field changes.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "sync_root",
+              "project_root"
+            ],
+            "description": "Config scope to update."
+          },
+          "project_id": {
+            "description": "Project ID when updating project_root config (e.g. 'the-lamb' or 'universe-1/book-1').",
+            "type": "string"
+          },
+          "updates": {
+            "type": "object",
+            "properties": {
+              "language": {
+                "type": "string",
+                "enum": [
+                  "english_us",
+                  "english_uk",
+                  "english_au",
+                  "english_ca",
+                  "swedish",
+                  "norwegian",
+                  "danish",
+                  "finnish",
+                  "french",
+                  "italian",
+                  "russian",
+                  "portuguese_pt",
+                  "portuguese_br",
+                  "german",
+                  "dutch",
+                  "polish",
+                  "czech",
+                  "hungarian",
+                  "spanish",
+                  "irish",
+                  "japanese",
+                  "korean",
+                  "chinese_traditional",
+                  "chinese_simplified"
+                ]
+              },
+              "spelling": {
+                "type": "string",
+                "enum": [
+                  "uk",
+                  "us",
+                  "au",
+                  "ca"
+                ]
+              },
+              "quotation_style": {
+                "type": "string",
+                "enum": [
+                  "double",
+                  "single",
+                  "guillemets",
+                  "low9",
+                  "dialogue_dash_en",
+                  "dialogue_dash_em",
+                  "corner_brackets"
+                ]
+              },
+              "quotation_style_nested": {
+                "type": "string",
+                "enum": [
+                  "double",
+                  "single",
+                  "guillemets_single",
+                  "low9_single",
+                  "corner_brackets_double"
+                ]
+              },
+              "em_dash_spacing": {
+                "type": "string",
+                "enum": [
+                  "closed",
+                  "spaced"
+                ]
+              },
+              "ellipsis_style": {
+                "type": "string",
+                "enum": [
+                  "three_periods",
+                  "ellipsis_char",
+                  "spaced"
+                ]
+              },
+              "abbreviation_periods": {
+                "type": "string",
+                "enum": [
+                  "with",
+                  "without"
+                ]
+              },
+              "oxford_comma": {
+                "type": "string",
+                "enum": [
+                  "yes",
+                  "no"
+                ]
+              },
+              "numbers": {
+                "type": "string",
+                "enum": [
+                  "spell_under_10",
+                  "spell_under_100",
+                  "always_spell",
+                  "numerals"
+                ]
+              },
+              "date_format": {
+                "type": "string",
+                "enum": [
+                  "mdy",
+                  "dmy"
+                ]
+              },
+              "time_format": {
+                "type": "string",
+                "enum": [
+                  "12h",
+                  "24h"
+                ]
+              },
+              "tense": {
+                "type": "string"
+              },
+              "pov": {
+                "type": "string",
+                "enum": [
+                  "first",
+                  "third_limited",
+                  "third_omniscient"
+                ]
+              },
+              "dialogue_tags": {
+                "type": "string",
+                "enum": [
+                  "minimal",
+                  "expressive"
+                ]
+              },
+              "sentence_fragments": {
+                "type": "string",
+                "enum": [
+                  "disallow",
+                  "intentional"
+                ]
+              },
+              "voice_notes": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Explicit config field changes to write at the selected scope."
+          }
+        },
+        "required": [
+          "scope",
+          "updates"
+        ]
+      }
+    },
+    {
+      "name": "preview_prose_styleguide_config_update",
+      "description": "Preview how explicit updates would change an existing prose-styleguide.config.yaml without writing any files.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "sync_root",
+              "project_root"
+            ],
+            "description": "Config scope to preview updates for."
+          },
+          "project_id": {
+            "description": "Project ID when previewing project_root config updates (e.g. 'the-lamb' or 'universe-1/book-1').",
+            "type": "string"
+          },
+          "updates": {
+            "type": "object",
+            "properties": {
+              "language": {
+                "type": "string",
+                "enum": [
+                  "english_us",
+                  "english_uk",
+                  "english_au",
+                  "english_ca",
+                  "swedish",
+                  "norwegian",
+                  "danish",
+                  "finnish",
+                  "french",
+                  "italian",
+                  "russian",
+                  "portuguese_pt",
+                  "portuguese_br",
+                  "german",
+                  "dutch",
+                  "polish",
+                  "czech",
+                  "hungarian",
+                  "spanish",
+                  "irish",
+                  "japanese",
+                  "korean",
+                  "chinese_traditional",
+                  "chinese_simplified"
+                ]
+              },
+              "spelling": {
+                "type": "string",
+                "enum": [
+                  "uk",
+                  "us",
+                  "au",
+                  "ca"
+                ]
+              },
+              "quotation_style": {
+                "type": "string",
+                "enum": [
+                  "double",
+                  "single",
+                  "guillemets",
+                  "low9",
+                  "dialogue_dash_en",
+                  "dialogue_dash_em",
+                  "corner_brackets"
+                ]
+              },
+              "quotation_style_nested": {
+                "type": "string",
+                "enum": [
+                  "double",
+                  "single",
+                  "guillemets_single",
+                  "low9_single",
+                  "corner_brackets_double"
+                ]
+              },
+              "em_dash_spacing": {
+                "type": "string",
+                "enum": [
+                  "closed",
+                  "spaced"
+                ]
+              },
+              "ellipsis_style": {
+                "type": "string",
+                "enum": [
+                  "three_periods",
+                  "ellipsis_char",
+                  "spaced"
+                ]
+              },
+              "abbreviation_periods": {
+                "type": "string",
+                "enum": [
+                  "with",
+                  "without"
+                ]
+              },
+              "oxford_comma": {
+                "type": "string",
+                "enum": [
+                  "yes",
+                  "no"
+                ]
+              },
+              "numbers": {
+                "type": "string",
+                "enum": [
+                  "spell_under_10",
+                  "spell_under_100",
+                  "always_spell",
+                  "numerals"
+                ]
+              },
+              "date_format": {
+                "type": "string",
+                "enum": [
+                  "mdy",
+                  "dmy"
+                ]
+              },
+              "time_format": {
+                "type": "string",
+                "enum": [
+                  "12h",
+                  "24h"
+                ]
+              },
+              "tense": {
+                "type": "string"
+              },
+              "pov": {
+                "type": "string",
+                "enum": [
+                  "first",
+                  "third_limited",
+                  "third_omniscient"
+                ]
+              },
+              "dialogue_tags": {
+                "type": "string",
+                "enum": [
+                  "minimal",
+                  "expressive"
+                ]
+              },
+              "sentence_fragments": {
+                "type": "string",
+                "enum": [
+                  "disallow",
+                  "intentional"
+                ]
+              },
+              "voice_notes": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Explicit config field changes to preview at the selected scope."
+          }
+        },
+        "required": [
+          "scope",
+          "updates"
+        ]
+      }
+    },
+    {
+      "name": "check_prose_styleguide_drift",
+      "description": "Detect styleguide drift by comparing declared config conventions against observed signals in scene prose.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to analyze (e.g. 'the-lamb' or 'universe-1/book-1')."
+          },
+          "scene_ids": {
+            "description": "Optional scene_id allowlist to analyze.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "part": {
+            "description": "Optional part filter.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter": {
+            "description": "Optional compatibility chapter number resolved through canonical chapter identity.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "chapter_id": {
+            "description": "Optional canonical chapter identifier.",
+            "type": "string"
+          },
+          "max_scenes": {
+            "description": "Maximum number of scenes to analyze (default: 50).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "min_agreement": {
+            "description": "Minimum agreement ratio for suggested updates (default: 0.6).",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "include_clean_scenes": {
+            "description": "If true, include scenes with no detected drift in scene_results.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project_id"
+        ]
+      }
+    },
+    {
+      "name": "setup_prose_styleguide_skill",
+      "description": "Generate skills/prose-styleguide/SKILL.md from the resolved prose styleguide config and universal craft rules. Optionally publish AI boot files (CLAUDE.md and .github/copilot-instructions.md) when using sync-root config scope.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "description": "Project-scoped skill generation is unsupported because this tool writes a shared sync-root skills/prose-styleguide/SKILL.md file.",
+            "type": "string"
+          },
+          "overwrite": {
+            "description": "If true, replaces an existing skills/prose-styleguide/SKILL.md file.",
+            "type": "boolean"
+          },
+          "publish_boot_files": {
+            "description": "If true, also upserts CLAUDE.md and .github/copilot-instructions.md at sync root. Defaults to true.",
+            "type": "boolean"
+          },
+          "boot_files_overwrite": {
+            "description": "If true, rewrites existing boot files instead of in-place updates.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "propose_edit",
+      "description": "Generate a proposed revision for a scene. Returns a proposal_id and a diff preview. Nothing is written yet — you must call commit_edit to apply the change. This tool requires git to be available. If scene IDs are reused across projects, omitting project_id returns CONFLICT with candidate project_ids.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "The scene_id to revise (e.g. 'sc-011-sebastian')."
+          },
+          "project_id": {
+            "description": "Optional project ID to disambiguate duplicate scene IDs across projects.",
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string",
+            "description": "A brief instruction for the edit (e.g. 'Tighten the opening paragraph'). Used in the git commit message."
+          },
+          "revised_prose": {
+            "type": "string",
+            "description": "The complete revised prose text for the scene."
+          },
+          "bypass_styleguide": {
+            "description": "If true, bypasses automatic styleguide checks for this proposal.",
+            "type": "boolean"
+          },
+          "bypass_reason": {
+            "description": "Required when bypass_styleguide=true. Explains why this edit should ignore styleguide checks.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scene_id",
+          "instruction",
+          "revised_prose"
+        ]
+      }
+    },
+    {
+      "name": "commit_edit",
+      "description": "Apply a proposed edit and commit it to git. First creates a pre-edit snapshot, then writes the revised prose and metadata back to disk. The scene metadata stale flag is cleared.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "The scene_id being revised."
+          },
+          "project_id": {
+            "description": "Optional project ID. Required when scene IDs are duplicated across projects.",
+            "type": "string"
+          },
+          "proposal_id": {
+            "type": "string",
+            "description": "The proposal_id returned by propose_edit."
+          }
+        },
+        "required": [
+          "scene_id",
+          "proposal_id"
+        ]
+      }
+    },
+    {
+      "name": "discard_edit",
+      "description": "Discard a pending proposal without applying it. The proposal is deleted and the prose remains unchanged.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "proposal_id": {
+            "type": "string",
+            "description": "The proposal_id to discard (from propose_edit)."
+          }
+        },
+        "required": [
+          "proposal_id"
+        ]
+      }
+    },
+    {
+      "name": "snapshot_scene",
+      "description": "Manually create a git commit (snapshot) for the current state of a scene. Use this to mark important editing checkpoints outside of the propose/commit workflow.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "The scene_id to snapshot."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Project the scene belongs to."
+          },
+          "reason": {
+            "type": "string",
+            "description": "A brief reason for the snapshot (e.g. 'Character arc milestone reached')."
+          }
+        },
+        "required": [
+          "scene_id",
+          "project_id",
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "list_snapshots",
+      "description": "List git commit history for a scene, with timestamps and commit messages. Use this to find commit hashes for get_scene_prose historical retrieval.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "description": "The scene_id to list snapshots for."
+          },
+          "project_id": {
+            "description": "Optional project ID to disambiguate duplicate scene IDs across projects.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scene_id"
+        ]
+      }
+    },
+    {
+      "name": "get_runtime_config",
+      "description": "Show the active runtime paths and capabilities for this server instance (server version, sync dir, database path, writability, permission diagnostics, and git availability). Use this to verify which manuscript location is currently connected.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

@@ -1,0 +1,335 @@
+{
+  "package": "agentcash",
+  "tools": [
+    {
+      "name": "fetch",
+      "description": "HTTP fetch with automatic authentication and payment handling. Makes the request, retries with SIGN-IN-WITH-X when the route exposes a SIWX challenge, and only pays if the route still returns 402. Returns response data along with payment details (price, tx hash) if a payment was made.\n\nFor endpoints you haven't called before in this session, you MUST call check_endpoint_schema first to confirm the request body schema. Skipping this causes 400 errors from wrong field names.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "The endpoint URL",
+            "type": "string"
+          },
+          "method": {
+            "default": "GET",
+            "description": "HTTP method. Defaults to GET for fetch operations.",
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE",
+              "PATCH"
+            ]
+          },
+          "body": {
+            "description": "Request body. Can be a string or an object that will be stringified.",
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Raw request body string. Passed through to the underlying fetch call as-is."
+              },
+              {
+                "description": "JSON object to be sent as the request body",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            ]
+          },
+          "headers": {
+            "description": "Additional headers to include as a key-value pair",
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "paymentNetwork": {
+            "description": "Chain to use for SIWX and payment when applicable. If not specified, the network will be auto-detected.",
+            "type": "string",
+            "enum": [
+              "base",
+              "solana",
+              "tempo"
+            ]
+          },
+          "paymentProtocol": {
+            "description": "Payment protocol to use when payment is required. If not specified, the payment protocol will be auto-detected.",
+            "type": "string",
+            "enum": [
+              "x402",
+              "mpp"
+            ]
+          },
+          "maxAmount": {
+            "description": "Maximum amount (in USD) to pay per request. Aborts if the endpoint requests more. Defaults to $5. Pass a higher value for known-expensive endpoints.",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "timeout": {
+            "description": "Request timeout in milliseconds",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "get_balance",
+      "description": "Get your total USDC balance across all supported networks. Auto-creates the wallet on first use (~/.agentcash/wallet.json). Use this before paid API calls to confirm you have funds available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_accounts",
+      "description": "List wallet accounts for each supported network. Returns the network, address, balance, and deposit link for every supported network so you can see where to fund the wallet. Auto-creates the wallet on first use (~/.agentcash/wallet.json). If onboardingCta is present, show its message to the user — it means they haven't onboarded yet and need to either visit the onboard link or deposit directly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "check_endpoint_schema",
+      "description": "Get the input/output schema and auth mode (paid or SIWX) for a single endpoint.\n\nCall this to see exactly what fields the request body expects and what the response contains.\n\nReturns the schema from the origin's OpenAPI spec. Optionally pass sample_input_body to probe the endpoint live (without payment) for an exact price quote — do this when pricing is dynamic (range-based or variable), or when you're unsure about the input schema. Treat auth mode as advisory: fetch handles both SIWX and paid routes.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "The endpoint URL",
+            "type": "string"
+          },
+          "method": {
+            "description": "HTTP method to check. If omitted, all methods declared in the spec are returned.",
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE",
+              "PATCH"
+            ]
+          },
+          "body": {
+            "description": "Optional. A sample request body to probe the endpoint live (without payment) for exact pricing. Use when pricing is range-based or quote-based, or when you need to verify the input schema. Omit to get the static schema and advisory pricing from the spec.",
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Raw request body string. Passed through to the underlying fetch call as-is."
+              },
+              {
+                "description": "JSON object to be sent as the request body",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            ]
+          },
+          "headers": {
+            "description": "Additional headers to include as a key-value pair",
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "redeem_invite",
+      "description": "Redeem an invite code for free USDC on Base. One-time use per code. Returns amount received and transaction hash. Use get_balance after to verify funds, or list_accounts if you need the per-network deposit links as well.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The invite code"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      }
+    },
+    {
+      "name": "discover_api_endpoints",
+      "description": "List available endpoints at an API origin. Returns endpoint URLs with descriptions of what each does and the auth mode for each (paid or SIWX). Works with any origin, not just the registered ones.\n\nCall this when you need to see what routes are available at an origin — whether it's one of the registered origins or any other origin you've identified as useful. Treat the auth mode as guidance for what the route may require; fetch handles both SIWX and payment.\n\nThe response always indicates whether guidance is available. Guidance is documentation published by the API provider explaining how endpoints work together, edge cases, and usage tips. compact guidance is included automatically; set include_guidance=true to force-include full usage documentation when you need to compose two or more endpoints or need clarification on how the origin works.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "The origin URL to discover endpoints on (e.g. https://stableenrich.dev)",
+            "type": "string"
+          },
+          "includeGuidance": {
+            "description": "Request the origin's usage guidance. true=always include, false=never include, omit=auto (included when compact). Guidance explains how to compose multiple endpoints and covers edge cases.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "report_error",
+      "description": "EMERGENCY ONLY. Report critical MCP tool bugs. Do NOT use for normal errors (balance, network, 4xx) — those are recoverable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "MCP tool name"
+          },
+          "resource": {
+            "description": "Resource URL",
+            "type": "string"
+          },
+          "summary": {
+            "type": "string",
+            "description": "1-2 sentence summary"
+          },
+          "errorMessage": {
+            "type": "string",
+            "description": "Error message"
+          },
+          "stack": {
+            "description": "Stack trace",
+            "type": "string"
+          },
+          "fullReport": {
+            "description": "Detailed report with context, logs, repro steps",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "summary",
+          "errorMessage"
+        ]
+      }
+    },
+    {
+      "name": "update_settings",
+      "description": "Update user settings (persisted to ~/.agentcash/settings.json). Currently supports maxAmount — the maximum USD amount allowed per fetch request. If a fetch response requests more than this, the payment is rejected. Returns the current settings after applying changes.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "maxAmount": {
+            "description": "Maximum amount (USD) to pay per fetch request. Current default: $5.",
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "get_settings",
+      "description": "Get current user settings. Returns persisted values from ~/.agentcash/settings.json with defaults applied.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "bridge",
+      "description": "Bridge USDC between supported networks using the current wallet. Requires a source network, destination network, and amount. Use this when funds are on one supported network and the user needs them moved to another. Bridging is subject to fees.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "enum": [
+              "base",
+              "tempo",
+              "solana"
+            ],
+            "description": "The network to bridge from"
+          },
+          "to": {
+            "type": "string",
+            "enum": [
+              "base",
+              "tempo",
+              "solana"
+            ],
+            "description": "The network to bridge to"
+          },
+          "amount": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "The amount of USDC to bridge"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "amount"
+        ]
+      }
+    },
+    {
+      "name": "search",
+      "description": "Search for relevant paid API services by describing what you need in natural language. Returns the best matching origins with endpoint details and pricing. The top result includes the full input/output schema so you can call it immediately via fetch.\n\nOnly use this when you DON'T already know which registered origin to use. If the task clearly maps to a registered origin (e.g. people search → StableEnrich, image generation → StableStudio), skip search and go straight to discover_api_endpoints on that origin. Search is for discovering NEW or UNKNOWN capabilities outside the registered origins.\n\nSet broad=true to widen the search to include newer, unvetted tools that may not have established trust. Use this if the default results don't cover what you need.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Natural language description of what you need (e.g. \"send physical mail\", \"generate music\", \"flight prices\")"
+          },
+          "broad": {
+            "description": "Include broader results that may contain newer, unvetted tools. Default is false.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum number of results to return (1-50). Default is 10.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "page": {
+            "description": "Page number for pagination. Default is 1.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  ]
+}

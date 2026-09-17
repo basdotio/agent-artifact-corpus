@@ -1,0 +1,239 @@
+{
+  "package": "internet-archive-mcp",
+  "tools": [
+    {
+      "name": "save_url",
+      "description": "Save a URL to the Wayback Machine for archival using the SPN2 API. Supports capturing screenshots, outlinks, and conditional archiving. Set WAYBACK_ACCESS_KEY and WAYBACK_SECRET_KEY env vars for higher SPN2 rate limits.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL to save to the Wayback Machine"
+          },
+          "captureScreenshot": {
+            "description": "Capture a screenshot of the page as a PNG image (uses the im_ modifier)",
+            "type": "boolean"
+          },
+          "captureOutlinks": {
+            "description": "Also archive up to 100 outlink pages linked from this URL",
+            "type": "boolean"
+          },
+          "ifNotArchivedWithin": {
+            "description": "Skip if archived within timeframe, e.g. \"30d\" (30 days), \"1h\" (1 hour)",
+            "type": "string"
+          },
+          "jsBehaviorTimeout": {
+            "description": "Run JavaScript for N seconds before capturing (max 30)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30
+          },
+          "forceGet": {
+            "description": "Use simple HTTP GET instead of browser rendering (faster but no JS)",
+            "type": "boolean"
+          },
+          "delayWbAvailability": {
+            "description": "Delay indexing ~12 hours to reduce server load",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "get_archived_url",
+      "description": "Retrieve an archived version of a URL from the Wayback Machine. Returns the snapshot content. Supports URL modifiers: id_ (raw content), im_ (screenshot image), js_ (JavaScript), cs_ (CSS).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL to retrieve from the Wayback Machine"
+          },
+          "timestamp": {
+            "description": "Specific timestamp (YYYYMMDDhhmmss) or \"latest\" for most recent",
+            "type": "string"
+          },
+          "modifier": {
+            "description": "URL modifier: id_ (raw content, no toolbar), im_ (screenshot image), js_ (JavaScript), cs_ (CSS). Default: id_",
+            "type": "string",
+            "enum": [
+              "id_",
+              "im_",
+              "js_",
+              "cs_"
+            ]
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "search_archives",
+      "description": "Search the Wayback Machine CDX API for archived versions of a URL. Supports match types (exact/prefix/host/domain), date range filtering, collapsing duplicates, field filtering, pagination, and duplicate counting.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL pattern to search for"
+          },
+          "matchType": {
+            "description": "URL match scope: exact (default), prefix (all under path), host, or domain (with subdomains)",
+            "type": "string",
+            "enum": [
+              "exact",
+              "prefix",
+              "host",
+              "domain"
+            ]
+          },
+          "from": {
+            "description": "Start date (YYYYMMDD or YYYY-MM-DD)",
+            "type": "string"
+          },
+          "to": {
+            "description": "End date (YYYYMMDD or YYYY-MM-DD)",
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "description": "Maximum number of results",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "offset": {
+            "description": "Skip the first N results",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "collapse": {
+            "description": "Collapse adjacent duplicates by field, e.g. \"timestamp:8\" (per hour), \"digest\" (unique content)",
+            "type": "string"
+          },
+          "filter": {
+            "description": "Filter by field regex, e.g. [\"statuscode:200\", \"!mimetype:image.*\"]. Prefix with ! to negate.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resolveRevisits": {
+            "description": "Resolve warc/revisit entries to their original mimetype and status code",
+            "type": "boolean"
+          },
+          "showDupeCount": {
+            "description": "Show duplicate count per capture (grouped by digest)",
+            "type": "boolean"
+          },
+          "page": {
+            "description": "Page number for pagination",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "description": "Results per page",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "check_archive_status",
+      "description": "Check if a URL has been archived by the Wayback Machine and get capture statistics including yearly breakdowns.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL to check archival status for"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "list_screenshots",
+      "description": "List available screenshots for a URL from the Wayback Machine. Screenshots are generated when captures are made with capture_screenshot=1.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL to find screenshots for"
+          },
+          "limit": {
+            "default": 10,
+            "description": "Maximum number of screenshot results",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "clear_cache",
+      "description": "Clear all cached Wayback Machine API responses. Use when fresh data is needed or after saving a URL.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "compare_snapshots",
+      "description": "Compare two archived snapshots of a URL. Fetches the raw content of both snapshots and provides a visual diff URL. If no timestamps specified, compares the oldest and newest available snapshots.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL to compare snapshots for"
+          },
+          "timestampA": {
+            "description": "First timestamp (YYYYMMDDhhmmss). Defaults to oldest available.",
+            "type": "string"
+          },
+          "timestampB": {
+            "description": "Second timestamp (YYYYMMDDhhmmss). Defaults to newest available.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    }
+  ]
+}

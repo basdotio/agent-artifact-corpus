@@ -1,0 +1,984 @@
+{
+  "package": "igniteui-theming",
+  "tools": [
+    {
+      "name": "detect_platform",
+      "description": "Detect the target platform by analyzing dependencies and project config files.\n\n<use_case>\n  Use this tool FIRST before generating any theme code to ensure platform-optimized output.\n  The detected platform determines the correct Sass module paths and syntax.\n</use_case>\n\n<detection_signals>\n  Uses multi-signal detection with confidence scoring:\n  1. Ignite UI packages (HIGH - 100): igniteui-angular, igniteui-webcomponents, igniteui-react, IgniteUI.Blazor\n  2. Config files (MEDIUM-HIGH - 80): angular.json, vite.config.*, next.config.*, .csproj\n  3. Framework packages (LOW - 40): @angular/core, react, lit (fallback only)\n  4. Generic fallback: When no Ignite UI product is found, returns \"generic\" for standalone theming\n</detection_signals>\n\n<output>\n  Returns:\n  - platform: \"angular\" | \"webcomponents\" | \"react\" | \"blazor\" | \"generic\" | null\n  - confidence: \"high\" | \"medium\" | \"low\" | \"none\"\n  - ambiguous: true if multiple Ignite UI platforms detected (requires user to specify explicitly)\n  - alternatives: Array of detected platforms when ambiguous\n  - signals: Array of detection signals found\n  - detectedPackage: The primary package that triggered detection\n  - platformInfo: Name, theming module path, and description\n\n  \"generic\" means no Ignite UI product framework was found. Most tools work in generic mode\n  (palette, typography, elevations, theme generation, color references, layout tokens with scope).\n  Component-specific tools (create_component_theme, get_component_design_tokens) are NOT available\n  in generic mode. The response includes Sass load path guidance based on detected build tooling.\n  null is reserved for error states (package.json read failure) or ambiguous multi-product detection.\n</output>\n\n<ambiguous_handling>\n  When multiple Ignite UI platforms are detected with significant confidence (≥60), returns:\n  - platform: null\n  - ambiguous: true\n  - alternatives: List of possible platforms with their signals\n  - Action: User must specify platform explicitly in subsequent tool calls\n</ambiguous_handling>\n\n<related_tools>\n  After detection, use the platform value with:\n  - create_palette: Generate color palette\n  - create_theme: Generate complete theme\n  - create_typography: Set up typography\n  - create_elevations: Configure shadows\n</related_tools>\n\n<related_resources>\n  - \"theming://guidance/platform-setup\": Comprehensive setup guide covering detection workflow, Sass load path configuration, dependency handling, and the recommended theming sequence. Read this for detailed platform-specific setup instructions.\n</related_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packageJsonPath": {
+            "type": "string",
+            "description": "Path to package.json file, relative to current working directory. Defaults to \"./package.json\"."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_palette",
+      "description": "Generate a color palette for Ignite UI themes using the palette() Sass function.\n\n<use_case>\n  Use this tool when you have base colors and want to auto-generate a complete palette\n  with all shade variations (50-900, A100-A700). Best for colors with mid-range luminance\n  that will produce good automatic shade distribution.\n</use_case>\n\n<output_formats>\n  - \"sass\" (default): Generates Sass code using the palette() function. Requires Sass compilation.\n  - \"css\": Generates CSS custom properties (variables) directly. Ready to use in any CSS file.\n\n  Use \"css\" output when:\n  - Working with vanilla CSS projects without Sass\n  - You want immediately usable CSS variables\n  - Using CSS-in-JS or other non-Sass styling approaches\n</output_formats>\n\n<workflow>\n  1. Validates input colors against the theme variant\n  2. Analyzes color luminance for shade generation suitability\n  3. Generates Sass code OR compiles to CSS based on output parameter\n  4. Adds warning comments to code if issues detected\n  5. Returns validation warnings and tips in response\n</workflow>\n\n<important_notes>\n  - Requires primary, secondary, and surface colors (matches Sass palette() API)\n  - Gray, info, success, warn, error are optional (use design system defaults)\n  - Surface color should match variant: light colors for \"light\", dark for \"dark\"\n  - Colors with extreme luminance (< 0.05 or > 0.45) may produce suboptimal automatic shade generation.\n\n  SHADE PROGRESSION (important):\n  - Primary, secondary, and all chromatic colors: shades are NEVER inverted.\n    The palette() function always generates 50=lightest to 900=darkest.\n  - Only gray shades behave differently based on variant (for text contrast).\n  - DO NOT manually invert primary/secondary colors for dark themes.\n\n  SASS FILE PLACEMENT:\n  - When combining Sass output from multiple tools into one file, all @use rules\n    must appear at the top before any other statements. Deduplicate @use lines\n    that share the same module path.\n</important_notes>\n\n<output>\n  Returns:\n  - Generated Sass code with palette() function call, OR\n  - Generated CSS with custom properties (:root { --ig-primary-50: ...; })\n  - Platform-specific module imports (Sass only)\n  - Validation warnings (if any colors have issues)\n  - Variable name created (e.g., $my-palette) (Sass only)\n</output>\n\n<error_handling>\n  - Invalid color format: Returns error with format examples\n  - Variant mismatch: Warns if surface color doesn't match theme variant\n  - Luminance issues: Warns with recommendation to use create_custom_palette\n</error_handling>\n\n<example>\n  Blue brand with orange accent on light theme (Sass output):\n  {\n    \"primary\": \"#1976D2\",\n    \"secondary\": \"#FF9800\",\n    \"surface\": \"#FAFAFA\",\n    \"variant\": \"light\"\n  }\n\n  Same palette as CSS variables:\n  {\n    \"primary\": \"#1976D2\",\n    \"secondary\": \"#FF9800\",\n    \"surface\": \"#FAFAFA\",\n    \"variant\": \"light\",\n    \"output\": \"css\"\n  }\n</example>\n\n<related_tools>\n  - detect_platform: Run first to get correct platform value\n  - create_custom_palette: Use if this tool warns about luminance issues\n  - create_theme: Use instead if you want palette + typography + elevations together\n</related_tools>\n\n<related_resources>\n  Call read_resource to load reference data:\n  - \"theming://presets/palettes\" — preset palette colors\n  - \"theming://guidance/colors\" — color guidance overview\n  - \"theming://guidance/colors/rules\" — light/dark theme color rules\n</related_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "angular",
+              "webcomponents",
+              "react",
+              "blazor",
+              "generic"
+            ],
+            "description": "Target platform: \"angular\" for Ignite UI for Angular, \"webcomponents\" for Ignite UI for Web Components, \"react\" for Ignite UI for React, \"blazor\" for Ignite UI for Blazor, or \"generic\" for platform-agnostic output (standalone igniteui-theming usage). If omitted, generates generic code. Use detect_platform tool first to auto-detect from project files."
+          },
+          "licensed": {
+            "type": "boolean",
+            "description": "Use licensed @infragistics package (Angular only). Set to true if using @infragistics/igniteui-angular from private ProGet registry. Defaults to false (uses open-source igniteui-angular from npm). Note: igniteui-theming is always free/OSS for all other platforms."
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark"
+            ],
+            "description": "Theme variant: \"light\" (light backgrounds, dark text) or \"dark\" (dark backgrounds, light text). Defaults to \"light\"."
+          },
+          "name": {
+            "type": "string",
+            "description": "Custom variable name (without $ prefix). If omitted, auto-generates based on tool and variant (e.g., \"custom-light\", \"my-theme\")."
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "sass",
+              "css"
+            ],
+            "description": "Output format: \"sass\" generates Sass code using igniteui-theming library functions. \"css\" generates CSS custom properties (variables) directly - useful for vanilla CSS projects or when you don't want Sass compilation. Defaults to tool-specific output (\"sass\" for theme generators, \"css\" for layout setters)."
+          },
+          "primary": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$",
+            "description": "Primary brand color - used for main actions, active states, and emphasis. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "secondary": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$",
+            "description": "Secondary/accent color - used for FABs, selection controls, highlights. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "surface": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$",
+            "description": "Surface/background color - should be light for \"light\" variant, dark for \"dark\" variant. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "gray": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$",
+            "description": "Gray/neutral base color for text, borders, disabled states. Optional - defaults from design system preset. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "info": {
+            "$ref": "#/properties/gray",
+            "description": "Info state color (typically blue) for informational messages. Optional - defaults from design system. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "success": {
+            "$ref": "#/properties/gray",
+            "description": "Success state color (typically green) for success messages and positive actions. Optional - defaults from design system. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "warn": {
+            "$ref": "#/properties/gray",
+            "description": "Warning state color (typically orange/amber) for warning messages. Optional - defaults from design system. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "error": {
+            "$ref": "#/properties/gray",
+            "description": "Error state color (typically red) for error messages and destructive actions. Optional - defaults from design system. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          }
+        },
+        "required": [
+          "primary",
+          "secondary",
+          "surface"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_custom_palette",
+      "description": "Generate a custom color palette with fine-grained control over individual shade values.\n\n⚠️ CRITICAL RULES - READ BEFORE GENERATING SHADES:\n1. MONOCHROMATIC: Each color (primary, secondary, etc.) must use ONE HUE only.\n   All 14 shades are lighter/darker versions of the SAME color.\n   Example: primary blue → all shades must be blue (#E3F2FD light → #0D47A1 dark).\n   WRONG: mixing blue, green, purple in one color's shades.\n2. NEVER INVERT: Chromatic colors always go 50=lightest → 900=darkest.\n   This applies to BOTH light and dark themes. Only gray inverts for dark themes.\n\n<use_case>\n  Use this tool when:\n  - The standard palette() function produces suboptimal shade distribution\n  - You have brand guidelines specifying exact color values for each shade\n  - Base colors are too light (luminance > 0.45) or too dark (< 0.05)\n  - You have specific accessibility audit requirements with exact contrast color values (rare - auto-generated contrast is usually sufficient)\n  - You want to mix auto-generated and manually specified color groups\n</use_case>\n\n<output_formats>\n  - \"sass\" (default): Generates Sass code with palette map structure. Requires Sass compilation.\n  - \"css\": Generates CSS custom properties (variables) directly. Ready to use in any CSS file.\n\n  Use \"css\" output when:\n  - Working with vanilla CSS projects without Sass\n  - You want immediately usable CSS variables\n  - Building prototypes or quick demos\n  - Using CSS-in-JS or other non-Sass styling approaches\n</output_formats>\n\n<workflow>\n  1. For each color group, choose a mode:\n     - mode:\"shades\" → Auto-generate all shades from baseColor using shades() function\n     - mode:\"explicit\" → Manually specify every shade value\n  2. Validates all explicit shades for:\n     - Completeness: All required shades present\n     - Color format: Valid CSS color values\n     - Luminance progression: 50 lightest → 900 darkest (chromatic colors)\n     - Hue consistency: All shades within ±30° hue tolerance (monochromatic)\n  3. Generates Sass code with color() map structure\n  4. Returns any validation warnings\n</workflow>\n\n<important_notes>\n  CRITICAL - SHADE PROGRESSION RULES:\n  - CHROMATIC colors (primary, secondary, surface, info, success, warn, error):\n    Shade 50 = ALWAYS lightest, shade 900 = ALWAYS darkest.\n    This is TRUE FOR BOTH light AND dark themes. NEVER invert chromatic colors.\n  - GRAY color ONLY: Inverts for dark themes (50=darkest, 900=lightest).\n  - DO NOT confuse these rules. Only gray inverts, never primary/secondary/etc.\n\n  ⚠️ CRITICAL - MONOCHROMATIC REQUIREMENT:\n  Each color group (primary, secondary, etc.) must contain shades of ONE COLOR ONLY.\n  Shades are lighter/darker variations of the SAME hue - NOT different colors!\n\n  CORRECT example for primary blue:\n    50: \"#E3F2FD\"  (very light blue)\n    500: \"#2196F3\" (medium blue)\n    900: \"#0D47A1\" (dark blue)\n    → All shades are BLUE, just different lightness levels\n\n  WRONG example (DO NOT DO THIS):\n    50: \"#E3F2FD\"  (light blue)\n    500: \"#4CAF50\" (green) ← WRONG! Different hue\n    900: \"#9C27B0\" (purple) ← WRONG! Different hue\n    → This creates a rainbow, not a shade palette\n\n  Rule: Keep hue constant (±30° tolerance), vary only lightness and saturation.\n\n  CHROMATIC COLORS (primary, secondary, surface, info, success, warn, error):\n  - Explicit mode requires 14 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, A100, A200, A400, A700\n  - Shade 50 = lightest, shade 900 = darkest (SAME for light AND dark themes)\n  - ALL shades must be the SAME HUE (monochromatic) - see requirement above\n  - A100-A700 are accent shades (same hue, typically more saturated)\n\n  GRAY COLOR (the ONLY color that inverts):\n  - Explicit mode requires 10 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900\n  - LIGHT themes: 50 = lightest (near white), 900 = darkest (near black)\n  - DARK themes: 50 = darkest, 900 = lightest (INVERTED progression)\n  - Gray inverts because text/UI elements need to contrast against the surface\n\n  CONTRAST COLORS (AUTO-GENERATED - DO NOT PROVIDE):\n  - DO NOT include contrastOverrides in your input - OMIT THIS FIELD ENTIRELY\n  - The system AUTOMATICALLY generates contrast colors using adaptive-contrast()\n  - For each shade, the generated Sass output will include:\n      '500': #4CAF50,\n      '500-contrast': adaptive-contrast(#4CAF50),  ← AUTO-GENERATED\n      '500-raw': #4CAF50,\n  - The adaptive-contrast() function auto-selects black or white for readability\n  - Only provide contrastOverrides if you have a specific accessibility audit\n    requiring exact contrast color values (this is extremely rare)\n\n  MIXING MODES:\n  - You can use \"shades\" mode for some colors and \"explicit\" for others\n  - Example: explicit primary, shades-based secondary and surface\n\n  SASS FILE PLACEMENT:\n  - When combining Sass output from multiple tools into one file, all @use rules\n    must appear at the top before any other statements. Deduplicate @use lines\n    that share the same module path.\n</important_notes>\n\n<output>\n  Returns:\n  - Generated Sass code with color() map definitions, OR\n  - Generated CSS with custom properties (:root { --ig-primary-50: ...; })\n  - Summary of which colors use shades() vs explicit values\n  - Variable name created (e.g., $custom-light-palette) (Sass only)\n  - Validation warnings (if any)\n</output>\n\n<error_handling>\n  Validation FAILS (returns error, no code generated) if:\n  - Missing required shades in explicit mode\n  - Invalid CSS color format in any shade\n\n  Validation WARNS (generates code with warnings) if:\n  - Luminance progression incorrect (50 darker than 900)\n  - Hue inconsistency detected (shades not monochromatic)\n  - Gray progression doesn't match variant (light vs dark)\n</error_handling>\n\n<example>\n  Brand green with exact shades (NOTE: ALL shades are GREEN - same hue, different lightness):\n\n  INPUT (what you provide - NO contrastOverrides needed):\n  {\n    \"variant\": \"light\",\n    \"primary\": {\n      \"mode\": \"explicit\",\n      \"shades\": {\n        \"50\": \"#E8F5E9\",\n        \"100\": \"#C8E6C9\",\n        \"200\": \"#A5D6A7\",\n        \"300\": \"#81C784\",\n        \"400\": \"#66BB6A\",\n        \"500\": \"#4CAF50\",\n        \"600\": \"#43A047\",\n        \"700\": \"#388E3C\",\n        \"800\": \"#2E7D32\",\n        \"900\": \"#1B5E20\",\n        \"A100\": \"#B9F6CA\",\n        \"A200\": \"#69F0AE\",\n        \"A400\": \"#00E676\",\n        \"A700\": \"#00C853\"\n      }\n      // ↑ Only provide shades - contrast colors are AUTO-GENERATED\n    },\n    \"secondary\": { \"mode\": \"shades\", \"baseColor\": \"#FF9800\" },\n    \"surface\": { \"mode\": \"shades\", \"baseColor\": \"#FAFAFA\" }\n  }\n\n  GENERATED OUTPUT (contrast colors added automatically):\n  'primary': (\n    '500': #4CAF50,\n    '500-contrast': adaptive-contrast(#4CAF50),  // ← AUTO-GENERATED\n    '500-raw': #4CAF50,  // ← AUTO-GENERATED\n    // ... same pattern for all 14 shades\n  )\n</example>\n\n<related_tools>\n  - detect_platform: Run first to get correct platform value\n  - create_palette: Use for simpler cases with mid-range luminance colors\n  - create_theme: Does not support custom palettes; use this tool + manual theme assembly\n</related_tools>\n\n<anti_example>\n  ❌ WRONG - DO NOT create shades like this (different hues = broken palette):\n  {\n    \"primary\": {\n      \"mode\": \"explicit\",\n      \"shades\": {\n        \"50\": \"#E3F2FD\",   // blue\n        \"100\": \"#DCEDC8\",  // green ← WRONG HUE\n        \"200\": \"#FFF9C4\",  // yellow ← WRONG HUE\n        \"500\": \"#9C27B0\",  // purple ← WRONG HUE\n        \"900\": \"#BF360C\"   // red-brown ← WRONG HUE\n      }\n    }\n  }\n  This creates a rainbow, not a shade palette. Components will look broken.\n</anti_example>\n\n<related_resources>\n  Call read_resource to load reference data:\n  - \"theming://presets/palettes\" — preset palette colors for reference\n  - \"theming://guidance/colors/usage\" — which shades to use for different purposes\n  - \"theming://guidance/colors/roles\" — semantic meaning of each color family\n</related_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "angular",
+              "webcomponents",
+              "react",
+              "blazor",
+              "generic"
+            ],
+            "description": "Target platform: \"angular\" for Ignite UI for Angular, \"webcomponents\" for Ignite UI for Web Components, \"react\" for Ignite UI for React, \"blazor\" for Ignite UI for Blazor, or \"generic\" for platform-agnostic output (standalone igniteui-theming usage). If omitted, generates generic code. Use detect_platform tool first to auto-detect from project files."
+          },
+          "licensed": {
+            "type": "boolean",
+            "description": "Use licensed @infragistics package (Angular only). Set to true if using @infragistics/igniteui-angular from private ProGet registry. Defaults to false (uses open-source igniteui-angular from npm). Note: igniteui-theming is always free/OSS for all other platforms."
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark"
+            ],
+            "description": "Theme variant: \"light\" (light backgrounds, dark text) or \"dark\" (dark backgrounds, light text). Defaults to \"light\"."
+          },
+          "designSystem": {
+            "type": "string",
+            "enum": [
+              "material",
+              "bootstrap",
+              "fluent",
+              "indigo"
+            ],
+            "description": "Design system preset: \"material\" (Material Design), \"bootstrap\" (Bootstrap), \"fluent\" (Microsoft Fluent), or \"indigo\" (Infragistics Indigo). Defaults to \"material\"."
+          },
+          "name": {
+            "type": "string",
+            "description": "Custom variable name (without $ prefix). If omitted, auto-generates based on tool and variant (e.g., \"custom-light\", \"my-theme\")."
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "sass",
+              "css"
+            ],
+            "description": "Output format: \"sass\" generates Sass code using igniteui-theming library functions. \"css\" generates CSS custom properties (variables) directly - useful for vanilla CSS projects or when you don't want Sass compilation. Defaults to tool-specific output (\"sass\" for theme generators, \"css\" for layout setters)."
+          },
+          "primary": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "const": "shades"
+                  },
+                  "baseColor": {
+                    "type": "string",
+                    "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$",
+                    "description": "Base color for automatic shade generation using shades() function. Choose a mid-luminance color (0.1-0.4) for best results. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+                  }
+                },
+                "required": [
+                  "mode",
+                  "baseColor"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "const": "explicit"
+                  },
+                  "shades": {
+                    "type": "object",
+                    "properties": {
+                      "50": {
+                        "type": "string",
+                        "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$"
+                      },
+                      "100": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "200": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "300": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "400": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "500": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "600": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "700": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "800": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "900": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "A100": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "A200": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "A400": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "A700": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      }
+                    },
+                    "required": [
+                      "50",
+                      "100",
+                      "200",
+                      "300",
+                      "400",
+                      "500",
+                      "600",
+                      "700",
+                      "800",
+                      "900",
+                      "A100",
+                      "A200",
+                      "A400",
+                      "A700"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Object with all shade values. 14 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, A100, A200, A400, A700. Luminance should decrease from 50 (lightest) to 900 (darkest). CRITICAL: All shades must be the SAME COLOR (same hue) at different lightness levels - do NOT use different colors for different shades."
+                  },
+                  "contrastOverrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                    },
+                    "propertyNames": {
+                      "enum": [
+                        "50",
+                        "100",
+                        "200",
+                        "300",
+                        "400",
+                        "500",
+                        "600",
+                        "700",
+                        "800",
+                        "900",
+                        "A100",
+                        "A200",
+                        "A400",
+                        "A700"
+                      ]
+                    },
+                    "description": "USUALLY OMIT THIS FIELD. Contrast colors are auto-generated using adaptive-contrast(). Only provide this if you have specific accessibility requirements with exact contrast values (rare). When omitted (recommended), the generated Sass code automatically includes adaptive-contrast(#shadeColor) for each shade, which auto-selects black or white for optimal readability."
+                  }
+                },
+                "required": [
+                  "mode",
+                  "shades"
+                ],
+                "additionalProperties": false
+              }
+            ],
+            "description": "Color definition object with mode selection:\n• mode: \"shades\" + baseColor: Auto-generates all shades from one color\n• mode: \"explicit\" + shades: Manually specify all 14 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, A100, A200, A400, A700\nIMPORTANT: All shades must be MONOCHROMATIC (same hue). Shades are lighter/darker versions of ONE color, not different colors."
+          },
+          "secondary": {
+            "anyOf": [
+              {
+                "$ref": "#/properties/primary/anyOf/0"
+              },
+              {
+                "$ref": "#/properties/primary/anyOf/1"
+              }
+            ],
+            "description": "Color definition object with mode selection:\n• mode: \"shades\" + baseColor: Auto-generates all shades from one color\n• mode: \"explicit\" + shades: Manually specify all 14 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, A100, A200, A400, A700\nIMPORTANT: All shades must be MONOCHROMATIC (same hue). Shades are lighter/darker versions of ONE color, not different colors."
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "$ref": "#/properties/primary/anyOf/0"
+              },
+              {
+                "$ref": "#/properties/primary/anyOf/1"
+              }
+            ],
+            "description": "Color definition object with mode selection:\n• mode: \"shades\" + baseColor: Auto-generates all shades from one color\n• mode: \"explicit\" + shades: Manually specify all 14 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, A100, A200, A400, A700\nIMPORTANT: All shades must be MONOCHROMATIC (same hue). Shades are lighter/darker versions of ONE color, not different colors."
+          },
+          "gray": {
+            "anyOf": [
+              {
+                "$ref": "#/properties/primary/anyOf/0"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "const": "explicit"
+                  },
+                  "shades": {
+                    "type": "object",
+                    "properties": {
+                      "50": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "100": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "200": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "300": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "400": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "500": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "600": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "700": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "800": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      },
+                      "900": {
+                        "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                      }
+                    },
+                    "required": [
+                      "50",
+                      "100",
+                      "200",
+                      "300",
+                      "400",
+                      "500",
+                      "600",
+                      "700",
+                      "800",
+                      "900"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Object with all gray shade values. 10 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900. For light themes: 50=lightest, 900=darkest. For dark themes: 50=darkest, 900=lightest."
+                  },
+                  "contrastOverrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/properties/primary/anyOf/1/properties/shades/properties/50"
+                    },
+                    "propertyNames": {
+                      "enum": [
+                        "50",
+                        "100",
+                        "200",
+                        "300",
+                        "400",
+                        "500",
+                        "600",
+                        "700",
+                        "800",
+                        "900"
+                      ]
+                    },
+                    "description": "USUALLY OMIT THIS FIELD. Contrast colors are auto-generated using adaptive-contrast(). Only provide this if you have specific accessibility requirements with exact contrast values (rare). When omitted (recommended), the generated Sass code automatically includes adaptive-contrast(#shadeColor) for each shade, which auto-selects black or white for optimal readability."
+                  }
+                },
+                "required": [
+                  "mode",
+                  "shades"
+                ],
+                "additionalProperties": false
+              }
+            ],
+            "description": "Gray color definition object with mode selection:\n• mode: \"shades\" + baseColor: Auto-generates all shades from one color\n• mode: \"explicit\" + shades: Manually specify all 10 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900\nImportant: Gray progression is INVERTED for dark themes (50=darkest, 900=lightest)."
+          },
+          "info": {
+            "anyOf": [
+              {
+                "$ref": "#/properties/primary/anyOf/0"
+              },
+              {
+                "$ref": "#/properties/primary/anyOf/1"
+              }
+            ],
+            "description": "Color definition object with mode selection:\n• mode: \"shades\" + baseColor: Auto-generates all shades from one color\n• mode: \"explicit\" + shades: Manually specify all 14 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, A100, A200, A400, A700\nIMPORTANT: All shades must be MONOCHROMATIC (same hue). Shades are lighter/darker versions of ONE color, not different colors."
+          },
+          "success": {
+            "$ref": "#/properties/info",
+            "description": "Color definition object with mode selection:\n• mode: \"shades\" + baseColor: Auto-generates all shades from one color\n• mode: \"explicit\" + shades: Manually specify all 14 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, A100, A200, A400, A700\nIMPORTANT: All shades must be MONOCHROMATIC (same hue). Shades are lighter/darker versions of ONE color, not different colors."
+          },
+          "warn": {
+            "$ref": "#/properties/info",
+            "description": "Color definition object with mode selection:\n• mode: \"shades\" + baseColor: Auto-generates all shades from one color\n• mode: \"explicit\" + shades: Manually specify all 14 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, A100, A200, A400, A700\nIMPORTANT: All shades must be MONOCHROMATIC (same hue). Shades are lighter/darker versions of ONE color, not different colors."
+          },
+          "error": {
+            "$ref": "#/properties/info",
+            "description": "Color definition object with mode selection:\n• mode: \"shades\" + baseColor: Auto-generates all shades from one color\n• mode: \"explicit\" + shades: Manually specify all 14 shades required: 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, A100, A200, A400, A700\nIMPORTANT: All shades must be MONOCHROMATIC (same hue). Shades are lighter/darker versions of ONE color, not different colors."
+          }
+        },
+        "required": [
+          "primary",
+          "secondary",
+          "surface"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_typography",
+      "description": "Set up typography for Ignite UI themes with custom font families and type scales.\n\n<use_case>\n  Use this tool to configure fonts that match your brand identity while maintaining\n  consistent sizing, line heights, and letter spacing based on design system conventions.\n</use_case>\n\n<workflow>\n  1. Takes font family string and optional design system preset\n  2. Generates Sass code using the typography() mixin\n  3. Applies the type scale from the selected design system\n  4. Optionally applies custom scale overrides\n</workflow>\n\n<important_notes>\n  - Font family string should include fallbacks for cross-platform compatibility\n  - Quote font names that contain spaces: '\"Segoe UI\"' not 'Segoe UI'\n  - Design system affects: font sizes, line heights, letter spacing, font weights\n  - Type styles include: h1-h6, subtitle-1/2, body-1/2, button, caption, overline\n\n  SASS FILE PLACEMENT:\n  - When combining Sass output from multiple tools into one file, all @use rules\n    must appear at the top before any other statements. Deduplicate @use lines\n    that share the same module path.\n</important_notes>\n\n<output>\n  Returns:\n  - Generated Sass code with typography() mixin call\n  - Platform-specific module imports\n  - Variable name used (e.g., $my-typography)\n</output>\n\n<error_handling>\n  - Empty font family: Returns error requesting valid font family string\n</error_handling>\n\n<example>\n  Modern sans-serif typography for Material Design:\n  {\n    \"fontFamily\": \"'Inter', 'Segoe UI', 'Helvetica Neue', sans-serif\",\n    \"designSystem\": \"material\"\n  }\n</example>\n\n<related_tools>\n  - detect_platform: Run first to get correct platform value\n  - create_theme: Use instead if you want typography + palette + elevations together\n</related_tools>\n\n<related_resources>\n  Call read_resource to load reference data:\n  - \"theming://presets/typography\" — typography presets for all design systems\n</related_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "angular",
+              "webcomponents",
+              "react",
+              "blazor",
+              "generic"
+            ],
+            "description": "Target platform: \"angular\" for Ignite UI for Angular, \"webcomponents\" for Ignite UI for Web Components, \"react\" for Ignite UI for React, \"blazor\" for Ignite UI for Blazor, or \"generic\" for platform-agnostic output (standalone igniteui-theming usage). If omitted, generates generic code. Use detect_platform tool first to auto-detect from project files."
+          },
+          "licensed": {
+            "type": "boolean",
+            "description": "Use licensed @infragistics package (Angular only). Set to true if using @infragistics/igniteui-angular from private ProGet registry. Defaults to false (uses open-source igniteui-angular from npm). Note: igniteui-theming is always free/OSS for all other platforms."
+          },
+          "fontFamily": {
+            "type": "string",
+            "description": "Font family string with fallbacks. Quote names with spaces. Example: '\"Inter\", \"Helvetica Neue\", sans-serif'"
+          },
+          "designSystem": {
+            "type": "string",
+            "enum": [
+              "material",
+              "bootstrap",
+              "fluent",
+              "indigo"
+            ],
+            "description": "Design system preset: \"material\" (Material Design), \"bootstrap\" (Bootstrap), \"fluent\" (Microsoft Fluent), or \"indigo\" (Infragistics Indigo). Defaults to \"material\"."
+          },
+          "customScale": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "fontSize": {
+                  "type": "string"
+                },
+                "fontWeight": {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                "fontStyle": {
+                  "type": "string"
+                },
+                "lineHeight": {
+                  "type": "string"
+                },
+                "letterSpacing": {
+                  "type": "string"
+                },
+                "textTransform": {
+                  "type": "string"
+                },
+                "marginTop": {
+                  "type": "string"
+                },
+                "marginBottom": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "Custom type scale overrides. Object with type style names as keys (h1, h2, body-1, button, etc.) and style objects as values containing fontSize, fontWeight, lineHeight, letterSpacing, textTransform."
+          },
+          "name": {
+            "type": "string",
+            "description": "Custom variable name (without $ prefix). If omitted, auto-generates based on tool and variant (e.g., \"custom-light\", \"my-theme\")."
+          }
+        },
+        "required": [
+          "fontFamily"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_elevations",
+      "description": "Set up elevation shadows for Ignite UI themes.\n\n<use_case>\n  Use this tool to configure box-shadow values that provide visual depth and hierarchy.\n  Elevations follow Material Design or Indigo design specifications.\n</use_case>\n\n<workflow>\n  1. Selects elevation preset based on design system parameter\n  2. Generates Sass code using the elevations() mixin\n  3. Creates 24 elevation levels (0-24) with corresponding shadow values\n</workflow>\n\n<important_notes>\n  - \"material\" preset: Material Design 3 shadow specifications\n  - \"indigo\" preset: Infragistics Indigo shadow specifications\n  - Elevation 0 = no shadow, elevation 24 = maximum shadow depth\n  - Components use elevation() function to apply specific levels\n\n  SASS FILE PLACEMENT:\n  - When combining Sass output from multiple tools into one file, all @use rules\n    must appear at the top before any other statements. Deduplicate @use lines\n    that share the same module path.\n</important_notes>\n\n<output>\n  Returns:\n  - Generated Sass code with elevations() mixin call\n  - Platform-specific module imports\n  - Variable name used (e.g., $my-elevations)\n</output>\n\n<related_tools>\n  - detect_platform: Run first to get correct platform value\n  - create_theme: Use instead if you want elevations + palette + typography together\n</related_tools>\n\n<related_resources>\n  Call read_resource to load reference data:\n  - \"theming://presets/elevations\" — elevation presets for Material and Indigo\n</related_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "angular",
+              "webcomponents",
+              "react",
+              "blazor",
+              "generic"
+            ],
+            "description": "Target platform: \"angular\" for Ignite UI for Angular, \"webcomponents\" for Ignite UI for Web Components, \"react\" for Ignite UI for React, \"blazor\" for Ignite UI for Blazor, or \"generic\" for platform-agnostic output (standalone igniteui-theming usage). If omitted, generates generic code. Use detect_platform tool first to auto-detect from project files."
+          },
+          "licensed": {
+            "type": "boolean",
+            "description": "Use licensed @infragistics package (Angular only). Set to true if using @infragistics/igniteui-angular from private ProGet registry. Defaults to false (uses open-source igniteui-angular from npm). Note: igniteui-theming is always free/OSS for all other platforms."
+          },
+          "designSystem": {
+            "type": "string",
+            "enum": [
+              "material",
+              "indigo"
+            ],
+            "description": "Elevation shadow preset: \"material\" (Material Design shadows) or \"indigo\" (Infragistics Indigo shadows). Defaults to \"material\"."
+          },
+          "name": {
+            "type": "string",
+            "description": "Custom variable name (without $ prefix). If omitted, auto-generates based on tool and variant (e.g., \"custom-light\", \"my-theme\")."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_theme",
+      "description": "Generate a complete, production-ready Ignite UI theme with palette, typography, and elevations.\n\n<use_case>\n  Use this tool as the starting point for new projects. It generates everything needed\n  for a working theme in a single operation: color palette, typography setup, elevation\n  shadows, and the theme application mixin.\n</use_case>\n\n<workflow>\n  1. Analyzes input colors for palette shade generation suitability\n  2. Creates color palette using palette() function\n  3. Sets up typography with specified font family (if includeTypography: true)\n  4. Configures elevations based on design system (if includeElevations: true)\n  5. Configures spacing utilities for Web Components (if includeSpacing: true)\n  6. Applies the theme using the theme() mixin\n  7. Returns luminance warnings if any colors may produce poor shades\n</workflow>\n\n<important_notes>\n  REQUIRED COLORS:\n  - primaryColor: Main brand color\n  - secondaryColor: Accent/highlight color\n  - surfaceColor: Background color (should match variant)\n\n  SHADE PROGRESSION (important):\n  - Primary and secondary colors are NEVER inverted between light/dark themes.\n  - The palette() function generates shades 50=lightest to 900=darkest for ALL\n    chromatic colors regardless of theme variant.\n  - Only gray shades behave differently (for text contrast against surface).\n  - DO NOT provide inverted primary/secondary colors for dark themes.\n\n  LUMINANCE ANALYSIS:\n  - Colors with extreme luminance (< 0.05 or > 0.45) may produce suboptimal automatic shade generation.\n  - If warnings appear, consider using create_custom_palette for those colors\n\n  PLATFORM DIFFERENCES:\n  - Angular: Uses igniteui-angular/theming with core() and theme() mixins\n  - Web Components: Uses igniteui-theming directly with palette(), typography(), elevations() mixins\n  - React: Uses igniteui-theming directly (same as Web Components), common with Vite/Next.js\n  - Blazor: Uses igniteui-theming for Sass compilation, theme CSS referenced in Blazor components\n\n  SASS FILE PLACEMENT:\n  - When combining Sass output from multiple tools into one file, all @use rules\n    must appear at the top before any other statements. Deduplicate @use lines\n    that share the same module path.\n</important_notes>\n\n<output>\n  Returns:\n  - Complete Sass code with all theme components\n  - Luminance analysis warnings (if applicable)\n  - List of variables created/used\n  - Platform-specific guidance\n</output>\n\n<error_handling>\n  - Invalid color format: Returns error with format examples\n  - Luminance issues: Warns but still generates code (may produce suboptimal shades)\n  - Variant mismatch: Warns if surface color doesn't match theme variant\n</error_handling>\n\n<example>\n  Complete Material Design blue theme:\n  {\n    \"platform\": \"angular\",\n    \"designSystem\": \"material\",\n    \"primaryColor\": \"#1976D2\",\n    \"secondaryColor\": \"#FF9800\",\n    \"surfaceColor\": \"#FAFAFA\",\n    \"variant\": \"light\",\n    \"fontFamily\": \"'Roboto', sans-serif\",\n    \"includeTypography\": true,\n    \"includeElevations\": true\n  }\n</example>\n\n<next_steps>\n  After generating a theme:\n  1. Review any luminance warnings in the output\n  2. If warnings suggest shade generation issues:\n     - Use create_custom_palette for problematic colors\n     - Manually assemble theme with custom palette\n  3. Import the generated Sass file in your application's main styles\n  4. Customize individual component themes as needed using component schema overrides\n</next_steps>\n\n<related_tools>\n  - detect_platform: Run first to auto-detect platform from package.json\n  - create_custom_palette: Use for colors that produce luminance warnings\n  - create_palette: Use if you only need a palette without full theme\n  - create_typography: Use if you only need typography setup\n  - create_elevations: Use if you only need elevation shadows\n</related_tools>\n\n  <related_resources>\n  Call read_resource to load reference data:\n  - \"theming://presets/palettes\" — preset palette colors\n  - \"theming://guidance/colors\" — color guidance overview\n  - \"theming://guidance/colors/rules\" — light/dark theme color rules\n  - \"theming://platforms/angular\" — Angular platform configuration\n  - \"theming://platforms/webcomponents\" — Web Components platform configuration\n  - \"theming://platforms/react\" — React platform configuration\n  - \"theming://platforms/blazor\" — Blazor platform configuration\n  </related_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "angular",
+              "webcomponents",
+              "react",
+              "blazor",
+              "generic"
+            ],
+            "description": "Target platform: \"angular\" for Ignite UI for Angular, \"webcomponents\" for Ignite UI for Web Components, \"react\" for Ignite UI for React, \"blazor\" for Ignite UI for Blazor, or \"generic\" for platform-agnostic output (standalone igniteui-theming usage). If omitted, generates generic code. Use detect_platform tool first to auto-detect from project files."
+          },
+          "licensed": {
+            "type": "boolean",
+            "description": "Use licensed @infragistics package (Angular only). Set to true if using @infragistics/igniteui-angular from private ProGet registry. Defaults to false (uses open-source igniteui-angular from npm). Note: igniteui-theming is always free/OSS for all other platforms."
+          },
+          "designSystem": {
+            "type": "string",
+            "enum": [
+              "material",
+              "bootstrap",
+              "fluent",
+              "indigo"
+            ],
+            "description": "Design system preset: \"material\" (Material Design), \"bootstrap\" (Bootstrap), \"fluent\" (Microsoft Fluent), or \"indigo\" (Infragistics Indigo). Defaults to \"material\"."
+          },
+          "primaryColor": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$",
+            "description": "Primary brand color for the theme - used for main actions and emphasis. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "secondaryColor": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$",
+            "description": "Secondary/accent color for the theme - used for highlights and selection. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "surfaceColor": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$",
+            "description": "Surface/background color for the theme. Use light colors (#FAFAFA) for \"light\" variant, dark colors (#121212) for \"dark\" variant. Valid CSS color formats: hex (\"#3F51B5\", \"#3F51B5AA\"), rgb/rgba (\"rgb(63, 81, 181)\", \"rgb(63 81 181 / 0.5)\"), hsl/hsla (\"hsl(231, 48%, 48%)\", \"hsl(231 48% 48% / 0.5)\"), hwb (\"hwb(231 20% 30%)\"), lab/lch (\"lab(50% 40 59)\", \"lch(50% 80 30)\"), oklab/oklch (\"oklab(59% 0.1 0.1)\", \"oklch(60% 0.15 50)\"), color() for wide-gamut (\"color(display-p3 1 0.5 0)\"), or CSS named colors (\"indigo\", \"rebeccapurple\")."
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark"
+            ],
+            "description": "Theme variant: \"light\" (light backgrounds, dark text) or \"dark\" (dark backgrounds, light text). Defaults to \"light\"."
+          },
+          "name": {
+            "type": "string",
+            "description": "Custom variable name (without $ prefix). If omitted, auto-generates based on tool and variant (e.g., \"custom-light\", \"my-theme\")."
+          },
+          "fontFamily": {
+            "type": "string",
+            "description": "Font family string with fallbacks. Quote names with spaces. Example: '\"Inter\", \"Helvetica Neue\", sans-serif'"
+          },
+          "includeTypography": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include typography setup in the generated theme. Set to false if you want to configure typography separately. Defaults to true."
+          },
+          "includeElevations": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include elevation shadows in the generated theme. Set to false if you want to configure elevations separately. Defaults to true."
+          },
+          "includeSpacing": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include spacing CSS custom properties (Web Components platform only). Defaults to true. Has no effect on Angular platform."
+          }
+        },
+        "required": [
+          "primaryColor",
+          "secondaryColor",
+          "surfaceColor"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_size",
+      "description": "Set global or component-specific sizing by updating --ig-size.\n\n<use_case>\n  Use this tool for requests like:\n  - \"Make the calendar smaller\"\n  - \"The buttons feel too big\"\n  - \"Use the small size everywhere\"\n</use_case>\n\n<behavior>\n  - Sets --ig-size in the chosen scope (defaults to :root)\n  - Accepts \"small\", \"medium\", \"large\" (mapped to 1, 2, 3) or numeric values\n  - When platform is \"generic\", do NOT use the \"component\" parameter (it resolves Ignite UI component selectors). Use \"scope\" with a custom CSS selector instead, or omit both for :root.\n</behavior>\n\n<sass_notes>\n  - Components map --ig-size to --component-size internally\n  - Styles using sizable() require @include sizable() in component styles\n</sass_notes>\n\n<example>\n  Make flat buttons medium:\n  {\n    \"component\": \"flat-button\",\n    \"size\": \"medium\"\n  }\n\n  Make everything small globally:\n  {\n    \"size\": \"small\"\n  }\n</example>\n\n<related_resources>\n  Call read_resource to load reference data:\n  - \"theming://docs/spacing-and-sizing\" — spacing and sizing overview\n  - \"theming://docs/functions/sizable\" — sizable value function\n  - \"theming://docs/mixins/sizable\" — sizable mixin\n</related_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "angular",
+              "webcomponents",
+              "react",
+              "blazor",
+              "generic"
+            ],
+            "description": "Target platform: \"angular\" for Ignite UI for Angular, \"webcomponents\" for Ignite UI for Web Components, \"react\" for Ignite UI for React, \"blazor\" for Ignite UI for Blazor, or \"generic\" for platform-agnostic output (standalone igniteui-theming usage). If omitted, generates generic code. Use detect_platform tool first to auto-detect from project files."
+          },
+          "component": {
+            "type": "string",
+            "description": "Optional component name to scope the layout change (e.g., \"flat-button\", \"calendar\", \"avatar\"). If omitted, the change applies globally via :root. Note: component targets Ignite UI framework selectors — do not use with platform \"generic\". Use \"scope\" instead for custom CSS selectors."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Optional CSS selector scope for the change (e.g., \".my-theme\", \":root\", \"#app\"). Ignored when component is provided."
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "small",
+                  "medium",
+                  "large"
+                ]
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              }
+            ],
+            "description": "Size value to set for --ig-size. Accepts \"small\" (1), \"medium\" (2), \"large\" (3), or numeric 1, 2, 3 only."
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "sass",
+              "css"
+            ],
+            "description": "Output format: \"sass\" generates Sass code using igniteui-theming library functions. \"css\" generates CSS custom properties (variables) directly - useful for vanilla CSS projects or when you don't want Sass compilation. Defaults to tool-specific output (\"sass\" for theme generators, \"css\" for layout setters)."
+          }
+        },
+        "required": [
+          "size"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_spacing",
+      "description": "Set global or component-specific spacing by updating --ig-spacing.\n\n<use_case>\n  Use this tool for requests like:\n  - \"The button feels bloated\"\n  - \"Tighten the spacing on the form\"\n  - \"Double the padding on cards\"\n</use_case>\n\n<behavior>\n  - Sets --ig-spacing in the chosen scope (defaults to :root)\n  - Optional overrides for --ig-spacing-inline and --ig-spacing-block\n  - 0 = no spacing, 1 = default, 2 = double (fractions allowed)\n  - spacing is required; inline/block are optional overrides\n  - When platform is \"generic\", do NOT use the \"component\" parameter (it resolves Ignite UI component selectors). Use \"scope\" with a custom CSS selector instead, or omit both for :root.\n</behavior>\n\n<sass_notes>\n  - pad(), pad-inline(), pad-block() require @include spacing() once\n</sass_notes>\n\n<example>\n  Reduce calendar spacing:\n  {\n    \"component\": \"calendar\",\n    \"spacing\": 0.75\n  }\n\n  Override inline spacing:\n  {\n    \"scope\": \".compact\",\n    \"inline\": 0.5,\n    \"block\": 0.75\n  }\n</example>\n\n<related_resources>\n  Call read_resource to load reference data:\n  - \"theming://docs/spacing-and-sizing\" — spacing and sizing overview\n  - \"theming://docs/functions/pad\" — pad spacing function\n  - \"theming://docs/mixins/spacing\" — spacing mixin\n</related_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "angular",
+              "webcomponents",
+              "react",
+              "blazor",
+              "generic"
+            ],
+            "description": "Target platform: \"angular\" for Ignite UI for Angular, \"webcomponents\" for Ignite UI for Web Components, \"react\" for Ignite UI for React, \"blazor\" for Ignite UI for Blazor, or \"generic\" for platform-agnostic output (standalone igniteui-theming usage). If omitted, generates generic code. Use detect_platform tool first to auto-detect from project files."
+          },
+          "component": {
+            "type": "string",
+            "description": "Optional component name to scope the layout change (e.g., \"flat-button\", \"calendar\", \"avatar\"). If omitted, the change applies globally via :root. Note: component targets Ignite UI framework selectors — do not use with platform \"generic\". Use \"scope\" instead for custom CSS selectors."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Optional CSS selector scope for the change (e.g., \".my-theme\", \":root\", \"#app\"). Ignored when component is provided."
+          },
+          "spacing": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Spacing scale multiplier for --ig-spacing. 0 = none, 1 = default, 2 = double. Fractions allowed."
+          },
+          "inline": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Inline spacing scale multiplier for --ig-spacing-inline. Overrides inline spacing only."
+          },
+          "block": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Block spacing scale multiplier for --ig-spacing-block. Overrides block spacing only."
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "sass",
+              "css"
+            ],
+            "description": "Output format: \"sass\" generates Sass code using igniteui-theming library functions. \"css\" generates CSS custom properties (variables) directly - useful for vanilla CSS projects or when you don't want Sass compilation. Defaults to tool-specific output (\"sass\" for theme generators, \"css\" for layout setters)."
+          }
+        },
+        "required": [
+          "spacing"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_roundness",
+      "description": "Set global or component-specific roundness by updating --ig-radius-factor.\n\n<use_case>\n  Use this tool for requests like:\n  - \"Make the flat buttons more round\"\n  - \"Square off the cards\"\n</use_case>\n\n<behavior>\n  - Sets --ig-radius-factor in the chosen scope (defaults to :root)\n  - 0 = minimum radius, 1 = maximum radius, values between interpolate\n  - When platform is \"generic\", do NOT use the \"component\" parameter (it resolves Ignite UI component selectors). Use \"scope\" with a custom CSS selector instead, or omit both for :root.\n</behavior>\n\n<sass_notes>\n  - border-radius() responds to --ig-radius-factor without extra mixins\n</sass_notes>\n\n<example>\n  Round avatars more:\n  {\n    \"component\": \"avatar\",\n    \"radiusFactor\": 0.9\n  }\n\n  Globally reduce roundness:\n  {\n    \"radiusFactor\": 0.8\n  }\n</example>\n\n<related_resources>\n  Call read_resource to load reference data:\n  - \"theming://docs/spacing-and-sizing\" — spacing and sizing overview\n  - \"theming://docs/functions/border-radius\" — border radius function\n</related_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "angular",
+              "webcomponents",
+              "react",
+              "blazor",
+              "generic"
+            ],
+            "description": "Target platform: \"angular\" for Ignite UI for Angular, \"webcomponents\" for Ignite UI for Web Components, \"react\" for Ignite UI for React, \"blazor\" for Ignite UI for Blazor, or \"generic\" for platform-agnostic output (standalone igniteui-theming usage). If omitted, generates generic code. Use detect_platform tool first to auto-detect from project files."
+          },
+          "component": {
+            "type": "string",
+            "description": "Optional component name to scope the layout change (e.g., \"flat-button\", \"calendar\", \"avatar\"). If omitted, the change applies globally via :root. Note: component targets Ignite UI framework selectors — do not use with platform \"generic\". Use \"scope\" instead for custom CSS selectors."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Optional CSS selector scope for the change (e.g., \".my-theme\", \":root\", \"#app\"). Ignored when component is provided."
+          },
+          "radiusFactor": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Roundness scale factor for --ig-radius-factor. 0 = minimum radius, 1 = maximum radius. Values must be between 0 and 1."
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "sass",
+              "css"
+            ],
+            "description": "Output format: \"sass\" generates Sass code using igniteui-theming library functions. \"css\" generates CSS custom properties (variables) directly - useful for vanilla CSS projects or when you don't want Sass compilation. Defaults to tool-specific output (\"sass\" for theme generators, \"css\" for layout setters)."
+          }
+        },
+        "required": [
+          "radiusFactor"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_component_design_tokens",
+      "description": "Discover available design tokens (themeable properties) for an Ignite UI component.\n\n<use_case>\n  ALWAYS call this tool FIRST before using create_component_theme. It returns the\n  exact token names that can be customized for a component, preventing hallucination\n  of invalid property names.\n\n  NOTE: This tool returns tokens for Ignite UI framework components. It is NOT useful\n  when the detected platform is \"generic\" — component theming requires a specific\n  Ignite UI product (angular, webcomponents, react, or blazor).\n</use_case>\n\n<workflow>\n  1. Provide the component name (e.g., \"button\", \"avatar\", \"grid\")\n  2. Receive list of all available tokens with their types and descriptions\n  3. Use the token names in create_component_theme\n</workflow>\n\n<important_notes>\n  COMPONENT NAMING:\n  - Basic components: Use simple names like \"avatar\", \"badge\", \"card\"\n  - Button variants: Use specific variant names like \"flat-button\", \"contained-button\",\n    \"outlined-button\", \"fab-button\" (NOT just \"button\")\n  - Icon button variants: \"flat-icon-button\", \"contained-icon-button\", \"outlined-icon-button\"\n  - Child sub-components: Use names like \"list-item\", \"card-header\", \"accordion-header\",\n    \"tab-item\", \"step\", \"expansion-panel-header\". These resolve to the parent component's\n    theme automatically.\n\n  CHILD SUB-COMPONENTS:\n  - Some component parts (e.g., \"list-item\", \"card-header\", \"accordion-header\") don't have\n    their own theme function — they are styled through the parent component's theme tokens.\n  - When you query a child sub-component, the response includes a note explaining the\n    parent-child relationship and shows the parent theme's full token list.\n  - The token descriptions guide you to the relevant tokens (e.g., \"item-background\"\n    for list items, \"header-text-color\" for card headers).\n  - When you then call create_component_theme with a child name, it automatically\n    uses the parent's theme function, variable name, and selector — producing output\n    that is merge-compatible with the parent component's theme.\n\n  COMPOUND COMPONENTS:\n  There are two types of compound components:\n\n  **Standard compounds** (e.g., \"combo\", \"select\", \"date-picker\"):\n  - Use multiple internal components that each need their own theme\n  - The response lists related themes and, where available, token derivation hints\n    showing how child token values relate to parent/sibling tokens\n    (e.g., \"foreground → adaptive-contrast of calendar.content-background\")\n  - Follow derivation hints when setting child token values. If the user specifies an\n    explicit value, use that instead of the derived value.\n  - All related themes should be scoped under the parent component's selector\n  - For each related theme: call get_component_design_tokens, then create_component_theme\n    using the parent component's selector for the target platform\n\n  **Composed compounds** (e.g., \"grid components\"):\n  - The framework automatically generates internal themes for all child components from just the primary tokens\n  - Do NOT create separate themes for the related components — they are auto-derived\n    in the component's Sass styles\n  - The response uses a **two-tier token hierarchy**:\n    - **✅ Primary Tokens — USE THESE**: Use ONLY these tokens for the initial theme\n    - **📖 Refinement Tokens — REFERENCE ONLY**: Auto-derived tokens available ONLY when\n      the user explicitly requests fine-grained control (e.g., \"change the header background\")\n  - Only set the primary tokens in the parent component's theme; all children inherit automatically\n  - The response clearly marks these as \"Composed Compound Component\" and lists the\n    internally themed children for reference (not for separate theming)\n\n  VARIANTS INFO:\n  - If you query a base component that has variants (e.g., \"button\"), the response\n    lists available variants to help you choose the right one\n</important_notes>\n\n<output>\n  Returns:\n  - component: The component name\n  - themeFunctionName: The Sass function to use (e.g., \"button-theme\")\n  - description: Information about the component theme\n  - tokens: Array of { name, type, description } for each available token\n  - variants: (if applicable) List of variant-specific theme names\n  - compoundInfo: (if applicable) Related themes with token derivation hints and guidance\n  - childNote: (if child sub-component) A note explaining the parent-child relationship\n</output>\n\n<error_handling>\n  - Unknown component: Returns list of similar component names as suggestions\n  - Partial match: If query partially matches multiple components, returns all matches\n</error_handling>\n\n<example>\n  Get tokens for flat button:\n  {\n    \"component\": \"flat-button\"\n  }\n\n  Returns tokens like: background, foreground, hover-background, border-radius, etc.\n\n  Get tokens for a child sub-component:\n  {\n    \"component\": \"list-item\"\n  }\n\n  Returns the list theme's tokens with a note: \"list-item is a child of the list component.\n  Its styling is controlled through the list theme.\"\n</example>\n\n<related_tools>\n  - create_component_theme: Use the discovered tokens to create a custom theme\n</related_tools>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string",
+            "description": "Component name to get design tokens for (e.g., \"button\", \"avatar\", \"grid\"). Use exact names like \"flat-button\" for button variants. Child sub-component names like \"list-item\", \"card-header\", \"accordion-header\", \"tab-item\", \"step\" are also supported — they resolve to the parent component's theme. Call this tool to discover available tokens BEFORE using create_component_theme."
+          }
+        },
+        "required": [
+          "component"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_component_theme",
+      "description": "Generate Sass or CSS code to customize an Ignite UI component's appearance using design tokens.\n\n<use_case>\n  Use this tool AFTER calling get_component_design_tokens to customize specific\n  component styles. The generated code can be included in your theme file to\n  override default component appearances.\n</use_case>\n\n<workflow>\n  1. First call get_component_design_tokens to discover available tokens\n  2. Choose which tokens to customize based on your design requirements\n  3. Specify designSystem and variant to match the global theme or the one explicitly requested (defaults to Material light)\n  4. Call this tool with component name, token values, and output format (\"sass\" or \"css\")\n  5. Receive ready-to-use Sass or CSS code with the component theme\n</workflow>\n\n<important_notes>\n  DESIGN SYSTEM & VARIANT:\n  - designSystem: Choose \"material\" (default), \"bootstrap\", \"fluent\", or \"indigo\"\n  - variant: Choose \"light\" (default) or \"dark\"\n  - The correct schema (e.g., $light-bootstrap-schema, $dark-material-schema) is\n    automatically selected and passed to the component theme function\n  - The correct output: Choose output format based on the target file type (Sass vs CSS)\n  - This ensures component tokens inherit proper defaults from the design system\n\n  TOKEN VALIDATION:\n  - All provided token names are validated against the component's schema\n  - Invalid tokens return an error with the list of valid token names\n  - You don't need to specify all tokens - only those you want to customize (prefer PRIMARY tokens to minimize the number of overrides)\n\n  TOKEN VALUE FORMATS:\n  - Colors: Any valid CSS color format (hex, rgb, hsl, named colors)\n  - Dimensions: Include units (e.g., \"8px\", \"0.5rem\", \"2em\")\n  - Border radius: Can be single value or shorthand (\"8px\" or \"8px 8px 0 0\")\n  - Shadows: Full box-shadow syntax (\"0 2px 4px rgba(0,0,0,0.1)\")\n\n  SELECTORS:\n  - Default selector is auto-detected based on platform and component\n  - For child sub-components (e.g., \"list-item\", \"card-header\"), the selector\n    automatically resolves to the parent component's selector (e.g., \"igx-list\", \"igx-card\")\n  - Angular: Uses \"igx-*\" element selectors or attribute selectors\n  - Web Components: Uses \"igc-*\" element selectors\n  - Custom selectors supported for targeted styling (e.g., \".my-button\")\n\n  CHILD SUB-COMPONENTS:\n  - When creating a theme for a child sub-component (e.g., \"card-actions\"), the output\n    uses the parent's theme function, variable name, and selector.\n  - This means the output for \"card\" and \"card-actions\" is merge-compatible:\n    both produce `$custom-card-theme: card-theme(...)` scoped to `igx-card`.\n  - To add tokens for multiple sub-parts, merge the token arguments into a single\n    theme function call rather than creating separate themes.\n\n  SASS OUTPUT:\n  - Generated code uses `@include tokens($theme)` to apply the theme\n  - The tokens mixin emits --ig-{component}-{token} CSS custom properties in global mode\n\n  COMPOUND COMPLETENESS:\n  - **Standard compounds:** If the user asks for a standard compound component,\n    the response is incomplete unless related theme calls are also generated.\n    Use the related themes list from get_component_design_tokens to drive the sequence.\n    All related themes should use the compound component's selector as the wrapper.\n    Follow token derivation hints to set child token values consistently.\n  - **Composed compounds:** If the component is a composed compound (e.g., grid),\n    do NOT generate separate child themes. Only set the primary tokens (background,\n    foreground, accent-color) on the parent component's theme — child themes are\n    auto-derived internally by the component's Sass styles.\n    Refinement tokens (e.g., header-background) can be added in follow-up calls\n    when the user explicitly asks to customize a specific aspect.\n\n  SASS FILE PLACEMENT:\n  - When combining Sass output from multiple tools into one file, all @use rules\n    must appear at the top before any other statements. Deduplicate @use lines\n    that share the same module path.\n</important_notes>\n\n<output>\n  Returns:\n  - Generated Sass or CSS code with:\n    - Platform-specific @use import (Sass only)\n    - Theme function call with $schema parameter and provided token values (Sass only)\n    - tokens mixin to apply the theme to the selector (Sass only)\n  - Description of what was generated\n  - Design system and variant used\n  - List of tokens used\n</output>\n\n<error_handling>\n  - Unknown component: Returns error with list of available components\n  - Invalid tokens: Returns error listing invalid tokens and valid alternatives\n  - Invalid color format: Returns error with format guidance\n</error_handling>\n\n<example>\n  Custom blue flat button with rounded corners (Angular, Material Design):\n  {\n    \"platform\": \"angular\",\n    \"designSystem\": \"material\",\n    \"variant\": \"light\",\n    \"component\": \"flat-button\",\n    \"tokens\": {\n      \"foreground\": \"#1976d2\",\n    }\n  }\n\n  Generates:\n  ```scss\n  @use 'igniteui-angular/theming' as *;\n\n  $custom-flat-button-theme: flat-button-theme(\n    $schema: $light-material-schema,\n    $foreground: #1976d2,\n  );\n\n  .igx-button--flat {\n    @include tokens($custom-flat-button-theme);\n  }\n  ```\n\n  Bootstrap dark theme example:\n  {\n    \"platform\": \"webcomponents\",\n    \"designSystem\": \"bootstrap\",\n    \"variant\": \"dark\",\n    \"component\": \"avatar\",\n    \"tokens\": {\n      \"background\": \"#ff5722\"\n    }\n  }\n\n  Generates:\n  ```scss\n  @use 'igniteui-theming' as *;\n\n  $custom-avatar-theme: avatar-theme(\n    $schema: $dark-bootstrap-schema,\n    $background: #ff5722\n  );\n\n  igc-avatar {\n    @include tokens($custom-avatar-theme);\n  }\n  ```\n</example>\n\n<compound_example>\n  Date Picker (compound) — all child themes use the parent component's selector.\n  Follow token derivation hints from get_component_design_tokens:\n  1) get_component_design_tokens { \"component\": \"date-picker\" }\n  2) create_component_theme { \"component\": \"date-picker\", \"platform\": \"angular\", ... }\n  3) create_component_theme { \"component\": \"calendar\", \"selector\": \"igx-date-picker\", ... }\n  4) create_component_theme { \"component\": \"flat-button\", \"selector\": \"igx-date-picker\", ... }\n  5) create_component_theme { \"component\": \"input-group\", \"selector\": \"igx-date-picker\", ... }\n\n  Each child theme uses the parent's platform selector (e.g., `igx-date-picker` for Angular,\n  `igc-date-picker` for Web Components / React / Blazor).\n  The tokens mixin emits --ig-{component}-{token} variables that child components\n  consume via var() fallback — no per-child selectors needed.\n</compound_example>\n\n<related_tools>\n  - detect_platform: Run to auto-detect platform for correct imports\n  - get_component_design_tokens: MUST call first to discover valid tokens\n  - create_theme: Use for full theme (palette + typography + elevations)\n</related_tools>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "angular",
+              "webcomponents",
+              "react",
+              "blazor",
+              "generic"
+            ],
+            "description": "Target platform: \"angular\" for Ignite UI for Angular, \"webcomponents\" for Ignite UI for Web Components, \"react\" for Ignite UI for React, \"blazor\" for Ignite UI for Blazor, or \"generic\" for platform-agnostic output (standalone igniteui-theming usage). If omitted, generates generic code. Use detect_platform tool first to auto-detect from project files."
+          },
+          "licensed": {
+            "type": "boolean",
+            "description": "Use licensed @infragistics package (Angular only). Set to true if using @infragistics/igniteui-angular from private ProGet registry. Defaults to false (uses open-source igniteui-angular from npm). Note: igniteui-theming is always free/OSS for all other platforms."
+          },
+          "designSystem": {
+            "type": "string",
+            "enum": [
+              "material",
+              "bootstrap",
+              "fluent",
+              "indigo"
+            ],
+            "description": "Design system preset: \"material\" (Material Design), \"bootstrap\" (Bootstrap), \"fluent\" (Microsoft Fluent), or \"indigo\" (Infragistics Indigo). Defaults to \"material\"."
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark"
+            ],
+            "description": "Theme variant: \"light\" (light backgrounds, dark text) or \"dark\" (dark backgrounds, light text). Defaults to \"light\"."
+          },
+          "component": {
+            "type": "string",
+            "description": "Component name to theme (e.g., \"button\", \"avatar\", \"flat-button\", \"grid\"). Must match a valid component from get_component_design_tokens. For button/icon-button variants, use specific names like \"flat-button\", \"contained-button\", \"outlined-button\", \"fab-button\". Child sub-component names (e.g., \"list-item\", \"card-header\") are supported and automatically resolve to the parent theme with the parent's selector and variable name."
+          },
+          "tokens": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\\(.+\\)|hsla?\\(.+\\)|hwb\\(.+\\)|lab\\(.+\\)|lch\\(.+\\)|oklab\\(.+\\)|oklch\\(.+\\)|color\\(.+\\)|[a-z]+)$"
+                },
+                {
+                  "type": "string",
+                  "description": "CSS value (e.g., \"8px\", \"1rem\", \"0 2px 4px rgba(0,0,0,0.1)\")"
+                },
+                {
+                  "type": "number",
+                  "description": "Numeric value"
+                }
+              ]
+            },
+            "description": "Object mapping token names to values. Token names must be valid for the component (use get_component_design_tokens to discover them). Values can be CSS colors, dimensions with units, or other Sass-compatible values. Example: { \"background\": \"#1976D2\", \"border-radius\": \"8px\" }"
+          },
+          "selector": {
+            "type": "string",
+            "description": "Optional CSS selector to scope the theme. If omitted, uses the platform's default selector for the component. For child sub-components (e.g., \"list-item\"), the default selector is the parent component's selector (e.g., \"igx-list\"). For Angular: \"igx-*\" selectors, for Web Components: \"igc-*\" selectors. You can specify custom selectors like \".my-custom-button\" for targeted styling."
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional name for the generated theme variable (without $ prefix). If omitted, auto-generates based on component name (e.g., \"$custom-button-theme\")."
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "sass",
+              "css"
+            ],
+            "description": "Output format: \"sass\" generates Sass code using igniteui-theming library functions. \"css\" generates CSS custom properties (variables) directly - useful for vanilla CSS projects or when you don't want Sass compilation. Defaults to tool-specific output (\"sass\" for theme generators, \"css\" for layout setters)."
+          }
+        },
+        "required": [
+          "platform",
+          "component",
+          "tokens"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_color",
+      "description": "Retrieve a palette color from Ignite UI Theming as a CSS variable reference.\n\n<use_case>\n  Use this tool when you need to reference a specific palette color in CSS or Sass code.\n  Returns CSS variable references that work in both Sass and CSS contexts.\n\n  Common scenarios:\n  - Setting component backgrounds/foregrounds using theme colors\n  - Creating hover/focus states with opacity variations\n  - Ensuring text contrast against colored backgrounds\n</use_case>\n\n<workflow>\n  1. Specify the color family (primary, secondary, gray, etc.)\n  2. Optionally specify a shade variant (50-900, A100-A700)\n  3. Optionally request the contrast color for text readability\n  4. Optionally apply opacity for transparency effects\n</workflow>\n\n<output_examples>\n  Basic color:\n    { color: \"primary\" }\n    → var(--ig-primary-500)\n\n  Specific shade:\n    { color: \"primary\", variant: \"600\" }\n    → var(--ig-primary-600)\n\n  Contrast color:\n    { color: \"primary\", variant: \"600\", contrast: true }\n    → var(--ig-primary-600-contrast)\n\n  With opacity:\n    { color: \"primary\", opacity: 0.5 }\n    → hsl(from var(--ig-primary-500) h s l / 0.5)\n\n  Contrast with opacity:\n    { color: \"primary\", contrast: true, opacity: 0.7 }\n    → hsl(from var(--ig-primary-500-contrast) h s l / 0.7)\n</output_examples>\n\n<important_notes>\n  CSS VARIABLE NAMING:\n  - Base colors: --ig-{color}-{variant} (e.g., --ig-primary-500)\n  - Contrast: --ig-{color}-{variant}-contrast (e.g., --ig-primary-500-contrast)\n\n  GRAY RESTRICTIONS:\n  - Gray only supports standard shades (50-900), not accent shades (A100-A700)\n\n  OPACITY HANDLING:\n  - Uses CSS relative color syntax: hsl(from <color> h s l / <opacity>)\n  - Works in modern browsers (CSS Color Level 4)\n  - For Sass projects, this syntax is passed through unchanged\n</important_notes>\n\n<related_tools>\n  - create_palette: Generate a complete palette with these colors\n  - create_component_theme: Use retrieved colors in component theming\n</related_tools>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "gray",
+              "surface",
+              "info",
+              "success",
+              "warn",
+              "error"
+            ]
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "50",
+              "100",
+              "200",
+              "300",
+              "400",
+              "500",
+              "600",
+              "700",
+              "800",
+              "900",
+              "A100",
+              "A200",
+              "A400",
+              "A700"
+            ]
+          },
+          "contrast": {
+            "type": "boolean"
+          },
+          "opacity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_resource",
+      "description": "Read a theming resource by URI. Returns reference data such as platform configurations, color palette presets, typography presets, color guidance, and layout documentation.\n\n<use_case>\n  Use this tool to load reference data before or during theme generation. Other tools\n  reference these resources in their related_resources sections — call this tool with\n  the listed URI to retrieve the data.\n\n  Common scenarios:\n  - Load palette presets to see available colors before creating a palette\n  - Read color guidance to understand shade usage and semantic roles\n  - Check platform configuration for usage examples and supported features\n  - Read layout documentation for spacing, sizing, and roundness details\n</use_case>\n\n<workflow>\n  1. Identify the resource URI from the available_resources list or from a related_resources hint in another tool\n  2. Call this tool with the URI\n  3. Use the returned data to inform your next action\n</workflow>\n\n<output>\n  Returns the resource content as text. Format depends on the resource:\n  - application/json resources return JSON data\n  - text/markdown resources return Markdown documentation\n</output>\n\n<error_handling>\n  If the URI is not found, returns the list of all available resource URIs.\n</error_handling>\n\n<available_resources>\n  Platforms:\n    - \"theming://platforms\" — Supported Platforms\n    - \"theming://platforms/angular\" — Angular Platform Config\n    - \"theming://platforms/webcomponents\" — Web Components Platform Config\n    - \"theming://platforms/react\" — React Platform Config\n    - \"theming://platforms/blazor\" — Blazor Platform Config\n    - \"theming://platforms/generic\" — Generic Platform Config\n  Presets:\n    - \"theming://presets/palettes\" — Color Palettes - All Presets\n    - \"theming://presets/palettes/light\" — Color Palettes - Light\n    - \"theming://presets/palettes/dark\" — Color Palettes - Dark\n    - \"theming://presets/typography\" — Typography Presets\n    - \"theming://presets/elevations\" — Elevation Presets\n  Guidance:\n    - \"theming://guidance/platform-setup\" — Platform Setup Guide\n    - \"theming://guidance/colors\" — Color Guidance Overview\n    - \"theming://guidance/colors/rules\" — Color Rules - Light and Dark Themes\n    - \"theming://guidance/colors/usage\" — Color Shade Reference\n    - \"theming://guidance/colors/roles\" — Color Semantic Roles\n    - \"theming://guidance/colors/states\" — Color Interaction States\n    - \"theming://guidance/colors/themes\" — Color Design System Patterns\n  Layout Docs:\n    - \"theming://docs/spacing-and-sizing\" — Spacing and Sizing Overview\n    - \"theming://docs/functions/pad\" — Pad Spacing Function\n    - \"theming://docs/functions/sizable\" — Sizable Value Function\n    - \"theming://docs/functions/border-radius\" — Border Radius Function\n    - \"theming://docs/mixins/spacing\" — Spacing Mixin\n    - \"theming://docs/mixins/sizing\" — Sizing Mixin\n    - \"theming://docs/mixins/sizable\" — Sizable Mixin\n</available_resources>",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "URI of the theming resource to read (e.g., \"theming://presets/palettes\", \"theming://platforms/angular\"). See the available_resources list in the tool description for all valid URIs."
+          }
+        },
+        "required": [
+          "uri"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

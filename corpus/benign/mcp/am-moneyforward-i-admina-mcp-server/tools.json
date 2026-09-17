@@ -1,0 +1,2271 @@
+{
+  "package": "@moneyforward_i/admina-mcp-server",
+  "tools": [
+    {
+      "name": "get_organization_info",
+      "description": "Get information about the organization including name, unique name, status, system language, etc.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_devices",
+      "description": "Get a list of devices for an organization using advanced search and filtering.\n\n## Key Features\n- Combine query parameters (pagination, sorting) with body parameters (filtering)\n- Support for text search, field-specific filters, and complex queries\n- Pagination with cursor-based navigation\n\n## Example Usage\n**Find first 5 devices for user with email \"someone@gmail.com\":**\n- Query: limit=5\n- Body: {\"searchTerm\": \"someone@gmail.com\", \"searchFields\": [\"people.primaryEmail\"]}\n\n## Pro Tips\n- **1**: Always make sure understand the definition of the fields (preset and custom fields) before using them.\n- **2**: If user search devices by category: pc, phone or other, please use body.type to filter devices by category.\n- **3**: Always to understand what are current sub types of the devices. If the user search information relate to sub types, Please use body.filters.[\"preset.subtype\"] to filter devices by sub types.\n- **4**: We don't really need to use searchFields parameter to the search results in all fields, only use it when the user search information relate to specific fields.\n- **5**: If user want to filter devices by status, please use body.filters.[\"preset.status\"].eq to filter devices by status.\n- **5.1**: Unassigned devices status should be \"in_stock\" or \"decommissioned\".\n- **6**: If user want to filter devices by preset fields or custom fields, please check the field.kind first, we only support date, number, dropdown kind of fields.\n- **6.1**: If the field.kind is date, please use body.filters.[\"preset.field_name\"].minDate or body.filters.[\"custom.attributeCode\"].minDate and body.filters.[\"preset.field_name\"].maxDate or body.filters.[\"custom.attributeCode\"].maxDate to filter devices by date range.\n- **6.2**: If the field.kind is number, please use body.filters.[\"preset.field_name\"].minNumber or body.filters.[\"custom.attributeCode\"].minNumber and body.filters.[\"preset.field_name\"].maxNumber or body.filters.[\"custom.attributeCode\"].maxNumber to filter devices by number range.\n- **6.3**: If the preset field field.kind is dropdown, please use body.filters.[\"preset.field_name\"].eq or body.filters.[\"custom.attributeCode\"].eq to filter devices by dropdown value.\n- **7**: Combine multiple filters examples: {\"preset.status\":{\"eq\":\"active\"},\"preset.subtype\":{\"eq\":\"desktop_pc\"},\"custom.custom_xxx\":{\"eq\":\"1\"},\"custom.dt_13\":{\"minDate\":\"2025-12-23\",\"maxDate\":\"2025-12-25\"},\"custom.drp_4\":{\"eq\":\"1\"}}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "maximum": 200,
+            "description": "Maximum number of items to return per page"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Base64-encoded cursor for pagination"
+          },
+          "sortBy": {
+            "type": "string",
+            "description": "Sort by field. Format: `<preset | custom>.<unique field name>` or `people.displayName`"
+          },
+          "sortOrder": {
+            "type": "string",
+            "enum": [
+              "DESC",
+              "ASC"
+            ],
+            "description": "Sort order for the results"
+          },
+          "expands": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "relatedIdentity",
+                "customFieldsMetadata"
+              ]
+            },
+            "description": "Expand other datasets when fetching devices"
+          },
+          "peopleId": {
+            "type": "number",
+            "description": "Filter devices by the people ID assigned to them"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "pc",
+              "phone",
+              "other"
+            ],
+            "description": "Filter devices by device type"
+          },
+          "employeeStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "on_leave",
+              "draft",
+              "preactive",
+              "retired",
+              "untracked"
+            ],
+            "description": "Filter devices by the employment status of the assigned person"
+          },
+          "searchTerm": {
+            "type": "string",
+            "description": "Search term to filter devices"
+          },
+          "searchFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of field names to search within when using searchTerm. Supports memo, people fields, preset fields, and custom fields"
+          },
+          "filters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "minDate": {
+                  "type": "string",
+                  "description": "Only supported by fields with `date` kind"
+                },
+                "maxDate": {
+                  "type": "string",
+                  "description": "Only supported by fields with `date` kind"
+                },
+                "minNumber": {
+                  "type": "number",
+                  "description": "Only supported by fields with `number` kind and few special fields such as `$age`"
+                },
+                "maxNumber": {
+                  "type": "number",
+                  "description": "Only supported by fields with `number` kind and few special fields such as `$age`"
+                },
+                "eq": {
+                  "type": "string",
+                  "description": "Only supported by fields with `dropdown` kind"
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "Advanced filters. Keys look like `preset.<unique field name>`. There are certain extra virtual fields, such as `$age`"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_device",
+      "description": "Create a new device for an organization. Requires device type (subtype), asset number, and model name. Can include optional preset fields and custom fields.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memo": {
+            "type": "string",
+            "description": "Additional notes or memo about the device"
+          },
+          "fields": {
+            "type": "object",
+            "properties": {
+              "preset.asset_number": {
+                "type": "string",
+                "description": "Asset number (REQUIRED)"
+              },
+              "preset.subtype": {
+                "type": "string",
+                "enum": [
+                  "desktop_pc",
+                  "laptop_pc",
+                  "tablet_pc",
+                  "phone",
+                  "monitor",
+                  "server",
+                  "peripheral_device",
+                  "other"
+                ],
+                "description": "Device subtype (REQUIRED)"
+              },
+              "preset.model_name": {
+                "type": "string",
+                "description": "Model name (REQUIRED)"
+              },
+              "preset.serial_number": {
+                "type": "string",
+                "description": "Serial number"
+              },
+              "preset.model_number": {
+                "type": "string",
+                "description": "Model number"
+              },
+              "preset.memory": {
+                "type": "string",
+                "description": "Memory specification"
+              },
+              "preset.hdd_ssd": {
+                "type": "string",
+                "description": "Storage specification"
+              },
+              "preset.cpu": {
+                "type": "string",
+                "description": "CPU specification"
+              },
+              "preset.os": {
+                "type": "string",
+                "description": "Operating system"
+              },
+              "preset.size": {
+                "type": "string",
+                "description": "Size/dimensions"
+              },
+              "preset.manufacturer": {
+                "type": "string",
+                "description": "Manufacturer name"
+              },
+              "preset.supplier": {
+                "type": "string",
+                "description": "Supplier name"
+              },
+              "preset.procurement_method": {
+                "type": "string",
+                "enum": [
+                  "purchase",
+                  "lease",
+                  "rental",
+                  "other"
+                ],
+                "description": "Procurement method"
+              },
+              "preset.purchase_date": {
+                "type": "string",
+                "description": "Purchase date (YYYY-MM-DD format)"
+              },
+              "preset.purchase_cost": {
+                "type": "number",
+                "description": "Purchase cost"
+              },
+              "preset.warranty_period": {
+                "type": "string",
+                "description": "Warranty period"
+              },
+              "preset.decommission_date": {
+                "type": "string",
+                "description": "Decommission date (YYYY-MM-DD format)"
+              },
+              "preset.scheduled_return_date": {
+                "type": "string",
+                "description": "Scheduled return date (YYYY-MM-DD format)"
+              },
+              "preset.fixed_asset": {
+                "type": "string",
+                "enum": [
+                  "yes",
+                  "no"
+                ],
+                "description": "Fixed asset status"
+              },
+              "preset.phone_number": {
+                "type": "string",
+                "description": "Phone number (for phone devices)"
+              },
+              "preset.sim_number": {
+                "type": "string",
+                "description": "SIM number (for phone devices)"
+              },
+              "preset.mobile_plan": {
+                "type": "string",
+                "description": "Mobile plan (for phone devices)"
+              },
+              "preset.hostname": {
+                "type": "string",
+                "description": "Hostname"
+              },
+              "preset.version": {
+                "type": "string",
+                "description": "Version"
+              },
+              "preset.keyboard_layout": {
+                "type": "string",
+                "enum": [
+                  "us",
+                  "uk",
+                  "jis",
+                  "other"
+                ],
+                "description": "Keyboard layout"
+              },
+              "preset.usage_start_date": {
+                "type": "string",
+                "description": "Usage start date (YYYY-MM-DD format)"
+              },
+              "preset.usage_end_date": {
+                "type": "string",
+                "description": "Usage end date (YYYY-MM-DD format)"
+              }
+            },
+            "required": [
+              "preset.asset_number",
+              "preset.subtype",
+              "preset.model_name"
+            ],
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "not": {}
+                },
+                {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                }
+              ]
+            },
+            "description": "Device field values including preset and custom fields"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_device",
+      "description": "Update an existing device's information. Can update preset fields, custom fields, and device properties. Note: fields.preset.asset_number, fields.preset.subtype, fields.preset.model_name are always required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "number",
+            "description": "The ID of the device to update"
+          },
+          "memo": {
+            "type": "string",
+            "description": "Additional notes or memo about the device"
+          },
+          "fields": {
+            "type": "object",
+            "properties": {
+              "preset.asset_number": {
+                "type": "string",
+                "description": "Asset number (REQUIRED for update)"
+              },
+              "preset.subtype": {
+                "type": "string",
+                "enum": [
+                  "desktop_pc",
+                  "laptop_pc",
+                  "tablet_pc",
+                  "phone",
+                  "monitor",
+                  "server",
+                  "peripheral_device",
+                  "other"
+                ],
+                "description": "Device subtype (REQUIRED for update)"
+              },
+              "preset.model_name": {
+                "type": "string",
+                "description": "Model name (REQUIRED for update)"
+              },
+              "preset.serial_number": {
+                "type": "string",
+                "description": "Serial number"
+              },
+              "preset.model_number": {
+                "type": "string",
+                "description": "Model number"
+              },
+              "preset.memory": {
+                "type": "string",
+                "description": "Memory specification"
+              },
+              "preset.hdd_ssd": {
+                "type": "string",
+                "description": "Storage specification"
+              },
+              "preset.cpu": {
+                "type": "string",
+                "description": "CPU specification"
+              },
+              "preset.os": {
+                "type": "string",
+                "description": "Operating system"
+              },
+              "preset.size": {
+                "type": "string",
+                "description": "Size/dimensions"
+              },
+              "preset.manufacturer": {
+                "type": "string",
+                "description": "Manufacturer name"
+              },
+              "preset.supplier": {
+                "type": "string",
+                "description": "Supplier name"
+              },
+              "preset.procurement_method": {
+                "type": "string",
+                "enum": [
+                  "purchase",
+                  "lease",
+                  "rental",
+                  "other"
+                ],
+                "description": "Procurement method"
+              },
+              "preset.purchase_date": {
+                "type": "string",
+                "description": "Purchase date (YYYY-MM-DD format)"
+              },
+              "preset.purchase_cost": {
+                "type": "number",
+                "description": "Purchase cost"
+              },
+              "preset.warranty_period": {
+                "type": "string",
+                "description": "Warranty period"
+              },
+              "preset.decommission_date": {
+                "type": "string",
+                "description": "Decommission date (YYYY-MM-DD format)"
+              },
+              "preset.scheduled_return_date": {
+                "type": "string",
+                "description": "Scheduled return date (YYYY-MM-DD format)"
+              },
+              "preset.fixed_asset": {
+                "type": "string",
+                "enum": [
+                  "yes",
+                  "no"
+                ],
+                "description": "Fixed asset status"
+              },
+              "preset.phone_number": {
+                "type": "string",
+                "description": "Phone number (for phone devices)"
+              },
+              "preset.sim_number": {
+                "type": "string",
+                "description": "SIM number (for phone devices)"
+              },
+              "preset.mobile_plan": {
+                "type": "string",
+                "description": "Mobile plan (for phone devices)"
+              },
+              "preset.hostname": {
+                "type": "string",
+                "description": "Hostname"
+              },
+              "preset.version": {
+                "type": "string",
+                "description": "Version"
+              },
+              "preset.keyboard_layout": {
+                "type": "string",
+                "enum": [
+                  "us",
+                  "uk",
+                  "jis",
+                  "other"
+                ],
+                "description": "Keyboard layout"
+              },
+              "preset.usage_start_date": {
+                "type": "string",
+                "description": "Usage start date (YYYY-MM-DD format)"
+              },
+              "preset.usage_end_date": {
+                "type": "string",
+                "description": "Usage end date (YYYY-MM-DD format)"
+              }
+            },
+            "required": [
+              "preset.asset_number",
+              "preset.subtype",
+              "preset.model_name"
+            ],
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "not": {}
+                },
+                {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                }
+              ]
+            },
+            "description": "Device field values. Note: preset.asset_number, preset.subtype, and preset.model_name are always required"
+          }
+        },
+        "required": [
+          "deviceId",
+          "fields"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_device_meta",
+      "description": "Update device's meta information including assignment info (peopleId, status, dates) and location. Use this to assign/unassign devices to people. When unassigned, status should be 'in_stock' or 'decommissioned'. When assigned without status, defaults to 'active'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "number",
+            "description": "The ID of the device to update"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_stock",
+              "pre_use",
+              "active",
+              "missing",
+              "malfunction",
+              "decommissioned",
+              "on_order"
+            ],
+            "description": "Device status. If 'in_stock' or 'decommissioned', device will be unassigned and assignment dates cleared"
+          },
+          "peopleId": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "People ID to assign device to. Set to null to unassign. Cannot assign if status is 'in_stock' or 'decommissioned'"
+          },
+          "assignmentStartDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Assignment start date (YYYY-MM-DD). Cannot set if status is 'in_stock' or 'decommissioned'"
+          },
+          "assignmentEndDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Assignment end date (YYYY-MM-DD). Cannot set if status is 'in_stock' or 'decommissioned'"
+          },
+          "location1": {
+            "type": "string",
+            "description": "Primary location information"
+          },
+          "location2": {
+            "type": "string",
+            "description": "Secondary location information"
+          }
+        },
+        "required": [
+          "deviceId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_device_custom_fields",
+      "description": "Get all custom fields configured for an organization's devices. Returns field definitions, types (text, date, number, dropdown), and configurations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_device_custom_field",
+      "description": "Create a new custom field for organization devices. Defines a new field that can be used across all devices in the organization.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "attributeName": {
+            "type": "string",
+            "description": "Display label for the custom field (REQUIRED)"
+          },
+          "attributeCode": {
+            "type": "string",
+            "description": "Unique identifier for the custom field. Must contain only lowercase letters, numbers, and underscores (REQUIRED)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "number",
+              "date",
+              "dropdown"
+            ],
+            "description": "The type of the custom field (REQUIRED)"
+          },
+          "configuration": {
+            "type": "object",
+            "properties": {
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Stable identifier for the option"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "Display name for the option"
+                    },
+                    "group": {
+                      "type": "string",
+                      "description": "Optional group for the option"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Dropdown items with id (stable identifier) and value (display name)"
+              }
+            },
+            "required": [
+              "values"
+            ],
+            "additionalProperties": false,
+            "description": "Dropdown configuration with values. Only required for 'dropdown' kind fields."
+          }
+        },
+        "required": [
+          "attributeName",
+          "attributeCode",
+          "kind"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_device_custom_field",
+      "description": "Update an existing device custom field configuration. Can modify field name, code, visibility for device types, and dropdown configuration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customFieldId": {
+            "type": "number",
+            "description": "The ID of the custom field to update"
+          },
+          "visibleForType": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "pc",
+                "phone",
+                "other"
+              ]
+            },
+            "description": "List of device types this field is visible for"
+          },
+          "configuration": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Stable identifier for the option"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "Display name for the option"
+                        },
+                        "group": {
+                          "type": "string",
+                          "description": "Optional group for the option"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Dropdown items with id (stable identifier) and value (display name)"
+                  }
+                },
+                "required": [
+                  "values"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dropdown configuration (values can be added, removed, reordered, or modified). Only for dropdown type fields."
+          },
+          "attributeName": {
+            "type": "string",
+            "description": "Display label for the custom field"
+          },
+          "attributeCode": {
+            "type": "string",
+            "description": "Unique identifier for the custom field. Must contain only lowercase letters, numbers, and underscores."
+          }
+        },
+        "required": [
+          "customFieldId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_device_custom_field",
+      "description": "Delete a device custom field configuration. Removes a custom field definition from the organization.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customFieldId": {
+            "type": "number",
+            "description": "The ID of the custom field to delete. Make sure user wants to delete a device custom field and not an identity custom field"
+          }
+        },
+        "required": [
+          "customFieldId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_identities",
+      "description": "Return a list of identities. Can be filtered by the status, department and type. Can also search by the email or name by keyword",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of items to return per page"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Cursor for pagination"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "Filter results by username, identityId, department name, email or displayName (prefix search)"
+          },
+          "statuses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "active",
+                "on_leave",
+                "draft",
+                "preactive",
+                "retired",
+                "untracked",
+                "archived"
+              ]
+            },
+            "description": "Filter results by status. Accepts multiple options."
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter results by employee type. Accepts multiple options."
+          },
+          "managementTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "managed",
+                "external",
+                "system",
+                "unknown",
+                "unregistered"
+              ]
+            },
+            "description": "Filter results by management type. Accepts multiple options."
+          },
+          "departments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter results by departments. Accepts multiple options."
+          },
+          "companies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter results by companies. Accepts multiple options."
+          },
+          "locations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter results by locations. Accepts multiple options."
+          },
+          "identityIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter results by identityIds. Accepts multiple options."
+          },
+          "peopleIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Filter results by peopleIds. Accepts multiple options."
+          },
+          "excludeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exclude identities by id. Accepts multiple options."
+          },
+          "alertTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "retired_account",
+                "inactive_account",
+                "on_leave_account",
+                "unknown_account",
+                "public_files"
+              ]
+            },
+            "description": "Filter results by alert type. Accepts multiple options."
+          },
+          "expands": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "devices",
+                "accounts",
+                "customFieldsMetadata",
+                "relatedIdentity"
+              ]
+            },
+            "description": "Expand other datasets when fetching identities. Accepts multiple options."
+          },
+          "sortBy": {
+            "type": "string",
+            "enum": [
+              "name",
+              "type",
+              "status",
+              "company",
+              "department",
+              "location",
+              "servicesCount",
+              "devicesCount",
+              "costUsd",
+              "costJpy"
+            ],
+            "description": "Sort results by a specific field."
+          },
+          "sortOrder": {
+            "type": "string",
+            "enum": [
+              "ASC",
+              "DESC"
+            ],
+            "description": "Sort results in ascending or descending order."
+          },
+          "contractStartRange": {
+            "type": "string",
+            "description": "Filter results by contract start date range. Format: YYYY-MM-DD:YYYY-MM-DD, separated by a colon."
+          },
+          "contractEndRange": {
+            "type": "string",
+            "description": "Filter results by contract end date range. Format: YYYY-MM-DD:YYYY-MM-DD, separated by a colon."
+          },
+          "suspensionStartRange": {
+            "type": "string",
+            "description": "Filter results by suspension start date range. Format: YYYY-MM-DD:YYYY-MM-DD, separated by a colon."
+          },
+          "suspensionEndRange": {
+            "type": "string",
+            "description": "Filter results by suspension end date range. Format: YYYY-MM-DD:YYYY-MM-DD, separated by a colon."
+          },
+          "createdAtRange": {
+            "type": "string",
+            "description": "Filter results by created date range. Format: YYYY-MM-DD:YYYY-MM-DD, separated by a colon."
+          },
+          "updatedAtRange": {
+            "type": "string",
+            "description": "Filter results by updated date range. Format: YYYY-MM-DD:YYYY-MM-DD, separated by a colon."
+          },
+          "serviceCountFrom": {
+            "type": "integer",
+            "description": "Filter results by minimum service count."
+          },
+          "serviceCountTo": {
+            "type": "integer",
+            "description": "Filter results by maximum service count."
+          },
+          "managerId": {
+            "type": "string",
+            "description": "Filter results by managerId."
+          },
+          "serviceId": {
+            "type": "string",
+            "description": "Filter results by serviceId."
+          },
+          "customFields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Filter results by custom fields. For date fields, use date range format: YYYY-MM-DD:YYYY-MM-DD"
+          },
+          "hasHRM": {
+            "type": "boolean",
+            "description": "Filter results by HRM (employee master) linkage. When true, returns only UIDs with HRM linkage."
+          },
+          "haveAssignedDevice": {
+            "type": "boolean",
+            "description": "Filter results by identities that have at least one assigned device."
+          },
+          "haveSaasAccount": {
+            "type": "boolean",
+            "description": "Filter results by identities that have at least one SaaS account."
+          },
+          "includeActiveInternalOnly": {
+            "type": "boolean",
+            "description": "When true, limits results to active employees with internal management (ACTIVE status, MANAGED/SYSTEM types only)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_identity",
+      "description": "Create a new identity in the organization. Requires employeeStatus, employeeType, firstName, and lastName. Optional: displayName, primaryEmail, department, jobTitle, employeeId, lifecycle, customFields, manager, etc.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "employeeStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "on_leave",
+              "draft",
+              "preactive",
+              "retired",
+              "untracked",
+              "archived"
+            ],
+            "description": "Extended status of the employee"
+          },
+          "employeeType": {
+            "type": "string",
+            "enum": [
+              "board_member",
+              "full_time_employee",
+              "fixed_time_employee",
+              "temporary_employee",
+              "part_time_employee",
+              "secondment_employee",
+              "contract_employee",
+              "collaborator",
+              "group_address",
+              "shared_address",
+              "test_address",
+              "other",
+              "unknown",
+              "unregistered"
+            ],
+            "description": "Type of the employee"
+          },
+          "firstName": {
+            "type": "string",
+            "description": "First name of the employee"
+          },
+          "lastName": {
+            "type": "string",
+            "description": "Last name of the employee"
+          },
+          "managementType": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "managed",
+                  "external",
+                  "system",
+                  "unknown",
+                  "unregistered"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Management type of the employee"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of the employee"
+          },
+          "primaryEmail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Primary email of the employee"
+          },
+          "secondaryEmails": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Secondary emails of the employee"
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Company name of the employee"
+          },
+          "workLocation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Work location of the employee"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Department of the employee"
+          },
+          "jobTitle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Job title of the employee"
+          },
+          "employeeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Employee ID of the employee"
+          },
+          "lifecycle": {
+            "type": "object",
+            "properties": {
+              "contractStartAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Contract start date (YYYY-MM-DD)"
+              },
+              "contractEndAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Contract end date (YYYY-MM-DD)"
+              },
+              "suspensionStartAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Suspension start date (YYYY-MM-DD)"
+              },
+              "suspensionEndAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Suspension end date (YYYY-MM-DD)"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Lifecycle of the employee"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Notes of the employee"
+          },
+          "customFields": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Custom fields of the employee"
+          },
+          "manager": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Manager identity ID"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Manager of the employee"
+          }
+        },
+        "required": [
+          "employeeStatus",
+          "employeeType",
+          "firstName",
+          "lastName"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_identity",
+      "description": "Get a single identity by ID. Optionally expand with customFieldsMetadata.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identityId": {
+            "type": "string",
+            "description": "The ID of the identity to retrieve"
+          },
+          "expands": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "customFieldsMetadata"
+              ]
+            },
+            "description": "Expand other datasets when fetching the identity (e.g. customFieldsMetadata)"
+          }
+        },
+        "required": [
+          "identityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_identity",
+      "description": "Update an existing identity. Pass identityId and any fields to update (employeeStatus, employeeType, displayName, primaryEmail, department, jobTitle, customFields, manager, etc.).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identityId": {
+            "type": "string",
+            "description": "The ID of the identity to update"
+          },
+          "employeeStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "on_leave",
+              "draft",
+              "preactive",
+              "retired",
+              "untracked",
+              "archived"
+            ],
+            "description": "Extended status of the employee"
+          },
+          "employeeType": {
+            "type": "string",
+            "enum": [
+              "board_member",
+              "full_time_employee",
+              "fixed_time_employee",
+              "temporary_employee",
+              "part_time_employee",
+              "secondment_employee",
+              "contract_employee",
+              "collaborator",
+              "group_address",
+              "shared_address",
+              "test_address",
+              "other",
+              "unknown",
+              "unregistered"
+            ],
+            "description": "Type of the employee"
+          },
+          "managementType": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "managed",
+                  "external",
+                  "system",
+                  "unknown",
+                  "unregistered"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Management type of the employee"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of the employee"
+          },
+          "firstName": {
+            "type": "string",
+            "description": "First name of the employee"
+          },
+          "lastName": {
+            "type": "string",
+            "description": "Last name of the employee"
+          },
+          "primaryEmail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Primary email of the employee"
+          },
+          "secondaryEmails": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Secondary emails of the employee"
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Company name of the employee"
+          },
+          "workLocation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Work location of the employee"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Department of the employee"
+          },
+          "jobTitle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Job title of the employee"
+          },
+          "employeeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Employee ID of the employee"
+          },
+          "lifecycle": {
+            "type": "object",
+            "properties": {
+              "contractStartAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Contract start date (YYYY-MM-DD)"
+              },
+              "contractEndAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Contract end date (YYYY-MM-DD)"
+              },
+              "suspensionStartAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Suspension start date (YYYY-MM-DD)"
+              },
+              "suspensionEndAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Suspension end date (YYYY-MM-DD)"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Lifecycle of the employee"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Notes of the employee"
+          },
+          "customFields": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Custom fields of the employee"
+          },
+          "manager": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Manager identity ID"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Manager of the employee"
+          }
+        },
+        "required": [
+          "identityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_identity",
+      "description": "Delete an identity by ID. Returns the deleted identity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identityId": {
+            "type": "string",
+            "description": "The ID of the identity to delete"
+          }
+        },
+        "required": [
+          "identityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_services",
+      "description": "Return a list of services, along with the preview of the accounts. Can be searched by the service name by keyword",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "keyword": {
+            "type": "string"
+          },
+          "sortBy": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_service_accounts",
+      "description": "Return a list of accounts for a specific service. The serviceId can be obtained from the get_services tool. Can be searched by email/name of the account by keyword",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "serviceId": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "keyword": {
+            "type": "string"
+          },
+          "sortBy": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "string"
+          },
+          "workspaceIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "twoFa": {
+            "type": "boolean"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "admin",
+                "guest",
+                "other"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "serviceRoles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "employee",
+                "guest",
+                "system",
+                "unknown"
+              ]
+            }
+          },
+          "employeeTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "board_member",
+                "full_time_employee",
+                "fixed_time_employee",
+                "temporary_employee",
+                "part_time_employee",
+                "secondment_employee",
+                "contract_employee",
+                "collaborator",
+                "group_address",
+                "shared_address",
+                "test_address",
+                "other",
+                "unknown",
+                "unregistered"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "employeeStatuses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "active",
+                "on_leave",
+                "draft",
+                "preactive",
+                "retired",
+                "untracked"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "statuses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "active",
+                "on_leave",
+                "draft",
+                "preactive",
+                "retired",
+                "untracked"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "includeDeleted": {
+            "type": "boolean"
+          },
+          "expandIdentities": {
+            "type": "boolean"
+          },
+          "onlyInactive": {
+            "type": "boolean"
+          },
+          "licenses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "alertType": {
+            "type": "string",
+            "enum": [
+              "retired_account",
+              "inactive_account",
+              "on_leave_account",
+              "unknown_account",
+              "public_files"
+            ]
+          },
+          "alertStatus": {
+            "type": "string",
+            "enum": [
+              "muted",
+              "unmuted"
+            ]
+          }
+        },
+        "required": [
+          "serviceId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_people_accounts",
+      "description": "Return a list of SaaS accounts belonging to a person. The peopleId can be obtained from the get_identities tool. Can be filtered by role, two-factor authentication, and searched by service name or workspace name",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "peopleId": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "guest",
+              "other"
+            ]
+          },
+          "twoFa": {
+            "type": "boolean"
+          },
+          "keyword": {
+            "type": "string"
+          },
+          "serviceIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "workspaceIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "sortBy": {
+            "type": "string",
+            "enum": [
+              "service",
+              "twoFa",
+              "lastActivity"
+            ]
+          },
+          "sortOrder": {
+            "type": "string",
+            "enum": [
+              "ASC",
+              "DESC"
+            ]
+          },
+          "licenses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "on_leave",
+              "draft",
+              "preactive",
+              "retired",
+              "untracked"
+            ]
+          }
+        },
+        "required": [
+          "peopleId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_identity_field_configuration",
+      "description": "Get identity field configuration of an organization. Returns preset field configurations, field order, available fields, fields metadata, and field details. Optionally pass an identityId to get the effective configuration for a specific identity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identityId": {
+            "type": "string",
+            "description": "Optional identity ID to get the effective configuration for a specific identity"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_identity_config",
+      "description": "Get configuration for identity fields of a specific identity. Required to filter by a specific identityId to see the effective configuration for that identity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identityId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "identityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_identity_custom_fields",
+      "description": "Get all identity custom fields configured for an organization. Returns field definitions, types (text, date, number, dropdown), and configurations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_identity_management_type",
+      "description": "Check Identity management type. Use this endpoint to determine the management type for an identity based on email or identityId. Returns the management type (e.g., hr_master, manual, unregistered).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email of the new Identity to check"
+          },
+          "identityId": {
+            "type": "string",
+            "description": "Identity Id to be checked"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_identities_stats",
+      "description": "Get identities statistics for an organization. Returns management type counts, HR master integration information, and domain lists. Use this to understand the distribution of identities across different management types and HR systems.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "merge_identities",
+      "description": "Merge identities in batch. Use this to merge multiple people entities or identity entities. Supports up to 50 merge operations per request. Can merge people entities (by peopleId) or identity entities (by identityId) in a single operation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "merges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fromPeopleId": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Source people ID to merge from"
+                },
+                "toPeopleId": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Target people ID to merge into"
+                }
+              },
+              "required": [
+                "fromPeopleId",
+                "toPeopleId"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Array of people merge operations (1-50 items)"
+          },
+          "identityMerges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fromIdentityId": {
+                  "type": "string",
+                  "description": "Source identity ID to merge from"
+                },
+                "toIdentityId": {
+                  "type": "string",
+                  "description": "Target identity ID to merge into"
+                }
+              },
+              "required": [
+                "fromIdentityId",
+                "toIdentityId"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Array of identity merge operations (1-50 items)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "unmerge_identities",
+      "description": "Unmerge previously merged identity/people entities. Provide peopleIds, identityIds, or both to unmerge (up to 50 items each).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "peopleIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "List of people IDs to unmerge (1-50 items)."
+          },
+          "identityIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "List of identity IDs to unmerge (1-50 items)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "bulk_update_identities",
+      "description": "Bulk update multiple identities in a single request. Provide a list of identity IDs (1-50) and a set of field updates to apply to all of them. All identity update fields are optional.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identityIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Array of identity IDs to update (1-50 items)"
+          },
+          "identityUpdates": {
+            "type": "object",
+            "properties": {
+              "employeeStatus": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "on_leave",
+                  "draft",
+                  "preactive",
+                  "retired",
+                  "untracked",
+                  "archived"
+                ],
+                "description": "Extended status of the employee"
+              },
+              "employeeType": {
+                "type": "string",
+                "enum": [
+                  "board_member",
+                  "full_time_employee",
+                  "fixed_time_employee",
+                  "temporary_employee",
+                  "part_time_employee",
+                  "secondment_employee",
+                  "contract_employee",
+                  "collaborator",
+                  "group_address",
+                  "shared_address",
+                  "test_address",
+                  "other",
+                  "unknown",
+                  "unregistered"
+                ],
+                "description": "Type of the employee"
+              },
+              "managementType": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "managed",
+                      "external",
+                      "system",
+                      "unknown",
+                      "unregistered"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Management type of the employee"
+              },
+              "displayName": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Display name of the employee"
+              },
+              "firstName": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "First name of the employee"
+              },
+              "lastName": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Last name of the employee"
+              },
+              "primaryEmail": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Primary email of the employee"
+              },
+              "secondaryEmails": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Secondary emails of the employee"
+              },
+              "companyName": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Company name of the employee"
+              },
+              "workLocation": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Work location of the employee"
+              },
+              "department": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Department of the employee"
+              },
+              "jobTitle": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Job title of the employee"
+              },
+              "employeeId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Employee ID of the employee"
+              },
+              "lifecycle": {
+                "type": "object",
+                "properties": {
+                  "contractStartAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Contract start date (YYYY-MM-DD)"
+                  },
+                  "contractEndAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Contract end date (YYYY-MM-DD)"
+                  },
+                  "suspensionStartAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Suspension start date (YYYY-MM-DD)"
+                  },
+                  "suspensionEndAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Suspension end date (YYYY-MM-DD)"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Lifecycle of the employee"
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Notes of the employee"
+              },
+              "customFields": {
+                "type": "object",
+                "additionalProperties": {},
+                "description": "Custom fields of the employee"
+              },
+              "manager": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Manager identity ID"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Manager of the employee"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Identity updates to apply to all selected identities. All fields are optional."
+          }
+        },
+        "required": [
+          "identityIds",
+          "identityUpdates"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_identity_history",
+      "description": "Get the change history of a specific identity. Returns a paginated list of history records showing field-level changes, action types, sources, and actors.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identityId": {
+            "type": "string",
+            "description": "The ID of the identity to retrieve history for"
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Maximum number of history items to return per page. Defaults to 10."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Base64-encoded cursor for pagination"
+          }
+        },
+        "required": [
+          "identityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "archive_identity",
+      "description": "Toggle the archive flag for an identity. Returns the updated identity with the new archive state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identityId": {
+            "type": "string",
+            "description": "The ID of the identity to toggle the archive flag for"
+          }
+        },
+        "required": [
+          "identityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "unregister_identity",
+      "description": "Toggle the unregistered management type for an identity. Returns the updated identity with the new management type.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identityId": {
+            "type": "string",
+            "description": "The ID of the identity to toggle the unregistered management type for"
+          }
+        },
+        "required": [
+          "identityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_identity_custom_field",
+      "description": "Create a new identity custom field for an organization. Defines a new field that can be used across all identities in the organization.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "textarea",
+              "number",
+              "date",
+              "dropdown",
+              "email"
+            ],
+            "description": "The type of the custom field (REQUIRED)"
+          },
+          "configuration": {
+            "type": "object",
+            "properties": {
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Stable identifier for the option"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "Display name for the option"
+                    },
+                    "group": {
+                      "type": "string",
+                      "description": "Optional group for the option"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Dropdown items with id (stable identifier) and value (display name)"
+              }
+            },
+            "required": [
+              "values"
+            ],
+            "additionalProperties": false,
+            "description": "Dropdown configuration (values can be added, removed, reordered, or modified). Only required for dropdown type fields."
+          },
+          "attributeName": {
+            "type": "string",
+            "description": "Display label for the custom field (REQUIRED)"
+          },
+          "attributeCode": {
+            "type": "string",
+            "description": "Unique identifier for the custom field. Must contain only lowercase letters, numbers, and underscores. If not provided, will be auto-generated."
+          },
+          "serviceSource": {
+            "type": "object",
+            "properties": {
+              "serviceFieldId": {
+                "type": "string",
+                "description": "Display label for the custom field (REQUIRED). This can be obtained as workspaceId of workspace of service field from get_services tool and user should pick a service then pick a workspace from the list of workspaces for that service and use that workspaceId for this field"
+              },
+              "workspaceId": {
+                "type": "number",
+                "description": "Workspace ID number for the service source. This can be obtained from the get_services tool."
+              }
+            },
+            "required": [
+              "serviceFieldId",
+              "workspaceId"
+            ],
+            "additionalProperties": false,
+            "description": "Optional service source to link this custom field to a specific service workspace."
+          }
+        },
+        "required": [
+          "kind",
+          "attributeName",
+          "attributeCode"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_identity_custom_field",
+      "description": "Update an existing identity custom field configuration. Can modify field name and code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customFieldId": {
+            "type": "number",
+            "description": "The ID of the custom field to update"
+          },
+          "attributeName": {
+            "type": "string",
+            "description": "Display label for the custom field"
+          },
+          "attributeCode": {
+            "type": "string",
+            "description": "Unique identifier for the custom field. Must contain only lowercase letters, numbers, and underscores."
+          }
+        },
+        "required": [
+          "customFieldId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_identity_custom_field",
+      "description": "Delete an identity custom field for an organization. Removes a custom field definition from the organization.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customFieldId": {
+            "type": "number",
+            "description": "The ID of the custom field to delete. Make sure user wants to delete an identity custom field and not a device custom field"
+          }
+        },
+        "required": [
+          "customFieldId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

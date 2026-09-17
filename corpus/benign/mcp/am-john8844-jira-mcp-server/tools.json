@@ -1,0 +1,358 @@
+{
+  "package": "@john8844/jira-mcp-server",
+  "tools": [
+    {
+      "name": "jira_ls_projects",
+      "description": "Lists Jira projects accessible to the user, optionally filtering by name/key (`name`) or sorting (`orderBy`). Use this to discover available projects and find project keys/IDs needed for other tools (like `jira_get_project` or `jira_list_issues`). Supports pagination via `limit` and `startAt`. Returns a formatted list of projects including key, name, type, style, lead, and URL. Pagination information including next page instructions is included in the returned text. **Note:** Default sort is by most recently updated issue time. Requires Jira credentials to be configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Filter projects by name or key (case-insensitive). Use this to find specific projects by their display name or project key."
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum number of items to return (1-100). Use this to control the response size. Useful for pagination or when you only need a few results."
+          },
+          "startAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index of the first item to return (0-based offset). Use this for pagination instead of cursor, as Jira uses offset-based pagination."
+          },
+          "orderBy": {
+            "type": "string",
+            "description": "Field to sort projects by (e.g., \"name\", \"key\", \"lastIssueUpdatedTime\"). Default is \"lastIssueUpdatedTime\", which shows the most recently active projects first."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_get_project",
+      "description": "Retrieves comprehensive details for a specific Jira project using its key or ID (`projectKeyOrId`). Includes description, lead, components, versions, and other metadata. Use this after finding a project key/ID via `jira_list_projects` to get its full details. Returns detailed project information formatted as Markdown. Requires Jira credentials to be configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectKeyOrId": {
+            "type": "string",
+            "description": "The key or numeric ID of the Jira project to retrieve (e.g., \"PROJ\" or \"10001\"). This is required and must be a valid project key or ID from your Jira instance."
+          }
+        },
+        "required": [
+          "projectKeyOrId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_ls_issues",
+      "description": "Searches for Jira issues using JQL and other filters. Supports filtering by project (`projectKeyOrId`), statuses (`statuses`), or advanced JQL queries (`jql`). Includes pagination via `limit` and `startAt`. Returns formatted issue summaries including key, type, status, summary, and assignee. The response includes the executed JQL query and pagination information with instructions for viewing the next page. Requires Jira credentials to be configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jql": {
+            "type": "string",
+            "description": "Filter issues using JQL syntax. Use this for complex queries like \"project = TEAM AND status = 'In Progress'\" or \"assignee = currentUser()\". If omitted, returns issues according to your Jira default search."
+          },
+          "projectKeyOrId": {
+            "type": "string",
+            "description": "Filter issues by a specific project key or ID (e.g., \"PROJ\" or \"10001\"). If `jql` is also provided, this will be ANDed with it (e.g., `project = YOUR_KEY AND (YOUR_JQL)`). Will be combined with other filters using AND logic."
+          },
+          "statuses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter issues by specific status names (e.g., [\"To Do\", \"In Progress\"]). Requires exact names; use jira_ls_statuses to discover. If `jql` is also provided, this will be ANDed with it (e.g., `status IN (\"To Do\", \"In Progress\") AND (YOUR_JQL)`). Will be combined with other filters using AND logic."
+          },
+          "orderBy": {
+            "type": "string",
+            "description": "Specify the sorting order using JQL ORDER BY clause syntax (e.g., \"priority DESC\", \"created ASC\"). If no `orderBy` is provided and a `jql` query without an ORDER BY clause is given, it defaults to `updated DESC`. If `jql` is empty, it also defaults to `ORDER BY updated DESC`."
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum number of items to return (1-100). Use this to control the response size. Useful for pagination or when you only need a few results."
+          },
+          "startAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index of the first item to return (0-based offset). Use this for pagination instead of cursor, as Jira uses offset-based pagination."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_get_issue",
+      "description": "Retrieves comprehensive details about a specific Jira issue using its ID or key (`issueIdOrKey`). Returns formatted issue information including summary, description, status, reporter, assignee, comments summary, and related development information (commits, branches, pull requests) if available. Requires Jira credentials to be configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": {
+            "type": "string",
+            "description": "The ID or key of the Jira issue to retrieve (e.g., \"10001\" or \"PROJ-123\"). This is required and must be a valid issue ID or key from your Jira instance."
+          }
+        },
+        "required": [
+          "issueIdOrKey"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_ls_statuses",
+      "description": "Lists available Jira statuses, either globally or for a specific project (`projectKeyOrId`).\nUse this to discover valid status names and IDs needed for filtering issues (e.g., in `jira_ls_issues`).\n**Important:** This tool returns *all* available statuses in a single response. The underlying Jira API does not support pagination for this endpoint, so parameters like `limit` or pagination tokens are not applicable.\nReturns a formatted Markdown list of statuses including name, ID, description, and category (To Do, In Progress, Done).\nRequires Jira credentials to be configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectKeyOrId": {
+            "type": "string",
+            "description": "Optional project key or ID (e.g. \"PROJ\" or \"10001\") to filter statuses relevant to that project workflows."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_ls_comments",
+      "description": "Lists comments for a specific Jira issue identified by `issueIdOrKey`. Supports pagination via `limit` and `startAt`. Returns a formatted Markdown list of comments with author, date, and content. Pagination information including next page instructions is included in the returned text. Requires Jira credentials to be configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ID or key of the Jira issue to get comments from (e.g., \"PROJ-123\" or \"10001\")."
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum number of comments to return (1-100). Default is 25."
+          },
+          "startAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index of the first comment to return (0-based offset). Used with limit for pagination."
+          },
+          "orderBy": {
+            "type": "string",
+            "pattern": "^(-)?(created|updated)$",
+            "description": "Sort comments by field and direction. Use \"created\" or \"updated\" for ascending order, and \"-created\" or \"-updated\" for descending order."
+          }
+        },
+        "required": [
+          "issueIdOrKey"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_add_comment",
+      "description": "Adds a new comment to a specific Jira issue identified by `issueIdOrKey`. The content of the comment is provided in `commentBody` and supports Markdown formatting which will be converted to Jira's Atlassian Document Format (ADF). Returns a confirmation message and link to the newly created comment. Requires Jira credentials to be configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ID or key of the Jira issue to add a comment to (e.g., \"PROJ-123\" or \"10001\")."
+          },
+          "commentBody": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The text content of the comment to add. Supports Markdown formatting including headings, lists, code blocks, tables, and other common markdown elements."
+          }
+        },
+        "required": [
+          "issueIdOrKey",
+          "commentBody"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_ls_worklogs",
+      "description": "List worklogs for a Jira issue. Shows all work logged on an issue including time spent, authors, and comments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ID or key of the issue (e.g., \"PROJ-123\" or \"10001\")"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25,
+            "description": "Maximum number of worklogs to return (1-100)"
+          },
+          "startAt": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "The index of the first worklog to return (0-based)"
+          },
+          "expand": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Use expand to include additional information in the response"
+          }
+        },
+        "required": [
+          "issueIdOrKey"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_add_worklog",
+      "description": "Add a worklog entry to a Jira issue. Logs time spent working on an issue with optional comment and estimate adjustment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ID or key of the issue (e.g., \"PROJ-123\" or \"10001\")"
+          },
+          "timeSpent": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Time spent working in Jira duration format (e.g., \"2h 30m\", \"1d\", \"45m\")"
+          },
+          "comment": {
+            "type": "string",
+            "description": "Worklog comment/description in Markdown format"
+          },
+          "started": {
+            "type": "string",
+            "description": "When the work was started in ISO 8601 format (e.g., \"2024-01-22T10:00:00.000+0000\")"
+          },
+          "adjustEstimate": {
+            "type": "string",
+            "enum": [
+              "new",
+              "leave",
+              "manual",
+              "auto"
+            ],
+            "description": "How to adjust the remaining estimate: new (set new estimate), leave (don't change), manual (reduce by amount), auto (reduce by time spent)"
+          },
+          "newEstimate": {
+            "type": "string",
+            "description": "The new estimate when adjustEstimate is \"new\" (e.g., \"3d 4h\")"
+          },
+          "reduceBy": {
+            "type": "string",
+            "description": "Amount to reduce remaining estimate when adjustEstimate is \"manual\" (e.g., \"2h\")"
+          }
+        },
+        "required": [
+          "issueIdOrKey",
+          "timeSpent",
+          "started"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_update_worklog",
+      "description": "Update an existing worklog entry. Modify the time spent, comment, or start time of a previously logged work entry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ID or key of the issue (e.g., \"PROJ-123\" or \"10001\")"
+          },
+          "worklogId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ID of the worklog to update"
+          },
+          "timeSpent": {
+            "type": "string",
+            "description": "New time spent value in Jira duration format (e.g., \"3h 15m\")"
+          },
+          "comment": {
+            "type": "string",
+            "description": "New worklog comment/description in Markdown format"
+          },
+          "started": {
+            "type": "string",
+            "description": "New start time in ISO 8601 format (e.g., \"2024-01-22T10:00:00.000+0000\")"
+          }
+        },
+        "required": [
+          "issueIdOrKey",
+          "worklogId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "jira_delete_worklog",
+      "description": "Delete a worklog entry from a Jira issue. Removes a previously logged work entry with optional estimate adjustment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ID or key of the issue (e.g., \"PROJ-123\" or \"10001\")"
+          },
+          "worklogId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ID of the worklog to delete"
+          },
+          "adjustEstimate": {
+            "type": "string",
+            "enum": [
+              "new",
+              "leave",
+              "manual",
+              "auto"
+            ],
+            "description": "How to adjust the remaining estimate: new (set new estimate), leave (don't change), manual (increase by amount), auto (increase by time that was logged)"
+          },
+          "newEstimate": {
+            "type": "string",
+            "description": "The new estimate when adjustEstimate is \"new\" (e.g., \"5d\")"
+          },
+          "increaseBy": {
+            "type": "string",
+            "description": "Amount to increase remaining estimate when adjustEstimate is \"manual\" (e.g., \"3h\")"
+          }
+        },
+        "required": [
+          "issueIdOrKey",
+          "worklogId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}

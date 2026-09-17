@@ -1,0 +1,566 @@
+{
+  "package": "postfast-mcp",
+  "tools": [
+    {
+      "name": "list_posts",
+      "description": "List social media posts with optional filters for platform, status, and date range",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "page": {
+            "default": 0,
+            "description": "Page number (0-based)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "default": 20,
+            "description": "Posts per page (max 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "platforms": {
+            "description": "Filter by platforms",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "FACEBOOK",
+                "INSTAGRAM",
+                "X",
+                "TIKTOK",
+                "LINKEDIN",
+                "YOUTUBE",
+                "BLUESKY",
+                "THREADS",
+                "PINTEREST",
+                "TELEGRAM",
+                "GOOGLE_BUSINESS_PROFILE"
+              ]
+            }
+          },
+          "statuses": {
+            "description": "Filter by post statuses",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "DRAFT",
+                "SCHEDULED",
+                "PUBLISHED",
+                "FAILED"
+              ]
+            }
+          },
+          "from": {
+            "description": "Start date filter (ISO 8601, e.g. 2025-01-01T00:00:00.000Z)",
+            "type": "string"
+          },
+          "to": {
+            "description": "End date filter (ISO 8601, e.g. 2025-01-31T23:59:59.999Z)",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_posts",
+      "description": "Create and schedule social media posts. Supports batch creation (up to 15 posts). Each post targets a specific social account.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "posts": {
+            "minItems": 1,
+            "maxItems": 15,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Post text content"
+                },
+                "firstComment": {
+                  "description": "First comment to add after publishing",
+                  "type": "string"
+                },
+                "mediaItems": {
+                  "description": "Media attachments",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "S3 media key from get_upload_urls"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "IMAGE",
+                          "VIDEO"
+                        ]
+                      },
+                      "sortOrder": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "coverImageKey": {
+                        "description": "S3 key of a custom cover/thumbnail image for video posts (upload via get_upload_urls first). Supported on Instagram Reels, Facebook Reels, Pinterest video pins.",
+                        "type": "string"
+                      },
+                      "coverTimestamp": {
+                        "description": "Video cover timestamp in milliseconds (e.g. \"5000\" = 5s). Fallback when coverImageKey is also provided.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "type",
+                      "sortOrder"
+                    ]
+                  }
+                },
+                "scheduledAt": {
+                  "description": "Schedule time (ISO 8601). Required when status is SCHEDULED.",
+                  "type": "string"
+                },
+                "socialMediaId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "Target social account ID (from list_accounts)"
+                }
+              },
+              "required": [
+                "content",
+                "socialMediaId"
+              ]
+            },
+            "description": "Array of posts to create"
+          },
+          "status": {
+            "default": "SCHEDULED",
+            "description": "Post status. SCHEDULED requires scheduledAt on all posts.",
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "SCHEDULED"
+            ]
+          },
+          "approvalStatus": {
+            "default": "APPROVED",
+            "description": "Approval workflow status",
+            "type": "string",
+            "enum": [
+              "PENDING_APPROVAL",
+              "APPROVED"
+            ]
+          },
+          "controls": {
+            "description": "Platform-specific controls (shared across all posts in the batch)",
+            "type": "object",
+            "properties": {
+              "xRetweetUrl": {
+                "type": "string"
+              },
+              "tiktokPrivacy": {
+                "type": "string",
+                "enum": [
+                  "PUBLIC",
+                  "MUTUAL_FRIENDS",
+                  "FOLLOWER_OF_CREATOR",
+                  "ONLY_ME"
+                ]
+              },
+              "tiktokIsDraft": {
+                "type": "boolean"
+              },
+              "tiktokAllowComments": {
+                "type": "boolean"
+              },
+              "tiktokAllowDuet": {
+                "type": "boolean"
+              },
+              "tiktokAllowStitch": {
+                "type": "boolean"
+              },
+              "tiktokBrandOrganic": {
+                "type": "boolean"
+              },
+              "tiktokBrandContent": {
+                "type": "boolean"
+              },
+              "tiktokAutoAddMusic": {
+                "type": "boolean"
+              },
+              "tiktokIsAigc": {
+                "description": "Declare video as AI-generated content",
+                "type": "boolean"
+              },
+              "instagramPostToGrid": {
+                "type": "boolean"
+              },
+              "instagramPublishType": {
+                "type": "string",
+                "enum": [
+                  "TIMELINE",
+                  "STORY",
+                  "REEL"
+                ]
+              },
+              "instagramCollaborators": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "youtubePrivacy": {
+                "type": "string",
+                "enum": [
+                  "PUBLIC",
+                  "PRIVATE",
+                  "UNLISTED"
+                ]
+              },
+              "youtubeTags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "youtubeCategoryId": {
+                "type": "string"
+              },
+              "youtubeIsShort": {
+                "type": "boolean"
+              },
+              "youtubeMadeForKids": {
+                "type": "boolean"
+              },
+              "youtubeTitle": {
+                "type": "string"
+              },
+              "youtubePlaylistId": {
+                "type": "string"
+              },
+              "youtubeThumbnailKey": {
+                "description": "S3 media key for custom YouTube video thumbnail (image, max 2MB, min 640px wide, 1280x720 recommended)",
+                "type": "string"
+              },
+              "facebookContentType": {
+                "type": "string",
+                "enum": [
+                  "POST",
+                  "REEL",
+                  "STORY"
+                ]
+              },
+              "facebookAllowComments": {
+                "type": "boolean"
+              },
+              "facebookPrivacy": {
+                "type": "string",
+                "enum": [
+                  "PUBLIC",
+                  "FRIENDS_OF_FRIENDS",
+                  "FRIENDS",
+                  "SELF"
+                ]
+              },
+              "facebookCarouselMainLink": {
+                "type": "string"
+              },
+              "facebookCarouselShowEndCard": {
+                "type": "boolean"
+              },
+              "facebookReelsCoverImageKey": {
+                "type": "string"
+              },
+              "facebookReelsCollaborators": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "gbpLocationId": {
+                "description": "GBP location resource name (from list_gbp_locations)",
+                "type": "string"
+              },
+              "gbpTopicType": {
+                "description": "Post type",
+                "type": "string",
+                "enum": [
+                  "STANDARD",
+                  "EVENT",
+                  "OFFER"
+                ]
+              },
+              "gbpCallToActionType": {
+                "type": "string",
+                "enum": [
+                  "BOOK",
+                  "ORDER",
+                  "LEARN_MORE",
+                  "SIGN_UP",
+                  "CALL",
+                  "SHOP"
+                ]
+              },
+              "gbpCallToActionUrl": {
+                "description": "CTA button URL (not needed for CALL, ignored for OFFER)",
+                "type": "string"
+              },
+              "gbpEventTitle": {
+                "description": "Title for EVENT/OFFER posts (max 58 chars)",
+                "type": "string"
+              },
+              "gbpEventStartDate": {
+                "description": "Start date for EVENT/OFFER (ISO 8601)",
+                "type": "string"
+              },
+              "gbpEventEndDate": {
+                "description": "End date for EVENT/OFFER (ISO 8601)",
+                "type": "string"
+              },
+              "gbpOfferCouponCode": {
+                "description": "Coupon code (OFFER only)",
+                "type": "string"
+              },
+              "gbpOfferRedeemUrl": {
+                "description": "Redemption URL (OFFER only)",
+                "type": "string"
+              },
+              "gbpOfferTerms": {
+                "description": "Terms and conditions (OFFER only)",
+                "type": "string"
+              },
+              "pinterestBoardId": {
+                "type": "string"
+              },
+              "pinterestLink": {
+                "type": "string"
+              },
+              "linkedinAttachmentKey": {
+                "type": "string"
+              },
+              "linkedinAttachmentTitle": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "delete_post",
+      "description": "Delete a social media post by ID",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Post ID to delete"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "get_post_analytics",
+      "description": "Fetch published posts with their latest performance metrics (impressions, reach, likes, comments, shares). Only returns published posts that have a platform post ID. LinkedIn personal accounts are excluded. Supported: Instagram, Facebook, TikTok, Threads, YouTube, LinkedIn (company pages), Pinterest (Business accounts). Pinterest extras include pin_clicks, outbound_clicks, saves_90d, save_rate_90d (saves are 90-day rolling because Pinterest API does not expose lifetime totals); video pins additionally surface mrc_views, views_10s, avg_watch_time, v50_watch_time, video_starts, quartile_95_views.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "description": "Start of date range (ISO 8601, e.g. 2026-01-01T00:00:00.000Z)"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "End of date range (ISO 8601, e.g. 2026-01-31T23:59:59.999Z)"
+          },
+          "platforms": {
+            "description": "Filter by platforms",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "FACEBOOK",
+                "INSTAGRAM",
+                "X",
+                "TIKTOK",
+                "LINKEDIN",
+                "YOUTUBE",
+                "BLUESKY",
+                "THREADS",
+                "PINTEREST",
+                "TELEGRAM",
+                "GOOGLE_BUSINESS_PROFILE"
+              ]
+            }
+          },
+          "socialMediaIds": {
+            "description": "Filter by specific social media account IDs",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        },
+        "required": [
+          "startDate",
+          "endDate"
+        ]
+      }
+    },
+    {
+      "name": "list_accounts",
+      "description": "List all social media accounts connected to the workspace",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_pinterest_boards",
+      "description": "List Pinterest boards for a connected Pinterest account",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "socialMediaId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Pinterest account ID (from list_accounts)"
+          }
+        },
+        "required": [
+          "socialMediaId"
+        ]
+      }
+    },
+    {
+      "name": "list_youtube_playlists",
+      "description": "List YouTube playlists for a connected YouTube account",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "socialMediaId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "YouTube account ID (from list_accounts)"
+          }
+        },
+        "required": [
+          "socialMediaId"
+        ]
+      }
+    },
+    {
+      "name": "list_gbp_locations",
+      "description": "List Google Business Profile locations for a connected GBP account",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "socialMediaId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "GBP account ID (from list_accounts)"
+          }
+        },
+        "required": [
+          "socialMediaId"
+        ]
+      }
+    },
+    {
+      "name": "generate_connect_link",
+      "description": "Generate a shareable link for external clients to connect their social accounts to the workspace",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "expiryDays": {
+            "default": 7,
+            "description": "Link expiry in days (1-30, default 7)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "sendEmail": {
+            "default": false,
+            "description": "Send the link via email",
+            "type": "boolean"
+          },
+          "email": {
+            "description": "Recipient email (required if sendEmail is true)",
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_upload_urls",
+      "description": "Get signed upload URLs for media files. Upload your file to the returned URL via PUT, then use the key in create_posts mediaItems.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "contentType": {
+            "type": "string",
+            "description": "MIME type of the file. Supported: image/jpeg, image/png, image/gif, image/webp, video/mp4, video/webm, video/quicktime"
+          },
+          "count": {
+            "default": 1,
+            "description": "Number of upload URLs (1-8 for images, 1 for videos)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          }
+        },
+        "required": [
+          "contentType"
+        ]
+      }
+    },
+    {
+      "name": "upload_media",
+      "description": "Upload a local file to PostFast and get back a media key for use in create_posts. Handles the full flow: detects content type, gets a signed URL, uploads the file, and returns the key and type.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Absolute path to the local file (e.g. /Users/me/photo.jpg)"
+          }
+        },
+        "required": [
+          "filePath"
+        ]
+      }
+    }
+  ]
+}
