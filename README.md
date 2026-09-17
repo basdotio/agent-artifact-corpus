@@ -159,17 +159,17 @@ shows up there rather than in someone else's clone.
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **CI cannot verify rule ids, and now says so out loud.**
-  [`.github/workflows/validate.yml`](.github/workflows/validate.yml) runs `make validate`,
-  `go test -race`, gofmt, vet and the Python tests on every push — on a clean checkout, which
-  is the half that cannot be tested on the machine the corpus was built on. What it cannot do
-  is check `expect.<tool>` rule ids: `taxonomy/tools.yaml` locates aguard's rule reference at
-  `../agent-guard/docs/rules.md`, outside this repository, so on a clean checkout validate
-  reports `aguard not checked` and stays green. That degradation is correct — an unreadable
-  reference must not be assumed correct — but it was silent, which is worse than no check. The
-  workflow now pins the set of scanners it cannot verify and fails if that set changes, in
-  either direction, so wiring up a second scanner cannot quietly mean nothing ever checks its
-  rule ids.
+- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 3,489 labels
+  carry such a block; the other 3,483 are pure `truth` and need no scanner to check. A
+  scanner's rule list belongs to that scanner, so `taxonomy/tools.yaml` reaches it only
+  through an environment variable and the validator now **rejects** a `rules_source.path`
+  that leaves this repository. That rule exists because aguard's used to be
+  `../agent-guard/docs/rules.md` — a sibling directory on one machine. Nothing broke, which
+  was the problem: `make validate` reported "73 ids, 56 carry a dimension" there and
+  "not checked" everywhere else, so the corpus's own result depended on the author's
+  directory layout. The remaining gap is real and belongs elsewhere: **no scanner's
+  repository yet clones this corpus to check its own `expect` blocks against its own rules**,
+  which is where that check has to live.
 - **`sha256` is verified in layer 1 and still empty in layer 2.** The 393 harvested samples
   each carry the hash of the bytes as collected, and `make validate` recomputes all 393 from
   the vendored artifact and fails on a mismatch. Every *manifest* entry still carries an empty

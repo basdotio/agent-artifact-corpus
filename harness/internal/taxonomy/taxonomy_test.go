@@ -48,7 +48,6 @@ tools:
     section_pattern: '^## (?:[0-9]+ — )?(.+)$'
     rules_source:
       env: TEST_RULES_MD
-      path: ../nowhere/rules.md
     native_format: sarif-2.1.0
     dimension_map:
       Backdoor: backdoor
@@ -192,6 +191,53 @@ techniques:
 
 // KnownRules must downgrade to "not checked" rather than pass everything, because this
 // repository has to validate with no checkout of any scanner present.
+// A rules_source.path that leaves the repository is rejected, and the reason is not
+// tidiness. aguard's was `../agent-guard/docs/rules.md`: nothing broke, `make validate`
+// reported 73 verified rule ids on the machine that had the scanner checked out beside the
+// corpus, and "not checked" on every other machine in the world. A tool-neutral corpus whose
+// validation result depends on the author's directory layout is not tool-neutral.
+func TestRulesSourcePathMayNotLeaveTheRepository(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"sibling repository", "../agent-guard/docs/rules.md", true},
+		{"further out", "../../elsewhere/rules.md", true},
+		{"absolute", "/Users/someone/agent-guard/docs/rules.md", true},
+		{"escapes then returns", "sub/../../outside/rules.md", true},
+		// Inside is fine: a tool could legitimately vendor its own reference here, and then
+		// every machine reads the same file.
+		{"inside", "taxonomy/vendor/aguard-rules.md", false},
+		{"inside with a detour", "docs/../taxonomy/rules.md", false},
+		{"absent", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tools := strings.Replace(goodTools, "      env: TEST_RULES_MD",
+				"      env: TEST_RULES_MD\n      path: "+tc.path, 1)
+			if tc.path == "" {
+				tools = goodTools
+			}
+			set, err := loadFrom(t, goodTechniques, tools)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			var found bool
+			for _, e := range set.Validate() {
+				if strings.Contains(e.Error(), "leaves this repository") {
+					found = true
+				}
+			}
+			if found != tc.wantErr {
+				t.Errorf("path %q: reported=%v, want=%v", tc.path, found, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestKnownRulesDowngradesWhenUnreachable(t *testing.T) {
 	t.Parallel()
 	s, err := loadFrom(t, goodTechniques, goodTools)

@@ -34,9 +34,23 @@
 # base64-wrapped reverse shell is "Obfuscation" passes part 1 and fails part 2: it detected
 # that something was hidden, not that there was a backdoor.
 #
-# `rules_source` locates the generated reference. `path` is relative to this repository's
-# root; `env` overrides it. Both optional: a tool with no reachable reference downgrades to
-# "rule ids not checked for this tool" and says so, rather than silently passing everything.
+# `rules_source` locates the generated reference. `env` names an environment variable holding
+# the path; `path` is relative to this repository's root and MAY NOT leave it — the validator
+# rejects one that does. Both optional, and for an external scanner `env` is the only correct
+# choice: a tool with no reachable reference downgrades to "rule ids not checked for this
+# tool" and says so, rather than silently passing everything.
+#
+# Why `path` is forbidden from escaping: aguard's used to be `../agent-guard/docs/rules.md`, a
+# sibling directory on one machine. Nothing broke — which was the problem. `make validate`
+# reported "73 ids, 56 carry a dimension" on that machine and "not checked" on every other,
+# so the corpus's own validation result depended on the author's directory layout. A
+# tool-neutral corpus cannot have an output conditional on having one particular tool.
+#
+# A scanner's rule list belongs to that scanner, and so does the check that a label's rule
+# ids exist in it. That check is scorer-adjacent, and the Makefile header already states
+# where the scorer lives: in the scanner's repository, which should clone this corpus and
+# validate its own `expect` blocks against its own rules. Setting the env var below is how
+# someone with a local checkout gets the same check here — opt-in, and visibly so.
 #
 # `severity_ladder` is that tool's own ladder, ordered most to least severe, last entry being
 # its name for "nothing". Expectation bounds in a label are checked against the ladder of the
@@ -57,8 +71,10 @@ tools:
     # "## Scan notes (dimension 0)". One capture group, the name.
     section_pattern: '^## (?:[0-9]+ — )?(.+)$'
     rules_source:
+      # No `path`. aguard is a separate repository, so there is no location inside this one
+      # that could hold its rules; an aguard developer exports AGUARD_RULES_MD to get the
+      # rule-id check locally, and everyone else sees "not checked", which is the truth.
       env: AGUARD_RULES_MD
-      path: ../agent-guard/docs/rules.md
     native_format: sarif-2.1.0
     dimension_map:
       Prompt injection: injection

@@ -245,6 +245,27 @@ func (s *Set) Validate() []error {
 			bad("tool %s declares no severity_ladder — expectation bounds in a label are "+
 				"checked against it, so without one every bound is unvalidated", t.ID)
 		}
+		// A rules_source.path must stay INSIDE this repository, and this check exists because
+		// one did not. aguard's was `../agent-guard/docs/rules.md`, a sibling of the corpus on
+		// one particular machine. The effect was not a broken build — it was worse: on that
+		// machine `make validate` reported "73 ids, 56 carry a dimension", and everywhere else
+		// in the world it reported "not checked" and stayed green. The corpus's own validation
+		// result depended on the author's directory layout.
+		//
+		// A scanner's rule list belongs to that scanner. Pointing at a checkout of it from
+		// here makes a tool-neutral corpus's output conditional on having that tool, which is
+		// the one property this repository is built to refuse. Use `env` instead: then the
+		// extra check is opt-in, visibly so, and the default is identical for everyone.
+		if p := t.RulesSource.Path; p != "" {
+			if filepath.IsAbs(p) || strings.HasPrefix(filepath.ToSlash(filepath.Clean(p)), "../") {
+				bad("tool %s: rules_source.path %q leaves this repository. A path outside it "+
+					"makes `make validate` report one thing on the machine that has the "+
+					"scanner checked out and another thing everywhere else, so the corpus "+
+					"would validate differently per machine. Use rules_source.env for a local "+
+					"checkout, and let the scanner's own repository verify its rule ids", t.ID, p)
+			}
+		}
+
 		for _, pat := range []struct{ name, expr string }{
 			{"rule_id_pattern", t.RuleIDPattern},
 			{"section_pattern", t.SectionPattern},
