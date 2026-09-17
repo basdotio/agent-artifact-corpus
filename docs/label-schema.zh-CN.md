@@ -266,7 +266,9 @@ surface: [hooks, permission]    # 确实同时位于两个加载路径上的那�
     rule_id_pattern: '…'                      # 它的规则 id 是怎么写的
     rules_source:
       env: YOURSCANNER_RULES
-      path: ../yourscanner/docs/rules.md      # 相对于本仓库根目录
+      # 这里不要写 `path:`。它相对于本仓库根目录，且不许走出去——校验器会拒绝走出去的
+      # 路径，因为一个指向你自己扫描器 checkout 的路径，会让 `make validate` 在不同机器
+      # 上给出不同结果。上面那个环境变量才是你连到自己 checkout 的方式。
     native_format: sarif-2.1.0
 ```
 

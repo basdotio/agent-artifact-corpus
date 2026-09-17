@@ -237,10 +237,21 @@ layer. Measure against it locally if you have it installed; redistribute nothing
 
 ## What is missing from the public world
 
-**Benign hooks, benign permission grants, and benign MCP server configurations.** The
-malicious side of these surfaces exists (`skillcraft-audit`, `cisco-mcp-scanner-evals`); the
-benign side does not, anywhere, because almost nobody scans those surfaces and so nobody has
-collected what normal ones look like.
+**Malicious hooks, malicious permission grants, malicious connector configs.** This entry
+has inverted since it was written, and the inversion is the point.
+
+The BENIGN side was the gap: no public dataset collected what a normal hook or permission
+config looks like, because almost nobody scans those surfaces. That gap is now closed by
+collecting rather than downloading — `scripts/harvest-claude-config.py` holds 391 real
+`.claude/settings.json` and `.mcp.json` files from 389 public repositories, plus 2 promoted
+to hard negatives.
+
+What has no public source at all is the MALICIOUS side of those same three surfaces. No
+dataset anywhere ships a weaponised hook or an over-broad permission grant AS AN ARTIFACT;
+`skillcraft-audit` covers hook weaponisation and permission bypass, but its artifacts are
+SKILLS that install a hook, which is a different load path. So on hooks, permission and
+connector this corpus can measure over-alerting and cannot measure recall at all — stated in
+README as a known gap rather than left for a reader to discover.
 
 This is the one gap that must be filled by collecting rather than downloading, and it is
 also the easiest place in the whole corpus to manufacture a flattering false-positive rate.

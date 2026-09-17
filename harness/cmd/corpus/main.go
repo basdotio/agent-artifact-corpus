@@ -160,18 +160,31 @@ func cmdValidate(root string) int {
 				l.Rel, ferr))
 			continue
 		}
-		// The group is the POPULATION a sample belongs to, because the gate asks whether the
-		// classes are separable without reading content — a question that only means anything
-		// inside one population. Harvested samples are their own: they are real configuration
-		// files collected from public repositories, and pooling them with the handful we wrote
-		// ourselves would report `file:.claude/settings.json` as leakage when all it says is
-		// that only the harvest contains settings files.
-		group := "hand-pinned"
+		// The group is the POPULATION a sample belongs to — where the ARTIFACT came from —
+		// because the gate asks whether the classes are separable without reading content, and
+		// that question only means anything inside one batch.
+		//
+		// The third case was added after an audit found a 100%-pure feature in what used to be
+		// a catch-all: five 14-24KB Turkish reference documents from one upstream sat in the
+		// same "hand-pinned" bucket as twelve sub-1.1KB fixtures we wrote ourselves, and
+		// document length alone then separated five of the nine hard negatives with a 12.9x
+		// margin and no overlap. Nothing was wrong with the samples. The bucket was wrong: it
+		// pooled two batches that were built by different people for different reasons, which
+		// is exactly the pooling this gate exists to detect in other people's corpora.
+		group := "hand-written"
 		switch {
 		case l.Origin.DerivedFrom != nil && l.Origin.DerivedFrom.Entry != "":
 			group = l.Origin.DerivedFrom.Entry
 		case l.Origin.Type == "harvested":
+			// One batch by construction: all collected by the same script from the same search.
 			group = "harvested"
+		default:
+			// A hand-pinned label can still describe somebody else's artifact. When the source
+			// names an upstream, that upstream is the batch; only samples with no external
+			// source at all were written here.
+			if repo := originOf(l); repo != "" {
+				group = repo
+			}
 		}
 		samples = append(samples, leakage.Sample{
 			ID: l.ID, Class: string(l.Class), Files: files, Group: group,
@@ -203,11 +216,28 @@ func cmdValidate(root string) int {
 	// The gate needs more samples than it has before it can say anything. Printing "ok"
 	// without saying so lets an inactive gate read as a passed one — the same failure the
 	// gate exists to catch, one level up.
+	// "active over 3489 samples" was the line here, and it was false in the way that matters:
+	// the gate can only reach a verdict inside a population that holds more than one class and
+	// is not already past the purity threshold. 86% of the corpus sat outside that, so the
+	// line reported the corpus's size as if it were the gate's reach. An inactive gate reading
+	// as a passed one is the exact failure this gate exists to catch, one level up.
+	judgeable := leakage.Judgeable(samples)
+	single := leakage.SingleClass(samples)
+	imbalanced := leakage.Imbalanced(samples)
 	if len(samples) < leakage.MinSupport {
 		fmt.Printf("leakage     INACTIVE — %d samples, gate needs %d before any feature has support\n",
 			len(samples), leakage.MinSupport)
 	} else {
-		fmt.Printf("leakage     active over %d samples\n", len(samples))
+		fmt.Printf("leakage     judged %d of %d sample(s) (%.1f%%); the rest sit in populations "+
+			"where no verdict is possible\n", judgeable, len(samples),
+			float64(judgeable)/float64(len(samples))*100)
+		for _, g := range single {
+			fmt.Printf("  no comparison  %s — one class, so no feature can predict it\n", g)
+		}
+		for _, g := range imbalanced {
+			fmt.Printf("  not judgeable  %s — one class already exceeds the %.0f%% purity "+
+				"threshold\n", g, leakage.MaxPurity*100)
+		}
 	}
 
 	// A pair that guards nothing passes every structural check. It is reported, named and

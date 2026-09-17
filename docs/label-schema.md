@@ -311,7 +311,10 @@ An entry in [`taxonomy/tools.yaml`](../taxonomy/tools.yaml), not a schema change
     rule_id_pattern: '…'                      # how its rule ids are written
     rules_source:
       env: YOURSCANNER_RULES
-      path: ../yourscanner/docs/rules.md      # relative to this repository's root
+      # No `path:` here. It is relative to this repository's root and MAY NOT leave it —
+      # the validator rejects one that does, because a path pointing at a checkout of your
+      # scanner makes `make validate` report different results on different machines.
+      # The env var above is how you reach your own checkout.
     native_format: sarif-2.1.0
 ```
 

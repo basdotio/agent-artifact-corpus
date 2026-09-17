@@ -99,7 +99,8 @@ func Imbalanced(samples []Sample) []string {
 			classCount[s.Class]++
 		}
 		if len(classCount) < 2 {
-			continue // single-class populations are reported elsewhere as having no comparison
+			continue // named by SingleClass instead — a population with one class has no
+			// comparison to make, which is a different statement from "checked and clean"
 		}
 		for cls, n := range classCount {
 			if r := float64(n) / float64(len(ss)); r > MaxPurity {
@@ -151,15 +152,41 @@ func checkOne(samples []Sample, group string) []Feature {
 	// people to ignore this list.
 	const answerFile = "_label.yaml"
 
+	present := make([]map[string]bool, len(samples))
+	common := map[string]int{}
+	for i, s := range samples {
+		present[i] = map[string]bool{}
+		for _, f := range featuresOf(s, answerFile) {
+			present[i][f] = true
+			common[f]++
+		}
+	}
+
+	// A classifier reads ABSENCE as readily as presence, and until an audit pointed it out
+	// this gate only ever saw what a sample HAD. "No SKILL.md in the tree" was a 100%-pure
+	// predictor in one population and the gate could not express the thought, let alone
+	// report it.
+	//
+	// Complements are emitted only for features already common enough in this population to
+	// clear MinSupport. Without that floor every one-off filename would mint a complement
+	// present in almost every sample, burying the real signal in noise of our own making.
 	support := map[string]int{}
 	byClass := map[string]map[string]int{}
-	for _, s := range samples {
-		for _, f := range featuresOf(s, answerFile) {
-			support[f]++
-			if byClass[f] == nil {
-				byClass[f] = map[string]int{}
+	add := func(f string, class string) {
+		support[f]++
+		if byClass[f] == nil {
+			byClass[f] = map[string]int{}
+		}
+		byClass[f][class]++
+	}
+	for i, s := range samples {
+		for f := range present[i] {
+			add(f, s.Class)
+		}
+		for f, n := range common {
+			if n >= MinSupport && !present[i][f] {
+				add("absent:"+f, s.Class)
 			}
-			byClass[f][s.Class]++
 		}
 	}
 
@@ -237,4 +264,65 @@ func bucket(n int) string {
 	default:
 		return "21+"
 	}
+}
+
+// SingleClass names the populations that hold exactly one class, with their size.
+//
+// It exists because Imbalanced's comment promised these were "reported elsewhere" and, for a
+// long time, elsewhere did not exist — neither function was called at all, and validate
+// printed "leakage active over N samples" while most of N sat in populations where the gate
+// could not fire by construction. A population with one class cannot have a feature that
+// predicts the class, so it is not clean: it is unjudgeable, and the two must not look alike.
+func SingleClass(samples []Sample) []string {
+	byGroup := map[string][]Sample{}
+	for _, s := range samples {
+		byGroup[s.Group] = append(byGroup[s.Group], s)
+	}
+	var out []string
+	for _, g := range sortedGroups(byGroup) {
+		ss := byGroup[g]
+		classCount := map[string]int{}
+		for _, s := range ss {
+			classCount[s.Class]++
+		}
+		if len(classCount) != 1 {
+			continue
+		}
+		for cls := range classCount {
+			out = append(out, fmt.Sprintf("%s (%d samples, all %s)", g, len(ss), cls))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Judgeable counts the samples the gate can actually reach a verdict about: those in a
+// population that holds more than one class AND where no single class already exceeds the
+// purity threshold. Reporting this instead of len(samples) is the difference between stating
+// coverage and implying it.
+func Judgeable(samples []Sample) int {
+	byGroup := map[string][]Sample{}
+	for _, s := range samples {
+		byGroup[s.Group] = append(byGroup[s.Group], s)
+	}
+	n := 0
+	for _, ss := range byGroup {
+		classCount := map[string]int{}
+		for _, s := range ss {
+			classCount[s.Class]++
+		}
+		if len(classCount) < 2 {
+			continue
+		}
+		over := false
+		for _, c := range classCount {
+			if float64(c)/float64(len(ss)) > MaxPurity {
+				over = true
+			}
+		}
+		if !over {
+			n += len(ss)
+		}
+	}
+	return n
 }

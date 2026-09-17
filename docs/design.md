@@ -223,7 +223,8 @@ everything after. Collecting first guarantees re-labelling everything later.
 
 That output is now two lists, because a label is two halves. `make stats` prints **every
 technique in the vocabulary including the ones with no sample**, which is the tool-neutral
-hole and the one another team can act on; six of nine dimensions are empty today. And per
+hole and the one another team can act on. All 8 dimensions now hold samples; what is empty
+is 7 of the 32 dimension x tier cells, which `make stats` names one by one. And per
 tool, **which of its scoring rules has no sample at all** — a count that must be read from
 the tool's generated rule reference, never written by hand. An earlier revision of this paragraph
 wrote that count out by hand as 61 while the generated header said 62 — the drift the rule

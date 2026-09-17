@@ -130,3 +130,63 @@ func TestBalancedPopulationStillLeaks(t *testing.T) {
 		t.Fatal("a real giveaway in a balanced population must still be reported")
 	}
 }
+
+// A classifier uses absence as readily as presence. Until an audit pointed it out, this gate
+// only ever saw what a sample HAD — so a population where one class is identified by what it
+// LACKS passed in silence. This is that population.
+func TestAbsenceIsAFeature(t *testing.T) {
+	t.Parallel()
+	var samples []Sample
+	for i := 0; i < 10; i++ {
+		// Malicious samples carry a payload file; benign ones do not. Every other file is
+		// shared, so presence alone gives nothing away — only the absence does.
+		samples = append(samples, Sample{
+			ID: "mal" + string(rune('a'+i)), Class: "malicious", Group: "g",
+			Files: []string{"SKILL.md", "README.md", "payload.py"},
+		})
+		samples = append(samples, Sample{
+			ID: "ben" + string(rune('a'+i)), Class: "benign", Group: "g",
+			Files: []string{"SKILL.md", "README.md"},
+		})
+	}
+
+	var found *Feature
+	for _, f := range Check(samples) {
+		if f.Name == "absent:file:payload.py" {
+			found = &f
+		}
+	}
+	if found == nil {
+		t.Fatalf("the gate did not notice that benign samples are identified by a MISSING "+
+			"file; features reported: %v", Check(samples))
+	}
+	if found.Class != "benign" || found.With != 10 || found.Total != 10 {
+		t.Errorf("got %+v, want 10/10 benign", *found)
+	}
+}
+
+// The floor matters as much as the feature. Without it, every one-off filename mints a
+// complement present in almost every sample, and the real signal drowns in noise we made.
+func TestRareFeaturesDoNotMintComplements(t *testing.T) {
+	t.Parallel()
+	var samples []Sample
+	for i := 0; i < 10; i++ {
+		samples = append(samples, Sample{
+			ID: "mal" + string(rune('a'+i)), Class: "malicious", Group: "g",
+			Files: []string{"SKILL.md"},
+		})
+		samples = append(samples, Sample{
+			ID: "ben" + string(rune('a'+i)), Class: "benign", Group: "g",
+			Files: []string{"SKILL.md"},
+		})
+	}
+	// One sample, one unique file: below MinSupport, so it must not produce a complement
+	// that 19 of 20 samples carry.
+	samples[0].Files = append(samples[0].Files, "oneoff.txt")
+
+	for _, f := range Check(samples) {
+		if f.Name == "absent:file:oneoff.txt" {
+			t.Errorf("a file seen once minted a complement: %+v", f)
+		}
+	}
+}
