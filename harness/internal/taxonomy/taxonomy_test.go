@@ -17,7 +17,9 @@ func write(t *testing.T, dir, name, body string) {
 }
 
 const goodTechniques = `
-dimensions: [backdoor, exfiltration]
+dimensions:
+  - {id: backdoor, what: outlives the run, not: not a one-shot action}
+  - {id: exfiltration, what: data leaves the host, not: not the read}
 tiers:
   - id: plain
     maps_to: "000"
@@ -90,7 +92,8 @@ func TestValidateCatchesVocabularyMistakes(t *testing.T) {
 		{
 			name: "a misspelled dimension silently creates a one-member recall axis",
 			techniques: `
-dimensions: [backdoor]
+dimensions:
+  - {id: backdoor, what: outlives the run, not: not a one-shot action}
 techniques:
   - id: reverse-shell
     title: Reverse shell
@@ -104,7 +107,8 @@ techniques:
 		{
 			name: "a technique without a definition is not a shared vocabulary",
 			techniques: `
-dimensions: [backdoor]
+dimensions:
+  - {id: backdoor, what: outlives the run, not: not a one-shot action}
 techniques:
   - id: reverse-shell
     title: Reverse shell
@@ -117,7 +121,8 @@ techniques:
 		{
 			name: "every technique needs its benign lookalike written out",
 			techniques: `
-dimensions: [backdoor]
+dimensions:
+  - {id: backdoor, what: outlives the run, not: not a one-shot action}
 techniques:
   - id: reverse-shell
     title: Reverse shell
@@ -175,7 +180,8 @@ tools:
 func TestLoadRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
 	_, err := loadFrom(t, `
-dimensions: [backdoor]
+dimensions:
+  - {id: backdoor, what: outlives the run, not: not a one-shot action}
 techniques:
   - id: reverse-shell
     title: Reverse shell

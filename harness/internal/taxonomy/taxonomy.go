@@ -25,6 +25,16 @@ import (
 
 // Tier is how deeply an attack is buried. The slice order in techniques.yaml is the order:
 // later is harder.
+// Dimension is what a sample ACHIEVES. `Not` is the load-bearing field: it names the
+// neighbouring dimension this one is confused with and the element that decides between
+// them. Without it these were eight bare words, and two mapping disputes turned out to be
+// unadjudicable — there was nothing written to adjudicate against.
+type Dimension struct {
+	ID   string `yaml:"id"`
+	What string `yaml:"what"`
+	Not  string `yaml:"not"`
+}
+
 type Tier struct {
 	ID     string `yaml:"id"`
 	MapsTo string `yaml:"maps_to"`
@@ -86,7 +96,7 @@ type Tool struct {
 func (t Tool) HasSeverity(s string) bool { return slices.Contains(t.SeverityLadder, s) }
 
 type techniqueFile struct {
-	Dimensions []string    `yaml:"dimensions"`
+	Dimensions []Dimension `yaml:"dimensions"`
 	Tiers      []Tier      `yaml:"tiers"`
 	Evasion    []Evasion   `yaml:"evasion"`
 	Techniques []Technique `yaml:"techniques"`
@@ -98,12 +108,15 @@ type toolFile struct {
 
 // Set is the loaded vocabulary.
 type Set struct {
-	Dimensions []string
-	TierOrder  []string // ordinal, easiest first
-	Tiers      map[string]Tier
-	Evasions   map[string]Evasion
-	Techniques map[string]Technique
-	Tools      map[string]Tool
+	// Dimensions keeps the bare ids, because every consumer wants the ordered list. The
+	// definitions live beside them in DimensionDefs.
+	Dimensions    []string
+	DimensionDefs map[string]Dimension
+	TierOrder     []string // ordinal, easiest first
+	Tiers         map[string]Tier
+	Evasions      map[string]Evasion
+	Techniques    map[string]Technique
+	Tools         map[string]Tool
 }
 
 // Load reads taxonomy/techniques.yaml and taxonomy/tools.yaml from dir.
@@ -118,11 +131,15 @@ func Load(dir string) (*Set, error) {
 	}
 
 	s := &Set{
-		Dimensions: tf.Dimensions,
-		Tiers:      map[string]Tier{},
-		Evasions:   map[string]Evasion{},
-		Techniques: map[string]Technique{},
-		Tools:      map[string]Tool{},
+		DimensionDefs: map[string]Dimension{},
+		Tiers:         map[string]Tier{},
+		Evasions:      map[string]Evasion{},
+		Techniques:    map[string]Technique{},
+		Tools:         map[string]Tool{},
+	}
+	for _, d := range tf.Dimensions {
+		s.Dimensions = append(s.Dimensions, d.ID)
+		s.DimensionDefs[d.ID] = d
 	}
 	for i, t := range tf.Tiers {
 		t.Rank = i
@@ -170,6 +187,19 @@ func (s *Set) Validate() []error {
 	}
 	if len(dims) == 0 {
 		bad("techniques.yaml declares no dimensions")
+	}
+	for _, id := range s.Dimensions {
+		d := s.DimensionDefs[id]
+		if d.What == "" {
+			bad("dimension %s has no `what`. Part two of this corpus's measurement — whether a "+
+				"scanner can say what KIND of problem it found — rests entirely on these eight "+
+				"words, and an undefined word cannot settle a disagreement about a mapping", id)
+		}
+		if d.Not == "" {
+			bad("dimension %s has no `not`. Naming the neighbour it is confused with, and the "+
+				"element that decides between them, is the half that makes a definition usable: "+
+				"two mapping disputes in this corpus were unadjudicable without it", id)
+		}
 	}
 	if dims["obfuscation"] {
 		bad("`obfuscation` is a dimension, but it describes how an attack hides rather than " +

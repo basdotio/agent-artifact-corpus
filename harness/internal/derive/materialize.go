@@ -84,12 +84,14 @@ func PlanMaterialize(e manifest.Entry, res *Result) ([]Plan, []error) {
 	return plans, errs
 }
 
-// Materialize copies each sample tree into layer 1 and writes its derived label beside it.
+// Materialize copies each sample tree into layer 1, writes its derived label beside it, and
+// removes labels this entry no longer produces. The removals are returned so a caller can say
+// what disappeared rather than letting samples vanish quietly.
 //
 // It refuses to overwrite a label that is not itself derived. Hand-pinned labels carry
 // judgements a rule cannot reproduce, and a re-derivation quietly flattening one would destroy
 // the most valuable kind of sample in the corpus.
-func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (written int, errs []error) {
+func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (written int, removed []string, errs []error) {
 	d := e.Derive
 	for _, p := range plans {
 		absDir := filepath.Join(repoRoot, p.Dir)
@@ -142,7 +144,44 @@ func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (writt
 		}
 		written++
 	}
-	return written, errs
+	// Reconciliation. A sample dropped from the derivation — by exclude_samples, by an upstream
+	// that no longer ships it, or by a layout change — leaves its label and tree behind unless
+	// something removes them. Without this, an exclusion is a statement the corpus contradicts:
+	// `derive` reports the sample as excluded while `validate` goes on counting it.
+	//
+	// Only labels belonging to THIS entry and carrying `type: derived` are touched. A
+	// hand-pinned label, or one derived from a different upstream, is never in scope.
+	keep := map[string]bool{}
+	for _, p := range plans {
+		keep[filepath.Join(repoRoot, p.LabelRel)] = true
+	}
+	for _, class := range []string{"malicious", "benign", "hard-negative"} {
+		dir := filepath.Join(repoRoot, "corpus", class, d.Surface)
+		labels, _ := filepath.Glob(filepath.Join(dir, "*.yaml"))
+		for _, lab := range labels {
+			if keep[lab] {
+				continue
+			}
+			b, err := os.ReadFile(lab)
+			if err != nil || !strings.Contains(string(b), "type: derived") {
+				continue
+			}
+			if !strings.Contains(string(b), "entry: "+e.ID+"\n") {
+				continue
+			}
+			tree := strings.TrimSuffix(lab, ".yaml")
+			if err := os.RemoveAll(tree); err != nil {
+				errs = append(errs, fmt.Errorf("%s: remove stale tree %s: %w", e.ID, tree, err))
+				continue
+			}
+			if err := os.Remove(lab); err != nil {
+				errs = append(errs, fmt.Errorf("%s: remove stale label %s: %w", e.ID, lab, err))
+				continue
+			}
+			removed = append(removed, filepath.Base(tree))
+		}
+	}
+	return written, removed, errs
 }
 
 // renderLabel writes the label by hand rather than marshalling the struct, so the generated

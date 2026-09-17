@@ -723,9 +723,13 @@ func cmdDerive(root string, want []string) int {
 				plans, perrs := derive.PlanMaterialize(e, res)
 				errs = append(errs, perrs...)
 				if len(perrs) == 0 {
-					n, werrs := derive.Materialize(root, upRoot, e, plans)
+					n, removedStale, werrs := derive.Materialize(root, upRoot, e, plans)
 					errs = append(errs, werrs...)
 					fmt.Printf("  wrote %d sample(s) into corpus/\n", n)
+					if len(removedStale) > 0 {
+						fmt.Printf("  removed %d label(s) this entry no longer produces: %s\n",
+							len(removedStale), strings.Join(removedStale, ", "))
+					}
 				}
 			}
 		}

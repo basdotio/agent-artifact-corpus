@@ -97,7 +97,7 @@ func TestMaterializeCopiesTreeAndWritesLabel(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("plan: %v", errs)
 	}
-	n, werrs := Materialize(repo, upRoot, e, plans)
+	n, _, werrs := Materialize(repo, upRoot, e, plans)
 	if len(werrs) != 0 || n != 1 {
 		t.Fatalf("materialise: wrote %d, errs %v", n, werrs)
 	}
@@ -163,7 +163,7 @@ func TestMaterializeRefusesToOverwriteHandPinned(t *testing.T) {
 	}}}
 	e := materialEntry()
 	plans, _ := PlanMaterialize(e, res)
-	n, werrs := Materialize(repo, upRoot, e, plans)
+	n, _, werrs := Materialize(repo, upRoot, e, plans)
 	if n != 0 || !containsErr(werrs, "refusing to overwrite hand-pinned label") {
 		t.Fatalf("expected a refusal, wrote %d, errs %v", n, werrs)
 	}
