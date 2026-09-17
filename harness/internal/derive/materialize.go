@@ -55,7 +55,16 @@ func PlanMaterialize(e manifest.Entry, res *Result) ([]Plan, []error) {
 		// label; leaving "200-" in the path would put the answer in the filename, which is the
 		// shortcut feature this corpus rejects in other people's datasets. Traceability is not
 		// lost: derived_from records the full upstream path.
-		name := d.IDPrefix + "-" + strings.TrimPrefix(stripTierPrefix(c.UpstreamID), "-")
+		// The leading-digit strip removes a TIER PREFIX, and only an entry that reads its tier
+		// from that prefix has one. Applied to every entry it was identity corruption: the
+		// upstream `12306-mcp` (China Railway) became `ben-mcp-am-mcp`, and `2389-research`
+		// lost the owner's name. Seven samples, no collisions, provenance intact in
+		// origin.source — but the id is what a person cites, and it named the wrong thing.
+		upstreamID := c.UpstreamID
+		if d.TierFrom == "id-prefix" {
+			upstreamID = strings.TrimPrefix(stripTierPrefix(upstreamID), "-")
+		}
+		name := d.IDPrefix + "-" + upstreamID
 
 		classPrefix := "mal"
 		if c.Class == "benign" {
@@ -210,7 +219,20 @@ func renderLabel(e manifest.Entry, p Plan) string {
 	}
 	fmt.Fprintf(&b, "  source: %q\n", src)
 	fmt.Fprintf(&b, "  license: %s\n", e.License)
+	// An entry with `label_file: ""` has NO per-sample upstream label, so its class and
+	// severity are constants this repository asserts. 163 labels — every cisco and skillcraft
+	// one — used to say "coordinates derived from the upstream's own labels" regardless, and
+	// carried a `derived_from.fidelity` string byte-identical to skillsgoat's. A reader
+	// inspecting one label could not tell a severity READ from an upstream field from a
+	// severity ASSERTED here. The entry-level fidelity block was honest about it; that honesty
+	// did not travel with the label, and the label is what a consumer reads.
+	hasUpstreamLabels := e.Derive.LabelFile == nil || *e.Derive.LabelFile != ""
 	note := "coordinates derived from the upstream's own labels; the artifact is vendored unchanged"
+	if !hasUpstreamLabels {
+		note = "the upstream ships no per-sample label, so class and severity are CONSTANTS this " +
+			"repository asserts rather than values it read; tier and dimension come from the " +
+			"category map. The artifact is vendored unchanged"
+	}
 	if c.HandReadDimension {
 		note = "dimension hand-read from the sample because the upstream labels this by technique only; other axes derived"
 	}
@@ -233,6 +255,10 @@ func renderLabel(e manifest.Entry, p Plan) string {
 	// none, and when benign labels carry no dimension or evasion at all, is the same defect as
 	// an unearned coordinate: a claim about provenance that the data does not support.
 	fid := "tier, severity and class mechanical; dimension and evasion via the category map"
+	if !hasUpstreamLabels {
+		fid = "class and severity are constants this entry asserts, NOT values read from an " +
+			"upstream label; tier and dimension come from the category map"
+	}
 	switch {
 	case c.Class == "benign":
 		fid = "class is a constant and benign labels carry no coordinates, so nothing is mapped; " +

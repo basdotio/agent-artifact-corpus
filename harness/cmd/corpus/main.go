@@ -151,6 +151,7 @@ func cmdValidate(root string) int {
 	problems = append(problems, neutralProblems...)
 
 	// Layer 2
+	var pinStatuses []PinStatus
 	manifests, _ := filepath.Glob(filepath.Join(root, "manifest", "*.yaml"))
 	for _, mp := range manifests {
 		f, err := manifest.Load(mp)
@@ -161,6 +162,7 @@ func cmdValidate(root string) int {
 		for _, e := range f.Validate() {
 			problems = append(problems, fmt.Sprintf("%s: %v", rel(root, mp), e))
 		}
+		pinStatuses = append(pinStatuses, CheckPins(root, f.Entries)...)
 	}
 
 	// Leakage gate
@@ -223,6 +225,7 @@ func cmdValidate(root string) int {
 		fmt.Printf("neutral     FAILED — %d place(s) where one scanner has become part of the "+
 			"shared half\n", len(neutralProblems))
 	}
+	problems = append(problems, reportPins(pinStatuses)...)
 	fmt.Println("rule ids")
 	for _, line := range ruleLines {
 		fmt.Println(line)

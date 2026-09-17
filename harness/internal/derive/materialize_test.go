@@ -5,6 +5,7 @@ package derive
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -19,6 +20,9 @@ func materialEntry() manifest.Entry {
 	e.Derive.Surface = "skills"
 	e.Derive.IDPrefix = "sg"
 	e.Derive.TreeSubdir = "skill"
+	// The strip only applies to an entry that READS its tier from that prefix, which is what
+	// makes the digits a tier rather than part of a name.
+	e.Derive.TierFrom = "id-prefix"
 	return e
 }
 
@@ -171,4 +175,43 @@ func TestMaterializeRefusesToOverwriteHandPinned(t *testing.T) {
 	if string(after) != handPinned {
 		t.Fatal("the hand-pinned label was modified")
 	}
+}
+
+// The counterpart to TestPlanStripsTierPrefixFromPath, and the reason that test needed a
+// companion. The strip removes a TIER PREFIX; an entry that does not read its tier from the id
+// has no such prefix, so leading digits there are part of the upstream's NAME. Applied to
+// every entry it was identity corruption: `12306-mcp` (China Railway) became `am-mcp`, and
+// `2389-research/ourocodus` lost its owner.
+func TestLeadingDigitsSurviveWhenTheyAreNotATier(t *testing.T) {
+	t.Parallel()
+	e := materialEntry()
+	e.Derive.IDPrefix = "am"
+	e.Derive.TierFrom = "" // this entry's tier comes from somewhere else, so digits are a name
+
+	res := &Result{Coords: []Coord{
+		{UpstreamID: "12306-mcp", Class: "benign", SamplePath: "extracted/12306-mcp"},
+		{UpstreamID: "2389-research__ourocodus", Class: "benign", SamplePath: "x/2389-research__ourocodus"},
+	}}
+	plans, errs := PlanMaterialize(e, res)
+	if len(errs) != 0 {
+		t.Fatalf("expected a clean plan, got %v", errs)
+	}
+	got := map[string]bool{}
+	for _, p := range plans {
+		got[p.LocalID] = true
+	}
+	for _, want := range []string{"ben-skill-am-12306-mcp", "ben-skill-am-2389-research__ourocodus"} {
+		if !got[want] {
+			t.Errorf("%s was not produced; the upstream's own name lost its leading digits. Got %v", want, keysOfBool(got))
+		}
+	}
+}
+
+func keysOfBool(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
