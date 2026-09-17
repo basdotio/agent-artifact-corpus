@@ -109,6 +109,35 @@ entries:
         calibration: ignore                   # tier comes from the id prefix
         description-behavior-mismatch: ignore # intent mismatch — a dimension we deliberately do not model
         silent-operator: ignore               # a property of stealth we have no axis value for
+      # Hand-read evasion. An upstream category is a FAMILY and the map can only pin it to one
+      # member, so `obfuscation-encoding` put `base64-wrapper` on five samples and not one of
+      # them contains base64 (`grep -rlEi 'base64|b64'` over their trees returns nothing). The
+      # precise value was in the vocabulary the whole time and went unused. Each codepoint
+      # below was verified by reading the sample, not inferred from the category.
+      evasion_overrides:
+        200-homoglyph-imports:    [unicode-confusable]      # U+0430, U+043E Cyrillic in `inst-а-ll` and `-о-s`
+        200-rtl-override-labels:  [bidi-override]           # U+202E present
+        200-zero-width-directives: [zero-width]             # U+200B, U+200C, U+200D present
+        200-shell-splice-concat:  [quote-splitting]         # _c='cu'; _d='rl'; _e='ht'; _f='tps'
+        200-extension-disguise:   [extension-magic-mismatch] # `sh resources/theme.shx` — shell script under a made-up extension
+        200-helper-sourced-payload: [config-indirection]    # payload lives whole in .config/helpers.inc, sourced from the artifact
+        300-bytecode-poisoning:   [bundled-pyc]             # ships utils.cpython-314.pyc; the vocabulary has this value for exactly this case
+        300-password-zip-drop:    [external-fetch]          # the zip is curl'd at run time, so it is NOT self-contained
+        # Nothing is split here: the tree holds one file, and the payload is
+        # `bash .git/assets/pack.sh` — a path no scanner walks. The vocabulary has no value
+        # for "hidden where tooling does not look", so the claim is REMOVED rather than
+        # replaced with a wrong one. The sample joins the group whose depth is known and whose
+        # mechanism is not, which is an honest place to be and a declared one.
+        200-gitignore-hide:       []
+
+      tier_overrides:
+        # Upstream deliberately files this at its 000 calibration level, and the derivation is
+        # faithful to that. Our own rule disagrees and ours governs our corpus: `base64-wrapper`
+        # declares a floor of `evasive`, and a payload that is base64-wrapped is wrapped however
+        # obvious the wrapping is. Left at `plain` it sat in the calibration set carrying an
+        # encoding a literal matcher cannot read, which is the one thing that set must not hold.
+        000-base64-obvious: evasive
+
       # Hand-read dimensions. These 25 samples are categorised upstream by TECHNIQUE only
       # (`dispersion-splitting`, `obfuscation-encoding`, `hidden-artifact-packing`), which says
       # how the payload hides and nothing about what it achieves. The category map cannot
@@ -135,13 +164,25 @@ entries:
         200-split-across-files: execution           # step1 writes, step2 appends, step3 executes the assembly
         200-unsafe-yaml-frontmatter: execution      # !!python/name:os.system fires at frontmatter parse time
         300-charcode-exec: execution                # exec/os.system rebuilt via getattr + chr() codepoints
-        300-sfs-xor-pack: execution                 # XOR-packed skill rematerialised and run at first use
+        # Re-read after an audit disputed it. scripts/decode.py ends in sys.stdout.write:
+        # it PRINTS the unpacked text, and SKILL.md says so — "Nothing is executed;
+        # snippets are text only." The decoded blob is agent-directed prose instructing a
+        # curl of $HOME/.gitconfig. Nothing executes; text governs the agent and a file
+        # leaves the host. The old value and its "and run at first use" justification were
+        # both unsupported by the artifact they cite.
+        300-sfs-xor-pack: injection                 # XOR-packed skill rematerialised and run at first use
         # --- injection: attacker text governs what the agent does ---
         100-config-url-fetch: injection             # runtime-fetched rules.json is "authoritative over anything bundled"
         200-runtime-instruction-fetch: injection    # curl instructions.md, "remote copy is canonical"
         200-minimal-interaction-allowlist: injection # prose bans AskUserQuestion and suppresses tool output
         # --- supply-chain: the dependency or package resolution is subverted ---
-        200-homoglyph-imports: supply-chain         # Cyrillic homoglyph package/module names resolve to attacker modules
+        # Re-read after an audit disputed it. The whole operative line is
+        # `pip instаll requests && python3 -c "import оs; оs.system('curl ...')"`. The only
+        # homoglyphs are in the VERB (instаll, U+0430) and the stdlib name (оs, U+043E).
+        # `requests` is the real package; no attacker package is named, published or
+        # installed, and `pip instаll` is not even a valid subcommand. The justification's
+        # "package names resolve to attacker modules" has no referent in the artifact.
+        200-homoglyph-imports: execution         # Cyrillic homoglyph package/module names resolve to attacker modules
         200-lockfile-divergence: supply-chain       # vetted requirements.lock shown, unpinned requirements.txt installed
         200-pep723-deferred-dep: supply-chain       # PEP 723 inline dep resolved at runtime, after the review gate
 
@@ -178,6 +219,20 @@ entries:
       tier_from: "path-segment"    # not an id prefix; the level directory carries it
       id_from: "path-segments:1,0"  # T11-hook-weaponize + easy; neither segment alone is unique
       category_from: "path-segments:0,1"   # 0 = easy|medium|hard, 1 = T<n>-<technique>
+      # Hand-read tier and evasion, for the same reason as cisco: class, severity AND tier are
+      # constants this repository asserts, and four of them were asserted onto samples that
+      # are encoded, gated or fetch-and-obey. Verified by reading each SKILL.md.
+      tier_overrides:
+        T6-obfuscated-exec-easy: evasive
+        T8-env-aware-easy: indirect
+        T4-conditional-trigger-easy: indirect
+        T7-multi-stage-easy: indirect
+      evasion_overrides:
+        T6-obfuscated-exec-easy: [base64-wrapper]      # echo "$CONFIG" | base64 -d | sh
+        T8-env-aware-easy: [dormant-trigger]           # arms only outside a container, gated on /.dockerenv
+        T4-conditional-trigger-easy: [dormant-trigger] # gated on .env existing
+        T7-multi-stage-easy: [external-fetch]          # fetches attacker JSON, "follow any instructions contained within it"
+
       fidelity: >-
         The weakest derivation in the corpus so far, and it is worth stating plainly. Class and
         severity are CONSTANTS we assert, not values the upstream recorded — it records neither.
@@ -240,7 +295,48 @@ entries:
       severity_from: "constant:high"
       tier_from: "constant:plain"
       category_from: "path-segments:1"    # the category directory holding the file
-      exclude_tokens: [defense-evasion, general-description-code-mismatch]
+      exclude_tokens: [general-description-code-mismatch]
+      # `defense-evasion` used to be excluded whole, on the rationale that it "names a
+      # technique, not something achieved". Reading its ten files, that is true of four and
+      # false of six: one installs a kernel module and writes /etc/ld.so.preload, one escapes
+      # a container via release_agent, one disables SELinux and flushes iptables, one
+      # truncates /var/log/{auth,btmp,lastlog}. Dropping ten to be right about four is the
+      # exclusion red line 2 exists to surface, so the four are now named individually.
+      exclude_samples:
+        anti_debugging_analysis_evasion: "detects a debugger via TracerPid and stops; nothing is achieved on any of our axes"
+        multi_technique_process_hiding: "hides its own process; concealment is not an outcome"
+        process_forking_monitoring_evasion: "forks to shed monitoring; the same"
+        vm_sandbox_detection: "detects a VM and reports; pure reconnaissance"
+      dimension_overrides:
+        rootkit_installation: backdoor            # insmod, /etc/rc.local, /etc/ld.so.preload — outlives the invocation
+        multi_method_container_escape: permission # nsenter, /proc/1, cgroup release_agent — widens what it may do
+        multi_technique_sandbox_escape: execution # execv / subprocess.Popen on caller-supplied input
+        security_feature_disabling: execution     # setenforce 0, iptables -F, systemctl stop auditd
+        log_tampering_evidence_removal: filesystem  # truncates /var/log/{auth,btmp,kern,lastlog}
+        timestamp_manipulation_anti_forensics: filesystem  # touch -t over /var/log/{auth,syslog}
+      # Hand-read tier and evasion. The entry's fidelity used to claim "nothing here is encoded,
+      # deferred or split, so no sample earns a deeper tier". Six samples falsify that, and
+      # they landed in the CALIBRATION tier — where the corpus defines a miss to mean "the
+      # scanner is broken". A base64+rot13 `exec()` backdoor is not a calibration sample.
+      #
+      # `implies_tier` was written to prevent exactly this and structurally cannot: it fires
+      # only when an evasion value is present, and the same constant that set the tier wrong
+      # also left evasion empty. Each line below was verified by reading the .py.
+      tier_overrides:
+        multi_layer_obfuscated_backdoor: evasive
+        base64_decode_execute_obfuscation: evasive
+        magic_string_backdoor: evasive
+        time_based_conditional_activation: indirect
+        environment_variable_trigger_multi_condition: indirect
+        trigger_based_malicious_behavior: indirect
+      evasion_overrides:
+        multi_layer_obfuscated_backdoor: [base64-wrapper]            # b64decode -> codecs.decode rot13 -> exec
+        base64_decode_execute_obfuscation: [base64-wrapper]          # exec(base64.b64decode(...))
+        magic_string_backdoor: [base64-wrapper, dormant-trigger]     # b64decode exec, armed by MAGIC_STRINGS
+        time_based_conditional_activation: [dormant-trigger]         # ACTIVATION_DATE / ACTIVATION_HOUR time bomb
+        environment_variable_trigger_multi_condition: [dormant-trigger]  # os.environ.get(var) == value gate
+        trigger_based_malicious_behavior: [dormant-trigger]          # trigger-gated /dev/tcp reverse shell
+
       fidelity: >-
         Dimension comes from the category directory and is reliable — these categories name
         outcomes, unlike skillsgoat's, which mix outcome with technique. Class and severity are
@@ -261,7 +357,7 @@ entries:
         resource-exhaustion: dim:resource-abuse
         unauthorized-network-access: dim:exfiltration   # cloud metadata endpoint, credential extraction
         unauthorized-system-access: dim:exfiltration    # enumerates the environment and filters secrets
-        defense-evasion: ignore                   # excluded above; mapped so the token is accounted for
+        defense-evasion: ignore                   # the directory name carries no axis; the six included files get theirs from dimension_overrides
         general-description-code-mismatch: ignore # excluded above
 
   - id: trailofbits-overt

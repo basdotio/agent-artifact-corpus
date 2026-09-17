@@ -202,6 +202,36 @@ type Derive struct {
 	// coordinates, because they carry a different kind of confidence.
 	DimensionOverrides map[string]string `yaml:"dimension_overrides"`
 
+	// EvasionOverrides and TierOverrides exist for the same reason as DimensionOverrides, and
+	// were added after an audit showed the category map getting both axes wrong in a way the
+	// map cannot express.
+	//
+	// An upstream category is often a FAMILY. skillsgoat's `obfuscation-encoding` covers
+	// homoglyphs, zero-width characters, RTL overrides, charcode rebuilding and shell
+	// splicing; the map could only pin it to one member, so five samples all claimed
+	// `base64-wrapper` and not one of them contained base64. Meanwhile `unicode-confusable`,
+	// `bidi-override`, `zero-width` and `quote-splitting` — the values that were exactly right
+	// — went unused. A closed vocabulary whose precise values are never reachable is a
+	// vocabulary that describes nothing.
+	//
+	// TierOverrides carries the sharper case. `implies_tier` is meant to stop a base64-wrapped
+	// payload from being filed as `plain` and landing in the calibration set, where a miss is
+	// defined to mean the scanner is broken. It cannot: the rule only fires when an evasion
+	// value is PRESENT, and the same map that got the tier wrong also omitted the evasion
+	// value. Eleven calibration samples were contaminated exactly that way. A hand-read tier,
+	// recorded here beside its evasion, is what closes that loop.
+	// ExcludeSamples drops named upstream samples, where ExcludeTokens drops whole path
+	// segments. It exists because an upstream category is not always homogeneous: cisco's
+	// `defense-evasion` directory was excluded entire on the rationale that it "names a
+	// technique, not something achieved", and six of its ten files install a rootkit, escape a
+	// container, disable SELinux or truncate /var/log. The rationale was right about four of
+	// them. Dropping ten to be right about four is the kind of exclusion red line 2 exists to
+	// make visible, so the four are now named one by one with the reason beside each.
+	ExcludeSamples map[string]string `yaml:"exclude_samples"`
+
+	EvasionOverrides map[string][]string `yaml:"evasion_overrides"`
+	TierOverrides    map[string]string   `yaml:"tier_overrides"`
+
 	// Fidelity is the aggregate honesty statement for the whole entry: which axes are
 	// mechanical, which are lossy, and how much of the derivation was spot-checked by hand.
 	// An empty Derive with no Fidelity is not "derivable with no caveats"; it is a

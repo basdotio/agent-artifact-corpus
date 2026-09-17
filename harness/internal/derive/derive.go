@@ -78,6 +78,10 @@ type Result struct {
 	// shrinking denominator is never invisible.
 	Excluded int
 
+	// ExcludedByName carries the reason for each per-sample exclusion, because a count alone
+	// turns a judgement about ten specific files into an anonymous number.
+	ExcludedByName []string
+
 	// Skipped counts layout matches that carried no upstream label. skillsgoat's pasture holds
 	// 66 single-artifact samples with an expected.yaml and 35 compound-chain nodes without
 	// one; the chains need a different, multi-node derivation. Skipping them is correct but it
@@ -129,6 +133,23 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			bad("%s: dimension_overrides[%q] is %q, which is not a dimension in the vocabulary", e.ID, id, dim)
 		}
 	}
+	for id, evs := range d.EvasionOverrides {
+		for _, ev := range evs {
+			if _, ok := tax.Evasions[ev]; !ok {
+				bad("%s: evasion_overrides[%q] names %q, which is not in the closed vocabulary", e.ID, id, ev)
+			}
+		}
+	}
+	for id, t := range d.TierOverrides {
+		if _, ok := tax.Tiers[t]; !ok {
+			bad("%s: tier_overrides[%q] is %q, which is not a tier", e.ID, id, t)
+		}
+	}
+
+	// An override keyed on a sample that does not exist does nothing at all, silently — a typo
+	// in a hand-read judgement would simply not apply, and the coordinate it was written to fix
+	// would ship wrong while the manifest looked like it had been handled.
+	usedOverride := map[string]bool{}
 
 	// Absent means the default; explicitly empty means the upstream has no per-sample label.
 	labelFile := "expected.yaml"
@@ -276,7 +297,15 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			}
 		}
 
+		if reason, ok := d.ExcludeSamples[up.ID]; ok {
+			usedOverride[up.ID] = true
+			res.Excluded++
+			res.ExcludedByName = append(res.ExcludedByName, fmt.Sprintf("%s — %s", up.ID, reason))
+			continue
+		}
+
 		if override, ok := d.DimensionOverrides[up.ID]; ok {
+			usedOverride[up.ID] = true
 			switch {
 			case len(c.Dimensions) > 0:
 				// The category map now places this sample, so the hand-read entry is stale.
@@ -293,6 +322,34 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			}
 		}
 
+		// A hand-read evasion REPLACES whatever the category map produced rather than adding
+		// to it: the map's value is the family, the override is the member, and keeping both
+		// would assert two mechanisms where the sample has one.
+		if override, ok := d.EvasionOverrides[up.ID]; ok {
+			usedOverride[up.ID] = true
+			if c.Class != "malicious" {
+				bad("%s/%s: has an evasion_overrides entry but is not malicious", e.ID, up.ID)
+			} else {
+				c.Evasion = append([]string{}, override...)
+				res.HandRead++
+			}
+		}
+		if override, ok := d.TierOverrides[up.ID]; ok {
+			usedOverride[up.ID] = true
+			switch {
+			case c.Class != "malicious":
+				bad("%s/%s: has a tier_overrides entry but is not malicious", e.ID, up.ID)
+			case c.Tier == override:
+				// The mechanical rule now agrees, so the hand-read entry is doing nothing and
+				// would outlive the reason it was written.
+				bad("%s/%s: tier_overrides says %q and the derivation already yields %q — remove "+
+					"the override, it is stale", e.ID, up.ID, override, c.Tier)
+			default:
+				c.Tier = override
+				res.HandRead++
+			}
+		}
+
 		// Caught here rather than left for the validator, so a derivation reports its own
 		// incompleteness instead of writing labels that fail one step later.
 		if c.Class == "malicious" && c.Tier == "" {
@@ -305,6 +362,23 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 				"in dimension_overrides", e.ID, up.ID, up.Categories)
 		}
 		res.Coords = append(res.Coords, c)
+	}
+
+	for _, m := range []struct {
+		name string
+		keys []string
+	}{
+		{"exclude_samples", keysOf(d.ExcludeSamples)},
+		{"dimension_overrides", keysOf(d.DimensionOverrides)},
+		{"evasion_overrides", keysOfSlice(d.EvasionOverrides)},
+		{"tier_overrides", keysOf(d.TierOverrides)},
+	} {
+		for _, k := range m.keys {
+			if !usedOverride[k] {
+				bad("%s: %s[%q] matched no upstream sample. A hand-read judgement keyed on a "+
+					"sample that does not exist applies to nothing and says so nowhere", e.ID, m.name, k)
+			}
+		}
 	}
 
 	sort.Slice(res.Coords, func(i, j int) bool { return res.Coords[i].UpstreamID < res.Coords[j].UpstreamID })
@@ -461,3 +535,21 @@ func appendUnique(xs []string, x string) []string {
 }
 
 func oneOf(v string, set []string) bool { return slices.Contains(set, v) }
+
+func keysOf(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func keysOfSlice(m map[string][]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
