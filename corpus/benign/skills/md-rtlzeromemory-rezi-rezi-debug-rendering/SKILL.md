@@ -1,0 +1,87 @@
+---
+name: rezi-debug-rendering
+description: Debug rendering and layout issues in Rezi apps. Use when UI looks wrong, has layout problems, or renders unexpectedly.
+user-invocable: true
+allowed-tools: Read, Glob, Grep, Bash(REZI_PERF=1 *)
+argument-hint: "[symptom-description]"
+metadata:
+  short-description: Debug rendering
+---
+
+## When to use
+
+Use this skill when:
+
+- UI does not look right or has layout problems
+- Widgets overlap, disappear, or have wrong dimensions
+- Unexpected re-renders or flicker
+- Performance issues during rendering
+
+## Source of truth
+
+- `packages/core/src/app/widgetRenderer.ts` — full render pipeline
+- `packages/core/src/app/__tests__/widgetRenderer.transition.test.ts` — transition behavior expectations
+- `packages/core/src/runtime/commit.ts` — VNode → RuntimeInstance tree
+- `packages/core/src/layout/` — layout engine
+- `packages/core/src/renderer/renderToDrawlist/` — draw operations
+- `packages/core/src/widgets/composition.ts` — animation hook implementations
+- `packages/core/src/ui/` — design tokens, recipes, and capability tiers
+
+## Debugging steps
+
+1. **Enable profiling**:
+   ```bash
+   REZI_PERF=1 REZI_PERF_DETAIL=1 node your-app.js
+   ```
+
+2. **Check VNode tree structure** — ensure no missing children or null nodes
+
+3. **Check widget IDs** — must be unique across the entire tree. Duplicate IDs cause unpredictable behavior
+
+4. **Check nesting depth**:
+   - Warning at 200 levels
+   - Fatal at 500 levels
+   - Flatten unnecessary wrapper nodes
+
+5. **Check `key` props** on list items — missing keys cause full re-render and lost state
+
+6. **Inspect with test renderer**:
+   ```typescript
+   const r = createTestRenderer({ viewport: { cols: 80, rows: 24 } });
+   const result = r.render(myView(state));
+   console.log(result.toText());  // see actual output
+   result.findById("my-widget");  // locate specific nodes
+   ```
+
+7. **Review layout props**: `width`, `height`, `flex`, `p`, `gap`, `align`
+
+8. **If animation is involved**, verify:
+   - container widgets (`ui.box`, `ui.row`, `ui.column`, `ui.grid`) use `transition` with expected `properties` (`position`, `size`, `opacity`)
+   - `properties: []` is not accidentally disabling tracks
+   - `opacity` stays within `[0..1]`
+   - `exitTransition` exists on nodes that should animate out before removal
+   - keyed re-entry behavior is intentional (same key cancels in-flight exit)
+   - exiting nodes are expected to be render-only (not focusable/hit-testable)
+   - animation hooks are not conditionally called
+
+9. **Read enriched runtime errors carefully**:
+   - `ZRUI_DUPLICATE_ID` now includes both conflicting widget kinds + `ctx.id()` guidance
+   - `ZRUI_DUPLICATE_KEY` includes the duplicate key and parent context
+   - `ZRUI_INVALID_PROPS` includes prop name, widget kind, and expected type
+   - `ZRUI_UPDATE_DURING_RENDER` includes guidance to move updates into event handlers/effects
+
+## Common causes
+
+| Symptom | Likely cause |
+|---------|-------------|
+| Widget not visible | Missing from VNode tree, or zero width/height |
+| Overlapping widgets | Wrong container type (use `column`/`row` not `box`) |
+| Content truncated | Fixed width too small, missing `flex` |
+| Flicker/full re-render | Missing `key` on list items |
+| Transition not animating | `transition` missing, wrong `properties`, or no actual value delta |
+| Opacity animation looks wrong | `opacity` outside `[0..1]` (clamped) or `properties` excludes `opacity` |
+| Exit animation not visible | Missing `exitTransition`, zero/invalid duration, or node has no stable key |
+| Exit node still interactive | Exit nodes are render-only; focus/hit-test should come from active tree only |
+| Crash on deep tree | Nesting depth > 500 |
+| DS styling not applied | DS styling is automatic with `ThemeDefinition`; check semantic tokens/theme activation (no `dsVariant` required) |
+| Wheel scrolling not working | Ensure the container uses `overflow: "scroll"` and content exceeds viewport size |

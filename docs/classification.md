@@ -126,7 +126,12 @@ that started this repository: two authors were 87% of the denominator, and the p
 spread (0.0%–30.8%) was wider than the pooled figure.
 
 - **Primary**: `SkillMD-138K` (138,133 skills / 20,556 repos, CC-BY-4.0) — the widest
-  real-world distribution available.
+  real-world distribution available. **In layer 1 as a 2,000-document sample, not as the
+  population**: stratified by repository + package path, one document per stratum, fixed
+  seed, per `scripts/sample-skillmd.py`. The sample spans 1,505 originating repositories and
+  94% of them contribute exactly one document, which is what makes a per-source rate possible
+  at all. Its own hazard: 90% of the population arrived via a registry whose admission
+  criteria are undocumented, so this measures over-alerting on *published* skills.
 - **Secondary**: `clawhub-security-signals` clean split (41,743, MIT). **Caveat that must
   travel with it**: its labels come from an OWASP Agentic Top 10 rating, which is the same
   taxonomy most scanners in this space derive their rules from. Using it to select benign

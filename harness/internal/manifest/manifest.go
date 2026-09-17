@@ -165,8 +165,13 @@ type Derive struct {
 	// requires every rate to be reported per source, with n and with the source count, because
 	// a machine-wide 12.9% once turned out to be 7 sources with two of them at 87%.
 	//
-	//   dirname-parts:<n>   the first n "__"-separated parts of the sample directory name,
-	//                       joined with "/" — skillet names its trees owner__repo__path__…
+	//   dirname-parts:<n>        the first n "__"-separated parts of the sample directory
+	//                            name, joined with "/" — skillet names its trees owner__repo__…
+	//   sidecar:<file>:<field>   a JSON file BESIDE the sample tree, not inside it. An
+	//                            extraction step that slugs its directory names loses the real
+	//                            repository, and a provenance file placed inside the tree would
+	//                            be read as part of the sample — the mistake that corrupted
+	//                            this corpus's measurements once already.
 	SourceFrom string `yaml:"source_from"`
 
 	// CategoryFrom says where the tokens fed to CategoryAxisMap come from:

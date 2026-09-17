@@ -68,6 +68,21 @@
     上游提供的是 parquet 表格而不是文件，所以这些树由 scripts/extract-automatelab.py
     从钉住的 parquet 生成；声明内容本身未作改动，没有任何一个工具列表被截断。
 
+  FayeZC/SkillMD-138K —— CC-BY-4.0
+    https://huggingface.co/datasets/FayeZC/SkillMD-138K @ 0d73048abf2f
+    2,000 篇 SKILL.md，位于 corpus/benign/skills/md-*，原样拷贝，来自 1,505 个不同的
+    原始仓库。
+
+    每个标签的 origin.source 记的是那个原始仓库，而不是这个数据集——因为 CC-BY 的署名
+    欠的是写下这篇 skill 的人，数据集只是它到达我们手里的路径，以「via」的形式记在后面。
+
+    这是一个 138,133 篇的总体的**样本**，不是总体本身。采样方案就是
+    scripts/sample-skillmd.py：按「仓库 + 包路径」分层，每层取一篇，抽 2,000 层，
+    固定随机种子，并排除 skillet 已经覆盖的那 100 个仓库，使两个分母不重复计数。
+
+    上游提供的是 parquet 表格而不是文件。每篇的来源信息放在 cache 里紧邻样本树的
+    sidecar 文件中，绝不放进样本树内部，以免被当作样本内容读进去。
+
 关于强制执行的说明：标签与 NOTICE 的一致性校验**尚未实现**。今天 `make validate` 只检查 `origin.license` 是否属于第 1 层允许的宽松许可之一，它不读这个文件。在那项检查落地之前，让此表与标签保持同步是一项人工义务。这一点写在这里而不是略去，因为署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，因此是许可证义务，不是记账。
 
 ---

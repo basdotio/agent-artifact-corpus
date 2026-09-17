@@ -1,0 +1,662 @@
+---
+name: creating-melker-apps
+description: Creates Terminal UI applications using Melker's .melker file format. Use when the user asks to build terminal apps, TUI interfaces, create .melker files, or mentions Melker components like containers, buttons, dialogs, tabs, canvas, or forms.
+license: MIT
+compatibility: Requires Deno 2.5+ or Node.js 25+ (experimental), ANSI-compatible terminal
+metadata:
+  author: wistrand
+  website: https://melker.sh
+---
+
+# Creating Melker Apps
+
+Melker Engine is a Deno library for building rich Terminal UI interfaces using an HTML-inspired document model. Apps are written in `.melker` files (UTF-8 encoded) with XML-like syntax. **Requires Deno 2.5+** or **Node.js 25+** (experimental, install via `npm install -g @melker/melker`, binary is `melker-node`).
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/wistrand/melker.git
+cd melker
+
+# Run directly (no build step needed)
+./melker.ts app.melker
+
+# Optional: install globally via symlink
+ln -s $(pwd)/melker.ts ~/.local/bin/melker
+# Then run from anywhere: melker app.melker
+
+# Or make .melker files executable (add #!/usr/bin/env -S melker as first line)
+chmod +x app.melker
+./app.melker
+```
+
+**From URL (no install):**
+```bash
+deno run --allow-all https://melker.sh/melker.ts app.melker
+```
+
+**Deno flags** forwarded to app subprocess: `--reload`, `--no-lock`, `--no-check`, `--quiet`/`-q`, `--cached-only`
+
+```bash
+./melker.ts --reload https://example.com/app.melker  # Reload remote modules
+./melker.ts --quiet app.melker                        # Suppress diagnostic output
+```
+
+## Requirements
+
+| Requirement | Details |
+|-------------|---------|
+| **Runtime** | Deno 2.5+ (required) |
+| **Platform** | Linux, macOS, Windows (WSL recommended) |
+| **Terminal** | Any ANSI-compatible terminal (iTerm2, Alacritty, Kitty, Windows Terminal, etc.) |
+
+**Terminal Feature Support:**
+
+| Feature | Requirements |
+|---------|--------------|
+| Basic TUI | Any terminal with ANSI support |
+| Mouse support | Terminal with mouse reporting (most modern terminals) |
+| True color | Terminal with 24-bit color support |
+| Images/video | Terminal with sextant/quadrant/halfblock/block character support |
+
+**Known Limitations:**
+- Windows CMD.exe has limited ANSI support; use Windows Terminal or WSL
+- Some SSH clients may not pass through mouse events
+- Very old terminals (VT100) lack color support
+
+## Quick Start
+
+```xml
+<melker>
+  <title>My App</title>
+  <container style="border: thin; padding: 1;">
+    <text>Hello, World!</text>
+    <button label="Click Me" onClick="alert('Clicked!')" />
+  </container>
+</melker>
+```
+
+**Run:** `./melker.ts app.melker`
+
+## Critical Rules
+
+1. **Button label** - Use `<button>Label</button>` or `label="Label"` (not `title`)
+2. **Don't add border to buttons** - Buttons already have `[ ]` brackets; adding border creates `[ [ Button ] ]`
+3. **Button padding** - Vertical padding ignored for `[ ]` buttons (they stay 1 line); horizontal padding works
+4. **Input type is `'input'`** - Not `'text-input'`
+5. **`console.log()` redirects to logger (in app code)** - Automatically redirected to `$melker.logger.info()` (disable with `--no-console-override`)
+6. **Auto-render** - Event handlers auto-render; call `$melker.skipRender()` to skip
+7. **Use getValue/setValue for values** - For input/textarea/select content. Use `.props.*` for other props like `open`, `checked`
+8. **Avoid emojis** - They break terminal layout
+9. **Export functions for handlers** - Functions must be `export function` to use in `onClick="$app.fn()"`
+10. **Scrollable containers** - Use `style="overflow: scroll"` or `style="overflow: auto"`
+11. **Dialog show/hide** - Use `dialog.show()`, `dialog.hide()`, or `dialog.setVisible(bool)`
+12. **Avoid specifying colors** - Let the theme engine handle colors
+13. **flex-direction is a style** - Use `style="flex-direction: row"` not `direction="row"`
+14. **Prevent cross-axis stretching** - In column containers, wrap select/combobox/autocomplete in a row container to prevent full-width stretching
+15. **Primitive exports are copied by value** - `$app.varName = value` modifies a copy, not the original. Use setter functions to modify variables from other scripts
+
+## Layout Essentials
+
+1. **Flex column is the default** — `container`, `dialog`, `tab` all default to `display: flex; flex-direction: column`. Don't write it explicitly.
+2. **`flex: 1` takes remaining space** — Use on the main content area to fill remaining height/width.
+3. **`width: fill` vs `100%`** — `fill` expands to *remaining* available space; `100%` takes the parent's full dimension. Use `fill` for content areas beside sidebars, `100%` for full-width elements.
+4. **Scrollable containers need constrained size** — `overflow: scroll` alone does nothing if the container can grow to fit content. Add `flex: 1` or a fixed height.
+5. **Canvas/img/video buffer size uses props, not style** — `style="width: fill"` only affects layout, not the pixel buffer. Use width/height props: `img` supports `"fill"`, `"100%"`, and numbers; `canvas`/`video` accept fixed numbers only.
+6. **split-pane sizes are ratios** — `sizes="3,2"` means 60%/40%, not 3 cols / 2 cols.
+7. **Terminal space is precious** — Avoid unnecessary nesting, borders, and padding. Every border costs 2 rows + 2 cols.
+
+```xml
+<!-- WRONG: redundant flex-direction, missing flex: 1 on content -->
+<container style="display: flex; flex-direction: column; width: 100%; height: 100%;">
+  <text>Header</text>
+  <container style="overflow: scroll;">Content</container>
+  <text>Footer</text>
+</container>
+
+<!-- RIGHT: defaults handle layout, flex: 1 fills space, scroll works -->
+<text>Header</text>
+<container style="overflow: scroll; flex: 1;">Content</container>
+<text>Footer</text>
+```
+
+## File Structure
+
+```xml
+<melker>
+  <title>App Title</title>
+  <help>
+## Usage
+`myapp.melker [args]`
+  </help>
+  <policy>{"permissions": {...}}</policy>
+  <style>
+    #myId { font-weight: bold; }
+    .myClass { padding: 1; }
+  </style>
+
+  <!-- UI components -->
+  <container>...</container>
+
+  <!-- Scripts last -->
+  <script type="typescript">
+    let count = 0;
+    export function increment() { count++; }
+  </script>
+</melker>
+```
+
+- `<help>` - Markdown help text shown in DevTools (F12 > Help tab)
+
+**Multiple top-level elements:** You can have multiple UI elements at the top level - they are automatically wrapped in a flex column container:
+
+```xml
+<melker>
+  <text>Header</text>
+  <container style="flex: 1;">Content</container>
+  <text>Footer</text>
+</melker>
+<!-- Internally becomes: <container style="display: flex; flex-direction: column; width: 100%; height: 100%;"> ... </container> -->
+```
+
+## Context API
+
+| API | Description |
+|-----|-------------|
+| `$melker.getElementById(id)` | Get element by ID |
+| `$melker.querySelector(selector)` | Get first element matching CSS selector (see below) |
+| `$melker.querySelectorAll(selector)` | Get all elements matching CSS selector |
+
+**CSS selector syntax:** `type`, `#id`, `.class`, `*` (universal), compound (`button.primary`), descendant (space: `container text`), child (`>`), comma OR (`button, .clickable`)
+| `$melker.render()` | Trigger re-render (for intermediate states) |
+| `$melker.skipRender()` | Skip auto-render after handler completes |
+| `$melker.exit()` | Exit application |
+| `$melker.alert(message)` | Show modal alert |
+| `$melker.toast.show(message, options?)` | Show non-modal toast (duplicates show count) |
+| `$melker.toast.dismissAll()` | Dismiss all toast notifications |
+| `$melker.devtools.toggle()` | Toggle Dev Tools overlay |
+| `$melker.devtools.show()` / `hide()` | Open/close Dev Tools programmatically |
+| `$melker.devtools.isOpen()` | Check if Dev Tools is open |
+| `$melker.copyToClipboard(text)` | Copy to clipboard (requires `clipboard: true`, auto-policy default) |
+| `$melker.openBrowser(url)` | Open URL in system browser (requires `browser: true` in policy) |
+| `$melker.cacheDir` | App-specific cache directory path (always exists) |
+| `$melker.cache.read(ns, key)` | Read cached binary data (returns `Uint8Array \| null`) |
+| `$melker.cache.write(ns, key, data, opts?)` | Write binary data to cache (`opts.maxBytes` for namespace budget) |
+| `$melker.cache.delete(ns, key)` | Delete a cache entry |
+| `$melker.cache.clear(ns)` | Clear all entries in a namespace |
+| `$melker.logger.debug/info/warn/error()` | Log to file (F12 shows location) |
+| `$melker.config.getString/getNumber/getBoolean(key, default)` | Read config values |
+| `$melker.createState(initial)` | Register state object for declarative bindings (one call per app) |
+| `$melker.url` | Source file URL |
+| `$melker.dirname` | Source directory path |
+| `$app.functionName()` | Call exported script functions |
+
+## Core Components
+
+| Component | Key Props | Notes |
+|-----------|-----------|-------|
+| `<container>` | style | Flexbox layout (use `overflow: scroll` style for scrolling) |
+| `<text>` | id, style | Text content |
+| `<input>` | placeholder, value, format, onInput | Single-line (format: 'text'\|'password') |
+| `<textarea>` | placeholder, rows, cols, wrap | Multi-line |
+| `<button>` | **label**, onClick | `<button>Label</button>` or `label="Label"` |
+| `<dialog>` | title, open, modal, backdrop, draggable | Modal overlay |
+| `<checkbox>` | title, checked, onChange | Toggle |
+| `<radio>` | title, value, name, onChange | Radio button |
+| `<tabs>` / `<tab>` | activeTab, onChange / title | Tabbed panels |
+| `<list>` / `<li>` | style | Lists |
+| `<canvas>` | width, height, onPaint, onShader, onFilter | Pixel graphics |
+| `<tile-map>` | lat, lon, zoom, provider, onOverlay | Interactive map (needs `map: true` policy) |
+| `<img>` | src, width, height, dither, onFilter | Images |
+| `<video>` | src, width, height, autoplay, loop, audio | Video (requires ffmpeg) |
+| `<combobox>` | placeholder, filter, onSelect | Filterable dropdown |
+| `<select>` | value, onSelect | Dropdown picker |
+| `<autocomplete>` | placeholder, onSearch, onSelect, debounce | Async search dropdown |
+| `<command>` | key, label, global, disabled, onExecute | Declarative keyboard shortcut |
+| `<command-palette>` | open, onSelect, width | Modal command picker |
+| `<markdown>` | src, text, onLink, enableGfm | Markdown rendering with image support |
+| `<slider>` | min, max, value, step, onChange | Range input |
+| `<progress>` | value, max, showValue, indeterminate | Progress bar |
+| `<data-table>` | columns, rows, selectable, onSelect | Array-based table |
+| `<data-bars>` | series, bars, labels, showValues | Bar charts (stacked/grouped/sparkline) |
+| `<data-heatmap>` | grid, colorScale, isolines/isolineCount, showCells | Heatmap with color scales and auto-isolines |
+| `<data-tree>` | nodes, columns, selectable, expandAll, showConnectors | Hierarchical tree with expand/collapse, multi-column |
+| `<table>` | border, columnBorders, resizable | HTML-like table |
+| `<file-browser>` | path, selectType, onSelect, onCancel | File/dir picker |
+| `<graph>` | type, src, text, style | Mermaid/JSON diagrams (flowchart, sequence, class) |
+| `<connector>` | from, to, arrow, label, routing | Draw lines between elements |
+| `<split-pane>` | sizes, dividerTitles, onResize | Resizable split panels with draggable dividers. `direction` and `min-pane-size` are style properties |
+
+For complete component reference, see [COMPONENTS.md](references/COMPONENTS.md). For tutorials, see [getting-started.md](https://github.com/wistrand/melker/blob/main/agent_docs/getting-started.md) and [melker.sh/tutorial.html](https://melker.sh/tutorial.html).
+
+## ARIA Attributes
+
+ARIA attributes improve the AI accessibility assistant's understanding of your UI. They are read-only metadata — they affect the AI context but not rendering, layout, or keyboard navigation.
+
+| Attribute          | Purpose                                                      | Example                                                    |
+|--------------------|--------------------------------------------------------------|------------------------------------------------------------|
+| `role`             | Override element type for the AI                             | `<container role="navigation">`                            |
+| `aria-label`       | Accessible name when no visible label                        | `<button aria-label="Close">X</button>`                    |
+| `aria-labelledby`  | Name from another element's text (highest priority)          | `<input aria-labelledby="email-label" />`                  |
+| `aria-hidden`      | Hide element from AI context                                 | `<separator aria-hidden="true" />`                         |
+| `aria-description` | Supplementary description                                    | `<input aria-description="Used for password reset" />`     |
+| `aria-expanded`    | Collapsible state                                            | `<button aria-expanded="false" aria-controls="panel">`     |
+| `aria-controls`    | Element relationship                                         | Shows `controls: panel` in AI context                      |
+| `aria-busy`        | Loading state                                                | `<container aria-busy="true">Loading...</container>`       |
+| `aria-required`    | Required field (inputs, textareas, checkboxes)               | `<input aria-required="true" />`                           |
+| `aria-invalid`     | Validation error (inputs, textareas)                         | `<input aria-invalid="true" />`                            |
+
+**Example:**
+```xml
+<container role="navigation" aria-label="Main menu">
+  <button>Home</button>
+  <button aria-controls="settings" aria-expanded="false">Settings</button>
+  <separator aria-hidden="true" />
+</container>
+<container role="main">
+  <text id="email-lbl">Email</text>
+  <input aria-labelledby="email-lbl" aria-required="true" />
+</container>
+```
+
+The AI sees `[Navigation: Main menu]` instead of `[Container]`, knows the input is required and labelled "Email", and skips the decorative separator.
+
+## Styling
+
+```xml
+<container style="
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  border: thin;
+  padding: 1;
+  gap: 1;
+">
+```
+
+**Layout:** `display`, `flex-direction`, `flex`, `width`, `height`, `min-width`, `max-width`, `min-height`, `max-height`, `padding`, `margin`, `gap`
+**Borders:** `border` (none|thin|thick|double|rounded|dashed|dashed-rounded|ascii|ascii-rounded|block), `borderTitle`
+**Text:** `font-weight`, `text-align`, `text-wrap`
+**Opacity:** `opacity` (0–1, blends fg+bg), `background-opacity` (0–1, blends bg only). Accepts percentages (`50%`). Animatable.
+**Size values:**
+- Numbers: `40` (columns/rows)
+- Percentages: `50%`, `100%` (in `style.width`/`style.height`)
+- `fill`: Expands to *remaining* available space (differs from 100%)
+- `min-width`/`max-width`/`min-height`/`max-height`: Constrain sizing
+
+**Note:** `display: flex` is auto-inferred when flex container properties are present (`flex-direction`, `justify-content`, `align-items`, `gap`, etc.), so it can be omitted.
+
+**Avoid specifying colors** - Let the theme engine handle colors for best appearance across themes. Only use `color`/`background-color` for canvas drawing or very intentional effects.
+
+### Advanced CSS Features
+
+**`@media` queries** — respond to terminal dimensions:
+```xml
+<style>
+  @media (max-width: 60) { .sidebar { display: none; } }
+</style>
+```
+
+**`@container` queries** — respond to container size:
+```xml
+<style>
+  .sidebar { container-type: inline-size; }
+  @container (min-width: 40) { .card { flex-direction: row; } }
+</style>
+```
+
+**`@keyframes` animations** — animate style properties:
+```xml
+<style>
+  @keyframes pulse { 0% { border-color: #333; } 50% { border-color: #38f; } 100% { border-color: #333; } }
+  .box { animation: pulse 2s ease-in-out infinite; border: thin; }
+</style>
+```
+
+**CSS specificity** — ID (#) > class (.) > type selectors, with definition order as tiebreaker.
+
+## Event Handling
+
+Events auto-render after completion:
+
+```xml
+<!-- Simple handler -->
+<button label="Click" onClick="alert('Hi!')" />
+
+<!-- Access elements -->
+<button onClick="
+  const el = $melker.getElementById('counter');
+  el.setValue(String(parseInt(el.getValue()) + 1));
+" />
+
+<!-- Call exported functions -->
+<button onClick="$app.increment()" />
+
+<!-- Async with intermediate state -->
+<button onClick="
+  statusEl.setValue('Loading...');
+  $melker.render();
+  await fetchData();
+  statusEl.setValue('Done');
+" />
+
+<!-- Skip auto-render -->
+<button onClick="
+  doSomethingWithoutUIChange();
+  $melker.skipRender();
+" />
+```
+
+**Event objects:**
+- `onInput`: `event.value` - current input value
+- `onSelect`: `event.value`, `event.label` - selected option
+- `onKeyPress`: `event.key` - key pressed
+
+## Command Element (Keyboard Shortcuts)
+
+The `<command>` element is a declarative replacement for `onKeyPress` switch blocks. Commands are auto-discovered by the command palette and AI assistant.
+
+```xml
+<!-- Focus-scoped: fires when parent container has focus -->
+<container style="border: thin; padding: 1;">
+  <command key="Delete,Backspace" label="Delete Item" onExecute="$app.deleteItem()" />
+  <text>Select and press Delete</text>
+</container>
+
+<!-- Global: fires regardless of focus -->
+<command key="Ctrl+s" label="Save" global onExecute="$app.save()" />
+<command key="ArrowLeft,a" label="Move Left" global onExecute="$app.moveLeft()" />
+```
+
+**Key format:** Comma-separated for multiple bindings. Aliases: `comma` for `,`, `Space` for ` `, `plus` for `+`. Modifier combos: `Ctrl+S`, `Alt+X`. Letter keys are case-insensitive.
+
+Containers with `<command>` children are automatically focusable via both keyboard (Tab) and mouse click. Clicking a focusable child (e.g., a button) inside the container focuses the child, not the container.
+
+**When to use `<command>` vs `onKeyPress`:** Use `<command>` for container shortcuts and global app shortcuts. Use `onKeyPress` for input-specific keys (e.g., Enter to submit a form field) — input elements consume keys before command dispatch.
+
+## Scripts
+
+```xml
+<script type="typescript">
+  // State variables
+  let count = 0;
+
+  // Export functions for use in handlers
+  export function increment() {
+    count++;
+    const el = $melker.getElementById('counter');
+    if (el) el.setValue(String(count));
+    $melker.render();
+  }
+
+  // Access via $app.increment() in event handlers
+</script>
+```
+
+### Script Lifecycle
+
+| Type  | Attribute        | When                | `export` | Use Case                            |
+|-------|------------------|---------------------|----------|-------------------------------------|
+| Sync  | (default)        | Before render       | Yes      | State setup, function definitions   |
+| Init  | `async="init"`   | Before first render | No       | Top-level `await` (fetch, read)     |
+| Ready | `async="ready"`  | After first render  | No       | Access rendered elements, timers    |
+
+`<script>` is emitted as a standalone ES module — `export function` creates `$app.*` handlers. `async="init"` and `async="ready"` wrap code inside an async function body, so `export` is a syntax error there. If you need both `await` and exports, use separate blocks.
+
+`type="typescript"` is optional — TypeScript is the default.
+
+**Preferred pattern for post-render initialization:**
+
+```xml
+<script type="typescript">
+  export function init() {
+    const canvas = $melker.getElementById('myCanvas');
+    // Start timers, initialize canvas, etc.
+  }
+</script>
+
+<script type="typescript" async="ready">
+  $app.init();
+</script>
+```
+
+**Alternative:** Use `$melker.engine.onMount()` for programmatic callback registration (required for `.md` files).
+
+For TypeScript type definitions (`$melker`, `Element`, event objects), see [TYPES.md](references/TYPES.md).
+
+## Variable Substitution
+
+Melker supports bash-style variable expansion during pre-processing:
+
+### Environment Variables
+
+| Syntax | Behavior |
+|--------|----------|
+| `$ENV{VAR}` | Value or empty string |
+| `$ENV{VAR:-default}` | Value or default if unset/empty |
+| `$ENV{VAR:+alternate}` | Alternate if set, else empty |
+| `$ENV{VAR:?error}` | Value or exit with error if unset/empty |
+
+### Command-Line Arguments
+
+`argv[0]` is the absolute `.melker` file path. User arguments start at `argv[1]`. Same indexing in both templates and `<script>` runtime.
+
+| Syntax | Behavior |
+|--------|----------|
+| `${argv[N]}` | Argument at index N |
+| `${argv[N]:-default}` | Argument or default |
+| `${argv[N]:+alternate}` | Alternate if exists |
+| `${argv[N]:?error}` | Argument or exit with error |
+
+### Examples
+
+```xml
+<!-- Required config -->
+<text>API: $ENV{API_KEY:?API_KEY is required}</text>
+
+<!-- Conditional debug -->
+<text>$ENV{DEBUG:+Debug mode}</text>
+
+<!-- File argument with default -->
+<markdown src="${argv[1]:-README.md}" />
+```
+
+In `<script>` blocks, `argv` is a `string[]` global with the same indexing:
+```typescript
+const userFile = argv[1]; // first user arg
+```
+
+## Common Patterns
+
+### Counter
+
+```xml
+<container style="display: flex; flex-direction: row; gap: 1;">
+  <button label="-" onClick="
+    const el = $melker.getElementById('count');
+    el.setValue(String(parseInt(el.getValue()) - 1));
+  " />
+  <text id="count">0</text>
+  <button label="+" onClick="
+    const el = $melker.getElementById('count');
+    el.setValue(String(parseInt(el.getValue()) + 1));
+  " />
+</container>
+```
+
+### Form with Validation
+
+```xml
+<container style="display: flex; flex-direction: column; gap: 1;">
+  <text>Name:</text>
+  <input id="name" placeholder="Enter name" />
+  <text>Email:</text>
+  <input id="email" placeholder="Enter email" />
+  <button label="Submit" onClick="
+    const name = $melker.getElementById('name')?.getValue() ?? '';
+    const email = $melker.getElementById('email')?.getValue() ?? '';
+    if (!name || !email) {
+      alert('Please fill all fields');
+      return;
+    }
+    alert('Submitted: ' + name);
+  " />
+</container>
+```
+
+### Dialog
+
+```xml
+<script>
+  export function openDialog() {
+    $melker.getElementById('myDialog').show();
+  }
+  export function closeDialog() {
+    $melker.getElementById('myDialog').hide();
+  }
+</script>
+
+<button label="Open" onClick="$app.openDialog()" />
+<dialog id="myDialog" title="My Dialog" modal="true" backdrop="true">
+  <container style="padding: 1;">
+    <text>Dialog content here</text>
+    <button label="Close" onClick="$app.closeDialog()" />
+  </container>
+</dialog>
+```
+
+### Tabs
+
+```xml
+<tabs id="myTabs">
+  <tab id="tab1" title="Tab 1">
+    <text>Content for tab 1</text>
+  </tab>
+  <tab id="tab2" title="Tab 2">
+    <text>Content for tab 2</text>
+  </tab>
+</tabs>
+
+<!-- To start on a specific tab, use activeTab with tab id -->
+<tabs id="myTabs" activeTab="tab2">...</tabs>
+```
+
+### Combobox with Groups
+
+```xml
+<combobox placeholder="Select..." filter="fuzzy" onChange="$app.onSelect(event.value, event.label)">
+  <group label="Group A">
+    <option value="a1">Option A1</option>
+    <option value="a2">Option A2</option>
+  </group>
+  <group label="Group B">
+    <option value="b1">Option B1</option>
+  </group>
+</combobox>
+```
+
+For more examples, see [EXAMPLES.md](references/EXAMPLES.md).
+
+## Permissions (Policy)
+
+**Recommendation:** Always add a `<policy>` section for apps that need file, network, or system access. This enables permission sandboxing and is **required for remote/URL-hosted apps**.
+
+```xml
+<melker>
+  <policy>
+  {
+    "name": "My App",
+    "description": "What the app does",
+    "comment": "Optional detailed explanation shown in approval prompt",
+    "permissions": {
+      "read": ["."],
+      "write": ["."],
+      "net": ["api.example.com"]
+    }
+  }
+  </policy>
+  <!-- UI -->
+</melker>
+```
+
+**Policy fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | App name (shown in approval prompt) |
+| `description` | string | Short description |
+| `comment` | string \| string[] | Detailed comment shown in approval prompt |
+| `permissions` | object | Permission declarations (see below) |
+
+**Permission types:**
+| Permission | Example | Description |
+|------------|---------|-------------|
+| `read` | `["cwd"]` or `["."]` or `["*"]` | File system read access |
+| `write` | `["cwd"]` or `["/data"]` | File system write access |
+| `net` | `["api.example.com"]` or `["samesite"]` | Network access to hosts |
+| `run` | `["ffmpeg"]` | Execute system commands |
+| `env` | `["API_KEY"]` | Environment variable access |
+| `ffi` | `["libfoo.so"]` | FFI library access |
+| `sys` | `["hostname", "osRelease"]` | System information access |
+
+**Special values:**
+- `"cwd"` in `read`/`write` - expands to current working directory
+- `"samesite"` in `net` - expands to the host of the app's source URL (for remote apps)
+
+**Auto-policy (no `<policy>` tag):** Local files without a policy get `read: ["cwd"], clipboard: true` by default, enabling file access in working directory and text selection copy (Alt+C).
+
+**Shortcuts** (set to `true` to enable):
+| Shortcut | Enables |
+|----------|---------|
+| `ai` | AI/media: ffmpeg, ffprobe, openrouter.ai |
+| `clipboard` | Clipboard: pbcopy, xclip, wl-copy |
+| `browser` | Browser opening: open, xdg-open |
+| `keyring` | Credential storage: security, secret-tool |
+
+**Example with shortcuts:**
+```xml
+<policy>
+{
+  "name": "My App",
+  "permissions": {
+    "read": ["."],
+    "clipboard": true,
+    "browser": true
+  }
+}
+</policy>
+```
+
+**When to omit policy:** Simple local apps with no network needs can skip the policy tag. They'll use an auto-generated policy with `read: ["cwd"], clipboard: true` (read access to working directory + clipboard for text selection copy).
+
+**Implicit permissions:** Melker adds certain paths automatically so apps don't need to declare framework internals:
+
+| Permission | Implicit Paths | Why |
+|------------|----------------|-----|
+| Read | temp dir, app dir, cwd, state dir | Bundler needs temp, app needs its own files and relative paths |
+| Write | temp dir, state dir, log dir | Bundler output, state persistence, logging |
+
+These are added regardless of policy content. CWD is implicit for **read** but not **write**—apps that write files must declare it explicitly.
+
+## State Persistence
+
+Elements with `id` are auto-persisted. Opt-out with `persist="false"`:
+
+```xml
+<input id="saved" />         <!-- Persisted -->
+<input id="temp" persist="false" />  <!-- Not persisted -->
+<input format="password" />  <!-- Never persisted -->
+```
+
+## Debugging
+
+- `console.log()` in app code is automatically redirected to `$melker.logger.info()` (won't break TUI)
+- Objects are formatted safely using `Deno.inspect()` (handles circular refs)
+- Use `--no-console-override` or `MELKER_NO_CONSOLE_OVERRIDE=1` to output to terminal instead
+- Press F12 for Dev Tools dialog (source, policy, document tree, log file location)
+- Press F6 for Performance dialog
+- Set `MELKER_LOG_FILE=/tmp/debug.log MELKER_LOG_LEVEL=DEBUG` for custom log location
+
+For common errors and debug strategies, see [TROUBLESHOOTING.md](references/TROUBLESHOOTING.md).
+

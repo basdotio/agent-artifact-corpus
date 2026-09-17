@@ -17,6 +17,7 @@
 package derive
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -164,6 +165,29 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		}
 		rel, _ := filepath.Rel(root, dir)
 		c := Coord{UpstreamID: up.ID, SamplePath: rel}
+		if spec, ok := strings.CutPrefix(d.SourceFrom, "sidecar:"); ok {
+			file, field, found := strings.Cut(spec, ":")
+			if !found {
+				bad("%s: source_from %q must be sidecar:<file>:<field>", e.ID, d.SourceFrom)
+			} else {
+				// The sidecar sits beside the tree, named after it, exactly as a label does.
+				name := filepath.Base(dir)
+				sc := filepath.Join(filepath.Dir(dir), strings.ReplaceAll(file, "<name>", name))
+				b, rerr := os.ReadFile(sc)
+				if rerr != nil {
+					bad("%s/%s: source_from sidecar %s is missing", e.ID, up.ID, filepath.Base(sc))
+				} else {
+					var m map[string]any
+					if jerr := json.Unmarshal(b, &m); jerr != nil {
+						bad("%s/%s: sidecar %s is not JSON: %v", e.ID, up.ID, filepath.Base(sc), jerr)
+					} else if v, has := m[field]; !has {
+						bad("%s/%s: sidecar %s has no field %q", e.ID, up.ID, filepath.Base(sc), field)
+					} else {
+						c.Source = fmt.Sprint(v)
+					}
+				}
+			}
+		}
 		if n, ok := strings.CutPrefix(d.SourceFrom, "dirname-parts:"); ok {
 			want := 0
 			fmt.Sscanf(n, "%d", &want)

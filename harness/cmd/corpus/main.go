@@ -325,6 +325,8 @@ func cmdStats(root string) int {
 		fmt.Printf("      mechanism recorded upstream — the depth is known, the mechanism is not\n")
 	}
 
+	reportSources(labels)
+
 	fmt.Println("  by surface")
 	for _, s := range sortedKeys(bySurface) {
 		m := bySurface[s]
@@ -555,6 +557,14 @@ func cmdDerive(root string, want []string) int {
 		e, ok := byID[id]
 		if !ok {
 			fmt.Fprintf(os.Stderr, "%s: no such entry\n", id)
+			rc = 1
+			continue
+		}
+		if e.Derive == nil {
+			// Most entries have no derive rule and never will — a corpus whose labels a rule
+			// cannot reproduce is the normal case here, not an omission.
+			fmt.Fprintf(os.Stderr, "%s: has no derive rule — its coordinates cannot be produced "+
+				"mechanically. Run `corpus derive` with no argument to list the entries that can.\n", id)
 			rc = 1
 			continue
 		}

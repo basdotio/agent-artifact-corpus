@@ -100,12 +100,12 @@ make test        # harness 单元测试
 
 - **没有 CI。** 没有任何东西会自动跑 `make validate`，所以上面说的回归闸门是一个设计，不是一个机制。
 - **`sha256` 从未被校验。** 每条 manifest 条目的 `sha256` 都是空的，拉取器只核对钉住的 commit。完整性靠的是 git，不是哈希。
-- **HuggingFace 那几条不止差一次拉取。** git 访问是通的、钉住的 commit 也能解析，但内容在 git-lfs 后面，而本机没装 lfs；并且 `SkillMD-138K` 是单个 560MB 的 `train.parquet`，不是样本树。要拿它当分母，需要 git-lfs、再加一步抽取，再按它自己 hazards 要求的逐仓库上限采样。
-- **`subset` 声明了却被拉取器忽略。** `datadog-ai-skills` 写了 `samples/ai-skills`、`cisco-mcp-scanner-evals` 写了 `evals`，但两者都会被整仓克隆。
+- **表格形态的上游没法只靠 `make fetch` 复现。** `automatelab-mcp-tools` 和 `SkillMD-138K` 给的是 parquet 表格而不是样本树，所以在 fetch 和 derive 之间各自还要过一个 `scripts/` 下的脚本。脚本本身是钉住且带固定种子的，但 `make derive` 不会去调它们，所以一个干净的 clone 没法用一条命令重建这两条。
+- **良性侧是抽样，恶性侧是普查。** 2,850 个良性样本是按写明的方案从写明的总体里抽出来的，而 237 个恶性样本是上游手里的全部。因此这份语料给出的召回数字和假阳性数字，靠的是两种不同性质的分母，不能合成一个分数。
 - **只接入了一个工具。** `taxonomy/tools.yaml` 里只有一条 entry。
 - **`NOTICE` 没有被 `make validate` 与标签的许可证做交叉校验。**
 - **harness 里有一个包没有测试**：`fetch`。
-- **九个技术维度中有六个还没有样本。** `make stats` 会把它们点名列出。
+- **32 个「维度 × 层级」格子里有 7 个没有样本**，另有三个作用面——hooks、permission、connector——完全没有样本，因为没有任何公开语料覆盖它们。`make stats` 会把它们点名列出。
 
 ## 许可证
 

@@ -155,16 +155,20 @@ measures.
   above is a design, not a mechanism.
 - **`sha256` is never verified.** Every manifest entry carries an empty `sha256`, and the
   fetcher checks the pinned commit only. Integrity rests on git, not on the hash.
-- **The HuggingFace entries need more than a fetch.** git access works and the pinned commits
-  resolve, but the payload is behind git-lfs, which is not installed here, and `SkillMD-138K`
-  is a single 560MB `train.parquet` rather than sample trees. Using it as a denominator needs
-  git-lfs, then an extraction step, then the per-repo cap its own hazards call for.
-- **`subset` is declared but ignored by the fetcher.** `datadog-ai-skills` names
-  `samples/ai-skills` and `cisco-mcp-scanner-evals` names `evals`, yet both would clone whole.
+- **The table-shaped upstreams are not reproducible from `make fetch` alone.**
+  `automatelab-mcp-tools` and `SkillMD-138K` ship parquet tables, not sample trees, so each
+  needs a script under `scripts/` between the fetch and the derive. The scripts are pinned and
+  seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
+  entries in one command.
+- **The benign side is a sample; the malicious side is a census.** 2,850 benign samples are
+  drawn from stated populations under stated designs, while all 237 malicious samples are
+  everything the upstreams had. A recall figure and a false-positive figure from this corpus
+  therefore rest on different kinds of denominator, and cannot be combined into one score.
 - **One tool wired up.** `taxonomy/tools.yaml` has a single entry.
 - **`NOTICE` is not cross-checked** against label licenses by `make validate`.
 - **One harness package has no tests**: `fetch`.
-- **Six of nine technique dimensions have no sample.** `make stats` names them.
+- **7 of 32 dimension × tier cells have no sample**, and three surfaces — hooks, permission,
+  connector — have none at all, because no public corpus covers them. `make stats` names them.
 
 ## License
 

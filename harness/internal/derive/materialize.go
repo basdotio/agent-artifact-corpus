@@ -189,8 +189,16 @@ func renderLabel(e manifest.Entry, p Plan) string {
 	fmt.Fprintf(&b, "  derived_from:\n")
 	fmt.Fprintf(&b, "    entry: %s\n", e.ID)
 	fmt.Fprintf(&b, "    sample: %s\n", filepath.ToSlash(c.SamplePath))
+	// The per-sample fidelity has to describe THIS sample's derivation, not the entry's
+	// general shape. Telling a benign sample it came through a category map when the entry has
+	// none, and when benign labels carry no dimension or evasion at all, is the same defect as
+	// an unearned coordinate: a claim about provenance that the data does not support.
 	fid := "tier, severity and class mechanical; dimension and evasion via the category map"
-	if c.HandReadDimension {
+	switch {
+	case c.Class == "benign":
+		fid = "class is a constant and benign labels carry no coordinates, so nothing is mapped; " +
+			"the judgement is in this entry's sampling design"
+	case c.HandReadDimension:
 		fid = "tier, severity and class mechanical; dimension hand-read into dimension_overrides"
 	}
 	fmt.Fprintf(&b, "    fidelity: %q\n", fid)
