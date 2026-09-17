@@ -200,7 +200,11 @@ type Derive struct {
 	// judgement standing in the open, countable and reviewable, rather than a guess buried in
 	// the category map. `corpus derive` reports these separately from mechanically derived
 	// coordinates, because they carry a different kind of confidence.
-	DimensionOverrides map[string]string `yaml:"dimension_overrides"`
+	// Targets, not string: a sample can achieve more than one thing, and forcing one value made
+	// the override mechanism unable to express what the dimension definitions themselves
+	// require — `reconnaissance.not` says a sample reading /etc/passwd earns both that and
+	// `filesystem`, "and should carry both".
+	DimensionOverrides map[string]Targets `yaml:"dimension_overrides"`
 
 	// EvasionOverrides and TierOverrides exist for the same reason as DimensionOverrides, and
 	// were added after an audit showed the category map getting both axes wrong in a way the

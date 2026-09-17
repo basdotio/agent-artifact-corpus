@@ -128,9 +128,11 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		}
 	}
 
-	for id, dim := range d.DimensionOverrides {
-		if !oneOf(dim, tax.Dimensions) {
-			bad("%s: dimension_overrides[%q] is %q, which is not a dimension in the vocabulary", e.ID, id, dim)
+	for id, dims := range d.DimensionOverrides {
+		for _, dim := range dims {
+			if !oneOf(dim, tax.Dimensions) {
+				bad("%s: dimension_overrides[%q] names %q, which is not a dimension in the vocabulary", e.ID, id, dim)
+			}
 		}
 	}
 	for id, evs := range d.EvasionOverrides {
@@ -307,16 +309,21 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		if override, ok := d.DimensionOverrides[up.ID]; ok {
 			usedOverride[up.ID] = true
 			switch {
-			case len(c.Dimensions) > 0:
-				// The category map now places this sample, so the hand-read entry is stale.
-				// Saying so prevents a override outliving the reason it was written.
-				bad("%s/%s: has a dimension_overrides entry (%q) but the category map already "+
-					"yields %v — remove the override, it is stale", e.ID, up.ID, override, c.Dimensions)
+			case sameSet(c.Dimensions, override):
+				// Stale means the override says what the RULE already says. It used to mean
+				// "the rule produced anything at all", which made the mechanism able to fill a
+				// gap and unable to correct an error — and correcting errors is most of what a
+				// hand-read dimension is for: a category that is right for eight of its members
+				// and wrong for two needs the two overridden, not the category deleted.
+				bad("%s/%s: dimension_overrides says %v and the category map already yields the "+
+					"same — remove the override, it is stale", e.ID, up.ID, override)
 			case c.Class != "malicious":
 				bad("%s/%s: has a dimension_overrides entry but is not malicious; only malicious "+
 					"samples sit on the recall axis", e.ID, up.ID)
 			default:
-				c.Dimensions = append(c.Dimensions, override)
+				// Replaces, like evasion_overrides. A hand-read dimension is the considered
+				// value for this sample; appending would leave the rejected one beside it.
+				c.Dimensions = append([]string{}, override...)
 				c.HandReadDimension = true
 				res.HandRead++
 			}
@@ -369,7 +376,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		keys []string
 	}{
 		{"exclude_samples", keysOf(d.ExcludeSamples)},
-		{"dimension_overrides", keysOf(d.DimensionOverrides)},
+		{"dimension_overrides", keysOfTargets(d.DimensionOverrides)},
 		{"evasion_overrides", keysOfSlice(d.EvasionOverrides)},
 		{"tier_overrides", keysOf(d.TierOverrides)},
 	} {
@@ -552,4 +559,33 @@ func keysOfSlice(m map[string][]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func keysOfTargets(m map[string]manifest.Targets) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sameSet reports whether two dimension lists carry the same members, order aside.
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, x := range a {
+		seen[x]++
+	}
+	for _, x := range b {
+		seen[x]--
+	}
+	for _, n := range seen {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }

@@ -322,7 +322,54 @@ entries:
         multi_technique_process_hiding: "hides its own process; concealment is not an outcome"
         process_forking_monitoring_evasion: "forks to shed monitoring; the same"
         vm_sandbox_detection: "detects a VM and reports; pure reconnaissance"
+      # Read one by one after a 127-sample census found 20 labels asserting `exfiltration` with
+      # ZERO egress anywhere in the file. The two category rules that produced them described
+      # THE READ ("enumerates the environment and filters secrets"), and `exfiltration.not`
+      # excludes exactly that: the transmission is the offence. A scanner correctly reporting
+      # host enumeration was being scored WRONG, which is worse for a benchmark than no label.
+      # Every tool in that group returns a COUNT, not content.
       dimension_overrides:
+        # Reads host files outside the working area AND gathers what is in them.
+        # `reconnaissance.not` says a sample reading /etc/passwd earns both, so both are here.
+        system_file_access_enumeration: [filesystem, reconnaissance]      # /etc/group, /etc/hosts, /etc/hostname
+        process_information_access: [filesystem, reconnaissance]          # /proc/<pid>/{environ,cmdline,status}
+        user_account_enumeration: [filesystem, reconnaissance]            # /etc/passwd, /etc/group
+        network_configuration_access: [filesystem, reconnaissance]        # /etc/hosts, /etc/network/interfaces
+        routing_table_arp_cache_access: [filesystem, reconnaissance]      # /proc/net/{route,arp,dev}
+        system_log_access: [filesystem, reconnaissance]                   # /var/log/{auth,kern}
+        filesystem_mount_information_access: [filesystem, reconnaissance] # /proc/mounts
+        system_hardware_information_access: [filesystem, reconnaissance]  # /proc/{cpuinfo,meminfo,devices}
+        file_protocol_ssrf_local_file: [filesystem, reconnaissance]       # file:// to /etc/hosts and ~/.ssh/id_rsa
+
+        # Gathers without touching a file at all — the case that proved the vocabulary was short
+        # a word rather than these samples being mislabelled by carelessness.
+        environment_variable_enumeration: reconnaissance   # os.environ, no file, no egress
+        user_database_access: reconnaissance               # pwd.getpwall() through libc
+        internal_service_port_scanning: reconnaissance
+        private_ip_range_scanning: reconnaissance
+        localhost_metadata_service_access: reconnaissance
+        ssrf_url_manipulation_internal_network: reconnaissance
+        dns_rebinding_attack: reconnaissance
+        redirect_following_open_redirect: reconnaissance
+        redirect_chain_internal_service: reconnaissance
+        unix_socket_docker_exploitation: reconnaissance    # queries /containers/json; lists, does not control
+        cloud_metadata_credential_extraction: [reconnaissance, permission]  # IAM creds it was never granted
+
+        # Labelled `injection` by the category map while carrying no attacker text addressed to
+        # the agent at all — the tool docstrings are honest and the offence is an act in the body.
+        conditional_behavior_privileged_users: backdoor   # /tmp/.system_monitor: `nc -l 4444 -e /bin/bash`, start_new_session
+        goal_subversion_objective_replacement: backdoor   # @reboot crontab + systemd unit + ~/.config/autostart
+        output_manipulation_system_mods: backdoor         # */10 reverse-shell crontab, appends /etc/rc.local
+        trigger_based_malicious_behavior: backdoor        # /tmp/.doc_processor reverse-shell loop, start_new_session
+        privilege_escalation_system_file_mod: permission  # sudoers.d NOPASSWD:ALL, usermod -aG sudo, pam_permit.so
+
+        # Harvest into a local cache and stop. Egress is 0, so `exfiltration.not` excludes it;
+        # nothing is addressed to the agent, so injection does not apply either.
+        api_key_harvesting_environment: [reconnaissance, filesystem]        # env secrets -> /tmp/.api_keys_cache
+        credential_harvesting_local_storage: [reconnaissance, filesystem]   # passwords -> /tmp/.auth_cache
+        session_hijacking_token_manipulation: [reconnaissance, filesystem]  # tokens -> /tmp/.session_cache
+        stealth_logging_interaction_tracking: [reconnaissance, filesystem]  # every tool call -> /tmp/.calc_audit
+
         rootkit_installation: backdoor            # insmod, /etc/rc.local, /etc/ld.so.preload — outlives the invocation
         multi_method_container_escape: permission # nsenter, /proc/1, cgroup release_agent — widens what it may do
         multi_technique_sandbox_escape: execution # execv / subprocess.Popen on caller-supplied input
@@ -373,8 +420,10 @@ entries:
         template-injection: dim:execution
         unauthorized-code-execution: dim:execution
         resource-exhaustion: dim:resource-abuse
-        unauthorized-network-access: dim:exfiltration   # cloud metadata endpoint, credential extraction
-        unauthorized-system-access: dim:exfiltration    # enumerates the environment and filters secrets
+        # REMOVED: was `dim:exfiltration`. Its own rationale described the read, and all ten
+        # samples under it have zero egress. A rule wrong more often than right should go.
+        unauthorized-network-access: ignore
+        unauthorized-system-access: ignore             # REMOVED for the same reason; all ten hand-read
         defense-evasion: ignore                   # the directory name carries no axis; the six included files get theirs from dimension_overrides
         general-description-code-mismatch: ignore # excluded above
 
