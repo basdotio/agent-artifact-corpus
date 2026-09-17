@@ -1,0 +1,122 @@
+# The regression gate this repository's README describes.
+#
+# Until this file existed, that gate was a design and not a mechanism: every invariant the
+# corpus depends on lives in `make validate`, and every one of them breaks from ordinary
+# editing rather than from bad code — renaming a sample, adding one, translating a document
+# in one language only, re-deriving an entry. Those are exactly the things a person forgets
+# to check.
+#
+# It runs on a CLEAN CHECKOUT, which is the other half of the point. This corpus is meant to
+# be usable by someone benchmarking a scanner we did not write, so `make validate` has to pass
+# on a fresh clone with nothing else installed. That property is unverifiable on the machine
+# where the corpus was built, because that machine has everything.
+
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only. Nothing here should ever need to write to the repository, and saying so means a
+# compromised action in the chain cannot.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Not the implicit `bash -e`: pipefail is load-bearing below, where `make validate` is
+    # piped into tee. Without it a failing validate would be masked by tee's exit code.
+    shell: bash
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # From harness/go.mod rather than pinned here, so the toolchain cannot drift away
+          # from what the module declares.
+          go-version-file: harness/go.mod
+          cache-dependency-path: harness/go.sum
+
+      - name: gofmt
+        working-directory: harness
+        run: |
+          # `gofmt -l` lists unformatted files and exits 0, so it has to be checked by hand.
+          # `make fmt` has the same shape and the same hole; this is the version that fails.
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: harness
+        run: go vet ./...
+
+      - name: go test
+        working-directory: harness
+        # -race matches `make test`. The harness has no concurrency today, so this is cheap
+        # insurance rather than a live concern.
+        run: go test -race ./...
+
+      - name: make validate
+        run: make validate 2>&1 | tee validate.log
+
+      - name: assert which scanners went unverified
+        run: |
+          # This step exists because of a hole found by running the gate on a clean clone.
+          #
+          # `taxonomy/tools.yaml` locates each scanner's generated rule reference, and
+          # aguard's is `../agent-guard/docs/rules.md` — OUTSIDE this repository. On the
+          # machine where the corpus is built that file exists and validate reports
+          # "73 ids, 56 carry a dimension". On a clean checkout it does not exist, validate
+          # reports "not checked", and it stays GREEN. A typo'd rule id in any expect block
+          # would ship through CI unnoticed.
+          #
+          # The degradation itself is correct: a reference that cannot be read must not be
+          # assumed correct. What is wrong is for it to be silent. So the set of scanners CI
+          # cannot verify is pinned here, and any change to it fails the run — including a
+          # NEW scanner being added to tools.yaml with no reachable reference, which would
+          # otherwise mean wiring up a second tool and having nothing ever check its rule ids.
+          expected="aguard"
+          actual="$(awk '/not checked/ {print $1}' validate.log | sort | paste -sd' ' -)"
+          if [ "$actual" != "$expected" ]; then
+            echo "The set of scanners whose rule ids CI cannot verify has changed."
+            echo "  pinned in this workflow: '$expected'"
+            echo "  reported by validate:    '$actual'"
+            echo
+            echo "If a scanner was added, decide deliberately whether CI can reach its rule"
+            echo "reference (taxonomy/tools.yaml rules_source, which honours an env var) and"
+            echo "update this list either way. Do not delete the check to make it pass."
+            exit 1
+          fi
+          echo "rule ids unverified in CI, as expected: $expected"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: pytest
+        run: |
+          python -m pip install --quiet pytest
+          # Deliberately no pandas / pyarrow / fastparquet: the tested code is the harvest's
+          # classification logic, which decides what the false-positive denominator contains.
+          # The parquet scripts are extraction plumbing and need a 534MB download to exercise.
+          python -m pytest scripts/ -q
+
+      - name: composition
+        # Not a gate. The corpus's own numbers appear in the README and in published figures,
+        # and this puts the real ones in the run summary so the two can be compared without
+        # trusting either.
+        run: |
+          {
+            echo '## Corpus composition'
+            echo '```'
+            make stats
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -136,7 +136,9 @@ make fetch       # materialise named layer-2 entries at their pinned commit (net
 make test        # harness unit tests
 ```
 
-`make validate` is offline and needs no scanner installed.
+`make validate` is offline and needs no scanner installed. CI runs these same targets on a
+clean checkout, so anything that passes locally only because your machine has something extra
+shows up there rather than in someone else's clone.
 
 ## Adding a sample
 
@@ -157,8 +159,17 @@ make test        # harness unit tests
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **No CI.** Nothing runs `make validate` automatically, so the regression gate described
-  above is a design, not a mechanism.
+- **CI cannot verify rule ids, and now says so out loud.**
+  [`.github/workflows/validate.yml`](.github/workflows/validate.yml) runs `make validate`,
+  `go test -race`, gofmt, vet and the Python tests on every push — on a clean checkout, which
+  is the half that cannot be tested on the machine the corpus was built on. What it cannot do
+  is check `expect.<tool>` rule ids: `taxonomy/tools.yaml` locates aguard's rule reference at
+  `../agent-guard/docs/rules.md`, outside this repository, so on a clean checkout validate
+  reports `aguard not checked` and stays green. That degradation is correct — an unreadable
+  reference must not be assumed correct — but it was silent, which is worse than no check. The
+  workflow now pins the set of scanners it cannot verify and fails if that set changes, in
+  either direction, so wiring up a second scanner cannot quietly mean nothing ever checks its
+  rule ids.
 - **`sha256` is verified in layer 1 and still empty in layer 2.** The 393 harvested samples
   each carry the hash of the bytes as collected, and `make validate` recomputes all 393 from
   the vendored artifact and fails on a mismatch. Every *manifest* entry still carries an empty

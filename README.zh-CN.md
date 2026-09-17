@@ -86,7 +86,7 @@ make fetch       # 按钉住的 commit materialise 指定的第 2 层条目（�
 make test        # harness 单元测试
 ```
 
-`make validate` 是离线的，不需要安装任何扫描器。
+`make validate` 是离线的，不需要安装任何扫描器。CI 在干净 checkout 上跑的就是同一批 target，所以那种「只因为你机器上多了点东西才能过」的情况会在那里暴露，而不是在别人的 clone 里。
 
 ## 添加一个样本
 
@@ -100,7 +100,7 @@ make test        # harness 单元测试
 
 写明而不是略去，用的是这份语料要求被测扫描器遵守的同一条原则。
 
-- **没有 CI。** 没有任何东西会自动跑 `make validate`，所以上面说的回归闸门是一个设计，不是一个机制。
+- **CI 验不了规则 ID，而现在这件事是响的。** [`.github/workflows/validate.yml`](.github/workflows/validate.yml) 在每次 push 上跑 `make validate`、`go test -race`、gofmt、vet 和 Python 测试，而且是在**干净 checkout** 上跑 —— 这后半点恰恰是在建这份语料的机器上无法验证的。它做不到的是检查 `expect.<tool>` 里的规则 ID：`taxonomy/tools.yaml` 把 aguard 的规则引用指向 `../agent-guard/docs/rules.md`，在**仓库外面**，所以干净 checkout 上 validate 会报 `aguard not checked` 并且仍然是绿的。这个降级本身是对的——读不到的引用不该被假定为正确——但它是静默的，而静默的跳过比没有检查更糟。现在 workflow 把「CI 验不了的扫描器集合」钉住，这个集合往任何一个方向变了都会红，所以以后接入第二个扫描器，不会悄悄变成「没有任何东西检查过它的规则 ID」。
 - **`sha256` 在第 1 层已被校验，在第 2 层仍然是空的。** 393 个采集来的样本各自带着采集时那份字节的哈希，`make validate` 会从 vendoring 的 artifact 重新算出全部 393 个并在不一致时失败。而每条 *manifest* 条目的 `sha256` 依然是空的、拉取器只核对钉住的 commit：一个引用在本地没有字节可供哈希，所以第 2 层的完整性仍然只靠 git。
 - **表格形态的上游没法只靠 `make fetch` 复现。** `automatelab-mcp-tools` 和 `SkillMD-138K` 给的是 parquet 表格而不是样本树，所以在 fetch 和 derive 之间各自还要过一个 `scripts/` 下的脚本。脚本本身是钉住且带固定种子的，但 `make derive` 不会去调它们，所以一个干净的 clone 没法用一条命令重建这两条。
 - **良性侧是抽样，恶性侧是普查。** 3,241 个良性样本是按写明的方案从写明的总体里抽出来的，而 237 个恶性样本是上游手里的全部。因此这份语料给出的召回数字和假阳性数字，靠的是两种不同性质的分母，不能合成一个分数。
