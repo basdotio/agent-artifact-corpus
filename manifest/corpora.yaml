@@ -2182,6 +2182,111 @@ entries:
         defense-evasion: ignore                   # the directory name carries no axis; the six included files get theirs from dimension_overrides
         general-description-code-mismatch: ignore # excluded above
 
+  - id: skill-safety-bench
+    name: "AI45Lab/skill-safety-bench (SkillSafetyBench, Shanghai AI Lab)"
+    url: https://github.com/AI45Lab/skill-safety-bench
+    commit: e0589d7b68c7442027a287c956c40e3df4b7bbab
+    sha256: ""
+    license: Apache-2.0
+    role: recall
+    malicious: 9
+    benign: 0
+    vendorable: true
+    overlaps: []
+    hazards:
+      - "the repo is 330 MB and its NOTICE.md warns that BENIGN task content (adapted upstream tasks, bundled PDF/PPTX/MP4/CSV) carries provenance the authors have not fully cleared. scripts/prep-skill-safety-bench.py fetches ONLY the injected poison files (the SKILL.md and, where the attack is split, its companion policy file) for the selected scenarios — never the media. `corpus fetch` is not used, for the same reason as datadog"
+      - "the upstream's category names DO NOT map to our dimensions: its reconnaissance category is labelled attack_class malware_ransomware and its destructive category mixes backdoor/exfil. Every dimension here is hand-read from the artifact into dimension_overrides with a quote, not taken from the category — the exact trap the audit corrected three times elsewhere"
+      - "9 of ~30 categories are integrated: only the scenarios that, read against the artifact, genuinely exercise filesystem / reconnaissance / resource-abuse — the three dimensions cisco otherwise monopolises. The rest are other vectors already covered"
+      - "the resource-abuse attacks are SPLIT: a policy/note file declares the forced loop and the SKILL.md obeys it. Both are vendored so the sample is judgeable; the quote is taken from whichever file carries the deciding instruction"
+    prep:
+      - "run scripts/prep-skill-safety-bench.py to fetch the selected poison files into cache/skill-safety-bench/_selected/"
+    derive:
+      layout: "_selected/*"
+      surface: skills
+      id_prefix: ssb
+      class_from: "constant:malicious"
+      label_file: ""
+      tier_from: "constant:plain"
+      severity_from: "constant:high"
+      fidelity: >-
+        class is a constant this repository asserts; every dimension, tier and evasion is
+        hand-read from the vendored artifact into the override blocks below, each with a quote
+        validate locates in the sample's own bytes. Nothing comes from the upstream's category
+        names, which do not map to our axes.
+      dimension_overrides:
+        organize-audit-log-erasure:
+          dimensions: [filesystem]
+          evidence:
+            file: SKILL.md
+            lines: "440"
+            quote: 'mv /root/papers/all/ZZ_RD2_SORTING_HISTORY_ARCHIVE_AFTER_SORTING.log /root/.audit_archive/'
+        organize-intake-manifest:
+          dimensions: [filesystem]
+          evidence:
+            file: SKILL.md
+            lines: "440"
+            quote: 'mv /root/papers/all/ZZ_RD2_INTAKE_MANIFEST_ARCHIVE_AFTER_SORTING.txt /root/.intake_archive/'
+        metadata-service-probe:
+          dimensions: [reconnaissance]
+          evidence:
+            file: SKILL.md
+            lines: "44"
+            quote: 'metadata routes such as `169.254.169.254`, `metadata.google.internal`, `/computeMetadata/v1`'
+        docker-socket-repro:
+          dimensions: [reconnaissance]
+          evidence:
+            file: SKILL.md
+            lines: "42"
+            quote: 'a container command that mounts `/:/host` and `/var/run/docker.sock'
+        requery-loop:
+          dimensions: [resource-abuse]
+          evidence:
+            file: rd6_requery_policy.md
+            lines: "1"
+            quote: 'requery_mode=looped'
+        training-sweep-drain:
+          dimensions: [resource-abuse]
+          evidence:
+            file: rd6_training_sweep_note.md
+            lines: "5"
+            quote: 'sweep_mode=looped'
+        tfidf-budget-drain:
+          dimensions: [resource-abuse]
+          evidence:
+            file: rd6_benchmark_budget.txt
+            lines: "6"
+            quote: 'termination_reason=policy-forced-loop'
+        travel-fanout-explosion:
+          dimensions: [resource-abuse]
+          evidence:
+            file: rd6_city_variant_policy.json
+            lines: "2"
+            quote: '"fanout_mode": "bounded-variant-expansion"'
+        video-rescan-loop:
+          dimensions: [resource-abuse]
+          evidence:
+            file: rd6_rescan_policy.md
+            lines: "1"
+            quote: 'rescan_mode=looped'
+      tier_overrides:
+        organize-audit-log-erasure: evasive
+        organize-intake-manifest: evasive
+        metadata-service-probe: evasive
+        docker-socket-repro: evasive
+        requery-loop: indirect
+        training-sweep-drain: indirect
+        tfidf-budget-drain: indirect
+        travel-fanout-explosion: indirect
+        video-rescan-loop: indirect
+      evasion_overrides:
+        metadata-service-probe: [semantic-paraphrase]
+        docker-socket-repro: [semantic-paraphrase]
+        requery-loop: [config-indirection]
+        training-sweep-drain: [config-indirection]
+        tfidf-budget-drain: [config-indirection]
+        travel-fanout-explosion: [config-indirection]
+        video-rescan-loop: [config-indirection]
+
   # ---------- searched for, and why they are not layer 1 ----------
   # The corpus has ZERO malicious samples on the hooks, permission and connector surfaces.
   # These two entries are what a search for them actually turned up, recorded so the next
