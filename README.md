@@ -83,7 +83,7 @@ is what lets `make validate` run with no build of any scanner present.
 
 | Tool | Rule-level expectations | Note |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 3,506 layer-1 samples | the only one so far — see *Known gaps* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 3,509 layer-1 samples | the only one so far — see *Known gaps* |
 
 No second scanner has been wired up yet. Until one is, the tool-neutral claims above are a
 property of the schema rather than a demonstrated result, and that distinction is the reason
@@ -184,7 +184,7 @@ shows up there rather than in someone else's clone.
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 3,506 labels
+- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 3,509 labels
   carry such a block; the other 3,483 are pure `truth` and need no scanner to check. A
   scanner's rule list belongs to that scanner, so `taxonomy/tools.yaml` reaches it only
   through an environment variable and the validator now **rejects** a `rules_source.path`
