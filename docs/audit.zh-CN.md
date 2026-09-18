@@ -177,6 +177,8 @@ grep -rl 'GOAT-CANARY-benign' corpus/benign/skills/sg-* | xargs -n1 dirname | so
 两条必须讲明的限制。**harvested 配置里 141 条 hook 命令中有 131 条调用的脚本没有被 vendoring** —— artifact 只有 `settings.json` 本身，所以那些判断判的是命令字符串，不是真正跑起来的东西。另外**有 7 棵样本树被严格包含在另一棵样本树里**，另有 5 对完全重复；其中一对**跨总体**(同一个作者的 skill 被 skillmd-138k 和 skillet-wild 各自独立收了一遍)，所以这些总体并不是报告设计所假定的那种彼此独立的分层。
 
 ## 仍未解决
+- **误报分母是在各自的上游取尽了，不是疏忽导致的薄。** skillmd-138k 在 n=1,996 达到 ±0.44pp，够用。skillet-wild(474)、harvested(391)、automatelab-mcp-tools(357)各自在 ±1pp 附近，而且**扩不动**：474 是 skillet heldout+dev 的全部，357 是 automatelab 所有返回了工具声明的 server(它 922 个里有 565 个安装超时、缺凭据或没有工具)。要让每个总体到 ±0.5pp，只能换**新的良性上游**，不是多取现有的 —— 和恶意侧是同一个来源问题。
+
 
 - **`tier` 和 `evasion` 没有更正。** 分别有 33 条和 32 条争议。它们是**解释轴** —— 告诉扫描器作者"为什么漏了" —— **不参与打分**。一个缺失的解释是诚实的；一个**错误**的解释会把人送去修错的东西。产生它们的有损派生应当**停止**，而不是被逐条覆盖。
 - **`sk-phamtiendatbg92…tech-stack-config` 还在分母里。** 排除的理由写在上面了，但还没有钉进 manifest。`taxonomy/refutation.yaml` 里的 `live-credential` 模式会把它路由到 `adjudicate`，而这条裁决还没有被记录下来。

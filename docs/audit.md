@@ -298,6 +298,13 @@ author's skill collected independently by skillmd-138k and skillet-wild), so the
 not quite the independent strata the reporting design assumes.
 
 ## Still open
+- **The false-positive denominators are exhausted at their sources, not thin by neglect.**
+  skillmd-138k reaches ±0.44pp at n=1,996 and is fine. skillet-wild (474), harvested (391)
+  and automatelab-mcp-tools (357) each sit near ±1pp and cannot grow: 474 is skillet's whole
+  heldout+dev split, and 357 is every automatelab server that returned a tool list (565 of its
+  922 timed out, needed credentials, or shipped no tools). Reaching ±0.5pp per population means
+  a NEW benign upstream, not more of these — the same source problem the malicious side has.
+
 
 - **`tier` and `evasion` are not corrected.** 33 and 32 disputes respectively. They are
   EXPLANATORY axes — they tell a scanner author why a miss happened — and they are not scored.
