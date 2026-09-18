@@ -59,6 +59,17 @@ func populationOf(l *label.Label) string {
 		// other reconstructions on the SAME SURFACE, where the config ones are all malicious,
 		// single-class, and the gate rightly reaches no verdict rather than a manufactured one.
 		return "reconstruction:" + l.Surface.Primary()
+	case l.Origin.Type == "synthetic":
+		// A synthetic sample is a fixture we constructed, and the evasion matrix constructs a
+		// family that shares one payload BY DESIGN — every cell is the same env-exfiltration under
+		// a different transformation, so their frontmatter and payload strings are identical on
+		// purpose. Pooled with a sample of another class, that shared text predicts the class
+		// (the `notes-helper` name appearing only in the malicious cells), which is an artifact of
+		// mixing a controlled family with an unrelated sample, not a leak in the samples. Grouped
+		// by class the family is single-class, and the gate rightly reaches no verdict: a string
+		// every member shares cannot separate members that are all one class. Same shape as the
+		// promoted-<class> split above.
+		return "synthetic-" + string(l.Class)
 	default:
 		// A hand-pinned label can still describe somebody else's artifact. When the source
 		// names an upstream, that upstream is the batch.

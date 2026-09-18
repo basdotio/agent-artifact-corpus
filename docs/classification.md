@@ -145,7 +145,7 @@ spread (0.0%–30.8%) was wider than the pooled figure.
 
 ## Why the benign side is 13x the malicious side
 
-A reader who sees 3,220 benign against 292 malicious reasonably suspects the corpus is
+A reader who sees 3,220 benign against 300 malicious reasonably suspects the corpus is
 lopsided. It is, deliberately, and the reason is that **recall and the false-positive rate do
 not need the same number of samples — not even close.**
 
@@ -159,7 +159,7 @@ proportion to a useful precision costs roughly an order of magnitude more sample
 | False-positive rate | 1% | ±0.5 points | **1,522** |
 | False-positive rate | 1% | ±0.3 points | 4,226 |
 
-So 292 malicious samples is not a shortage in aggregate — it supports ±3.4 points on a pooled
+So 300 malicious samples is not a shortage in aggregate — it supports ±3.4 points on a pooled
 recall. The shortage is per dimension, which is the only way this corpus permits recall to be
 reported: four of the eight dimensions hold fewer than 20 samples each, and a recall figure
 from 6 samples carries ±24 points, which is not a figure.
