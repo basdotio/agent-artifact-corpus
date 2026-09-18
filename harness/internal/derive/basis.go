@@ -76,8 +76,17 @@ func basisBlock(e manifest.Entry, c Coord) string {
 		add("source_field: %s", sourceField)
 		add("source_value: %s", sourceValue)
 	}
-	if dimBasis != "" {
-		add("dimension: %s", dimBasis)
+	switch dimBasis {
+	case "read":
+		add("dimension: read")
+		add("evidence:")
+		add("  file: %s", c.DimensionEvidence.File)
+		add("  lines: %q", c.DimensionEvidence.Lines)
+		// %q escapes the inner quotes. Half the evidence in this corpus is shell, so a raw
+		// emit would produce labels that do not parse.
+		add("  quote: %q", c.DimensionEvidence.Quote)
+	case "derived":
+		add("dimension: derived")
 		add("rule: category_axis_map")
 	}
 	if sevBasis != "" {
@@ -105,17 +114,30 @@ func fromSpec(spec, value string) (basis, field, val string) {
 
 // dimensionBasis decides what, if anything, may be claimed for the attribution axis.
 //
-// A hand-read dimension gets NOTHING, and that is the deliberate part. Those judgements are
-// real — a person opened the sample — but their evidence lives in a YAML comment beside the
-// override, which no machine can check and VerifyEvidence would find nothing to confirm.
-// `read` is the only basis allowed to score attribution, so claiming it here would hand the
-// axis's strongest guarantee to the one case that cannot honour it.
+// A hand-read dimension may claim `read` only when the override carries an evidence block.
+// The judgement is equally real either way — a person opened the sample — but `read` is the
+// one basis allowed to score attribution, and the difference between the two cases is whether
+// anybody else can check it.
 //
-// Leaving it empty makes the axis unscoreable for those samples. That is the accurate state
-// of affairs, and it is recoverable: moving each comment into an `evidence` block promotes
-// the sample to `read` with a quote that validate can locate.
+// 79 overrides began with their reasoning in a YAML comment beside the value: genuine
+// readings that no machine could reach. Those claim nothing and their samples' attribution
+// axis stays unscoreable, which is the accurate state rather than a flattering one. Moving a
+// comment into an `evidence` block is what promotes one, and the promotion is real: validate
+// then locates the quote in the sample's own bytes.
 func dimensionBasis(d *manifest.Derive, c Coord) string {
-	if len(c.Dimensions) == 0 || c.HandReadDimension {
+	if len(c.Dimensions) == 0 {
+		return ""
+	}
+	if c.HandReadDimension {
+		// A hand-read dimension IS a reading. Whether it may say so depends entirely on
+		// whether the reasoning was written where a checker can reach it: with an evidence
+		// block, validate locates the quote in the sample and the claim stands on its own.
+		// Without one, the judgement is just as real and just as unverifiable, and claiming
+		// `read` would hand the attribution axis's only guarantee to the case that cannot
+		// honour it.
+		if c.DimensionEvidence != nil {
+			return "read"
+		}
 		return ""
 	}
 	if len(d.CategoryAxisMap) == 0 {

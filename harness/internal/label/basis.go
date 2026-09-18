@@ -222,3 +222,23 @@ func BasisDebt(labels []*Label, spec *taxonomy.BasisSpec) Debt {
 	}
 	return d
 }
+
+// ScoreableOnDimension counts the samples whose attribution axis may actually be scored,
+// against the samples that carry a dimension at all.
+//
+// Reported separately from the class axis on purpose. Detection and attribution are the two
+// things this corpus measures, they rest on different evidence, and a single "3,494 labels"
+// figure hides the one that is hard to move: a dimension may only be scored from `read`, so
+// this number grows one located quote at a time.
+func ScoreableOnDimension(labels []*Label, spec *taxonomy.BasisSpec) (scoreable, withDimension int) {
+	for _, l := range labels {
+		if len(l.Truth.Dimensions) == 0 && len(l.Truth.Techniques) == 0 {
+			continue
+		}
+		withDimension++
+		if l.Basis != nil && spec.AllowsAxis("dimension", l.Basis.Dimension) {
+			scoreable++
+		}
+	}
+	return scoreable, withDimension
+}

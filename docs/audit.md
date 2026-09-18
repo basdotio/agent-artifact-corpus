@@ -310,13 +310,12 @@ not quite the independent strata the reporting design assumes.
   sample, sitting in a recall denominator where a scanner that correctly stays quiet is
   charged a miss. `validate` prints the count every run so it cannot become permanent by
   inattention.
-- **The attribution axis is scoreable on 17 samples, not 253.** `dimension` accepts only
-  `read`, and the 79 hand-read dimension overrides recorded their deciding evidence in YAML
-  comments beside the override — real judgements that no machine can check and that
-  `VerifyEvidence` would find nothing to confirm. They were deliberately left claiming no
-  basis rather than given one that reads better than what backs it. Moving each comment into
-  an `evidence` block is what widens the axis, and it is transcription: the reading already
-  happened.
+- **The attribution axis is scoreable on 87 of 242, up from 17.** All 79 hand-read dimension
+  overrides now carry an `evidence` block with a quote located in the artifact's own bytes,
+  so they claim `read` and validate confirms it. The remaining 155 rest on the category map
+  and stay `derived`, which cannot score attribution — correctly, since a rule reading a
+  directory name is what inverted this axis in the first place. Widening it further means
+  reading those samples, not relabelling them.
 - **Two upstream pins cannot be verified locally** — parquet drops with no git history.
 - **The rule-id check cannot run here** and should not: it belongs in the scanner's own
   repository. No scanner's repository yet clones this corpus to check its own `expect` blocks.

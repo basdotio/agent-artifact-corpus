@@ -80,6 +80,13 @@ func reportBasis(labels []*label.Label, spec *taxonomy.BasisSpec) []string {
 		fmt.Printf("  not recorded  %d — the axis is unscoreable for these until it is stated\n",
 			d.NoBasis)
 	}
+	// Attribution is reported on its own line because it is the axis this whole vocabulary was
+	// built to protect, and it moves one located quote at a time. Folding it into the class
+	// figure would hide exactly the number worth watching.
+	if scoreable, withDim := label.ScoreableOnDimension(labels, spec); withDim > 0 {
+		fmt.Printf("  attribution   %d of %d sample(s) with a dimension can be scored on it "+
+			"(only `read` qualifies)\n", scoreable, withDim)
+	}
 	if d.AssumedRisky > 0 {
 		// Reported every run, deliberately. A malicious label with no per-sample confirmation
 		// asserts an attack nobody has exhibited, and it can sit in a recall denominator for

@@ -62,6 +62,11 @@ type Coord struct {
 	// by technique and never said what it achieves. It is tracked so the two kinds of
 	// confidence are never summed into one "derived" number.
 	HandReadDimension bool
+
+	// DimensionEvidence is the quote backing a hand-read dimension, when the override records
+	// one. Nil means the judgement was made and its reasoning lives somewhere no checker can
+	// reach — which is the state 79 overrides started in.
+	DimensionEvidence *manifest.Evidence
 }
 
 // Result is a derivation's output together with the accounting a reviewer needs: which
@@ -128,8 +133,8 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		}
 	}
 
-	for id, dims := range d.DimensionOverrides {
-		for _, dim := range dims {
+	for id, ov := range d.DimensionOverrides {
+		for _, dim := range ov.Dimensions {
 			if !oneOf(dim, tax.Dimensions) {
 				bad("%s: dimension_overrides[%q] names %q, which is not a dimension in the vocabulary", e.ID, id, dim)
 			}
@@ -309,22 +314,27 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		if override, ok := d.DimensionOverrides[up.ID]; ok {
 			usedOverride[up.ID] = true
 			switch {
-			case sameSet(c.Dimensions, override):
+			case sameSet(c.Dimensions, override.Dimensions):
 				// Stale means the override says what the RULE already says. It used to mean
 				// "the rule produced anything at all", which made the mechanism able to fill a
 				// gap and unable to correct an error — and correcting errors is most of what a
 				// hand-read dimension is for: a category that is right for eight of its members
 				// and wrong for two needs the two overridden, not the category deleted.
 				bad("%s/%s: dimension_overrides says %v and the category map already yields the "+
-					"same — remove the override, it is stale", e.ID, up.ID, override)
+					"same — remove the override, it is stale", e.ID, up.ID, override.Dimensions)
 			case c.Class != "malicious":
 				bad("%s/%s: has a dimension_overrides entry but is not malicious; only malicious "+
 					"samples sit on the recall axis", e.ID, up.ID)
 			default:
 				// Replaces, like evasion_overrides. A hand-read dimension is the considered
 				// value for this sample; appending would leave the rejected one beside it.
-				c.Dimensions = append([]string{}, override...)
+				c.Dimensions = append([]string{}, override.Dimensions...)
 				c.HandReadDimension = true
+				// The evidence travels with the coordinate so the generated label can carry a
+				// `read` basis. Absent evidence is not an error: the override is still a real
+				// hand-read judgement, it simply cannot be verified, and the label says so by
+				// claiming no basis for the axis rather than one it cannot support.
+				c.DimensionEvidence = override.Evidence
 				res.HandRead++
 			}
 		}
@@ -376,7 +386,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		keys []string
 	}{
 		{"exclude_samples", keysOf(d.ExcludeSamples)},
-		{"dimension_overrides", keysOfTargets(d.DimensionOverrides)},
+		{"dimension_overrides", keysOfOverrides(d.DimensionOverrides)},
 		{"evasion_overrides", keysOfSlice(d.EvasionOverrides)},
 		{"tier_overrides", keysOf(d.TierOverrides)},
 	} {
@@ -553,6 +563,15 @@ func keysOf(m map[string]string) []string {
 }
 
 func keysOfSlice(m map[string][]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func keysOfOverrides(m map[string]manifest.DimensionOverride) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

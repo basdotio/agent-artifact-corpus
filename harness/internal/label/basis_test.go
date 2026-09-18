@@ -191,3 +191,27 @@ func TestBasisDebtCountsUnlabelledAndAssumedMalicious(t *testing.T) {
 		t.Errorf("ByBasis = %v, want read:1 assumed:2", d.ByBasis)
 	}
 }
+
+// The attribution axis is the reason `read` exists, so its reach is reported separately from
+// the class axis. Pooling them would hide the thing this work is trying to move.
+func TestScoreableOnDimension(t *testing.T) {
+	spec := basisSpec(t)
+	labels := []*Label{
+		{ID: "a", Class: Malicious, Truth: Truth{Dimensions: []string{"exfiltration"}},
+			Basis: &Basis{Class: "upstream", SourceField: "v", SourceValue: "malicious",
+				Dimension: "read", Evidence: &Evidence{File: "f", Lines: "1", Quote: "q"}}},
+		{ID: "b", Class: Malicious, Truth: Truth{Dimensions: []string{"execution"}},
+			Basis: &Basis{Class: "assumed", Assumption: "batch", Dimension: "derived", Rule: "map"}},
+		{ID: "c", Class: Malicious, Truth: Truth{Dimensions: []string{"backdoor"}},
+			Basis: &Basis{Class: "assumed", Assumption: "batch"}}, // hand-read, no evidence
+		{ID: "d", Class: Benign, Basis: &Basis{Class: "assumed", Assumption: "batch"}},
+	}
+	got, total := ScoreableOnDimension(labels, spec)
+	if got != 1 {
+		t.Errorf("scoreable = %d, want 1 — only the sample whose dimension rests on `read`", got)
+	}
+	if total != 3 {
+		t.Errorf("total = %d, want 3 — the denominator is samples that HAVE a dimension, "+
+			"not the whole corpus", total)
+	}
+}

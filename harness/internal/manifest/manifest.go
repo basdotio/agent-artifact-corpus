@@ -235,7 +235,7 @@ type Derive struct {
 	// the override mechanism unable to express what the dimension definitions themselves
 	// require — `reconnaissance.not` says a sample reading /etc/passwd earns both that and
 	// `filesystem`, "and should carry both".
-	DimensionOverrides map[string]Targets `yaml:"dimension_overrides"`
+	DimensionOverrides map[string]DimensionOverride `yaml:"dimension_overrides"`
 
 	// EvasionOverrides and TierOverrides exist for the same reason as DimensionOverrides, and
 	// were added after an audit showed the category map getting both axes wrong in a way the

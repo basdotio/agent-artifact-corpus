@@ -198,7 +198,7 @@ severity: high
 categories: [dispersion-splitting]
 `)
 	e := entry(map[string]manifest.Targets{"dispersion-splitting": {"evasion:base64-wrapper"}})
-	e.Derive.DimensionOverrides = map[string]manifest.Targets{"200-split": {"exfiltration"}}
+	e.Derive.DimensionOverrides = map[string]manifest.DimensionOverride{"200-split": {Dimensions: manifest.Targets{"exfiltration"}}}
 
 	res, errs := Derive(e, root, testTax())
 	if len(errs) != 0 {
@@ -229,7 +229,7 @@ categories: [persistence-backdoor]
 	// "the rule produced anything at all", which made the mechanism able to fill a gap and
 	// unable to correct an error — and correcting errors is most of what a hand-read dimension
 	// turned out to be for.
-	e.Derive.DimensionOverrides = map[string]manifest.Targets{"200-x": {"backdoor"}}
+	e.Derive.DimensionOverrides = map[string]manifest.DimensionOverride{"200-x": {Dimensions: manifest.Targets{"backdoor"}}}
 
 	_, errs := Derive(e, root, testTax())
 	if !containsErr(errs, "it is stale") {
@@ -250,7 +250,7 @@ severity: high
 categories: [persistence-backdoor]
 `)
 	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
-	e.Derive.DimensionOverrides = map[string]manifest.Targets{"200-x": {"exfiltration", "filesystem"}}
+	e.Derive.DimensionOverrides = map[string]manifest.DimensionOverride{"200-x": {Dimensions: manifest.Targets{"exfiltration", "filesystem"}}}
 
 	res, errs := Derive(e, root, testTax())
 	if len(errs) != 0 {
@@ -276,7 +276,7 @@ severity: high
 categories: [persistence-backdoor]
 `)
 	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
-	e.Derive.DimensionOverrides = map[string]manifest.Targets{"200-other": {"telepathy"}}
+	e.Derive.DimensionOverrides = map[string]manifest.DimensionOverride{"200-other": {Dimensions: manifest.Targets{"telepathy"}}}
 
 	_, errs := Derive(e, root, testTax())
 	if !containsErr(errs, `names "telepathy", which is not a dimension`) {
