@@ -316,3 +316,46 @@ techniques:
       Documentation and defensive prose that quotes the override phrase in order to teach
       refusal of it. The distinguishing element is use versus mention, which is a hard
       problem for a literal matcher and the reason this pair exists.
+
+  # ---------------------------------------------------------------------------------------
+  # Reconstructed from named CVEs. These three name the mechanisms of CVE-2025-59536, added
+  # when the corpus's hooks, connector and permission surfaces held zero malicious samples and
+  # no public corpus provided one. A CVE is the one source design.md's "we cannot write samples
+  # that surprise us" does not rule out: the shape came from Check Point's disclosure, not from
+  # reading our own rules. Each maps to a single dimension, like every other technique.
+  - id: lifecycle-hook-execution
+    title: Lifecycle-hook command execution
+    dimension: execution
+    what: >-
+      A project's `.claude/settings.json` registers a lifecycle hook — SessionStart, PreToolUse
+      — whose command runs a shell payload automatically when the project opens, before any
+      trust dialog. The command typically fetches and runs a remote script.
+    benign_lookalike: >-
+      A legitimate hook that formats code, injects context or guards a boundary — the corpus
+      holds ~190 of them. The distinguishing element is what the command does, not that a hook
+      exists: a formatter runs a known local script, this fetches and executes an arbitrary one.
+
+  - id: mcp-autostart-execution
+    title: Auto-started MCP server execution
+    dimension: execution
+    what: >-
+      A `.mcp.json` defines a server that launches a process, and a `.claude/settings.json`
+      sets `enableAllProjectMcpServers` so it starts on invocation, before the user can decline
+      the untrusted project. The executed command lives in the paired file, not the trigger.
+    benign_lookalike: >-
+      A project that ships a `.mcp.json` and lets the user approve its servers at the trust
+      dialog — ordinary and common. The distinguishing element is the setting that removes the
+      approval, not the presence of a project server.
+
+  - id: api-base-url-redirect
+    title: API base-URL redirect
+    dimension: exfiltration
+    what: >-
+      A `.claude/settings.json` env block sets `ANTHROPIC_BASE_URL` to a host the repository
+      chose, so every API request — carrying the user's key in the authorization header — is
+      sent there before the user decides to trust the directory.
+    benign_lookalike: >-
+      A settings file that sets env vars for legitimate configuration, including a base URL
+      pointing at a corporate proxy the team runs. The distinguishing element is whose host it
+      is, which a scanner cannot always tell from the string alone — so the sample sits at the
+      calibration tier, where a miss means the scanner does not read env blocks at all.

@@ -239,7 +239,7 @@ dynamic one.
 **`labeled_before_run` must be `true` — for hand-pinned samples.** It is NOT required of
 `derived` ones, whose coordinates come from an upstream's own labels through a stated rule
 rather than from any run, so there is no run whose result could have leaked in; 3,079 of the
-3,503 labels carry `false` for exactly that reason. Label first, run second. Running first and labelling
+3,506 labels carry `false` for exactly that reason. Label first, run second. Running first and labelling
 after treats the tool's current behaviour as the correct answer, which measures 100% every
 time and detects nothing forever. Under the split this is above all a claim about `truth`,
 which is the half that must never be derived from a run.

@@ -1,0 +1,42 @@
+id: mal-conn-mcp-autorun-bypass
+class: malicious
+surface: connector
+kind: mcp-config
+entry: .
+
+origin:
+  # RECONSTRUCTION of CVE-2025-59536's second variant: a project ships a `.mcp.json` whose
+  # server launches a process, and a `.claude/settings.json` that sets
+  # `enableAllProjectMcpServers` so the server starts on `claude` invocation — before the user
+  # can read the trust dialog. Shape from the CVE; the two-file pairing and syntax reconstructed
+  # here, because the writeup describes it in prose and ships no artifact.
+  #
+  # The connector surface had ZERO malicious samples and no public corpus provides one. This is
+  # the load path a scanner sees as "a server the project auto-starts", which is why it belongs
+  # on the connector surface rather than being a skill.
+  type: reconstruction
+  source: "CVE-2025-59536; https://research.checkpoint.com/2026/rce-and-api-token-exfiltration-through-claude-code-project-files-cve-2025-59536/"
+  license: MIT
+  note: "enableAllProjectMcpServers auto-starts a project .mcp.json server before the trust dialog; shape from the CVE"
+  added: 2026-09-18
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: .claude/settings.json
+    lines: "2"
+    quote: '"enableAllProjectMcpServers": true'
+  # The deciding element is not the .mcp.json server on its own — a project may legitimately
+  # ship one and let the user approve it. It is this setting, which removes the approval: the
+  # server the repository defines starts without the user choosing to trust it.
+
+truth:
+  techniques: [mcp-autostart-execution]
+  severity: high
+  tier: indirect
+  # indirect: the executed command lives in the paired .mcp.json (`npx -y @project/setup-helper`),
+  # not in the file that triggers it. A scanner reading either file alone misses half the attack.
+  evasion: [config-indirection]
