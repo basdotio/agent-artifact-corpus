@@ -51,6 +51,7 @@ func basisBlock(e manifest.Entry, c Coord) string {
 	// rest on the same kind of thing — cisco's class and severity are both constants — one
 	// assumption sentence covers both and says so.
 	var assumption, sourceField, sourceValue string
+	needRule := false
 	if classBasis == "assumed" {
 		assumption = fmt.Sprintf(
 			"every sample collected from %s is treated as %s; nothing about this particular "+
@@ -67,6 +68,11 @@ func basisBlock(e manifest.Entry, c Coord) string {
 
 	dimBasis := dimensionBasis(d, c)
 
+	tierBasis := ""
+	if c.Tier != "" {
+		tierBasis = axisBasis(d.TierFrom)
+	}
+
 	// Assemble the companion fields the chosen bases require.
 	if sevBasis == "assumed" && assumption == "" {
 		assumption = fmt.Sprintf("severity for every sample from %s is the constant %q; "+
@@ -74,6 +80,14 @@ func basisBlock(e manifest.Entry, c Coord) string {
 	} else if sevBasis == "assumed" {
 		assumption += fmt.Sprintf(". Severity is likewise the constant %q for the whole batch",
 			c.Severity)
+	}
+	if tierBasis == "assumed" && assumption == "" {
+		assumption = fmt.Sprintf("tier for every sample from %s is the constant %q", e.ID, c.Tier)
+	} else if tierBasis == "assumed" {
+		assumption += fmt.Sprintf(". Tier is likewise the constant %q", c.Tier)
+	}
+	if tierBasis == "derived" || (len(c.Evasion) > 0 && len(d.CategoryAxisMap) > 0) {
+		needRule = true
 	}
 	if sevBasis == "upstream" && sourceField == "" {
 		sourceField, sourceValue = sevField, sevValue
@@ -85,6 +99,12 @@ func basisBlock(e manifest.Entry, c Coord) string {
 	if sourceField != "" {
 		add("source_field: %s", sourceField)
 		add("source_value: %s", sourceValue)
+	}
+	if needRule && dimBasis != "derived" {
+		// `derived` requires a rule name, and the dimension branch below emits one only when
+		// the dimension itself is derived. Tier and evasion can be derived while the dimension
+		// was hand-read, and the requirement is per-basis, not per-axis.
+		add("rule: derive rules in manifest/corpora.yaml")
 	}
 	switch dimBasis {
 	case "read":
@@ -103,6 +123,18 @@ func basisBlock(e manifest.Entry, c Coord) string {
 		add("severity: %s", sevBasis)
 	}
 
+	// The explanatory axes. `id-prefix` and `path-segment` are OUR rules reading a directory
+	// name, so they are `derived` — which is exactly what the audit found wrong 33 times, and
+	// saying so is the point. `field:` means the upstream declared the depth itself.
+	if tierBasis != "" {
+		add("tier: %s", tierBasis)
+	}
+	if len(c.Evasion) > 0 && len(d.CategoryAxisMap) > 0 {
+		// Evasion only ever arrives through the category map, which is the lossy path: an
+		// upstream category is a FAMILY and the map could pin it to one member.
+		add("evasion: derived")
+	}
+
 	return "basis:\n" + strings.Join(lines, "\n") + "\n"
 }
 
@@ -111,6 +143,22 @@ func basisBlock(e manifest.Entry, c Coord) string {
 // The mapping is the whole argument of taxonomy/basis.yaml in two lines: a constant is a
 // statement about the batch (`assumed`), and reading the upstream's own field is adopting
 // their claim unchanged (`upstream`).
+// axisBasis classifies a tier/evasion source spec. `id-prefix` and `path-segment` are rules
+// of ours reading a path, which makes them `derived` with all that implies: wrong about a
+// category means wrong about every member of it at once.
+func axisBasis(spec string) string {
+	switch {
+	case strings.HasPrefix(spec, "constant:"):
+		return "assumed"
+	case strings.HasPrefix(spec, "field:"):
+		return "upstream"
+	case spec == "id-prefix", spec == "path-segment":
+		return "derived"
+	default:
+		return ""
+	}
+}
+
 func fromSpec(spec, value string) (basis, field, val string) {
 	switch {
 	case strings.HasPrefix(spec, "constant:"):

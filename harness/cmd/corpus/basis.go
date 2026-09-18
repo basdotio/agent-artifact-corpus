@@ -87,6 +87,26 @@ func reportBasis(labels []*label.Label, spec *taxonomy.BasisSpec) []string {
 		fmt.Printf("  attribution   %d of %d sample(s) with a dimension can be scored on it "+
 			"(only `read` qualifies)\n", scoreable, withDim)
 	}
+	if scoreable, withSev := label.ScoreableOnSeverity(labels, spec); withSev > 0 {
+		fmt.Printf("  severity      %d of %d sample(s) with a severity can be scored on it "+
+			"(a constant is not a measurement)\n", scoreable, withSev)
+	}
+	// The explanatory axes, reported because being unscored does not make a wrong value free.
+	for _, ax := range []struct {
+		name string
+		has  func(*label.Label) bool
+		get  func(*label.Basis) string
+	}{
+		{"tier", func(l *label.Label) bool { return l.Truth.Tier != "" },
+			func(b *label.Basis) string { return b.Tier }},
+		{"evasion", func(l *label.Label) bool { return len(l.Truth.Evasion) > 0 },
+			func(b *label.Basis) string { return b.Evasion }},
+	} {
+		if n, tot := label.ScoreableOnAxis(labels, spec, ax.name, ax.has, ax.get); tot > 0 {
+			fmt.Printf("  %-13s %d of %d rest on a reading, not a rule (explanatory, never scored)\n",
+				ax.name, n, tot)
+		}
+	}
 	if d.AssumedRisky > 0 {
 		// Reported every run, deliberately. A malicious label with no per-sample confirmation
 		// asserts an attack nobody has exhibited, and it can sit in a recall denominator for

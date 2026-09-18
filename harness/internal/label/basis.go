@@ -32,6 +32,12 @@ type Basis struct {
 	Dimension string `yaml:"dimension"`
 	Severity  string `yaml:"severity"`
 
+	// Tier and Evasion are the explanatory axes. They are never scored, and they still need a
+	// basis: a wrong explanation is worse than a missing one, because it sends a scanner
+	// author to fix something that was never broken.
+	Tier    string `yaml:"tier"`
+	Evasion string `yaml:"evasion"`
+
 	// Evidence belongs to `read` and to nothing else. See validateEvidencePlacement.
 	Evidence *Evidence `yaml:"evidence"`
 
@@ -70,6 +76,12 @@ func (b *Basis) axisValues() map[string]string {
 	if b.Severity != "" {
 		out["severity"] = b.Severity
 	}
+	if b.Tier != "" {
+		out["tier"] = b.Tier
+	}
+	if b.Evasion != "" {
+		out["evasion"] = b.Evasion
+	}
 	return out
 }
 
@@ -106,7 +118,7 @@ func (l *Label) ValidateBasis(spec *taxonomy.BasisSpec) []error {
 	var errs []error
 	bad := func(f string, a ...any) { errs = append(errs, fmt.Errorf(f, a...)) }
 
-	for _, axis := range []string{"class", "dimension", "severity"} {
+	for _, axis := range []string{"class", "dimension", "severity", "tier", "evasion"} {
 		v, set := l.Basis.axisValues()[axis]
 		if !set {
 			continue
@@ -241,6 +253,43 @@ func ScoreableOnDimension(labels []*Label, spec *taxonomy.BasisSpec) (scoreable,
 		}
 	}
 	return scoreable, withDimension
+}
+
+// ScoreableOnAxis counts how many samples carrying an axis may be used on it.
+//
+// One function for the explanatory axes, because the question is uniform and the answer is
+// not: `tier` and `evasion` are never scored, but a WRONG explanation sends a scanner author
+// to fix something that was never broken, so a consumer needs to know which ones rest on a
+// reading and which on a rule that read a directory name.
+func ScoreableOnAxis(labels []*Label, spec *taxonomy.BasisSpec, axis string,
+	has func(*Label) bool, get func(*Basis) string) (scoreable, total int) {
+	for _, l := range labels {
+		if !has(l) {
+			continue
+		}
+		total++
+		if l.Basis != nil && spec.AllowsAxis(axis, get(l.Basis)) {
+			scoreable++
+		}
+	}
+	return scoreable, total
+}
+
+// ScoreableOnSeverity is the same question for the severity axis, and it is asked separately
+// because the answer is different and worse: 169 of 242 malicious samples carry a severity
+// that came from `constant:high`. A scanner scored on "did it report at or above the stated
+// severity" would be scored against a line in the manifest.
+func ScoreableOnSeverity(labels []*Label, spec *taxonomy.BasisSpec) (scoreable, withSeverity int) {
+	for _, l := range labels {
+		if l.Truth.Severity == "" {
+			continue
+		}
+		withSeverity++
+		if l.Basis != nil && spec.AllowsAxis("severity", l.Basis.Severity) {
+			scoreable++
+		}
+	}
+	return scoreable, withSeverity
 }
 
 // RefutationCoverage reports benign labels with no search record, and records written under a
