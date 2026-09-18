@@ -36,6 +36,16 @@ func populationOf(l *label.Label) string {
 	case l.Origin.Type == "harvested":
 		// One batch by construction: collected by the same script from the same search.
 		return "harvested"
+	case l.Origin.Type == "reconstruction":
+		// A reconstruction is a single hand-authored artifact for one disclosed shape, not a
+		// batch. Grouping it with the hand-pinned prose put 8 malicious config files (.json) in
+		// a pool whose only hard negatives were prose (.md), and the gate correctly saw
+		// `ext:.json` predict the class — a signal that exists ONLY in that artificial pool. At
+		// the real scoring unit, the surface, .json does not predict class: 190 benign hooks and
+		// 122 benign connector configs are .json too. So a reconstruction's comparable group is
+		// other reconstructions on the SAME SURFACE, where the config ones are all malicious,
+		// single-class, and the gate rightly reaches no verdict rather than a manufactured one.
+		return "reconstruction:" + l.Surface.Primary()
 	default:
 		// A hand-pinned label can still describe somebody else's artifact. When the source
 		// names an upstream, that upstream is the batch.

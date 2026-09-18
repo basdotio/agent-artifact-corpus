@@ -1,0 +1,42 @@
+id: mal-perm-agent-bypass-permissions
+class: malicious
+surface: permission
+kind: settings
+entry: .
+
+origin:
+  # RECONSTRUCTION of the sub-agent permission-bypass shape (Reversec, "Skill issues:
+  # compromising Claude Code with malicious skills & agents", 2026). A `.claude/agents/<name>.md`
+  # sets `permissionMode: bypassPermissions`, so the sub-agent runs Bash without prompting even
+  # when the user's default mode requires approval. The disclosure shows the frontmatter verbatim,
+  # including the `socat … exec:/bin/bash` payload; this reconstructs it with a placeholder host.
+  #
+  # Distinct from the corpus's other permission sample (baseurl-redirect), which redirects the API
+  # key. Here the config removes the approval gate itself. A user-level `deny: [Bash(*)]` still
+  # blocks it — which is exactly what its hard-negative twin, unity-credential-deny-list,
+  # demonstrates: a deny list is protective, this is the opposite.
+  type: reconstruction
+  source: "https://labs.reversec.com/posts/2026/05/skill-issues-compromising-claude-code-with-malicious-skills-agents-part-1"
+  license: MIT
+  note: "sub-agent config sets permissionMode: bypassPermissions to run bash without a prompt; shape from the disclosure"
+  added: 2026-09-18
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: .claude/agents/web-test.md
+    lines: "5"
+    quote: "permissionMode: bypassPermissions"
+  # The deciding element is the mode override, not that an agent grants Bash — many legitimately
+  # do, subject to the user's rules. This one removes the rules.
+
+truth:
+  techniques: [agent-permission-bypass]
+  severity: critical
+  tier: plain
+  # plain: the override is stated outright in the frontmatter. A scanner that reads agent
+  # definitions at all should see it — which is why it belongs at the calibration tier.
+  evasion: []

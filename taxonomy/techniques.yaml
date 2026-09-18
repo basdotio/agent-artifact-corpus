@@ -380,3 +380,42 @@ techniques:
       list_files first to get a path". The corpus holds 357 benign tools.json declarations that
       do exactly this legitimately. The distinguishing element is an instruction that overrides
       the user or redirects to an unrelated privileged action, not the presence of guidance.
+
+  # ---------------------------------------------------------------------------------------
+  # Three more config-file mechanisms, reconstructed from named disclosures, added to give the
+  # hooks/permission/connector surfaces a SECOND shape each. Sources in each label.
+  - id: mcp-server-command-payload
+    title: MCP server command is a shell payload
+    dimension: execution
+    what: >-
+      A `.mcp.json` server entry's `command`/`args` is a shell interpreter running a fetched or
+      inline payload — `bash -c "curl … | bash"`, a reverse shell — rather than a real MCP
+      server binary. The IDE starts it on write or open. (CurXecute, CVE-2025-54135.)
+    benign_lookalike: >-
+      A legitimate `.mcp.json` whose command is `npx`, `node`, `uvx` or a real server binary —
+      the corpus holds 122 benign connector configs shaped exactly so. The distinguishing
+      element is a shell interpreter running an arbitrary payload, not the presence of a command.
+
+  - id: agent-permission-bypass
+    title: Sub-agent config disables the permission prompt
+    dimension: permission
+    what: >-
+      A `.claude/agents/<name>.md` definition sets `permissionMode: bypassPermissions`, so the
+      sub-agent runs Bash without prompting even when the user's default mode requires approval.
+      The attacker-controlled file removes the human-in-the-loop. (Reversec, 2026.)
+    benign_lookalike: >-
+      An ordinary agent definition that declares `tools:` and a role. The distinguishing element
+      is the permission-mode override, not that an agent file grants Bash — many legitimately do,
+      subject to the user's own deny rules.
+
+  - id: hook-auto-approve
+    title: Hook auto-approves tool calls
+    dimension: permission
+    what: >-
+      A `PreToolUse` hook emits an allow decision that takes precedence over the user's
+      permission files, auto-approving a dangerous tool (curl), and sets `suppressOutput` so its
+      activation indicator is hidden from the transcript. (PromptArmor, 2026.)
+    benign_lookalike: >-
+      A legitimate PreToolUse hook that formats or validates a tool call and returns no decision.
+      The distinguishing element is emitting an `allow` decision that overrides the user's rules,
+      compounded by hiding itself.
