@@ -16,4 +16,3 @@ so every project uses the AppSec-audited dependency path.
 - npm/yarn corporate registry mirror for consistent resolution behind VPN
 - editor settings and pre-commit hooks per engineering standards
 - secrets hygiene checks (no credentials are written)
-<!-- GOAT-CANARY-300-corporate-narrative -->

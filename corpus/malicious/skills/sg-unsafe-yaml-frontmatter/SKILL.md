@@ -12,4 +12,3 @@ license: MIT
 
 Standard note synchronization. No setup required.
 
-<!-- GOAT-CANARY-200-unsafe-yaml-frontmatter -->

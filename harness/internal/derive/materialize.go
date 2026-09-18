@@ -4,7 +4,6 @@ package derive
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -102,6 +101,10 @@ func PlanMaterialize(e manifest.Entry, res *Result) ([]Plan, []error) {
 // the most valuable kind of sample in the corpus.
 func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (written int, removed []string, errs []error) {
 	d := e.Derive
+	// Counted across every sample, then reconciled against what the manifest declares. A
+	// transform is a change to somebody else's bytes; the count is how a reader confirms the
+	// change is the one that was reviewed.
+	tCounts := map[string]int{}
 	for _, p := range plans {
 		absDir := filepath.Join(repoRoot, p.Dir)
 		absLabel := filepath.Join(repoRoot, p.LabelRel)
@@ -139,11 +142,11 @@ func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (writt
 				errs = append(errs, fmt.Errorf("%s: create %s: %w", e.ID, p.Dir, err))
 				continue
 			}
-			if err := copyFile(src, filepath.Join(absDir, filepath.Base(src))); err != nil {
+			if err := copyFile(src, filepath.Join(absDir, filepath.Base(src)), d.Transforms, tCounts); err != nil {
 				errs = append(errs, fmt.Errorf("%s: copy %s: %w", e.ID, p.Dir, err))
 				continue
 			}
-		} else if err := copyTree(src, absDir); err != nil {
+		} else if err := copyTree(src, absDir, d.Transforms, tCounts); err != nil {
 			errs = append(errs, fmt.Errorf("%s: copy %s: %w", e.ID, p.Dir, err))
 			continue
 		}
@@ -190,6 +193,10 @@ func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (writt
 			removed = append(removed, filepath.Base(tree))
 		}
 	}
+	// Reconciled only after every sample has been through, because the declaration is about
+	// the entry as a whole. Checking per sample would report 74 separate failures for one
+	// upstream that grew by a sample.
+	errs = append(errs, checkTransformCounts(e.ID, d.Transforms, tCounts)...)
 	return written, removed, errs
 }
 
@@ -242,6 +249,22 @@ func renderLabel(e manifest.Entry, p Plan) string {
 			note = "upstream benign; this entry does not state what that label was based on"
 		}
 	}
+	// A declared transform makes "vendored unchanged" false, and the label is what a consumer
+	// actually reads. An audit already found 163 labels carrying a fidelity string that
+	// described a different entry entirely; a note that survives a change to the bytes it
+	// describes is that same defect with a shorter fuse.
+	if len(e.Derive.Transforms) > 0 {
+		note = strings.TrimRight(strings.TrimSpace(
+			strings.ReplaceAll(note, "; the artifact is vendored unchanged", "")), ";. ")
+		note = strings.TrimRight(strings.TrimSpace(
+			strings.ReplaceAll(note, "The artifact is vendored unchanged", "")), ";. ")
+		ids := make([]string, 0, len(e.Derive.Transforms))
+		for _, t := range e.Derive.Transforms {
+			ids = append(ids, t.ID)
+		}
+		note += fmt.Sprintf("; the artifact is vendored with %s applied, declared in the manifest",
+			strings.Join(ids, " and "))
+	}
 	fmt.Fprintf(&b, "  note: %q\n", note)
 	fmt.Fprintf(&b, "  added: %s\n", time.Now().Format("2006-01-02"))
 	// Derived coordinates come from an upstream label through a stated rule, not from running
@@ -292,25 +315,32 @@ func short12(s string) string {
 	return s
 }
 
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+// copyFile copies one file, applying the declared transforms on the way through.
+//
+// It reads the whole file rather than streaming it. The transforms are line-oriented and a
+// marker can sit anywhere, so there is no window size that would be correct; the largest
+// single artifact in the corpus is a few megabytes and correctness is worth the memory.
+func copyFile(src, dst string, ts []manifest.Transform, counts map[string]int) error {
+	b, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	out, err := os.Create(dst)
+	out, applied, err := applyTransforms(b, ts)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	for id, n := range applied {
+		counts[id] += n
+	}
+	return os.WriteFile(dst, out, 0o644)
 }
 
 // target2 is just the destination path; named so the symlink branch reads in one line.
 func target2(_, dst, rel string) string { return filepath.Join(dst, rel) }
 
-func copyTree(src, dst string) error {
+// copyTree copies the artifact, applying the entry's declared transforms to text files
+// and counting each application into counts.
+func copyTree(src, dst string, ts []manifest.Transform, counts map[string]int) error {
 	// filepath.Walk uses Lstat, so a symlink arrives as a symlink rather than as its target.
 	return filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
@@ -354,17 +384,6 @@ func copyTree(src, dst string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		in, err := os.Open(p)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-		out, err := os.Create(target)
-		if err != nil {
-			return err
-		}
-		defer out.Close()
-		_, err = io.Copy(out, in)
-		return err
+		return copyFile(p, target, ts, counts)
 	})
 }

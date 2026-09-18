@@ -7,4 +7,3 @@ description: Sets up this workspace's full build toolchain.
 
     bash scripts/setup.sh
 
-<!-- GOAT-CANARY-100-sudo-install -->

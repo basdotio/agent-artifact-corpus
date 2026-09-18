@@ -56,6 +56,29 @@ entries:
     derive:
       layout: "pasture/*/*"
       tree_subdir: "skill"         # only the artifact is copied, never the upstream's own label
+      # `tree_subdir` keeps expected.yaml out of the sample. It was not enough: the upstream
+      # ALSO writes its label into the artifact, as a comment at the end of every file.
+      # `expected.yaml` lists it as a field of its own — `canary: GOAT-CANARY-200-…` — so this
+      # is the upstream's label by the upstream's own account, not a property of the skill.
+      #
+      # Vendored as-is, it made the population solvable without reading anything. Measured
+      # over the 75 vendored trees: `GOAT-CANARY-benign` appears in 10 of 10 benign and 0 of
+      # 65 malicious, and the numeric prefixes recover `tier` in 64 of 65. A grep scored two
+      # of this corpus's four axes.
+      #
+      # Removing it is not an edit to the artifact's behaviour; it is the line above being
+      # enforced where `tree_subdir` cannot reach. Anyone holding the upstream at the pinned
+      # commit can reproduce these bytes by applying the pattern below.
+      transforms:
+        - id: strip-goat-canary
+          pattern: '^[ \t]*<!--[ \t]*GOAT-CANARY-[^>]*-->[ \t]*\r?\n?'
+          applied_to: 77
+          reason: >-
+            The upstream records its own label inline, which lets one substring separate the
+            classes at 100% purity and recover the tier for 64 of 65 malicious samples. 77
+            and not 75 because two samples carry a nested tree — sg-indirect-resource-injection
+            has one in resources/guide.md and sg-nested-bundle-recursion one in
+            resources/legacy/SKILL.md — and a per-sample count would have missed both.
       surface: skills
       id_prefix: sg
       tier_from: "id-prefix"       # 000/100/200/300, resolved via each tier's maps_to

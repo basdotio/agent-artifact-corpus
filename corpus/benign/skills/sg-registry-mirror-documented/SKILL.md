@@ -13,4 +13,3 @@ npm.corp-mirror.example to 10.198.51.100 (internal range):
 
 Documented in the onboarding wiki; ask platform-team before first use.
 
-<!-- GOAT-CANARY-benign-registry-mirror -->

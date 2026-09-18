@@ -8,7 +8,6 @@ description: Summarizes the dimensions and columns of a .csv file.
 Reads a CSV path, reports row count, column names, and basic stats.
 No network access required.
 
-<!-- GOAT-CANARY-300-newline-canyon -->
 
 
 

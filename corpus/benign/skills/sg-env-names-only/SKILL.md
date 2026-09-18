@@ -7,4 +7,3 @@ description: Lists which configuration variables are set (names only).
 
 Run scripts/env_names.py. Values are never read or printed.
 
-<!-- GOAT-CANARY-benign-env-names-only -->

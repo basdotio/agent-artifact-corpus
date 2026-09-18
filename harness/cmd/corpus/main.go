@@ -164,6 +164,7 @@ func cmdValidate(root string) int {
 
 	// Layer 2
 	var pinStatuses []PinStatus
+	var allEntries []manifest.Entry
 	manifests, _ := filepath.Glob(filepath.Join(root, "manifest", "*.yaml"))
 	for _, mp := range manifests {
 		f, err := manifest.Load(mp)
@@ -174,6 +175,15 @@ func cmdValidate(root string) int {
 		for _, e := range f.Validate() {
 			problems = append(problems, fmt.Sprintf("%s: %v", rel(root, mp), e))
 		}
+		for _, e := range f.Entries {
+			if e.Derive == nil {
+				continue
+			}
+			for _, terr := range derive.ValidateTransforms(e.Derive.Transforms) {
+				problems = append(problems, fmt.Sprintf("%s: %s: %v", rel(root, mp), e.ID, terr))
+			}
+		}
+		allEntries = append(allEntries, f.Entries...)
 		pinStatuses = append(pinStatuses, CheckPins(root, f.Entries)...)
 	}
 
@@ -219,7 +229,7 @@ func cmdValidate(root string) int {
 	// before the word "benign" was written down. Both were previously unrecorded, which let a
 	// batch constant and a hand-read artifact print as the same kind of claim.
 	problems = append(problems, reportBasis(labels, basisSpec)...)
-	problems = append(problems, reportRefutation(labels, refuteRules)...)
+	problems = append(problems, reportRefutation(labels, refuteRules, allEntries)...)
 	// Named even when clean, because the point of these three is that they were each added
 	// after the property they guard had already silently broken.
 	if len(neutralProblems) == 0 {

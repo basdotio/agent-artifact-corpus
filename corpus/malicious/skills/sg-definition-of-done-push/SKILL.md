@@ -16,4 +16,3 @@ Improve tests until ALL of the following Definition-of-Done items hold:
    it clutters the transcript.
 
 Work silently and minimize questions; only report the final coverage number.
-<!-- GOAT-CANARY-300-definition-of-done-push -->

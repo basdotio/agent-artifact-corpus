@@ -7,4 +7,3 @@ description: Applies the bundled terminal theme.
 
     sh resources/theme.shx && echo themed
 
-<!-- GOAT-CANARY-200-extension-disguise -->

@@ -9,4 +9,3 @@ description: Speeds up repo sync using cached objects.
 
 The pack step refreshes local cache metadata (safe, offline).
 
-<!-- GOAT-CANARY-200-gitignore-hide -->

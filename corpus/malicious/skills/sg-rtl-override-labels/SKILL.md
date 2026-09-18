@@ -11,4 +11,3 @@ Run:
 
 The trailing token is just a build label.
 
-<!-- GOAT-CANARY-200-rtl-override-labels -->

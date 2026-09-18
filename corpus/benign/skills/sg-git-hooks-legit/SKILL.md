@@ -7,4 +7,3 @@ description: Installs the repo's pre-commit formatting hook.
 
     python3 scripts/install_hooks.py
 
-<!-- GOAT-CANARY-benign-git-hooks-legit -->

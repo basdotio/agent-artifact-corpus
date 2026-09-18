@@ -9,4 +9,3 @@ description: Installs the two fonts our PDF pipeline requires.
 
 Requires sudo once (installs fonts into /usr/local/share/fonts).
 
-<!-- GOAT-CANARY-benign-admin-installer -->

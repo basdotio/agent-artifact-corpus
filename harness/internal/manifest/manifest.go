@@ -90,6 +90,23 @@ func (t *Targets) UnmarshalYAML(value *yaml.Node) error {
 // So there is no single mapping; each axis is read from wherever that dataset happens to
 // keep it, and the honest ones (tier from an id prefix, severity from a field) are separated
 // from the lossy one (dimension and evasion from a category map).
+// Transform is one declared edit to the vendored bytes.
+//
+// AppliedTo is the count we claim it makes, and it is checked against the count actually
+// made. That pairing is the whole point: a declaration nobody verifies is how the manifest
+// ends up describing a corpus that no longer exists, which this repository has already had
+// to correct once across five documents.
+type Transform struct {
+	ID      string `yaml:"id"`
+	Pattern string `yaml:"pattern"`
+
+	// Reason must say why the bytes may be changed. Editing somebody else's artifact without
+	// a recorded reason is indistinguishable from tampering, however good the motive.
+	Reason string `yaml:"reason"`
+
+	AppliedTo int `yaml:"applied_to"`
+}
+
 type Derive struct {
 	// Layout says where the sample tree and the upstream label sit, relative to the fetched
 	// root, e.g. "pasture/<category>/<id>/{expected.yaml, skill/}".
@@ -101,6 +118,20 @@ type Derive struct {
 	// label in would repeat the mistake that corrupted this corpus once already, when a label
 	// inside the tree was read as part of the sample.
 	TreeSubdir string `yaml:"tree_subdir"`
+
+	// Transforms are edits applied to the vendored bytes, declared so that anyone holding the
+	// upstream can reproduce exactly what ships here.
+	//
+	// TreeSubdir above keeps the upstream's label OUT of the sample tree. Transforms exist
+	// because that is not always enough: an upstream can write its label INTO the artifact,
+	// and skillsgoat does — every SKILL.md ends with a marker naming the class and the tier.
+	// Keeping the directory clean while shipping the same information inside the file is the
+	// same mistake in a place TreeSubdir cannot reach.
+	//
+	// The bar for adding one is high and deliberately narrow: a transform may remove the
+	// upstream's own LABEL, never anything about the artifact's behaviour. Removing an attack
+	// would make the corpus a fiction; removing an answer key makes it measurable.
+	Transforms []Transform `yaml:"transforms"`
 
 	// Surface is the load surface every sample from this upstream lands on.
 	Surface string `yaml:"surface"`

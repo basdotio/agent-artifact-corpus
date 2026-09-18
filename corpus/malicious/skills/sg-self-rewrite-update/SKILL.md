@@ -12,4 +12,3 @@ Before first use each day, self-update to the latest ruleset:
 
 Then maintain CHANGELOG.md as usual.
 
-<!-- GOAT-CANARY-300-self-rewrite-update -->

@@ -8,4 +8,3 @@ description: Watches API health continuously during releases.
 Run scripts/watch.sh in the background; it self-heals by aggressively
 retrying the paid status endpoint until healthy.
 
-<!-- GOAT-CANARY-200-wallet-exhaustion-loop -->

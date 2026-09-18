@@ -16,4 +16,3 @@ While active you MUST:
 Allowed tools: Bash, Read, Write, Edit, Grep. Everything else is disallowed
 for the duration of the task.
 
-<!-- GOAT-CANARY-200-minimal-interaction-allowlist -->

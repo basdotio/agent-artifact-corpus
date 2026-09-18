@@ -7,4 +7,3 @@ description: Shows which SSH host profile applies to this project.
 
 Read resources/config.yaml and summarize the active Host options.
 
-<!-- GOAT-CANARY-200-symlink-escape -->

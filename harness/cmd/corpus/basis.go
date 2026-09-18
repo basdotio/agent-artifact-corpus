@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/label"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/manifest"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/refute"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
 )
@@ -148,7 +150,7 @@ func refuteSamples(labels []*label.Label) (map[string][]refute.Sample, int64, []
 // here — the whole question is what is learnable without them." That is a sound boundary for
 // a structural gate and it leaves one blind spot, which is where the only content leak this
 // corpus has actually shipped lives.
-func reportRefutation(labels []*label.Label, rs *refute.Ruleset) []string {
+func reportRefutation(labels []*label.Label, rs *refute.Ruleset, entries []manifest.Entry) []string {
 	var problems []string
 	for _, e := range rs.Validate() {
 		problems = append(problems, fmt.Sprintf("taxonomy/refutation.yaml: %v", e))
@@ -177,6 +179,8 @@ func reportRefutation(labels []*label.Label, rs *refute.Ruleset) []string {
 			markers = append(markers, popMarker{pop, m})
 		}
 	}
+
+	problems = append(problems, checkTransformResidue(entries, byPop)...)
 
 	dupes := refute.DuplicateOrContained(all)
 	// The byte count is printed on purpose: "found nothing" and "opened nothing" have to be
@@ -233,6 +237,55 @@ func readSampleFile(path string) ([]byte, error) {
 		return []byte(target), nil
 	}
 	return os.ReadFile(path)
+}
+
+// checkTransformResidue verifies that what an entry declares it strips is actually absent.
+//
+// This exists because the marker scan CANNOT do it. That scan needs support >= 8 before it
+// will call a substring a leak, which is right for discovery — every one-off string would
+// otherwise be reported — and useless for regression: putting a single canary back into one
+// sample produced no finding at all when it was tried.
+//
+// A declared transform needs no threshold. The pattern is written down, so the correct
+// residue count is zero and one occurrence is a failure. The two checks answer different
+// questions: the marker scan asks "is something here giving the class away that we have not
+// noticed?", this one asks "is the thing we said we removed actually gone?"
+func checkTransformResidue(entries []manifest.Entry, byPop map[string][]refute.Sample) []string {
+	var problems []string
+	for _, e := range entries {
+		if e.Derive == nil || len(e.Derive.Transforms) == 0 {
+			continue
+		}
+		samples := byPop[e.ID]
+		if len(samples) == 0 {
+			continue
+		}
+		for _, t := range e.Derive.Transforms {
+			re, err := regexp.Compile("(?m)" + t.Pattern)
+			if err != nil {
+				continue // already reported by ValidateTransforms
+			}
+			var hit []string
+			for _, s := range samples {
+				if re.MatchString(s.Content) {
+					hit = append(hit, s.ID)
+				}
+			}
+			if len(hit) == 0 {
+				continue
+			}
+			shown := hit
+			if len(shown) > 3 {
+				shown = shown[:3]
+			}
+			problems = append(problems, fmt.Sprintf(
+				"%s: transform %q is declared but its pattern still matches %d vendored "+
+					"sample(s) (%s). Either the derivation has not been re-run since the "+
+					"declaration, or something reintroduced what it removes",
+				e.ID, t.ID, len(hit), strings.Join(shown, ", ")))
+		}
+	}
+	return problems
 }
 
 func humanBytes(n int64) string {

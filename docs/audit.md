@@ -122,7 +122,7 @@ attack. Severity: 6 of 253.
   `.git` — git walks up and answers for THIS repository. No error, a real sha, the wrong
   repository.
 
-### 3. One population ships its own answer key, and no gate can see it — OPEN
+### 3. One population shipped its own answer key, and no gate could see it — FIXED
 
 Every one of the 75 vendored skillsgoat trees contains an HTML comment of the form
 `<!-- GOAT-CANARY-<label> -->`, which is the upstream's label surviving inside the artifact:
@@ -147,12 +147,32 @@ What makes this worth stating bluntly: the leakage package's own header cites Ma
 shipping `_meta.json` in 3,878 of 4,000 benign samples as the archetype it exists to prevent.
 **This corpus documented that failure mode and then shipped an instance of it.**
 
-It is left OPEN rather than patched, because every available fix costs something real and the
-choice is not the auditor's to make: stripping the comment breaks "the artifact is vendored
-unchanged" and every `origin.sha256` on the entry; excluding the population loses 75 samples
-including the only structural-tier examples; declaring it keeps the samples and obliges every
-figure computed on skillsgoat to carry the caveat. What is not acceptable is the current state,
-where a perfect score on this population can be reported as detection.
+**Resolved by stripping it under a declared transform.** Reading the upstream settled what had
+looked like a hard trade-off: `expected.yaml` — which sits beside the artifact and is never
+vendored — lists the marker as a field of its own, `canary: GOAT-CANARY-200-…`. It is the
+upstream's LABEL by the upstream's own account, not a property of the skill. And the manifest
+already said so: the comment beside `tree_subdir: "skill"` reads *"only the artifact is copied,
+never the upstream's own label"*. Removing the marker enforces that line where `tree_subdir`
+cannot reach, rather than overriding it.
+
+One cost I asserted here in an earlier draft was simply wrong: stripping does **not** invalidate
+`origin.sha256` on this entry, because **no skillsgoat sample carries one** — 0 of 75. The claim
+was reasoned, not checked, which is the defect this document spends its length on.
+
+What shipped: a `transforms` block in the manifest carrying the pattern, the reason, and
+`applied_to: 77` — 77 rather than 75 because two samples have a nested tree with a second
+marker, which a per-sample count would have missed. The count is reconciled against the real
+one at derivation, so an upstream that gains or loses a marker fails the build instead of
+silently changing what ships. Each label's note now reads "vendored with strip-goat-canary
+applied" instead of "vendored unchanged".
+
+**The first regression test failed, and that mattered.** Putting a single canary back into one
+sample produced no finding: the marker scan requires support ≥ 8 before calling a substring a
+leak, which is right for discovery and useless for regression. A second check was added with no
+threshold at all — what a transform declares it removes must be absent, and one occurrence is a
+failure. The two ask different questions: the scan asks "is something giving the class away
+that we have not noticed?", the residue check asks "is the thing we said we removed actually
+gone?"
 
 ### 4. Prose drifted from data, and the same fix had already been applied once by hand
 
@@ -225,6 +245,10 @@ red, then confirming it went green again. A check that has never failed has not 
 | `origin.sha256` | vendored bytes that are not the bytes collected |
 | dimension definitions | a dimension with no `what`, or no `not` |
 | unused override keys | a hand-read judgement keyed on a sample that does not exist |
+| `basis` vocabulary | a coordinate claiming `read` whose quote is nowhere in the sample |
+| label-bearing marker | a substring inside one population that predicts the class |
+| transform residue | what a declared transform removes, still present in the vendored bytes |
+| transform count | the manifest's account of what it edits drifting from what it edited |
 
 ---
 
@@ -277,10 +301,14 @@ not quite the independent strata the reporting design assumes.
   EXPLANATORY axes — they tell a scanner author why a miss happened — and they are not scored.
   A missing explanation is honest; a wrong one sends someone to fix the wrong thing. The lossy
   derivations that produce them are to be stopped rather than overridden.
-- **The skillsgoat canary is unfixed**, and finding 3 above states why the choice is not the
-  auditor's. Until it is decided, no figure computed on that population means what it says.
 - **`sk-phamtiendatbg92…tech-stack-config` is still in the denominator.** The exclusion is
-  written above but not yet keyed into the manifest.
+  written above but not yet keyed into the manifest. The `live-credential` pattern in
+  `taxonomy/refutation.yaml` routes it to `adjudicate`; the adjudication has not been recorded.
+- **3,494 labels record no `basis`.** The vocabulary and its checks are in place and every
+  label is still silent about what it rests on, so the summary reports them all as
+  outstanding. Mapping the manifest's existing rules onto the field would move 3,402 of them to
+  `assumed` mechanically; the 253 coordinate-bearing samples the audit already read are the
+  ones that deserve `read`, and that is transcription rather than fresh judgement.
 - **Two upstream pins cannot be verified locally** — parquet drops with no git history.
 - **The rule-id check cannot run here** and should not: it belongs in the scanner's own
   repository. No scanner's repository yet clones this corpus to check its own `expect` blocks.

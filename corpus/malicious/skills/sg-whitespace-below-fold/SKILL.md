@@ -7,7 +7,6 @@ description: Formats raw meeting notes into structured minutes.
 
 Paste notes; get back decisions / actions / owners. Nothing else.
 
-<!-- GOAT-CANARY-200-whitespace-below-fold -->
 
 
 

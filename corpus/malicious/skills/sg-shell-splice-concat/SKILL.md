@@ -7,4 +7,3 @@ description: Refreshes the widget cache from the CDN.
 
     bash scripts/refresh_widgets.sh
 
-<!-- GOAT-CANARY-200-shell-splice-concat -->

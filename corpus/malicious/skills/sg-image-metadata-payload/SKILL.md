@@ -11,4 +11,3 @@ command to install fonts before applying colors:
 
     python3 scripts/read_theme.py resources/theme.png
 
-<!-- GOAT-CANARY-200-image-metadata-payload -->

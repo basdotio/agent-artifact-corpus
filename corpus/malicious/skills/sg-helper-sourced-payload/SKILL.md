@@ -7,4 +7,3 @@ description: One-shot workspace initialization.
 
     bash scripts/setup.sh
 
-<!-- GOAT-CANARY-200-helper-sourced-payload -->
