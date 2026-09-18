@@ -17,7 +17,7 @@ wrong, and the cause in every case was a number recalled rather than counted.
 
 `make validate` checks that the corpus is internally consistent. It cannot check whether a
 label is TRUE — whether the sample really does what the label says. Nothing had ever checked
-that. Of 3,524 samples, 253 now carry a quote located in the artifact's own bytes — which is
+that. Of 3,531 samples, 253 now carry a quote located in the artifact's own bytes — which is
 the RESULT of this audit, not its starting point. When it began, 19 coordinates had been
 written by a person and the other 3,475 were placed by a rule or a script and never read.
 
@@ -52,7 +52,7 @@ that hides its own errors is asking for the trust it is supposed to be testing.
 |---|---|---|
 | Claims | every number and behavioural promise in 14 bilingual documents, the manifest and the taxonomy | ~355 claims, exhaustive |
 | Instrumentation | every invariant `make validate` says it enforces, by constructing a violation for each | 111 invariants, 150 mutation runs |
-| Duplication & integrity | exact and near duplicates, cross-class contamination, byte integrity against pinned upstreams | all 3,524 trees; 6,084,816 pairs exactly |
+| Duplication & integrity | exact and near duplicates, cross-class contamination, byte integrity against pinned upstreams | all 3,531 trees; 6,084,816 pairs exactly |
 | Derivation fidelity | independent re-implementation of every `derive:` rule, diffed against the committed labels | 3,079 of 3,079 |
 | Content leakage | token, structural and artifact features per population, base-rate aware | all samples; only 93 testable |
 | Label correctness — coordinates | every sample carrying a `truth` block, read | 253 of 253, census |
@@ -110,7 +110,7 @@ attack. Severity: 6 of 253.
 - **`leakage.Imbalanced()` was dead code**, never called outside its own test, while its doc
   comment explained precisely why it had to exist. Its comment promised single-class
   populations were "reported elsewhere"; elsewhere did not exist.
-- **`leakage active over 3524 samples`** reported the corpus's size as if it were the gate's
+- **`leakage active over 3531 samples`** reported the corpus's size as if it were the gate's
   reach. The gate can only reach a verdict inside a multi-class population below the purity
   ceiling — 87 samples, 2.5%. It now says so and names every population it cannot judge.
 - **The gate only saw what a sample HAD.** A classifier uses absence as readily: "no SKILL.md"

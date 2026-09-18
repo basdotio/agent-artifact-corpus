@@ -457,3 +457,74 @@ techniques:
       A legitimate .mcp.json whose server the user approved. The distinguishing element is a
       command that a scanner comparing against the approved baseline would see has changed — a
       point-in-time read cannot, which is exactly what makes this shape worth a sample.
+
+  # ---------------------------------------------------------------------------------------
+  # Reconstructed from the ATR rule library (Agent-Threat-Rule, MIT) — disclosed config-surface
+  # shapes this corpus had no sample for. Each cites its CVE or named research in the label.
+  - id: git-config-exec-hook
+    title: Git config callback turned into an execution hook
+    dimension: backdoor
+    what: >-
+      A git config callback key (core.fsmonitor, core.sshCommand, core.hooksPath, credential.helper,
+      filter.*.clean) is pointed at an inline shell command, so it runs on the next ordinary git
+      operation — a persistent foothold, not a one-shot. (CVE-2026-55607.)
+    benign_lookalike: >-
+      A hook that legitimately runs git or a formatter. The distinguishing element is a git config
+      key — not a setting but a callback — being set to a fetch-and-run command.
+  - id: ssh-authorized-keys-persist
+    title: Persistence via authorized_keys or shell rc
+    dimension: backdoor
+    what: >-
+      A skill directs writing an attacker SSH key into ~/.ssh/authorized_keys, or prepending a
+      writable dir onto PATH in a shell startup file — passwordless re-entry or code that re-runs
+      every shell. (GHSA-mined technique.)
+    benign_lookalike: >-
+      A setup skill that legitimately configures SSH or a shell profile. The distinguishing element
+      is an attacker-controlled key or a temp dir hijacking PATH, not the act of editing the file.
+  - id: guardrail-self-disable
+    title: Agent config tool disables its own guardrail
+    dimension: permission
+    what: >-
+      A config-mutation directive turns off a protection the agent is subject to — the sandbox, the
+      deny-list, the approval requirement, gateway auth. (CVE-2026-45001.)
+    benign_lookalike: >-
+      A legitimate performance or config tweak. The distinguishing element is the specific key being
+      set to a value that removes a protection, not that config is being changed.
+  - id: wildcard-auto-approve
+    title: Blanket auto-approval written into trust config
+    dimension: permission
+    what: >-
+      A trust/approval key is set to a wildcard or blanket-true — autoApprove true, allow Bash(*),
+      requireConfirmation false — removing the human gate for all later actions. (AWS-2025-019.)
+    benign_lookalike: >-
+      A settings file with scoped allow rules the user chose. The distinguishing element is the
+      wildcard/blanket value, not the presence of a permissions block.
+  - id: mcp-env-process-hijack
+    title: MCP config env block sets a process-hijack variable
+    dimension: execution
+    what: >-
+      An MCP stdio server's env block sets NODE_OPTIONS --require, LD_PRELOAD, DYLD_INSERT_LIBRARIES,
+      BASH_ENV or similar, so the spawned child loads attacker code before running. (CVE-2026-44995.)
+    benign_lookalike: >-
+      An env block setting an API base URL or a log level. The distinguishing element is a
+      well-known process-hijacking variable pointing at a loadable payload.
+  - id: mcp-self-registration
+    title: Agent writes a new server into its own MCP trust config
+    dimension: backdoor
+    what: >-
+      A directive appends a server to the mcpServers block of a config the agent itself loads, so it
+      starts every session. The command is deliberately unremarkable — persistence and privilege
+      expansion, not immediate RCE. (MCP-18 Shadow MCP.)
+    benign_lookalike: >-
+      A project that legitimately ships an mcpServers entry the user approves. The distinguishing
+      element is the agent silently adding one to its own trust file.
+  - id: mcp-tool-rugpull
+    title: MCP tool description redefined after approval
+    dimension: injection
+    what: >-
+      A tool's description is benign at approval time, then silently redefined — on a version bump,
+      a marker file, or a second run — to inject hidden execution or exfiltration. Time-of-check to
+      time-of-use on the metadata the agent trusts. (Repello AI rug-pull.)
+    benign_lookalike: >-
+      A tool whose description documents a real precondition. The distinguishing element is a
+      conditional redefinition gated on state the user cannot see at approval.
