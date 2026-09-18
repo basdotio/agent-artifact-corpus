@@ -256,7 +256,11 @@ func NoJudgeableContent(dir string) bool {
 		distinct[t] = true
 	}
 	switch {
-	case nonBlank == 0, len(distinct) <= 2:
+	// One distinct line, not two. A two-line skill can still be judged: `# Coding` followed by
+	// `Write production-quality code.` is terse and real, and the threshold flagged it. What
+	// this catches is a single line that is not content at all — `404: Not Found`, captured
+	// when a fetch failed and the error page was stored as the sample.
+	case nonBlank == 0, len(distinct) <= 1:
 		return true
 	case nonBlank >= 50 && nonBlank/len(distinct) >= 50:
 		// Bulk with no variety: exercises truncation handling, not over-alerting.
@@ -265,27 +269,41 @@ func NoJudgeableContent(dir string) bool {
 	return false
 }
 
-var (
-	secretAssign = regexp.MustCompile(`(?i)\b(pass(?:word|wd)?|secret|api[_-]?key|token)\b[^:=\n]{0,6}[:=]\s*['"` + "`" + `]?([^\s'"` + "`" + `,;]+)`)
-	vendorToken  = regexp.MustCompile(`\b(AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9-]{16,}|xox[baprs]-[A-Za-z0-9-]{10,})`)
-)
+// vendorToken matches credential shapes that identify themselves: a prefix a vendor issues,
+// or a PEM header. These can be decided mechanically, and that is the whole of what this
+// function attempts.
+// The PEM header sits OUTSIDE the `\b` group on purpose. `\b` needs a word character on one
+// side, and `-----BEGIN` has none — the same trap that made an earlier version miss
+// `DB_PASSWORD=...`, where `_` and `P` are both word characters so no boundary exists between
+// them either. Word boundaries are the wrong tool for anchors made of punctuation.
+var vendorToken = regexp.MustCompile(
+	`(\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9-]{16,}|` +
+		`xox[baprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{30,})` +
+		`|-----BEGIN [A-Z ]*PRIVATE KEY-----)`)
 
-// LiveCredentials reports credential assignments whose value could actually be used.
+// LiveCredentials reports credential shapes that can be identified from the bytes alone.
+//
+// IT DELIBERATELY DOES NOT TRY TO JUDGE BARE ASSIGNMENTS, and the reason is written in this
+// pattern's own `signal` field in taxonomy/refutation.yaml: "assignments to password/secret
+// keys whose value is not a placeholder. The last case cannot be decided by regex alone."
+//
+// A first implementation ignored that sentence and matched `password:` assignments with a
+// placeholder filter. Over the benign half it flagged 209 samples, then 192 after two rounds
+// of tightening — against a stated target of under 0.5% and an audited truth of exactly one.
+// The residue was `password: mypassword`, `password: secret123`, `password: 12345`: tutorial
+// examples that are textually indistinguishable from the one real instance, `password: datpt`.
+// That sample was found by a person reading the file, and the audit said so at the time:
+// no vendor prefix, no token shape, which is why every automated sweep missed it.
+//
+// So the split is: mechanical where the shape is self-identifying, `adjudicate` where it is
+// not. The one known real credential is excluded by name with a recorded reason, not by a
+// regex that would have to be wrong about 191 other samples to catch it.
 //
 // THE BOUNDARY IS THE POINT. Placeholders stay in the denominator: a scanner firing on
 // `AKIAIOSFODNN7EXAMPLE` — AWS's own documentation key — is producing exactly the false
 // positive being measured, and disqualifying that sample would delete the measurement.
-//
-// The one real instance found in 250 audited samples was `password: datpt`: no vendor prefix,
-// no token shape, which is why every automated sweep missed it and a person did not. That
-// asymmetry is why this pattern's action is `adjudicate` rather than an automatic exclusion.
 func LiveCredentials(s string) []string {
 	var hits []string
-	for _, m := range secretAssign.FindAllStringSubmatch(s, -1) {
-		if !isPlaceholder(m[2]) {
-			hits = append(hits, m[1]+"="+m[2])
-		}
-	}
 	for _, m := range vendorToken.FindAllStringSubmatch(s, -1) {
 		if !isPlaceholder(m[1]) {
 			hits = append(hits, m[1])
@@ -294,15 +312,12 @@ func LiveCredentials(s string) []string {
 	return hits
 }
 
+// isPlaceholder recognises the documentation values that must STAY in the denominator.
 func isPlaceholder(v string) bool {
 	if v == "" {
 		return true
 	}
 	lv := strings.ToLower(v)
-	if strings.HasPrefix(v, "${") || strings.HasPrefix(v, "$") ||
-		strings.HasPrefix(v, "<") || strings.HasPrefix(v, "{{") {
-		return true
-	}
 	for _, marker := range []string{
 		"xxx", "example", "your", "changeme", "placeholder", "dummy",
 		"redacted", "sample", "test", "fake", "todo", "abc123", "...",
@@ -311,13 +326,7 @@ func isPlaceholder(v string) bool {
 			return true
 		}
 	}
-	// A value that is a single repeated character carries no secret.
-	return len(strings.Map(func(r rune) rune {
-		if r == rune(v[0]) {
-			return -1
-		}
-		return r
-	}, v)) == 0
+	return false
 }
 
 // Finding is one sample disqualified by one pattern.

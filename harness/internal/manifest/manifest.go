@@ -21,6 +21,12 @@ import (
 
 type File struct {
 	Entries []Entry `yaml:"entries"`
+
+	// Adjudications are decisions about refutation matches, keyed by sample id. Top level
+	// rather than per-entry because a match is about a SAMPLE, and the same pattern fires
+	// across populations — keying them under one upstream would put the record in a place
+	// nobody would think to look for the others.
+	Adjudications map[string]Adjudication `yaml:"adjudications"`
 }
 
 type Entry struct {

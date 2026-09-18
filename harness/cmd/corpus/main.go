@@ -165,6 +165,7 @@ func cmdValidate(root string) int {
 	// Layer 2
 	var pinStatuses []PinStatus
 	var allEntries []manifest.Entry
+	allAdjudications := map[string]manifest.Adjudication{}
 	manifests, _ := filepath.Glob(filepath.Join(root, "manifest", "*.yaml"))
 	for _, mp := range manifests {
 		f, err := manifest.Load(mp)
@@ -184,6 +185,9 @@ func cmdValidate(root string) int {
 			}
 		}
 		allEntries = append(allEntries, f.Entries...)
+		for id, a := range f.Adjudications {
+			allAdjudications[id] = a
+		}
 		pinStatuses = append(pinStatuses, CheckPins(root, f.Entries)...)
 	}
 
@@ -229,7 +233,7 @@ func cmdValidate(root string) int {
 	// before the word "benign" was written down. Both were previously unrecorded, which let a
 	// batch constant and a hand-read artifact print as the same kind of claim.
 	problems = append(problems, reportBasis(labels, basisSpec)...)
-	problems = append(problems, reportRefutation(labels, refuteRules, allEntries)...)
+	problems = append(problems, reportRefutation(labels, refuteRules, allEntries, allAdjudications)...)
 	// Named even when clean, because the point of these three is that they were each added
 	// after the property they guard had already silently broken.
 	if len(neutralProblems) == 0 {

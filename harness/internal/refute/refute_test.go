@@ -184,11 +184,35 @@ func TestLiveCredentialKeepsPlaceholders(t *testing.T) {
 	}
 }
 
-func TestLiveCredentialFlagsRealAssignment(t *testing.T) {
-	// The one real instance in 250 audited samples. No vendor prefix, no token shape — which
-	// is why every automated sweep missed it and a reader did not.
-	if hits := LiveCredentials("- **Password**: datpt"); len(hits) == 0 {
-		t.Error("a non-placeholder password assignment was not flagged")
+// The one real credential in 250 audited samples is NOT matched here, on purpose.
+//
+// `password: datpt` has no vendor prefix and no token shape, and is textually identical in
+// form to `password: mypassword` and `password: secret123`, which appear throughout the
+// benign half as tutorial examples and must stay in the denominator. Trying to separate them
+// by regex produced 192 false positives against one true one. It is excluded by name with a
+// recorded reason instead — `adjudicate`, which is what refutation.yaml routes it to.
+func TestLiveCredentialDoesNotGuessAtBareAssignments(t *testing.T) {
+	for _, s := range []string{
+		"- **Password**: datpt",
+		"password: mypassword",
+		"password: secret123",
+		"password: 12345",
+	} {
+		if hits := LiveCredentials(s); len(hits) != 0 {
+			t.Errorf("%q flagged (%v) — bare assignments are adjudicated, not matched", s, hits)
+		}
+	}
+}
+
+func TestLiveCredentialFlagsSelfIdentifyingShapes(t *testing.T) {
+	for _, s := range []string{
+		"aws_access_key_id = AKIA1234567890ABCDEF",
+		"token: ghp_abcdefghijklmnopqrstuvwxyz0123",
+		"-----BEGIN RSA PRIVATE KEY-----",
+	} {
+		if hits := LiveCredentials(s); len(hits) == 0 {
+			t.Errorf("%q not flagged — the shape identifies itself", s)
+		}
 	}
 }
 
@@ -226,5 +250,63 @@ func TestLoadRejectsMalformed(t *testing.T) {
 	}
 	if errs := r.Validate(); len(errs) == 0 {
 		t.Fatal("a pattern naming an undeclared on_match action validated")
+	}
+}
+
+// Every string below was taken from the corpus when this pattern first ran over the benign
+// half and matched 209 samples — 6.4%, against a stated target of under 0.5% and an audited
+// truth of exactly one. The hit rate is the guard described in refutation.yaml's header, and
+// it worked: it said the pattern had become a scanner before anyone acted on its output.
+//
+// The distinction it was missing: a credential is a LITERAL VALUE. Everything here is a
+// reference to a value stored elsewhere, or a type, and reading a secret from the environment
+// is the correct thing for a benign sample to do.
+func TestLiveCredentialKeepsReferencesAndTypes(t *testing.T) {
+	keep := []string{
+		`api_key = os.environ.get("OPENAI_API_KEY")`,
+		`api_key = os.environ["OPENAI_API_KEY"]`,
+		"token = os.getenv('GITHUB_TOKEN')",
+		"apikey: process.env.OPENROUTER_API_KEY",
+		"token: module.ctx.creds.aws.session_token",
+		"password: string",
+		"password: str",
+		"password: string)",
+		"token: str)",
+		"password: bool",
+		"token: required",
+		"pass=true",
+		"password: None",
+		"token: null",
+		"password: raise",
+		"token: await client.fetch()",
+		"token: TOKEN_DA_INSTANCIA",
+		"api_key: ${{ secrets.OPENAI_KEY }}",
+	}
+	for _, s := range keep {
+		if hits := LiveCredentials(s); len(hits) != 0 {
+			t.Errorf("%q flagged (%v) — it names where a value comes from, it is not a value", s, hits)
+		}
+	}
+}
+
+// The threshold is one distinct line, not two, and the boundary is real content versus none.
+func TestNoJudgeableContentKeepsTerseButRealSkills(t *testing.T) {
+	cases := map[string]struct {
+		body string
+		want bool
+	}{
+		"two-line skill":   {"# Coding\n\nWrite production-quality code.\n", false},
+		"fetch error page": {"404: Not Found", true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(c.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := NoJudgeableContent(dir); got != c.want {
+				t.Errorf("NoJudgeableContent(%q) = %v, want %v", c.body, got, c.want)
+			}
+		})
 	}
 }

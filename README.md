@@ -205,7 +205,7 @@ measures.
   needs a script under `scripts/` between the fetch and the derive. The scripts are pinned and
   seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
   entries in one command.
-- **The benign side is a sample; the malicious side is a census.** 3,241 benign samples are
+- **The benign side is a sample; the malicious side is a census.** 3,236 benign samples are
   drawn from stated populations under stated designs, while all 237 malicious samples are
   everything the upstreams had. A recall figure and a false-positive figure from this corpus
   therefore rest on different kinds of denominator, and cannot be combined into one score.

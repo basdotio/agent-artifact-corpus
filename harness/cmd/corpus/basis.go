@@ -157,7 +157,8 @@ func refuteSamples(labels []*label.Label) (map[string][]refute.Sample, int64, []
 // here — the whole question is what is learnable without them." That is a sound boundary for
 // a structural gate and it leaves one blind spot, which is where the only content leak this
 // corpus has actually shipped lives.
-func reportRefutation(labels []*label.Label, rs *refute.Ruleset, entries []manifest.Entry) []string {
+func reportRefutation(labels []*label.Label, rs *refute.Ruleset, entries []manifest.Entry,
+	adj map[string]manifest.Adjudication) []string {
 	var problems []string
 	for _, e := range rs.Validate() {
 		problems = append(problems, fmt.Sprintf("taxonomy/refutation.yaml: %v", e))
@@ -189,6 +190,11 @@ func reportRefutation(labels []*label.Label, rs *refute.Ruleset, entries []manif
 
 	problems = append(problems, checkTransformResidue(entries, byPop)...)
 
+	// Only the benign half is scanned by these three. A malicious sample containing a real
+	// credential or a dangling path is the attack working as intended; the question these
+	// patterns ask is whether a sample is fit to sit in the FALSE-POSITIVE denominator.
+	hits := benignPatternHits(labels)
+
 	dupes := refute.DuplicateOrContained(all)
 	// The byte count is printed on purpose: "found nothing" and "opened nothing" have to be
 	// distinguishable at a glance, and for one revision of this function they were not.
@@ -212,7 +218,83 @@ func reportRefutation(labels []*label.Label, rs *refute.Ruleset, entries []manif
 	if len(dupes) > 0 {
 		fmt.Printf("  duplicates    %d sample(s) identical to or contained in another\n", len(dupes))
 	}
+	for _, pat := range sortedKeys(hits) {
+		fmt.Printf("  %-13s %d benign sample(s) matched\n", pat, len(hits[pat]))
+	}
+
+	// Every match needs a recorded decision. Without this the patterns would be a report
+	// nobody acts on, which is the exact defect this repository keeps finding in its own
+	// instrumentation — a check that runs, prints, and changes nothing.
+	for _, pat := range sortedKeys(hits) {
+		for _, id := range hits[pat] {
+			if _, ok := adj[id]; !ok {
+				problems = append(problems, fmt.Sprintf(
+					"%s matched refutation pattern %q and has no adjudication. Decide whether "+
+						"it stays in the denominator or leaves it, and record the reason in "+
+						"manifest `adjudications` — most matches should be `keep`, since 39%% "+
+						"of benign samples contain something a defensible scanner fires on",
+					id, pat))
+			}
+		}
+	}
+	for _, id := range sortedKeys(adj) {
+		matched := false
+		for _, ids := range hits {
+			for _, h := range ids {
+				if h == id {
+					matched = true
+				}
+			}
+		}
+		if !matched {
+			problems = append(problems, fmt.Sprintf(
+				"adjudications[%q] matches nothing — the pattern stopped firing or the sample "+
+					"is gone, and a decision about neither is a decision about nothing", id))
+		}
+	}
 	return problems
+}
+
+// benignPatternHits runs the per-sample refutation patterns over the benign half.
+//
+// Reported, not failed. Each of these routes to `adjudicate` or
+// `exclude_from_denominator` in taxonomy/refutation.yaml, and both end in a decision a person
+// records — an exclusion with no written reason is how a corpus quietly starts flattering
+// itself. Failing the build before those decisions exist would just force them to be made in
+// a hurry.
+func benignPatternHits(labels []*label.Label) map[string][]string {
+	out := map[string][]string{}
+	for _, l := range labels {
+		if l.Class != label.Benign {
+			continue
+		}
+		if refute.NoJudgeableContent(l.Path) {
+			out["no-content"] = append(out["no-content"], l.ID)
+		}
+		files, err := treeFiles(l.Path)
+		if err != nil {
+			continue
+		}
+		for _, rel := range files {
+			b, err := readSampleFile(filepath.Join(l.Path, rel))
+			if err != nil {
+				continue
+			}
+			if len(b) > maxScanBytes {
+				b = b[:maxScanBytes]
+			}
+			body := string(b)
+			if len(refute.LiveCredentials(body)) > 0 {
+				out["credential"] = append(out["credential"], l.ID)
+				break
+			}
+			if len(refute.HiddenCodepoints(body)) > 0 {
+				out["codepoint"] = append(out["codepoint"], l.ID)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // Thresholds match the structural gate's: enough support to be more than an accident, and

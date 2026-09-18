@@ -17,7 +17,7 @@ wrong, and the cause in every case was a number recalled rather than counted.
 
 `make validate` checks that the corpus is internally consistent. It cannot check whether a
 label is TRUE — whether the sample really does what the label says. Nothing had ever checked
-that. Of 3,494 samples, 19 carry coordinates a person wrote; the other 3,475 were placed by a
+that. Of 3,489 samples, 19 carry coordinates a person wrote; the other 3,475 were placed by a
 rule or a script and had never been read.
 
 The corpus's own third red line says "no scanner complained" is not evidence of benignity.
@@ -51,11 +51,11 @@ that hides its own errors is asking for the trust it is supposed to be testing.
 |---|---|---|
 | Claims | every number and behavioural promise in 14 bilingual documents, the manifest and the taxonomy | ~355 claims, exhaustive |
 | Instrumentation | every invariant `make validate` says it enforces, by constructing a violation for each | 111 invariants, 150 mutation runs |
-| Duplication & integrity | exact and near duplicates, cross-class contamination, byte integrity against pinned upstreams | all 3,494 trees; 6,084,816 pairs exactly |
+| Duplication & integrity | exact and near duplicates, cross-class contamination, byte integrity against pinned upstreams | all 3,489 trees; 6,084,816 pairs exactly |
 | Derivation fidelity | independent re-implementation of every `derive:` rule, diffed against the committed labels | 3,079 of 3,079 |
 | Content leakage | token, structural and artifact features per population, base-rate aware | all samples; only 93 testable |
 | Label correctness — coordinates | every sample carrying a `truth` block, read | 253 of 253, census |
-| Label correctness — benign | stratified sample, 60 per population, seeded, every one read | 250 of 3,241 |
+| Label correctness — benign | stratified sample, 60 per population, seeded, every one read | 250 of 3,236 |
 
 The last row is an ESTIMATE and the row above it is a CENSUS. They are never combined into
 one accuracy figure; they are different kinds of statement. At n=60 per population a 95%
@@ -266,7 +266,7 @@ precision test working.
 | harvested | 391 | 60 | 29 | 31 | 0 |
 | automatelab-mcp-tools | 357 | 60 | 45 | 15 | 0 |
 | skillsgoat | 10 | 10 (census) | 0 | 10 | 0 |
-| **total** | **3,241** | **250** | **152** | **97** | **1** |
+| **total** | **3,236** | **250** | **152** | **97** | **1** |
 
 **Mislabelling: 1 of 250.** At n=60 a zero result bounds the rate below roughly 5%, not at
 zero. The four populations that returned zero are consistent with a true rate anywhere under
