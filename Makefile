@@ -84,3 +84,6 @@ test:
 
 fmt:
 	@cd harness && gofmt -l . && go vet ./...
+
+score: ## grade a scanner's verdicts: make score V=path/to/verdicts.jsonl
+	@cd harness && go run ./cmd/corpus score "$(abspath $(V))"

@@ -159,7 +159,16 @@ make validate    # check every label, the taxonomy, every manifest entry, the do
 make stats       # corpus composition, tool-neutral and per tool
 make fetch       # materialise named layer-2 entries at their pinned commit (network)
 make test        # harness unit tests
+make score V=verdicts.jsonl   # grade a scanner's verdicts into recall, false positives, coverage
 ```
+
+`corpus score` reads a scanner's output as JSONL — one `{"sample","verdict"}` object per line,
+with optional `severity` and `dimensions` — and prints recall per dimension and per source,
+false positives per population, the hard-negative census, and attribution over the read-basis
+samples. It keeps three lines the corpus is built on: a collected rate and a constructed
+coverage count never merge, a per-source rate is labelled a rate about that source, and a group
+too small for a tight interval is printed as a bare count, not a figure. It grades against
+`truth`; it never decides what passes.
 
 `make validate` is offline and needs no scanner installed. CI runs these same targets on a
 clean checkout, so anything that passes locally only because your machine has something extra

@@ -45,6 +45,8 @@ func main() {
 		os.Exit(cmdDerive(root, os.Args[2:]))
 	case "refute":
 		os.Exit(cmdRefute(root, os.Args[2:]))
+	case "score":
+		os.Exit(cmdScore(root, os.Args[2:]))
 	default:
 		usage()
 		os.Exit(2)
@@ -58,7 +60,8 @@ func usage() {
   stats      corpus composition
   fetch      materialise named layer-2 entries into ./cache (network)
   derive     dry-run the coordinate derivation for a fetched entry and report coverage
-  refute     write a refutation_search record into every benign label (--write)`)
+  refute     write a refutation_search record into every benign label (--write)
+  score      grade a scanner's verdicts (JSONL) into recall, false positives and coverage`)
 }
 
 // ---------- validate ----------
