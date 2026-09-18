@@ -34,7 +34,20 @@ func populationOf(l *label.Label) string {
 	case l.Origin.DerivedFrom != nil && l.Origin.DerivedFrom.Entry != "":
 		return l.Origin.DerivedFrom.Entry
 	case l.Origin.Type == "harvested":
-		// One batch by construction: collected by the same script from the same search.
+		// One batch by construction: collected by the same script from the same search. The
+		// auto-harvest only ever produces benign samples, so a harvested label of any other
+		// class is one a person promoted BY HAND after reading it — a hard negative, say. That
+		// is a different batch: a handful of near-misses selected FOR their attack shape, not the
+		// broad population the script swept. Pooling the two manufactures a base-rate artifact:
+		// adding six hand-picked hard negatives to ~480 broad-harvest benigns drops the benign
+		// base rate just enough that legitimate vocabulary present only in the benign half —
+		// hook-event names like `session-end`, MCP server names like `sequential-thinking` —
+		// clears the giveaway threshold, though it encodes no answer and appears in no promoted
+		// sample. Same reasoning as the reconstruction split below: a hand-selected sample's
+		// comparable group is other hand-selected samples, not the script's sweep.
+		if l.Class != label.Benign {
+			return "promoted-" + string(l.Class)
+		}
 		return "harvested"
 	case l.Origin.Type == "reconstruction":
 		// A reconstruction is a single hand-authored artifact for one disclosed shape, not a
