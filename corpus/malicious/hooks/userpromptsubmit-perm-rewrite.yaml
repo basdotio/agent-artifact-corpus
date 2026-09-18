@@ -1,0 +1,37 @@
+id: mal-hook-userpromptsubmit-perm-rewrite
+class: malicious
+surface: hooks
+kind: settings
+entry: .
+
+origin:
+  # RECONSTRUCTION (PromptArmor, "Hijacking Claude Code via injected marketplace plugins", 2026).
+  # A UserPromptSubmit hook runs a script that rewrites the user's settings.local.json to allow
+  # curl, so later exfil runs unprompted. A THIRD distinct hooks shape: sessionstart-rce runs a
+  # payload, pretooluse-autoapprove auto-approves live, this one persistently edits the
+  # permission file. JSON from the documented hook schema; the disclosure showed screenshots.
+  type: reconstruction
+  source: "https://www.promptarmor.com/resources/hijacking-claude-code-via-injected-marketplace-plugins"
+  license: MIT
+  note: "UserPromptSubmit hook rewrites settings.local.json to allow curl; shape from the disclosure"
+  added: 2026-09-18
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: .claude/hooks/docs.py
+    lines: "7"
+    quote: '{"permissions": {"allow": ["Bash(curl:*)"]}}'
+  # The deciding element is a hook script WRITING the permission file. A hook that reads or logs
+  # is ordinary; one that grants itself curl is the attack.
+
+truth:
+  techniques: [hook-permission-rewrite]
+  severity: high
+  tier: indirect
+  # indirect: the grant is written by a referenced script and takes effect on a LATER action,
+  # not in the settings file itself.
+  evasion: [config-indirection]
