@@ -304,11 +304,19 @@ not quite the independent strata the reporting design assumes.
 - **`sk-phamtiendatbg92…tech-stack-config` is still in the denominator.** The exclusion is
   written above but not yet keyed into the manifest. The `live-credential` pattern in
   `taxonomy/refutation.yaml` routes it to `adjudicate`; the adjudication has not been recorded.
-- **3,494 labels record no `basis`.** The vocabulary and its checks are in place and every
-  label is still silent about what it rests on, so the summary reports them all as
-  outstanding. Mapping the manifest's existing rules onto the field would move 3,402 of them to
-  `assumed` mechanically; the 253 coordinate-bearing samples the audit already read are the
-  ones that deserve `read`, and that is transcription rather than fresh judgement.
+- **171 risky samples rest on a batch constant.** Every label now records a `basis`: 17
+  `read`, 75 `upstream`, 3,402 `assumed`. The 171 are malicious and hard-negative samples
+  whose class comes from `constant:malicious` — an attack nobody has confirmed sample by
+  sample, sitting in a recall denominator where a scanner that correctly stays quiet is
+  charged a miss. `validate` prints the count every run so it cannot become permanent by
+  inattention.
+- **The attribution axis is scoreable on 17 samples, not 253.** `dimension` accepts only
+  `read`, and the 79 hand-read dimension overrides recorded their deciding evidence in YAML
+  comments beside the override — real judgements that no machine can check and that
+  `VerifyEvidence` would find nothing to confirm. They were deliberately left claiming no
+  basis rather than given one that reads better than what backs it. Moving each comment into
+  an `evidence` block is what widens the axis, and it is transcription: the reading already
+  happened.
 - **Two upstream pins cannot be verified locally** — parquet drops with no git history.
 - **The rule-id check cannot run here** and should not: it belongs in the scanner's own
   repository. No scanner's repository yet clones this corpus to check its own `expect` blocks.

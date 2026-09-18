@@ -291,6 +291,17 @@ func renderLabel(e manifest.Entry, p Plan) string {
 	}
 	fmt.Fprintf(&b, "    fidelity: %q\n", fid)
 
+	// What each axis rests on, generated from the same rules that produced the coordinates.
+	// It sits between origin and truth because that is the order of the three questions: where
+	// the sample came from, how we know, and what it is.
+	//
+	// Outside the malicious branch on purpose. A benign sample has no truth block at all, and
+	// it is the one that most needs this: 3,231 of them rest on "collected from a batch we
+	// treat as benign" and nothing recorded that.
+	if bb := basisBlock(e, c); bb != "" {
+		fmt.Fprintf(&b, "\n%s", bb)
+	}
+
 	if c.Class == "malicious" {
 		fmt.Fprintf(&b, "\ntruth:\n")
 		fmt.Fprintf(&b, "  dimensions: [%s]\n", strings.Join(c.Dimensions, ", "))
