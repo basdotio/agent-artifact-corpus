@@ -49,6 +49,8 @@ func main() {
 		os.Exit(cmdScore(root, os.Args[2:]))
 	case "fixtures":
 		os.Exit(cmdFixtures(root, os.Args[2:]))
+	case "samples":
+		os.Exit(cmdSamples(root, os.Args[2:]))
 	default:
 		usage()
 		os.Exit(2)
@@ -64,7 +66,8 @@ func usage() {
   derive     dry-run the coordinate derivation for a fetched entry and report coverage
   refute     write a refutation_search record into every benign label (--write)
   score      grade a scanner's verdicts (JSONL) into recall, false positives and coverage
-  fixtures   list or materialise the injected-fault trees git cannot store`)
+  fixtures   list or materialise the injected-fault trees git cannot store
+  samples    emit every sample as JSONL {id, path, class} — the input side a runner iterates`)
 }
 
 // ---------- validate ----------

@@ -162,6 +162,11 @@ make test        # harness unit tests
 make score V=verdicts.jsonl   # grade a scanner's verdicts into recall, false positives, coverage
 ```
 
+`corpus samples` emits the corpus as a JSONL work list — `{id, path, class, surface}` per
+sample — the input side of the scoring loop: a runner iterates it, points its scanner at each
+`path`, and emits `{sample, verdict}` back for `corpus score`. It names no scanner and belongs
+here for the same reason the runner does not.
+
 `corpus fixtures` lists or materialises the injected-fault trees git cannot store — a 0111
 traverse-only directory, a FIFO SKILL.md, symlink cycles and escapes, a 4096-deep chain, an
 8 GiB sparse config — each with the tool-neutral pass condition a runner checks. Run
