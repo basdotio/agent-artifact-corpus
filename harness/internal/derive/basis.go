@@ -25,6 +25,16 @@ func basisBlock(e manifest.Entry, c Coord) string {
 	}
 
 	classBasis, classField, classValue := fromSpec(d.ClassFrom, c.Class)
+
+	// A dimension read off the artifact settles the class too. The quote shows the sample
+	// DOING something — `nc -e /bin/sh …`, `env | curl … | POST` — and that same line is both
+	// why it is malicious and what it achieves. Leaving class on a batch constant here would
+	// understate evidence already in hand, and it is the class that carries the recall
+	// denominator: an `assumed` malicious sample charges a correctly-silent scanner a miss.
+	dimEvidence := c.HandReadDimension && c.DimensionEvidence != nil
+	if dimEvidence {
+		classBasis, classField, classValue = "read", "", ""
+	}
 	if classBasis == "" {
 		// class_from is neither `constant:` nor `field:`. Guessing would stamp a fabricated
 		// provenance onto every sample of the entry.

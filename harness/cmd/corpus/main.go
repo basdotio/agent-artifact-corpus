@@ -43,6 +43,8 @@ func main() {
 		os.Exit(cmdFetch(root, os.Args[2:]))
 	case "derive":
 		os.Exit(cmdDerive(root, os.Args[2:]))
+	case "refute":
+		os.Exit(cmdRefute(root, os.Args[2:]))
 	default:
 		usage()
 		os.Exit(2)
@@ -55,7 +57,8 @@ func usage() {
   validate   check every label and manifest entry, and run the leakage gate
   stats      corpus composition
   fetch      materialise named layer-2 entries into ./cache (network)
-  derive     dry-run the coordinate derivation for a fetched entry and report coverage`)
+  derive     dry-run the coordinate derivation for a fetched entry and report coverage
+  refute     write a refutation_search record into every benign label (--write)`)
 }
 
 // ---------- validate ----------

@@ -164,6 +164,23 @@ func reportRefutation(labels []*label.Label, rs *refute.Ruleset, entries []manif
 		problems = append(problems, fmt.Sprintf("taxonomy/refutation.yaml: %v", e))
 	}
 
+	missing, stale := label.RefutationCoverage(labels, rs.Version)
+	for _, id := range capList(missing, 3) {
+		problems = append(problems, fmt.Sprintf(
+			"%s is benign and carries no refutation_search record, so the word means only "+
+				"\"collected from a batch we treat as benign\". Run `corpus refute --write`", id))
+	}
+	if len(missing) > 3 {
+		problems = append(problems, fmt.Sprintf("… and %d more benign label(s) with no "+
+			"refutation_search record", len(missing)-3))
+	}
+	for _, id := range capList(stale, 3) {
+		problems = append(problems, fmt.Sprintf(
+			"%s records a refutation_search from a different ruleset version than v%d. Rates "+
+				"measured under two rulesets are not comparable; re-run `corpus refute --write`",
+			id, rs.Version))
+	}
+
 	byPop, scanned, readProblems := refuteSamples(labels)
 	problems = append(problems, readProblems...)
 	var all []refute.Sample
@@ -375,6 +392,13 @@ func checkTransformResidue(entries []manifest.Entry, byPop map[string][]refute.S
 		}
 	}
 	return problems
+}
+
+func capList(in []string, n int) []string {
+	if len(in) > n {
+		return in[:n]
+	}
+	return in
 }
 
 func humanBytes(n int64) string {

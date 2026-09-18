@@ -242,3 +242,26 @@ func ScoreableOnDimension(labels []*Label, spec *taxonomy.BasisSpec) (scoreable,
 	}
 	return scoreable, withDimension
 }
+
+// RefutationCoverage reports benign labels with no search record, and records written under a
+// different ruleset version.
+//
+// Both matter for the same reason. "Benign" is the only claim 3,228 samples make, and its
+// entire content is which patterns were run and what they found. A missing record makes the
+// word mean "nobody looked"; a record from ruleset v1 sitting beside one from v2 makes two
+// samples look comparable when the question asked of them was different.
+func RefutationCoverage(labels []*Label, wantVersion int) (missing, stale []string) {
+	for _, l := range labels {
+		if l.Class != Benign {
+			continue
+		}
+		if l.RefutationSearch == nil {
+			missing = append(missing, l.ID)
+			continue
+		}
+		if l.RefutationSearch.RulesetVersion != wantVersion {
+			stale = append(stale, l.ID)
+		}
+	}
+	return missing, stale
+}
