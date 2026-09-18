@@ -55,6 +55,7 @@ that hides its own errors is asking for the trust it is supposed to be testing.
 | Derivation fidelity | independent re-implementation of every `derive:` rule, diffed against the committed labels | 3,079 of 3,079 |
 | Content leakage | token, structural and artifact features per population, base-rate aware | all samples; only 93 testable |
 | Label correctness — coordinates | every sample carrying a `truth` block, read | 253 of 253, census |
+| Evidence, post-audit | every risky sample's deciding quote located in its own bytes | 253 of 253 |
 | Label correctness — benign | stratified sample, 60 per population, seeded, every one read | 250 of 3,228 |
 
 The last row is an ESTIMATE and the row above it is a CENSUS. They are never combined into
@@ -304,18 +305,18 @@ not quite the independent strata the reporting design assumes.
 - **`sk-phamtiendatbg92…tech-stack-config` is still in the denominator.** The exclusion is
   written above but not yet keyed into the manifest. The `live-credential` pattern in
   `taxonomy/refutation.yaml` routes it to `adjudicate`; the adjudication has not been recorded.
-- **171 risky samples rest on a batch constant.** Every label now records a `basis`: 17
-  `read`, 75 `upstream`, 3,402 `assumed`. The 171 are malicious and hard-negative samples
-  whose class comes from `constant:malicious` — an attack nobody has confirmed sample by
-  sample, sitting in a recall denominator where a scanner that correctly stays quiet is
-  charged a miss. `validate` prints the count every run so it cannot become permanent by
-  inattention.
-- **The attribution axis is scoreable on 87 of 242, up from 17.** All 79 hand-read dimension
-  overrides now carry an `evidence` block with a quote located in the artifact's own bytes,
-  so they claim `read` and validate confirms it. The remaining 155 rest on the category map
-  and stay `derived`, which cannot score attribution — correctly, since a rule reading a
-  directory name is what inverted this axis in the first place. Widening it further means
-  reading those samples, not relabelling them.
+- **`tier` and `evasion` remain explanations nobody read.** 19 of 253 tiers and 0 of 68
+  evasions rest on a reading; the rest come from a filename prefix or a difficulty field —
+  the two lossy derivations the audit found producing 33 and 32 disputes. They are never
+  scored, and a wrong explanation still sends a scanner author to fix something that was
+  never broken. Each now declares its basis, so a consumer can filter; correcting them means
+  reading depth sample by sample, which has not been done.
+- **`severity` is scoreable on 65 of 242.** 169 samples say `high` because one manifest line
+  says `constant:high`. The axis now refuses those, which is accurate and leaves the axis
+  thin.
+- **14 refutation matches are adjudicated `keep`, and that is the expected answer.** 39% of
+  benign samples contain something a defensible scanner fires on; those are the precision
+  test. What the records buy is that somebody looked once and wrote down why.
 - **Two upstream pins cannot be verified locally** — parquet drops with no git history.
 - **The rule-id check cannot run here** and should not: it belongs in the scanner's own
   repository. No scanner's repository yet clones this corpus to check its own `expect` blocks.
