@@ -314,6 +314,14 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		if override, ok := d.DimensionOverrides[up.ID]; ok {
 			usedOverride[up.ID] = true
 			switch {
+			case sameSet(c.Dimensions, override.Dimensions) && override.Evidence != nil:
+				// Same value, but the override carries a located quote the category map cannot.
+				// That is not stale: it moves the axis from `derived` to `read`, which is the
+				// only basis allowed to score attribution. An override may correct a value, or
+				// supply the evidence for one, or both.
+				c.HandReadDimension = true
+				c.DimensionEvidence = override.Evidence
+				res.HandRead++
 			case sameSet(c.Dimensions, override.Dimensions):
 				// Stale means the override says what the RULE already says. It used to mean
 				// "the rule produced anything at all", which made the mechanism able to fill a

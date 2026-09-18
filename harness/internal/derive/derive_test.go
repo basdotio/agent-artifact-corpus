@@ -430,3 +430,37 @@ categories: [persistence-backdoor]
 		t.Fatalf("an unreadable tier must be reported, got %v", errs)
 	}
 }
+
+// An override that agrees with the category map is stale ONLY if it adds nothing. With
+// evidence it is doing the one thing the map cannot: making the attribution axis scoreable.
+func TestOverrideWithEvidenceIsNotStale(t *testing.T) {
+	e := entry(map[string]manifest.Targets{"persistence-backdoor": {"dim:backdoor"}})
+	e.Derive.DimensionOverrides = map[string]manifest.DimensionOverride{
+		"200-x": {
+			Dimensions: manifest.Targets{"backdoor"},
+			Evidence:   &manifest.Evidence{File: "s.sh", Lines: "3", Quote: "nc -e /bin/sh"},
+		},
+	}
+	root := t.TempDir()
+	writeSample(t, root, "persistence-backdoor", "200-x", `
+id: 200-x
+verdict: malicious
+severity: high
+categories: [persistence-backdoor]
+`)
+	res, errs := Derive(e, root, testTax())
+	for _, err := range errs {
+		if strings.Contains(err.Error(), "stale") {
+			t.Fatalf("an override supplying evidence was called stale: %v", err)
+		}
+	}
+	if len(res.Coords) != 1 {
+		t.Fatalf("got %d coords", len(res.Coords))
+	}
+	if res.Coords[0].DimensionEvidence == nil {
+		t.Error("the evidence did not reach the coordinate")
+	}
+	if !res.Coords[0].HandReadDimension {
+		t.Error("the sample should count as hand-read once evidence is attached")
+	}
+}
