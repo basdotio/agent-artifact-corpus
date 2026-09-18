@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: MIT
+#
+# `basis` — what a data point's truth rests on.
+#
+# Every sample in this corpus carries a class, and until now HOW that class was arrived at
+# lived in the manifest's derive rules rather than on the sample. That made four very
+# different things look identical in a label file:
+#
+#   - a person opened the artifact and pointed at the attack
+#   - the upstream said so and we took its word
+#   - a rule of ours translated the upstream's directory name
+#   - nobody judged this sample at all; it came from a batch we treat as one class
+#
+# Those four carry different weight and they must not be summed, for the same reason the
+# three credibility tiers in the manifest are never summed. `basis` moves that distinction
+# out of the manifest and onto the data point, where a scorer can act on it.
+#
+# ---------------------------------------------------------------------------------------
+# WHAT THIS FILE IS NOT
+#
+# It is not a confidence score. There is no ordering in which `derived` is "80% as good as"
+# `read`, and nothing may average them. The values name DIFFERENT KINDS OF EVIDENCE, and the
+# only operations defined on them are: filter, and report separately.
+#
+# It is also not a grading of effort. `assumed` is not laziness — 3,241 benign samples cannot
+# each be proven harmless, and pretending otherwise would be the dishonest option. `assumed`
+# exists so that "nobody looked at this one" is STATED rather than implied.
+#
+# ---------------------------------------------------------------------------------------
+# THE ASYMMETRY, STATED ONCE
+#
+# Judging a sample RISKY means exhibiting one piece of evidence. Judging it SAFE means
+# proving no evidence exists anywhere in it. The first is a finite act; the second is a
+# universal negative and cannot be performed. So no single basis value can cover both
+# directions, and any design that claims to is hiding the asymmetry rather than resolving it.
+#
+# What IS made uniform is the record: every data point declares its basis, every basis has
+# mandatory companion fields, and a label missing them fails validation. The difference
+# between a hand-read attack and an untouched benign sample stops being invisible.
+
+version: 1
+
+values:
+  - id: read
+    what: >-
+      A person opened this sample's content, located the deciding element, and quoted it
+      verbatim. The judgement was made against the evidence, and the evidence travels with
+      the label so a reader can disagree with it.
+    not: >-
+      NOT "somebody looked at this sample". The deciding element is the QUOTE: `evidence.quote`
+      must occur byte-for-byte inside the sample tree, and validation goes and finds it. A
+      judgement made by reading but recorded without a locatable quote is not `read` — it is
+      `upstream` or `derived` wearing a better name, and the whole point of this field is that
+      those must not be able to borrow each other's authority.
+
+  - id: upstream
+    what: >-
+      The upstream declared this value in its own metadata and we adopted it unchanged. The
+      value is theirs; our contribution is transport.
+    not: >-
+      NOT `derived`. The deciding element is whether a rule of OURS sat in between. Taking
+      `verdict: malicious` and writing `class: malicious` is `upstream` — the vocabularies
+      coincide and nothing was interpreted. The moment we write a mapping that translates
+      their word into ours, the result is `derived` and inherits our mapping's errors, not
+      just theirs.
+
+  - id: derived
+    what: >-
+      One of our rules computed this value from the upstream's metadata — a directory name, a
+      category, a filename prefix, a declared field.
+    not: >-
+      NOT `upstream`, and emphatically NOT `read`. The deciding element is that the value is
+      the OUTPUT OF A RULE, so its ceiling is the rule's correctness and its failures are
+      correlated: a rule wrong about a category is wrong about every member of that category
+      at once. This corpus has made that exact mistake three times (a category map, a
+      difficulty field, a filename prefix), and each time the rule ran faithfully. Faithful is
+      not the same as correct, and `derived` is the value that says so out loud.
+
+  - id: assumed
+    what: >-
+      Nothing judged this sample. The value comes from where the sample was COLLECTED: things
+      gathered from here are treated as this class.
+    not: >-
+      NOT `derived`. A derivation at least consulted metadata about THIS SAMPLE; an assumption
+      consulted only the batch. The deciding element is the GRANULARITY OF THE EVIDENCE — the
+      supporting statement is about the population, not about the artifact in front of you.
+      This is the honest label for `constant:benign` and for `constant:malicious` alike: a
+      constant is not a measurement of anything, and calling it a derivation would let 3,241
+      unexamined samples borrow the credibility of a rule that was never applied to them.
+
+# Mandatory companion fields. A label whose basis is X and which is missing any of
+# `requires[X]` fails validation — the point of the vocabulary is that a basis cannot be
+# claimed without the thing that would let someone check it.
+requires:
+  read:     [evidence.file, evidence.lines, evidence.quote]
+  upstream: [source_field, source_value]
+  derived:  [rule]
+  assumed:  [assumption]
+
+# What each basis is allowed to support when a scanner is scored.
+#
+# DETECTION (`class`) accepts every basis, because the class of these samples has been
+# checked the hardest: a census of all 253 coordinate-bearing samples produced zero class
+# disputes. But the report lists the bases separately and never pools them into one recall
+# figure, because a population labelled by constant fails as one block.
+#
+# ATTRIBUTION (`dimension`) accepts ONLY `read`. Attribution is the axis that says WHICH KIND
+# of problem a sample is, and no rule reading a directory name can establish that — the three
+# inverted-attribution failures in this corpus's audit were all `derived`. Restricting the
+# axis to `read` makes it usable immediately, on the subset that has evidence, instead of
+# waiting for every disputed label to be adjudicated.
+scores:
+  class:     [read, upstream, derived, assumed]
+  dimension: [read]
+
+# An `assumed` malicious sample is a standing debt, not a resting state: it asserts an attack
+# nobody confirmed. Validation reports the count so it stays visible and cannot quietly become
+# permanent. Benign samples are expected to stay `assumed` forever — they carry
+# `refutation_search` instead, which is what makes "we did not look" distinguishable from
+# "we looked with this ruleset and found nothing".
+report_as_debt:
+  - basis: assumed
+    class: [malicious, hard-negative]
+    why: >-
+      A malicious label with no per-sample confirmation is a claim about an attack that
+      nobody has exhibited. It can sit in a recall denominator for years and a scanner that
+      correctly stays quiet on it is charged a miss.

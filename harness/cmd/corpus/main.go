@@ -21,6 +21,7 @@ import (
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/label"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/leakage"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/manifest"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/refute"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
 )
 
@@ -68,8 +69,19 @@ func cmdValidate(root string) int {
 	if err != nil {
 		fatal(err)
 	}
+	basisSpec, err := taxonomy.LoadBasis(filepath.Join(root, "taxonomy"))
+	if err != nil {
+		fatal(err)
+	}
+	refuteRules, err := refute.Load(filepath.Join(root, "taxonomy"))
+	if err != nil {
+		fatal(err)
+	}
 
 	var problems []string
+	for _, e := range basisSpec.ValidateBasis() {
+		problems = append(problems, fmt.Sprintf("taxonomy/basis.yaml: %v", e))
+	}
 	for _, e := range tax.Validate() {
 		problems = append(problems, fmt.Sprintf("taxonomy: %v", e))
 	}
@@ -188,21 +200,7 @@ func cmdValidate(root string) int {
 		// margin and no overlap. Nothing was wrong with the samples. The bucket was wrong: it
 		// pooled two batches that were built by different people for different reasons, which
 		// is exactly the pooling this gate exists to detect in other people's corpora.
-		group := "hand-written"
-		switch {
-		case l.Origin.DerivedFrom != nil && l.Origin.DerivedFrom.Entry != "":
-			group = l.Origin.DerivedFrom.Entry
-		case l.Origin.Type == "harvested":
-			// One batch by construction: all collected by the same script from the same search.
-			group = "harvested"
-		default:
-			// A hand-pinned label can still describe somebody else's artifact. When the source
-			// names an upstream, that upstream is the batch; only samples with no external
-			// source at all were written here.
-			if repo := originOf(l); repo != "" {
-				group = repo
-			}
-		}
+		group := populationOf(l)
 		samples = append(samples, leakage.Sample{
 			ID: l.ID, Class: string(l.Class), Files: files, Group: group,
 		})
@@ -216,6 +214,12 @@ func cmdValidate(root string) int {
 	// for "the hashes were checked".
 	fmt.Printf("sha256      %d of %d label(s) carry a hash; %d verified against the vendored "+
 		"bytes\n", carried, len(labels), verified)
+
+	// What each label RESTS ON, and — for the benign half — whether anything was searched for
+	// before the word "benign" was written down. Both were previously unrecorded, which let a
+	// batch constant and a hand-read artifact print as the same kind of claim.
+	problems = append(problems, reportBasis(labels, basisSpec)...)
+	problems = append(problems, reportRefutation(labels, refuteRules)...)
 	// Named even when clean, because the point of these three is that they were each added
 	// after the property they guard had already silently broken.
 	if len(neutralProblems) == 0 {

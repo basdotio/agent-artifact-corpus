@@ -67,6 +67,19 @@ type Label struct {
 
 	Origin Origin `yaml:"origin"`
 
+	// Basis records what each axis of Truth RESTS ON, from taxonomy/basis.yaml. Origin says
+	// where the sample came from and Truth says what it is; Basis is the third question,
+	// which nothing recorded until now: how do we know. A coordinate a person read off the
+	// artifact and a coordinate a batch constant supplied used to look identical here.
+	//
+	// Optional, because the whole corpus predates it. See BasisDebt.
+	Basis *Basis `yaml:"basis"`
+
+	// RefutationSearch is the benign half of the same question. A benign sample cannot be
+	// proven harmless, so it records which ruleset was run over it and what matched — making
+	// "searched and found nothing" distinguishable from "nobody looked".
+	RefutationSearch *RefutationSearch `yaml:"refutation_search"`
+
 	// Truth is the tool-neutral half: what the sample is, not what any scanner should say
 	// about it.
 	Truth Truth `yaml:"truth"`
