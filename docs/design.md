@@ -94,11 +94,18 @@ checked-in fixture:
 - symlink escapes and cycles
 - files that grow while being read
 
-`fixtures/` is where the Go constructors for these belong. **It is empty today** — the
-directory exists and nothing has been written into it, which makes this the largest declared
-hole in layer 1. **Disk fixtures take scale and non-Go contributors; a Go harness takes the
-filesystem-level evasions.** Neither replaces the other, and the three most severe defects
-found in audit so far are all in the second group.
+`harness/internal/fixtures` holds the Go constructors, and `corpus fixtures` lists them or
+materialises them under a directory a scanner runner can point at. Six exist: a `0111`
+traverse-only subdirectory (class 3 disclosure — a walk cannot enumerate it, so a silent
+scanner scored an unread skill as read), a FIFO standing in for `SKILL.md`, a symlink cycle, a
+symlink escaping to `/etc/passwd`, a 4096-deep directory chain, and an 8 GiB sparse `.mcp.json`
+(all class 7 robustness). Each states, tool-neutrally, what a correct scanner must do; nothing
+here runs a scanner. Because a `0111` directory defeats the enumeration `RemoveAll` needs,
+`corpus fixtures --restore` unsticks a materialised tree before deletion.
+
+**Disk fixtures take scale and non-Go contributors; a Go harness takes the filesystem-level
+evasions.** Neither replaces the other, and the three most severe defects found in audit so far
+are all in the second group.
 
 ---
 

@@ -162,6 +162,12 @@ make test        # harness unit tests
 make score V=verdicts.jsonl   # grade a scanner's verdicts into recall, false positives, coverage
 ```
 
+`corpus fixtures` lists or materialises the injected-fault trees git cannot store — a 0111
+traverse-only directory, a FIFO SKILL.md, symlink cycles and escapes, a 4096-deep chain, an
+8 GiB sparse config — each with the tool-neutral pass condition a runner checks. Run
+`corpus fixtures --restore <dir>` before deleting a materialised set, or the 0111 directory
+blocks `rm -rf`.
+
 `corpus score` reads a scanner's output as JSONL — one `{"sample","verdict"}` object per line,
 with optional `severity` and `dimensions` — and prints recall per dimension and per source,
 false positives per population, the hard-negative census, and attribution over the read-basis
