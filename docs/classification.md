@@ -145,7 +145,7 @@ spread (0.0%–30.8%) was wider than the pooled figure.
 
 ## Why the benign side is 13x the malicious side
 
-A reader who sees 3,236 benign against 237 malicious reasonably suspects the corpus is
+A reader who sees 3,228 benign against 237 malicious reasonably suspects the corpus is
 lopsided. It is, deliberately, and the reason is that **recall and the false-positive rate do
 not need the same number of samples — not even close.**
 
@@ -165,7 +165,7 @@ reported: four of the eight dimensions hold fewer than 20 samples each, and a re
 from 6 samples carries ±24 points, which is not a figure.
 
 **And the benign side's size is not about precision either.** Precision passed the point of
-useful return well before 2,000: at a true rate of 1%, n=1,000 gives ±0.62 points and n=3,236
+useful return well before 2,000: at a true rate of 1%, n=1,000 gives ±0.62 points and n=3,228
 gives ±0.34. What the extra samples buy is **source diversity**, which is the thing the
 pooling rule above exists to protect. Measured over the vendored SkillMD sample, accumulating
 in a fixed seeded order:
