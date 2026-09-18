@@ -17,8 +17,9 @@ wrong, and the cause in every case was a number recalled rather than counted.
 
 `make validate` checks that the corpus is internally consistent. It cannot check whether a
 label is TRUE — whether the sample really does what the label says. Nothing had ever checked
-that. Of 3,481 samples, 19 carry coordinates a person wrote; the other 3,475 were placed by a
-rule or a script and had never been read.
+that. Of 3,481 samples, 253 now carry a quote located in the artifact's own bytes — which is
+the RESULT of this audit, not its starting point. When it began, 19 coordinates had been
+written by a person and the other 3,475 were placed by a rule or a script and never read.
 
 The corpus's own third red line says "no scanner complained" is not evidence of benignity.
 The same logic points back at itself: **"validate passes" is not evidence that the labels are
