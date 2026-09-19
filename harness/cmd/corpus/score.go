@@ -86,7 +86,7 @@ func printReport(rep score.Report) {
 	if g.N == 0 {
 		fmt.Println("  none scored")
 	} else {
-		fmt.Printf("  flagged %d of %d benign-that-looks-malicious (%.0f%%) — every one is a false positive\n",
+		fmt.Printf("  flagged %d of %d (%.0f%%) — each one a false positive on a deliberate near-miss\n",
 			g.Hits, g.N, g.Point*100)
 	}
 

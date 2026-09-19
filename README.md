@@ -74,10 +74,18 @@ separate, the same corpus yields a per-technique, per-dimension comparison rathe
 number per tool. `make stats` already reports the tool-neutral composition, including every
 technique that has no sample yet.
 
-**This repository does not score.** It owns the samples and the rules about them. A runner
-belongs with each scanner, or as a thin adapter that normalises output — SARIF 2.1.0 is the
-obvious boundary and several scanners in this space already emit it. Keeping the scorer out
-is what lets `make validate` run with no build of any scanner present.
+**This repository does not RUN scanners; it does grade their answers.** The line moved, and
+where it moved to matters. `corpus score` reads a scanner's verdicts and turns them into
+recall, false positives and coverage — that is arithmetic over `truth`, and keeping it here is
+what stops every scanner inventing its own scoring and calling the results comparable. What
+stays out is the part that has to know a particular tool: how to invoke it, how to read its
+output, how to place a sample into the layout it expects. That **runner belongs with each
+scanner**, or as a thin adapter that normalises output — SARIF 2.1.0 is the obvious boundary
+and several scanners in this space already emit it.
+
+The split is what lets `make validate` and `corpus score` run with no build of any scanner
+present: the corpus never executes anything it is measuring. See
+[`using-the-corpus.md`](docs/using-the-corpus.md) for the whole protocol from the other side.
 
 ### Tools wired up today
 
