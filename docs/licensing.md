@@ -12,6 +12,37 @@ Two questions, and conflating them is the common error:
 lawfully obtained, and publishing counts and rates, is not distribution and not a derivative
 work. That is why layer 2 exists and why it is only URLs and hashes.
 
+### That answer rests on the word "locally", and some scanners are not
+
+Added 2026-09-21, after the reasoning above was misread — by the author of the misreading.
+
+Not every scanner is a local program. A growing number are CLI front ends to a hosted service:
+the binary runs on your machine, the detection runs on theirs, and the artifact's text goes over
+the wire. Point one of those at material here and the sentence above stops applying, because
+"running a tool locally" was doing the work in it. Handing a file to a third party's service is
+at minimum a transmission, and for material under no licence it is the question 1 nobody asked.
+
+**Where this does and does not bite, precisely:**
+
+| | What it holds | A cloud-backed scanner |
+|---|---|---|
+| **Layer 1** — `corpus/`, the 3,539 labelled samples | Permissive licences only, and `make validate` rejects any label whose `origin.license` is outside that set. This repository is public. | **Fine.** Anything you could hand a vendor, they could clone. |
+| **Layer 2** — `cache/`, fetched on demand per `manifest/` | The no-licence and NonCommercial corpora, by design: they are referenced precisely because they may not be vendored. Currently ~874 MB once fetched. | **Not fine.** Zero-grant material to a commercial service is redistribution, not measurement. |
+
+So the rule has a shape worth stating plainly: **a cloud-backed scanner may be measured on
+layer 1 and must not be pointed at `cache/`.** Its figures then rest on a different denominator
+than a local tool's, and the citation rules below already require saying so — an exclusion
+appears in the conclusion with both numbers.
+
+**The mistake that produced this section** is recorded because it is the instructive part. A
+reader took the `vendorable: false` flags in `manifest/corpora.yaml` to be a list of
+non-redistributable samples sitting in the corpus, and concluded that nine sources had to be
+withheld from a commercial scanner. They are nothing of the kind: those flags describe whether an
+UPSTREAM corpus could be vendored, and the samples in layer 1 that trace back to them are our own
+permissively licensed reconstructions. Three of them are MIT files we wrote from a paper's
+description. The two questions at the top of this page were conflated exactly as the first
+sentence warns, by someone who had read that sentence.
+
 | Class | Corpora | Vendor into layer 1 | Layer 2 |
 |---|---|---|---|
 | **No license** | trailofbits, snyk-labs, MalSkillBench, MCPTox, zast-ai | ❌ **zero grant** | ✅ |
