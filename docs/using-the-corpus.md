@@ -190,6 +190,33 @@ hidden one is a lie.
 
 ---
 
+## If this corpus contains your own test fixtures
+
+It may. 127 of the malicious MCP samples derive from cisco-ai-defense's scanner evals, and a set
+of the fixtures come from NVIDIA's SkillSpector. If you are one of those projects, a figure over
+the whole corpus is partly your scanner graded on its own tests, and it will flatter you.
+
+Produce both numbers:
+
+```bash
+go run ./cmd/corpus samples --exclude-source <your-source-id> > samples.jsonl
+```
+
+`corpus samples` lists the source ids in its error message if you mistype one — and it REFUSES a
+name no sample carries rather than filtering nothing, because a typo would otherwise hand you a
+figure that looks de-contaminated and is not. The default excludes nothing: a denominator that
+shrinks unless you ask is a denominator that shrinks without anyone noticing.
+
+Both runs, then both numbers in the conclusion. `corpus score` helps by naming what is missing:
+when samples have no verdict it prints them grouped by source, and marks the ones where an entire
+source is absent.
+
+**Excluding is not always the better number.** Dropping cisco's 127 leaves three malicious MCP
+samples, which is too few for a rate — so on that surface there is no clean denominator for
+anyone, and the honest report says that rather than picking whichever version reads better.
+
+---
+
 ## If you want rule-level precision
 
 Everything above works with no entry anywhere in this repository. If you want more than a

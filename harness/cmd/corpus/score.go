@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/label"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/score"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
 )
@@ -54,11 +56,11 @@ func cmdScore(root string, args []string) int {
 	}
 
 	rep := score.Score(labels, verdicts, tax, basisSpec, populationOf)
-	printReport(rep)
+	printReport(rep, labels)
 	return 0
 }
 
-func printReport(rep score.Report) {
+func printReport(rep score.Report, labels []*label.Label) {
 	fmt.Printf("corpus     %d labels — %d malicious, %d benign, %d hard-negative\n",
 		rep.Labels, rep.Malicious, rep.Benign, rep.HardNeg)
 	fmt.Printf("coverage   %d of %d scored; %d had no verdict",
@@ -69,6 +71,11 @@ func printReport(rep score.Report) {
 	fmt.Println()
 	if rep.Uncovered > 0 {
 		fmt.Println("           an unscored sample is not a pass — recall below is over the scored subset only")
+		// Grouped by source, not listed by id. 127 ids tell a reader nothing; "127 from
+		// cisco-mcp-scanner-evals" tells them a whole source is missing from the denominator,
+		// which is either a deliberate de-contamination or an accident, and both are things
+		// they need to see at the top rather than infer from a list further down.
+		printUncoveredBySource(labels, rep.UncoveredIDs)
 	}
 
 	fmt.Println("\ndetection — recall per dimension. collected and constructed never merge:")
@@ -106,6 +113,44 @@ func printReport(rep score.Report) {
 	if len(rep.UnknownVerdicts) > 0 {
 		fmt.Printf("\n%d verdict(s) for a sample not in the corpus:\n", len(rep.UnknownVerdicts))
 		printList(rep.UnknownVerdicts)
+	}
+}
+
+// printUncoveredBySource says WHICH sources the missing samples came from. The corpus's citation
+// rule requires an exclusion to appear in the conclusion with both numbers; this is the line that
+// makes the first of those two numbers impossible to miss, whether the exclusion was intended
+// (`corpus samples --exclude-source`) or is a runner quietly dropping a whole shape.
+func printUncoveredBySource(labels []*label.Label, uncovered []string) {
+	if len(uncovered) == 0 {
+		return
+	}
+	missing := make(map[string]bool, len(uncovered))
+	for _, id := range uncovered {
+		missing[id] = true
+	}
+	counts := map[string]int{}
+	totals := map[string]int{}
+	for _, l := range labels {
+		src := populationOf(l)
+		totals[src]++
+		if missing[l.ID] {
+			counts[src]++
+		}
+	}
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	fmt.Println("           the unscored, by source — a whole source missing is either a")
+	fmt.Println("           deliberate exclusion or a runner dropping a shape; both need saying:")
+	for _, name := range names {
+		note := ""
+		if counts[name] == totals[name] {
+			note = "  (the entire source)"
+		}
+		fmt.Printf("           %5d of %-5d %s%s\n", counts[name], totals[name], name, note)
 	}
 }
 
