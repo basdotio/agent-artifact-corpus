@@ -121,8 +121,37 @@ func printReport(rep score.Report, labels []*label.Label) {
 // makes the first of those two numbers impossible to miss, whether the exclusion was intended
 // (`corpus samples --exclude-source`) or is a runner quietly dropping a whole shape.
 func printUncoveredBySource(labels []*label.Label, uncovered []string) {
-	if len(uncovered) == 0 {
+	gaps := uncoveredBySource(labels, uncovered)
+	if len(gaps) == 0 {
 		return
+	}
+	fmt.Println("           the unscored, by source — a whole source missing is either a")
+	fmt.Println("           deliberate exclusion or a runner dropping a shape; both need saying:")
+	for _, g := range gaps {
+		note := ""
+		if g.Whole {
+			note = "  (the entire source)"
+		}
+		fmt.Printf("           %5d of %-5d %s%s\n", g.Missing, g.Total, g.Source, note)
+	}
+}
+
+// sourceGap is one source's share of the unscored samples. Whole is the claim worth being right
+// about: it says the denominator lost this source entirely, and a reader acts differently on
+// that than on "9 of 387 went missing".
+type sourceGap struct {
+	Source  string
+	Missing int
+	Total   int
+	Whole   bool
+}
+
+// uncoveredBySource is the arithmetic, split out from the printing so the Whole claim can be
+// tested. Sources with nothing missing are omitted rather than listed with a zero: the section
+// exists to name what is absent.
+func uncoveredBySource(labels []*label.Label, uncovered []string) []sourceGap {
+	if len(uncovered) == 0 {
+		return nil
 	}
 	missing := make(map[string]bool, len(uncovered))
 	for _, id := range uncovered {
@@ -143,15 +172,14 @@ func printUncoveredBySource(labels []*label.Label, uncovered []string) {
 	}
 	sort.Strings(names)
 
-	fmt.Println("           the unscored, by source — a whole source missing is either a")
-	fmt.Println("           deliberate exclusion or a runner dropping a shape; both need saying:")
+	out := make([]sourceGap, 0, len(names))
 	for _, name := range names {
-		note := ""
-		if counts[name] == totals[name] {
-			note = "  (the entire source)"
-		}
-		fmt.Printf("           %5d of %-5d %s%s\n", counts[name], totals[name], name, note)
+		out = append(out, sourceGap{
+			Source: name, Missing: counts[name], Total: totals[name],
+			Whole: counts[name] == totals[name],
+		})
 	}
+	return out
 }
 
 // printRecall prints the dimension table with collected and constructed on their own rows, so

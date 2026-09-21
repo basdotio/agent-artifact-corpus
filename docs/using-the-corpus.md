@@ -192,8 +192,8 @@ hidden one is a lie.
 
 ## If this corpus contains your own test fixtures
 
-It may. 127 of the malicious MCP samples derive from cisco-ai-defense's scanner evals, and a set
-of the fixtures come from NVIDIA's SkillSpector. If you are one of those projects, a figure over
+It may. 127 of the malicious MCP samples derive from cisco-ai-defense's scanner evals, and 6
+samples (5 of them malicious) come from NVIDIA's SkillSpector fixtures. If you are one of those projects, a figure over
 the whole corpus is partly your scanner graded on its own tests, and it will flatter you.
 
 Produce both numbers:

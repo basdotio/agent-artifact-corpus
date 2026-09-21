@@ -24,7 +24,7 @@ import (
 // # Why it can now filter by source
 //
 // Some scanners are measured against a corpus that contains their own test fixtures. This one
-// holds 127 samples derived from cisco-ai-defense's scanner evals and a set from NVIDIA's
+// holds 127 samples derived from cisco-ai-defense's scanner evals and 6 from NVIDIA's
 // SkillSpector fixtures, so a figure for either of those tools is partly that tool graded on its
 // own tests. The corpus's own citation rule already covers the reporting side — "any exclusion
 // must appear in the conclusion, with both numbers" — but until now there was no way to PRODUCE

@@ -142,8 +142,8 @@ go run ./cmd/corpus fixtures --restore /tmp/fx      # 删除前必须执行
 
 ## 如果这份语料里含有你自己的测试 fixture
 
-有可能。恶意 MCP 样本里有 127 个派生自 cisco-ai-defense 的扫描器 evals，另有一批 fixture 来自
-NVIDIA 的 SkillSpector。如果你就是这些项目之一，那么在整份语料上得到的数字，有一部分是**你的扫描器
+有可能。恶意 MCP 样本里有 127 个派生自 cisco-ai-defense 的扫描器 evals，另有 6 个样本（其中 5 个恶意）
+来自 NVIDIA 的 SkillSpector fixtures。如果你就是这些项目之一，那么在整份语料上得到的数字，有一部分是**你的扫描器
 在自己的测试上得分**，它会讨好你。
 
 把两个数字都产出来：
