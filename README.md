@@ -86,12 +86,13 @@ and several scanners in this space already emit it.
 The split is what lets `make validate` and `corpus score` run with no build of any scanner
 present: the corpus never executes anything it is measuring. See
 [`using-the-corpus.md`](docs/using-the-corpus.md) for the whole protocol from the other side.
+Short introductions suitable for a post are in [`articles.md`](docs/articles.md).
 
 ### Tools wired up today
 
 | Tool | Rule-level expectations | Note |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 3,531 layer-1 samples | the only one so far — see *Known gaps* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 3,539 layer-1 samples | the only one so far — see *Known gaps* |
 
 No second scanner has been wired up yet. Until one is, the tool-neutral claims above are a
 property of the schema rather than a demonstrated result, and that distinction is the reason
@@ -212,8 +213,8 @@ shows up there rather than in someone else's clone.
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 3,531 labels
-  carry such a block; the other 3,483 are pure `truth` and need no scanner to check. A
+- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 3,539 labels
+  carry such a block; the other 3,533 are pure `truth` and need no scanner to check. A
   scanner's rule list belongs to that scanner, so `taxonomy/tools.yaml` reaches it only
   through an environment variable and the validator now **rejects** a `rules_source.path`
   that leaves this repository. That rule exists because aguard's used to be
