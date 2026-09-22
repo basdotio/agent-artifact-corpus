@@ -80,6 +80,24 @@ type Label struct {
 	// "searched and found nothing" distinguishable from "nobody looked".
 	RefutationSearch *RefutationSearch `yaml:"refutation_search"`
 
+	// Reviewed records that a PERSON read this artifact, and what they concluded.
+	//
+	// It deliberately does NOT touch `basis.class`, which stays `assumed`. taxonomy/basis.yaml
+	// is explicit that benign samples stay `assumed` forever, because reading one file cannot
+	// prove harmlessness — there is no quote for the absence of an attack. So this is not an
+	// upgrade of the class; it is a separate fact about who looked.
+	//
+	// What it buys is the distinction an external review put its finger on: `corpus score`
+	// reports a FLAG RATE over the benign pool, and a flag on a sample nobody read cannot be
+	// called a false positive without asserting the harmlessness the labels refuse to assert.
+	// A flag on a REVIEWED sample can. This is the only path from the one number to the other.
+	//
+	// The audit of 2026-09-17 read 250 benign samples and recorded only the totals; the
+	// per-sample readings and the sampling list were lost, because `cache/` is gitignored and
+	// the list lived there. That work cannot be recovered and is not claimed here — this field
+	// starts empty and fills only with readings that were actually done and recorded.
+	Reviewed *Reviewed `yaml:"reviewed"`
+
 	// Truth is the tool-neutral half: what the sample is, not what any scanner should say
 	// about it.
 	Truth Truth `yaml:"truth"`
@@ -292,6 +310,7 @@ func (l *Label) Validate(tax *taxonomy.Set) []error {
 	default:
 		bad("class %q is not malicious, benign or hard-negative", l.Class)
 	}
+	errs = append(errs, l.Reviewed.Validate(l.Class)...)
 	l.Surface.validate(bad)
 	if l.Entry == "" {
 		bad("entry is empty — it must say what the scanner is pointed at")

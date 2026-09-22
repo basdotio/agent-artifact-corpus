@@ -70,6 +70,14 @@ type Report struct {
 	UncoveredIDs       []string // corpus samples the scanner said nothing about
 	UnknownVerdicts    []string // verdicts naming a sample not in the corpus
 
+	// BenignReviewed is how many benign samples a person has actually read, and
+	// FlagsOnReviewed how many flags landed on those. The pair is the only bridge this corpus
+	// offers between a flag rate and a false-positive rate: on an unreviewed sample the benign
+	// class rests on `assumed`, so calling a flag an error would assert a harmlessness the
+	// label declines to assert. Both start at zero and grow one reading at a time.
+	BenignReviewed  int
+	FlagsOnReviewed int
+
 	RecallByDimension []Group // split by Evidence; never a pooled total
 	RecallBySource    []Group // one source is a rate about that source
 	FPByPopulation    []Group
@@ -165,6 +173,17 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 			fp[pop].n++
 			if v.Flagged() {
 				fp[pop].hits++
+				// A flag on a sample a person has READ is the only kind this corpus can call a
+				// false positive outright. On the rest, the benign class rests on `assumed` and
+				// calling the flag an error would assert a harmlessness the label refuses to
+				// assert. Counting the reviewed subset separately is the one honest bridge
+				// between the flag rate and a false-positive rate.
+				if l.Reviewed != nil {
+					rep.FlagsOnReviewed++
+				}
+			}
+			if l.Reviewed != nil {
+				rep.BenignReviewed++
 			}
 
 		case label.HardNegative:

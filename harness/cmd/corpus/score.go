@@ -95,6 +95,7 @@ func printReport(rep score.Report, labels []*label.Label) {
 	fmt.Println("  benign here means `somebody runs this`, on an `assumed` basis — these are flags,")
 	fmt.Println("  not confirmed false positives. Read one before you count it as an error.")
 	printGroups(rep.FPByPopulation)
+	printReviewed(rep)
 
 	fmt.Println("\nhard negatives — the precision probe, a census, never pooled with the estimate above:")
 	g := rep.HardNegFlagged
@@ -234,4 +235,21 @@ func printList(ids []string) {
 	for i := 0; i < len(ids); i += perLine {
 		fmt.Println("  " + strings.Join(ids[i:min(i+perLine, len(ids))], "  "))
 	}
+}
+
+// printReviewed reports the reviewed subset — the only part of the benign pool where a flag can
+// be called a false positive outright. It prints even when the subset is empty, and says so in
+// words, because a silent zero here reads as "no confirmed false positives" when what it means
+// is "nobody has read one yet". Those are opposite claims.
+func printReviewed(rep score.Report) {
+	if rep.BenignReviewed == 0 {
+		fmt.Println("  reviewed subset: none. No benign sample has been read by a person, so NONE")
+		fmt.Println("  of the flags above is a confirmed false positive — not one is confirmed to")
+		fmt.Println("  be an error, and not one is confirmed to be correct.")
+		return
+	}
+	fmt.Printf("  reviewed subset: %d of the benign pool has been read by a person; %d flag(s) "+
+		"landed there.\n", rep.BenignReviewed, rep.FlagsOnReviewed)
+	fmt.Printf("  those %d ARE confirmed false positives. The rest of the flags above remain "+
+		"unadjudicated.\n", rep.FlagsOnReviewed)
 }

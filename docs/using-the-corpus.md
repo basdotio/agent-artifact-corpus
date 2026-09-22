@@ -139,6 +139,15 @@ committed this to be loaded*; its class rests on `assumed`, nobody read it, and 
 review of it exists. So the benign table reports what your scanner DID — a flag rate — and how
 much of it is error is a question these labels cannot answer. Read one before counting it.
 
+The bridge is a `reviewed` block, and it is the only one: a benign label that someone has read
+carries `reviewed: {date, verdict, note}` with the verdict one of `benign`, `would-fire` or
+`not-benign`. It deliberately does NOT change `basis.class`, which stays `assumed` forever —
+reading one file cannot prove harmlessness, and there is no quote for the absence of an attack.
+What it does is let the scorecard say how many of your flags landed on samples a person read,
+and those ARE confirmed false positives. The count starts small and grows one reading at a
+time; when it is zero the scorer says so in words, because a silent zero would read as "no
+confirmed false positives" when it means "nobody has looked".
+
 **A census and an estimate are never one number.** The 19 hard negatives ARE read
 individually — every one is a deliberate near-miss, so a flag on any of them is a confirmed false
 positive you can go look at. The thousands of benign samples are a sample of a population.

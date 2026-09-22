@@ -314,3 +314,67 @@ func RefutationCoverage(labels []*Label, wantVersion int) (missing, stale []stri
 	}
 	return missing, stale
 }
+
+// ReviewVerdict is what a person concluded after reading a benign sample. The three values are
+// the buckets the 2026-09-17 audit used, and the middle one is the reason the scale is not
+// binary: a benign artifact a scanner would reasonably alert on is not a defect in the sample,
+// it is the precision test doing its job, and collapsing it into "benign" would hide the most
+// interesting group in the corpus.
+type ReviewVerdict string
+
+const (
+	// ReviewBenign — read, and nothing in it would make a reasonable scanner fire.
+	ReviewBenign ReviewVerdict = "benign"
+	// ReviewWouldFire — benign, but it wears a shape a reasonable scanner alerts on. A flag
+	// here is a confirmed false positive AND an expected one.
+	ReviewWouldFire ReviewVerdict = "would-fire"
+	// ReviewNotBenign — the label is wrong. Such a sample must not stay in corpus/benign; this
+	// value exists so the finding can be recorded in the same pass that found it, not so the
+	// sample can sit in the denominator wearing a note that says it should not.
+	ReviewNotBenign ReviewVerdict = "not-benign"
+)
+
+// Reviewed is the human half of "was this actually looked at". See Label.Reviewed for why it
+// does not and must not change the class basis.
+type Reviewed struct {
+	Date    string        `yaml:"date"`
+	Verdict ReviewVerdict `yaml:"verdict"`
+	// Note is required. A reading with no note is indistinguishable from a tick-box, and the
+	// whole value of this field is that a later reader can disagree with a specific claim.
+	Note string `yaml:"note"`
+}
+
+// Validate checks a review record. A missing note or an unknown verdict fails: this field only
+// earns its keep if every entry says something a later reader can check or contest.
+func (r *Reviewed) Validate(class Class) []error {
+	if r == nil {
+		return nil
+	}
+	var errs []error
+	if class == Malicious {
+		errs = append(errs, fmt.Errorf("`reviewed` records the reading of a BENIGN artifact; a "+
+			"malicious sample states its reading in basis.evidence with a located quote instead"))
+	}
+	switch r.Verdict {
+	case ReviewBenign, ReviewWouldFire, ReviewNotBenign:
+	case "":
+		errs = append(errs, fmt.Errorf("`reviewed` has no verdict"))
+	default:
+		errs = append(errs, fmt.Errorf("`reviewed.verdict` %q is not one of %q, %q, %q",
+			r.Verdict, ReviewBenign, ReviewWouldFire, ReviewNotBenign))
+	}
+	if strings.TrimSpace(r.Note) == "" {
+		errs = append(errs, fmt.Errorf("`reviewed` has no note — a reading nobody can contest "+
+			"is a tick-box, not a reading"))
+	}
+	if strings.TrimSpace(r.Date) == "" {
+		errs = append(errs, fmt.Errorf("`reviewed` has no date — a reading of an artifact that "+
+			"may since have been re-derived has to say when it happened"))
+	}
+	if r.Verdict == ReviewNotBenign && class == Benign {
+		errs = append(errs, fmt.Errorf("`reviewed.verdict: not-benign` on a sample still filed "+
+			"under corpus/benign — it is sitting in the false-positive denominator while its own "+
+			"label says it does not belong there; move it or correct the reading"))
+	}
+	return errs
+}
