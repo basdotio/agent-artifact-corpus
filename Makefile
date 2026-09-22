@@ -1,10 +1,12 @@
 # agent-artifact-corpus
 #
-# This repository owns the samples and the rules about them. It does not own the scorer:
-# running a scanner over the corpus lives in that scanner's repository, where a drift gate
-# can compare a generated report against a committed one.
+# This repository owns the samples, the rules about them, and the arithmetic over `truth`:
+# `corpus score` turns a scanner's verdicts into recall, false positives and coverage. What it
+# does NOT own is the part that must know a particular tool — how to invoke it, how to read its
+# output, how to place a sample into the layout it expects. That runner lives in that scanner's
+# repository, where a drift gate can compare a generated report against a committed one.
 #
-# Keeping the scorer out is load-bearing rather than tidy. A label's `truth` block is written
+# Keeping the RUNNER out is load-bearing rather than tidy. A label's `truth` block is written
 # in technique names no scanner owns, so it has to be checkable with no build of any scanner
 # present — which is also what lets someone benchmark their own tool against this corpus
 # without us being involved.

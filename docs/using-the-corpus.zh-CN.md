@@ -78,11 +78,13 @@ detection — recall per dimension. collected and constructed never merge:
   cisco-mcp-scanner-evals         127   11%  [7, 18]  (14/127)
   skillcraft-audit                 42   71%  [56, 83]  (30/42)
 
-false positives per population — the benign pool, an estimate, reported per source:
+flag rate on the benign pool — an estimate, reported per source:
+  benign here means `somebody runs this`, on an `assumed` basis — these are flags,
+  not confirmed false positives. Read one before you count it as an error.
   skillmd-138k                   1996   7%  [6, 8]  (133/1996)
 
 hard negatives — the precision probe, a census, never pooled with the estimate above:
-  flagged 5 of 19 (26%) — each one a false positive on a deliberate near-miss
+  flagged 5 of 19 (26%) — each one a confirmed false positive: these were read
 
 attribution — of caught malicious with a read-basis dimension, was the KIND named:
   31 of 68 correct (46%, [34, 57])
@@ -92,7 +94,7 @@ attribution — of caught malicious with a read-basis dimension, was the KIND na
 
 ## 怎么诚实地读它
 
-这张成绩单的设计目标是**让不诚实的读法变难**。有五条规则是写进输出本身的,而不是留给你的判断力。
+这张成绩单的设计目标是**让不诚实的读法变难**。有六条规则是写进输出本身的,而不是留给你的判断力。
 
 **collected 与 constructed 永不合并。** `collected` 行建立在来自我们之外的样本上——采集来的配置、上游数据集、真实捕获——所以在它们上面的率是**关于世界**的主张。`constructed` 行建立在对已披露攻击的复现和合成 fixture 上;它们测的是**我们选进来的那些形状的覆盖度**,**永远不是**能预测野外的率,所以无论 N 多大都印成 `caught K of N`。把两个数加起来,得到的东西没有意义。
 
@@ -100,7 +102,9 @@ attribution — of caught malicious with a read-basis dimension, was the KIND na
 
 **区间太宽时印计数,不印率。** 在百分比会误导的宽度以下,那一行写的是 `caught 0 of 16 (n too small for a rate; ±19 pts)`。这不是排版选择:来自少数几个样本的召回带着宽到不成其为数字的区间,印一个 `0%` 会邀请一个数据支撑不了的结论。
 
-**census 和 estimate 永不合成一个数。** 19 个硬负样本是**逐个读过**的——每一个都是刻意构造的近似命中,其中任何一个被报都是你可以去看的一个真实误报。而几千个良性样本是一个总体的**抽样**。它们回答不同的问题,所以分开印。
+**良性样本上的一次告警,还不等于一次误报。** 良性那一半的含义是*有人把它提交上去以供加载*;它的类别依据是 `assumed`,没人读过它,也不存在针对它的任何安全审查。所以良性那张表报的是你的扫描器**做了什么**——一个**告警率**;其中有多少是错的,这些标签回答不了。**先去读一个,再把它算成错误。**
+
+**census 和 estimate 永不合成一个数。** 19 个硬负样本**确实是逐个读过**的——每一个都是刻意构造的近似命中,所以其中任何一个被报,都是一次**已确认的误报**,你可以去逐字看。而几千个良性样本是一个总体的**抽样**。它们回答不同的问题,所以分开印。
 
 **归类只在「维度依据是人读出来的」那些样本上计分。** 说清「这是哪一类攻击」,只能对照一个**有人引用 artifact 原文**建立起来的维度来评,不能对照一条批次规则指派的维度。所以归类的分母比你的命中数小——那是诚实的分母,不是缺斤少两。
 

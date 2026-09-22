@@ -98,11 +98,13 @@ detection — recall per dimension. collected and constructed never merge:
   cisco-mcp-scanner-evals         127   11%  [7, 18]  (14/127)
   skillcraft-audit                 42   71%  [56, 83]  (30/42)
 
-false positives per population — the benign pool, an estimate, reported per source:
+flag rate on the benign pool — an estimate, reported per source:
+  benign here means `somebody runs this`, on an `assumed` basis — these are flags,
+  not confirmed false positives. Read one before you count it as an error.
   skillmd-138k                   1996   7%  [6, 8]  (133/1996)
 
 hard negatives — the precision probe, a census, never pooled with the estimate above:
-  flagged 5 of 19 (26%) — each one a false positive on a deliberate near-miss
+  flagged 5 of 19 (26%) — each one a confirmed false positive: these were read
 
 attribution — of caught malicious with a read-basis dimension, was the KIND named:
   31 of 68 correct (46%, [34, 57])
@@ -112,7 +114,7 @@ attribution — of caught malicious with a read-basis dimension, was the KIND na
 
 ## Reading it honestly
 
-The scorecard is built to make the dishonest reading hard. Five rules are enforced in the
+The scorecard is built to make the dishonest reading hard. Six rules are enforced in the
 output itself rather than left to your judgement.
 
 **Collected and constructed never merge.** A `collected` row rests on samples that came from
@@ -132,8 +134,13 @@ would mislead, the line reads `caught 0 of 16 (n too small for a rate; ±19 pts)
 a formatting choice: a recall from a handful of samples carries an interval so wide it is not
 a figure, and printing `0%` would invite a conclusion the data cannot support.
 
-**A census and an estimate are never one number.** The 19 hard negatives are read
-individually — every one is a deliberate near-miss, and a flag on any of them is a false
+**A flag on a benign sample is not yet a false positive.** The benign half means *somebody
+committed this to be loaded*; its class rests on `assumed`, nobody read it, and no security
+review of it exists. So the benign table reports what your scanner DID — a flag rate — and how
+much of it is error is a question these labels cannot answer. Read one before counting it.
+
+**A census and an estimate are never one number.** The 19 hard negatives ARE read
+individually — every one is a deliberate near-miss, so a flag on any of them is a confirmed false
 positive you can go look at. The thousands of benign samples are a sample of a population.
 They answer different questions and are printed apart.
 

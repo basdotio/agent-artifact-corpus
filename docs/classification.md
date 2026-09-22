@@ -9,7 +9,7 @@ support a sentence it could not support.
 
 | # | Class | Answers | Metric | Licenses the claim |
 |---|---|---|---|---|
-| 1 | **False positive** | Will operators turn it off? | precision, per source | "On corpus X, N% of benign artifacts are blocked" |
+| 1 | **False positive** | Will operators turn it off? | false-positive rate, per source | "On corpus X, N% of benign artifacts are blocked" |
 | 2 | **Recall** | Does it catch real attacks? | recall, per dimension | "Of N labelled malicious samples from M sources, it flags K" |
 | 3 | **Disclosure** | Does it admit what it did not look at? | disclosed / injected | "Every injected coverage gap produced a note" |
 | 4 | **Evasion resistance** | Does re-encoding the payload defeat it? | survived / variants | "Payload P survives K of N transformations" |
@@ -143,7 +143,7 @@ spread (0.0%–30.8%) was wider than the pooled figure.
 - **Never**: any "clean" label that means popularity, vendor curation, or "no scanner
   complained". Those are circular for us by construction.
 
-## Why the benign side is 13x the malicious side
+## Why the benign side dwarfs the malicious side
 
 A reader who sees 3,220 benign against 300 malicious reasonably suspects the corpus is
 lopsided. It is, deliberately, and the reason is that **recall and the false-positive rate do

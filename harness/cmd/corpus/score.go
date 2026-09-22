@@ -83,17 +83,27 @@ func printReport(rep score.Report, labels []*label.Label) {
 	printRecall(rep.RecallByDimension)
 
 	fmt.Println("\n  per source — a rate over one source is a rate ABOUT that source, not the world:")
-	printGroups(rep.RecallBySource, true)
+	printGroups(rep.RecallBySource)
 
-	fmt.Println("\nfalse positives per population — the benign pool, an estimate, reported per source:")
-	printGroups(rep.FPByPopulation, false)
+	// FLAG RATE, not false-positive rate, and the distinction is the corpus's own. A benign
+	// label here means "somebody committed this to be loaded" and its class rests on `assumed`
+	// — nobody read it and no security review of it exists. Calling a flag on such a sample a
+	// false positive would assert we know the artifact is harmless, which is exactly the claim
+	// the benign half refuses to make. The number below is what the scanner DID; how much of it
+	// is error is a question the labels cannot answer.
+	fmt.Println("\nflag rate on the benign pool — an estimate, reported per source:")
+	fmt.Println("  benign here means `somebody runs this`, on an `assumed` basis — these are flags,")
+	fmt.Println("  not confirmed false positives. Read one before you count it as an error.")
+	printGroups(rep.FPByPopulation)
 
 	fmt.Println("\nhard negatives — the precision probe, a census, never pooled with the estimate above:")
 	g := rep.HardNegFlagged
 	if g.N == 0 {
 		fmt.Println("  none scored")
 	} else {
-		fmt.Printf("  flagged %d of %d (%.0f%%) — each one a false positive on a deliberate near-miss\n",
+		// Here `false positive` IS earned: every hard negative was read by a person and carries
+		// a `differs_by` naming what makes it benign despite wearing an attack's shape.
+		fmt.Printf("  flagged %d of %d (%.0f%%) — each one a confirmed false positive: these were read\n",
 			g.Hits, g.N, g.Point*100)
 	}
 
@@ -191,7 +201,7 @@ func printRecall(gs []score.Group) {
 	}
 }
 
-func printGroups(gs []score.Group, recall bool) {
+func printGroups(gs []score.Group) {
 	if len(gs) == 0 {
 		fmt.Println("  none scored")
 		return
@@ -222,10 +232,6 @@ func result(g score.Group) string {
 func printList(ids []string) {
 	const perLine = 4
 	for i := 0; i < len(ids); i += perLine {
-		end := i + perLine
-		if end > len(ids) {
-			end = len(ids)
-		}
-		fmt.Println("  " + strings.Join(ids[i:end], "  "))
+		fmt.Println("  " + strings.Join(ids[i:min(i+perLine, len(ids))], "  "))
 	}
 }

@@ -184,8 +184,8 @@ blocks `rm -rf`.
 
 `corpus score` reads a scanner's output as JSONL — one `{"sample","verdict"}` object per line,
 with optional `severity` and `dimensions` — and prints recall per dimension and per source,
-false positives per population, the hard-negative census, and attribution over the read-basis
-samples. It keeps three lines the corpus is built on: a collected rate and a constructed
+the flag rate on each benign population, the hard-negative census, and attribution over the
+read-basis samples. It keeps three lines the corpus is built on: a collected rate and a constructed
 coverage count never merge, a per-source rate is labelled a rate about that source, and a group
 too small for a tight interval is printed as a bare count, not a figure. It grades against
 `truth`; it never decides what passes.
