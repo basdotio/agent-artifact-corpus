@@ -94,3 +94,62 @@ tools:
       # Dimension 0. These describe the scan, not the artifact.
       Scan notes (dimension 0): ~
       Load-time gate: ~
+
+  - id: ccaudit
+    name: cc-audit
+    url: https://github.com/ryo-ebata/cc-audit
+    # Its findings ladder has four rungs and no name for "nothing"; `safe` is the bottom of the
+    # separate 0-100 risk_score ladder (RiskLevel::Safe, score 0) and is the only word the tool
+    # has for a clean result, so it serves as the last entry here.
+    severity_ladder: [critical, high, medium, low, safe]
+    # Three letters as well as two: DEP-004 and MW-123 are both real, so the {2,3} is load
+    # bearing. Observed prefixes at v3.23.9: DEP DK EX MW OB OP PE PI PS SA SC SL.
+    rule_id_pattern: '\b([A-Z]{2,3}-[0-9]{3})\b'
+    # Unused for this tool, and present so its absence is not read as an oversight: cc-audit
+    # puts the category on each FINDING, so nothing has to be recovered from a heading.
+    section_pattern: '^#+ (.+)$'
+    rules_source:
+      # No `path`. cc-audit is a separate repository (docs/RULES.md there), so there is no
+      # location inside this one that could hold its rules, and a path escaping this repository
+      # is what made aguard's validation depend on one machine's directory layout.
+      env: CCAUDIT_RULES_MD
+    native_format: sarif-2.1.0
+    # Keyed on the `category` field cc-audit puts on every finding — not on a section name and
+    # not on a rule-id prefix. Two spellings exist in one document: findings say `supplychain`,
+    # risk_score.by_category says `supply_chain`. The finding spelling is authoritative here
+    # because that is where a per-finding kind is read from.
+    #
+    # DECIDED BY MEASUREMENT, 2026-09-23, not by reading the names — two of these were wrong on
+    # the first pass. Method: over the 159 read-basis malicious samples where cc-audit reported
+    # a category, cross-tabulate categories against truth dimensions and rank by LIFT over the
+    # base rate, P(dimension | category) / P(dimension). Raw share is useless: cc-audit emitted
+    # 5,612 `supplychain` findings corpus-wide, so it co-occurs with everything and its biggest
+    # raw overlap is `execution` only because `execution` is common.
+    dimension_map:
+      # lift 4.33 — the strongest signal in the table.
+      persistence: backdoor
+      # lift 3.42.
+      overpermission: permission
+      # lift 2.83.
+      promptinjection: injection
+      # lift 2.38, beating execution by 0.10. The weakest of the five that mapped; re-measure
+      # if the corpus grows.
+      supplychain: supply-chain
+      # lift 1.96.
+      exfiltration: exfiltration
+      # Deliberately unmapped, and the corpus's own worked example: the measurement splits the
+      # signal between execution (2.32) and exfiltration (1.87) with neither dominant. A finding
+      # here says the sample was hidden, never what it does. aguard's Obfuscation is unmapped
+      # for the same reason, so this is symmetric rather than a penalty.
+      obfuscation: ~
+      # Deliberately unmapped, and the interesting one. It fires on 61 of the 159 samples — more
+      # than any other category — and NOTHING clears the bar: filesystem 1.50 at n=9, then
+      # permission 1.42, then injection 1.38. A category that common carrying that little
+      # information about the KIND of attack is exactly what part 2 exists to surface. Mapping
+      # it to `permission` on the strength of its name would credit the tool for naming a kind
+      # the evidence says it did not name.
+      privilegeescalation: ~
+      # Unmeasurable rather than judged: one read-basis malicious sample carries it, so there is
+      # no evidence either way. Null is the conservative reading — a credential being present is
+      # not a finding that it leaves the machine — and it moves the figure by at most one sample.
+      secretleak: ~
