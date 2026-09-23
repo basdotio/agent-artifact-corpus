@@ -15,15 +15,24 @@ import (
 // line this corpus already uses when it talks about a reportable per-surface recall.
 const FigureThresholdPoints = 15.0
 
-// Evidence is what a group's samples rest on, and the two never merge into one number.
-// `collected` samples came from somewhere outside us — harvested configs, an upstream dataset,
-// real-world captures — so a rate over them is a claim about the world, wide or narrow by n.
-// `constructed` samples are reconstructions of a disclosed shape or synthetic fixtures: a
-// scanner's score on them is COVERAGE of the shapes we thought to include, never a rate that
-// predicts the wild. Keeping them apart is the whole reason this package exists.
+// Evidence is what a group's samples rest on, and the buckets never merge into one number.
+// They used to be two, and that was wrong: `collected` meant "not written by us", which put a
+// third party's numbered test fixtures in the same bucket as configs harvested from real
+// repositories and called the result a claim about the world. Three buckets, because there are
+// three different things.
 const (
-	Collected   = "collected"
+	// Wild — the artifact existed because somebody made it for real. Only these can back a
+	// claim about the world.
+	Wild = "wild"
+	// Fixture — a third party authored it as a test case. Worth catching and not ours to
+	// imagine, but coverage of THEIR chosen shapes rather than a sample of the world's.
+	Fixture = "fixture"
+	// Constructed — we authored it. Coverage of the shapes WE chose.
 	Constructed = "constructed"
+	// Unclassified — the sample's source declares no provenance. Reported as its own row and
+	// never folded into another: a silent default would put an unknown into whichever bucket
+	// happened to be the fallback, which is the exact error this split was made to fix.
+	Unclassified = "unclassified"
 )
 
 // Group is one row of a scored table: a dimension, a source, or a population, with the count
@@ -31,7 +40,7 @@ const (
 // to call a rate — the caller prints the count alone and says why.
 type Group struct {
 	Key      string
-	Evidence string // Collected | Constructed, empty for FP populations
+	Evidence string // Wild | Fixture | Constructed | Unclassified; empty for FP populations
 	N        int
 	Hits     int // caught, for recall; flagged, for false positives
 	Point    float64
@@ -90,7 +99,8 @@ type Report struct {
 // false positives by the exact same batches the leakage gate does — one definition of "source",
 // checked in one place.
 func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
-	spec *taxonomy.BasisSpec, population func(*label.Label) string) Report {
+	spec *taxonomy.BasisSpec, population func(*label.Label) string,
+	provenance map[string]string) Report {
 
 	byID := make(map[string]*label.Label, len(labels))
 	for _, l := range labels {
@@ -132,7 +142,7 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 
 		switch l.Class {
 		case label.Malicious:
-			ev := evidenceClass(l)
+			ev := evidenceClass(l, provenance)
 			hit := 0
 			if v.Flagged() {
 				hit = 1
@@ -227,13 +237,28 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 // evidenceClass decides whether a sample can back a rate. A reconstruction's shape came from a
 // disclosure but its bytes are ours; a synthetic fixture is ours end to end. Both test coverage
 // of shapes we chose, so a scanner's score on them is not a draw from the world.
-func evidenceClass(l *label.Label) string {
+// evidenceClass decides what kind of claim a sample can support. The `collected` bucket it
+// replaces conflated two things: not-written-by-us, and drawn-from-the-world. cisco's 127
+// numbered fixtures are the first and not the second, and they were 42% of the malicious half
+// sitting under a header that read "a rate is a claim about the world".
+//
+// Ours is decided by the label; everyone else's by the manifest entry that supplied it, which
+// is where the reading of that upstream was written down.
+func evidenceClass(l *label.Label, prov map[string]string) string {
 	switch l.Origin.Type {
 	case "reconstruction", "synthetic":
 		return Constructed
-	default:
-		return Collected
 	}
+	if l.Origin.DerivedFrom != nil && l.Origin.DerivedFrom.Entry != "" {
+		if p := prov[l.Origin.DerivedFrom.Entry]; p != "" {
+			return p
+		}
+	}
+	// A hand-pinned sample has no entry to inherit from and says so itself.
+	if l.Origin.Provenance != "" {
+		return l.Origin.Provenance
+	}
+	return Unclassified
 }
 
 // dimensionsOf resolves a malicious sample's dimensions: a technique names its dimension in the

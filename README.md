@@ -185,10 +185,11 @@ blocks `rm -rf`.
 `corpus score` reads a scanner's output as JSONL — one `{"sample","verdict"}` object per line,
 with optional `severity` and `dimensions` — and prints recall per dimension and per source,
 the flag rate on each benign population, the hard-negative census, and attribution over the
-read-basis samples. It keeps three lines the corpus is built on: a collected rate and a constructed
-coverage count never merge, a per-source rate is labelled a rate about that source, and a group
-too small for a tight interval is printed as a bare count, not a figure. It grades against
-`truth`; it never decides what passes.
+read-basis samples. It keeps three lines the corpus is built on: **wild**, **fixture** and
+**constructed** samples never merge into one number — only the first can back a claim about the
+world, and a third party's test fixtures are not it — a per-source rate is labelled a rate about
+that source, and a group too small for a tight interval is printed as a bare count, not a
+figure. It grades against `truth`; it never decides what passes.
 
 `make validate` is offline and needs no scanner installed. CI runs these same targets on a
 clean checkout, so anything that passes locally only because your machine has something extra

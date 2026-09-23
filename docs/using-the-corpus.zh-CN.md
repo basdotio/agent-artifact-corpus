@@ -67,12 +67,18 @@ go run ./cmd/corpus score verdicts.jsonl        # 3. 成绩单
 ### 3. `corpus score` —— 成绩单
 
 ```
-detection — recall per dimension. collected and constructed never merge:
+detection — recall per dimension, split by what the samples rest on:
+  wild        the artifact existed because somebody made it for real. ONLY these
+              can back a claim about the world.
+  fixture     a third party wrote it as a test case — coverage of THEIR shapes.
+  constructed we wrote it — coverage of OURS.
+  The three never merge. Adding them produces a number that means nothing.
   dimension        evidence          n   result
-  execution        collected        61   18%  [10, 29]  (11/61)
-  execution        constructed       6   caught 1 of 6 (coverage of chosen shapes, not a rate)
-  reconnaissance   collected        28   4%  [1, 18]  (1/28)
-  resource-abuse   collected        16   caught 0 of 16 (n too small for a rate; ±19 pts)
+  execution        fixture          52   12%  [5, 23]  (6/52)
+  execution        wild              9   caught 5 of 9 (n too small for a rate; ±29 pts)
+  execution        constructed       6   caught 2 of 6 (coverage of chosen shapes, not a rate)
+  reconnaissance   fixture          28   4%  [1, 18]  (1/28)
+  resource-abuse   fixture          16   caught 0 of 16 (n too small for a rate; ±19 pts)
 
   per source — a rate over one source is a rate ABOUT that source, not the world:
   cisco-mcp-scanner-evals         127   11%  [7, 18]  (14/127)
@@ -96,7 +102,9 @@ attribution — of caught malicious with a read-basis dimension, was the KIND na
 
 这张成绩单的设计目标是**让不诚实的读法变难**。有六条规则是写进输出本身的,而不是留给你的判断力。
 
-**collected 与 constructed 永不合并。** `collected` 行建立在来自我们之外的样本上——采集来的配置、上游数据集、真实捕获——所以在它们上面的率是**关于世界**的主张。`constructed` 行建立在对已披露攻击的复现和合成 fixture 上;它们测的是**我们选进来的那些形状的覆盖度**,**永远不是**能预测野外的率,所以无论 N 多大都印成 `caught K of N`。把两个数加起来,得到的东西没有意义。
+**wild、fixture、constructed 三者永不合并。** `wild` 建立在**因为真实用途而存在**的 artifact 上——被提交进仓库的配置、从真实攻击活动里捕获的样本——**只有它们能支撑"关于世界"的主张**。`fixture` 建立在第三方写的测试用例上:cisco 那 127 个文件的标题字面就是 `Example 3`、`Example 5`、`Example 10`,skillsgoat 是一个自带诱饵的训练靶场。值得抓,但那是**他们选的形状的覆盖度**。`constructed` 是我们写的——已披露攻击的复现和合成 fixture——**我们选的形状的覆盖度**。
+
+这里原本只有两个桶,而那个划分是错的:`collected` 的含义是"不是我们写的",于是把 248 个第三方 fixture 和 22 个真正野外的样本放进了同一列,并在表头写着*关于世界的主张*。**请预期 wild 那几行都很小。那是这个领域此刻的真实形状,不是报告的缺陷。**
 
 **一个分来源的率,是关于那个来源的率。** 同一个扫描器上 `cisco 11%` 和 `skillcraft 71%` 差了六十个百分点,汇总成一个数恰好会藏掉最值得知道的东西。**按来源发布,带 `n`,带来源数。** 这份语料正是在一个发布出去的 11.0% 被发现在完整总体上是 12.9% 之后建起来的。
 

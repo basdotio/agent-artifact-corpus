@@ -38,6 +38,26 @@ type Entry struct {
 	License string `yaml:"license"`
 	Role    string `yaml:"role"` // fp-denominator | recall | hard-negative | touchstone | probe
 
+	// Provenance is whether this upstream's artifacts EXISTED IN THE WORLD or were authored as
+	// test cases, and it is separate from Role and from who wrote them on purpose.
+	//
+	// It exists because `derived` conflated two things that must not share a number. A sample
+	// not written by us is not therefore a draw from the world: cisco's 127 are `Example 5`,
+	// `Example 10` — numbered fixtures Cisco authored to exercise its own scanner — and
+	// skillsgoat is a training range that ships deliberate decoys. Both are external, neither
+	// is wild. Before this field the scorer put all 248 such samples in the bucket whose header
+	// said "a rate is a claim about the world", alongside the 22 that actually are.
+	//
+	// `wild`    the artifact existed because somebody made it for real — a committed config, a
+	//           captured attack. Only these can back a claim about the world.
+	// `fixture` a third party authored it as a test case. Real enough to be worth catching and
+	//           not ours to imagine, but coverage of THEIR chosen shapes, not a sample of the
+	//           world's.
+	//
+	// Samples we author ourselves never reach here: their labels carry origin.type
+	// `reconstruction` or `synthetic` and the scorer classes them from that.
+	Provenance string `yaml:"provenance"`
+
 	// Counts are what the source claims, recorded so that a later fetch disagreeing with
 	// them is visible rather than silently changing a denominator.
 	Malicious int `yaml:"malicious"`
@@ -297,6 +317,12 @@ func Load(path string) (*File, error) {
 
 var validRoles = []string{"fp-denominator", "recall", "hard-negative", "touchstone", "probe"}
 
+// validProvenance is deliberately two words and not three. "Ours" is not an option here: a
+// sample this repository authored carries it in its own label (origin.type reconstruction or
+// synthetic) and never reaches a manifest entry, so offering the value would create a second
+// place to make the same claim — and eventually two places that disagree.
+var validProvenance = []string{"wild", "fixture"}
+
 // validAxisTarget checks the shape of a category_axis_map value. The value after the colon
 // (the actual axis member) is checked against the taxonomy in the derive package, where the
 // taxonomy is in scope; here we only reject a malformed prefix.
@@ -335,6 +361,16 @@ func (f *File) Validate() []error {
 		}
 		if !oneOf(e.Role, validRoles) {
 			bad("%s: role %q is not one of %s", e.ID, e.Role, strings.Join(validRoles, ", "))
+		}
+		// An entry whose samples reach layer 1 must say whether they existed in the world or
+		// were authored as test cases, because the scorer reports the two apart and a missing
+		// answer would silently default one of them into the other. Reference-only entries are
+		// exempt: nothing of theirs is scored.
+		if e.Vendorable && !oneOf(e.Provenance, validProvenance) {
+			bad("%s: provenance %q is not one of %s — a vendorable entry must say whether its "+
+				"artifacts existed in the world or were written as test cases, because only the "+
+				"first can back a claim about the world", e.ID, e.Provenance,
+				strings.Join(validProvenance, ", "))
 		}
 		if len(e.Hazards) == 0 {
 			bad("%s: hazards is empty — write \"none known\" explicitly. An undeclared hazard "+

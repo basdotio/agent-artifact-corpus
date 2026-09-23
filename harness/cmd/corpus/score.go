@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/label"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/manifest"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/score"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
 )
@@ -55,7 +56,21 @@ func cmdScore(root string, args []string) int {
 		fatal(err)
 	}
 
-	rep := score.Score(labels, verdicts, tax, basisSpec, populationOf)
+	// Provenance travels from the manifest, not from the label. "Are this upstream's artifacts
+	// wild or test fixtures" is a reading of the UPSTREAM, made once where that reading was
+	// written down, rather than re-decided per sample.
+	mf, err := manifest.Load(filepath.Join(root, "manifest", "corpora.yaml"))
+	if err != nil {
+		fatal(err)
+	}
+	prov := map[string]string{}
+	for _, e := range mf.Entries {
+		if e.Provenance != "" {
+			prov[e.ID] = e.Provenance
+		}
+	}
+
+	rep := score.Score(labels, verdicts, tax, basisSpec, populationOf, prov)
 	printReport(rep, labels)
 	return 0
 }
@@ -78,8 +93,12 @@ func printReport(rep score.Report, labels []*label.Label) {
 		printUncoveredBySource(labels, rep.UncoveredIDs)
 	}
 
-	fmt.Println("\ndetection — recall per dimension. collected and constructed never merge:")
-	fmt.Println("  a rate is a claim about the world; coverage is how many chosen shapes were caught.")
+	fmt.Println("\ndetection — recall per dimension, split by what the samples rest on:")
+	fmt.Println("  wild        the artifact existed because somebody made it for real. ONLY these")
+	fmt.Println("              can back a claim about the world.")
+	fmt.Println("  fixture     a third party wrote it as a test case — coverage of THEIR shapes.")
+	fmt.Println("  constructed we wrote it — coverage of OURS.")
+	fmt.Println("  The three never merge. Adding them produces a number that means nothing.")
 	printRecall(rep.RecallByDimension)
 
 	fmt.Println("\n  per source — a rate over one source is a rate ABOUT that source, not the world:")

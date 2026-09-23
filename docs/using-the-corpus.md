@@ -87,12 +87,18 @@ miss.** Check placement before you believe it.
 ### 3. `corpus score` — the scorecard
 
 ```
-detection — recall per dimension. collected and constructed never merge:
+detection — recall per dimension, split by what the samples rest on:
+  wild        the artifact existed because somebody made it for real. ONLY these
+              can back a claim about the world.
+  fixture     a third party wrote it as a test case — coverage of THEIR shapes.
+  constructed we wrote it — coverage of OURS.
+  The three never merge. Adding them produces a number that means nothing.
   dimension        evidence          n   result
-  execution        collected        61   18%  [10, 29]  (11/61)
-  execution        constructed       6   caught 1 of 6 (coverage of chosen shapes, not a rate)
-  reconnaissance   collected        28   4%  [1, 18]  (1/28)
-  resource-abuse   collected        16   caught 0 of 16 (n too small for a rate; ±19 pts)
+  execution        fixture          52   12%  [5, 23]  (6/52)
+  execution        wild              9   caught 5 of 9 (n too small for a rate; ±29 pts)
+  execution        constructed       6   caught 2 of 6 (coverage of chosen shapes, not a rate)
+  reconnaissance   fixture          28   4%  [1, 18]  (1/28)
+  resource-abuse   fixture          16   caught 0 of 16 (n too small for a rate; ±19 pts)
 
   per source — a rate over one source is a rate ABOUT that source, not the world:
   cisco-mcp-scanner-evals         127   11%  [7, 18]  (14/127)
@@ -117,12 +123,18 @@ attribution — of caught malicious with a read-basis dimension, was the KIND na
 The scorecard is built to make the dishonest reading hard. Six rules are enforced in the
 output itself rather than left to your judgement.
 
-**Collected and constructed never merge.** A `collected` row rests on samples that came from
-outside us — harvested configs, upstream datasets, real captures — so a rate over them is a
-claim about the world. A `constructed` row rests on reconstructions of a disclosed attack and
-on synthetic fixtures; those measure **coverage of the shapes we chose to include**, never a
-rate that predicts the wild, and they print as `caught K of N` no matter how large N gets.
-Adding the two numbers produces something that means nothing.
+**Wild, fixture and constructed never merge.** `wild` rests on artifacts that existed because
+somebody made them for real — configs committed to repositories, attacks captured from
+campaigns — and only those can back a claim about the world. `fixture` rests on a third party's
+test cases: cisco's 127 files are literally headed `Example 3`, `Example 5`, `Example 10`, and
+skillsgoat is a training range shipping deliberate decoys. Real enough to be worth catching,
+but coverage of THEIR chosen shapes. `constructed` is ours — reconstructions of disclosed
+attacks and synthetic fixtures — coverage of OURS.
+
+This started as two buckets and the split was wrong: `collected` meant "not written by us",
+which put 248 third-party fixtures in the same column as the 22 genuinely wild samples and
+headed it *a claim about the world*. Expect the wild rows to be small. That is the honest
+shape of this field right now, not a defect in the reporting.
 
 **A per-source rate is a rate about that source.** `cisco 11%` and `skillcraft 71%` on the
 same scanner is a sixty-point spread, and pooling them into one figure would hide exactly the

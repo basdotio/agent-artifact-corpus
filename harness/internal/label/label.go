@@ -136,6 +136,18 @@ type Origin struct {
 	Note    string `yaml:"note"`
 	Added   string `yaml:"added"`
 
+	// Provenance is `wild` or `fixture`, and only a HAND-PINNED sample needs it: a derived
+	// sample inherits the reading from its manifest entry, which is where that upstream was
+	// judged once. Without it, a hand-pinned sample from somebody else's fixture set has
+	// nothing linking it to the entry that knows what it is, and the scorer can only report it
+	// as unclassified — which is honest, and useless.
+	//
+	// It is separate from Type on purpose. Type says what KIND of artifact this is; this says
+	// whether it existed in the world or was written as a test case, and the two are
+	// independent: NVIDIA's SkillSpector fixtures are real files in a real repository AND were
+	// authored to exercise a scanner.
+	Provenance string `yaml:"provenance"`
+
 	// LabeledBeforeRun must be true for samples we pin by hand. Labelling after running
 	// treats a tool's current behaviour as the correct answer, which measures 100% every
 	// time. It is a claim about `truth`, the half that must not be derived from any run.
