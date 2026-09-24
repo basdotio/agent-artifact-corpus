@@ -153,3 +153,60 @@ tools:
       # no evidence either way. Null is the conservative reading — a credential being present is
       # not a finding that it leaves the machine — and it moves the figure by at most one sample.
       secretleak: ~
+
+  - id: skill-scanner
+    # The id is the product's own name, not the vendor's. `cisco` is ALSO the name of a corpus
+    # source (cisco-mcp-scanner-evals), and the neutrality check rightly refuses a tool id that
+    # already appears in the scripts producing everybody's samples — a scanner and a data source
+    # must stay two different things even when one company is behind both.
+    name: Cisco skill-scanner
+    url: https://github.com/cisco-ai-defense/skill-scanner
+    # Findings carry CRITICAL/HIGH/MEDIUM/LOW/INFO; SAFE is the model's own word for "nothing"
+    # (models.py:28-36 at v2.1.0) and is what the SARIF reporter maps to `none`.
+    severity_ladder: [critical, high, medium, low, info, safe]
+    # Upper-case words joined by underscores (MANIFEST_MISSING_LICENSE, PIPELINE_TAINT_FLOW), or a
+    # YARA_ prefix followed by mixed case and dates (YARA_SUSP_Lnx_EncodedShell_DecodeExec_Sep26).
+    # Observed on the 2026-09-24 run; not the dash-and-digits shape the other two tools use.
+    rule_id_pattern: '\b(YARA_[A-Za-z0-9_]+|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b'
+    # Unused: the category is on each finding in its JSON output, nothing is read from headings.
+    section_pattern: '^#+ (.+)$'
+    rules_source:
+      # No `path`: a separate repository. Its rule reference is spread across three packs
+      # (core, ATR, promptguard); export the path to whatever you generate from them.
+      env: CISCO_RULES_MD
+    native_format: sarif-2.1.0
+    # Keyed on the `category` field of each finding in `--format json`: the 17 ThreatCategory
+    # values of models.py:39-59 (v2.1.0).
+    #
+    # THIS TABLE IS NOT MEASURED, AND IS THE WEAKER FOR IT. The ccaudit block above was decided by
+    # lift over this corpus's own labels, and that method caught two name-based guesses that were
+    # wrong. The same script here had 23 samples: skill-scanner's strict mode refuses every tree
+    # without SKILL.md, which is every mcp sample, and on the skills surface only 23 read-basis
+    # malicious samples got a HIGH+ finding with a category. The largest lift, data_exfiltration
+    # → execution at 2.42, is n=6 and points away from the category's own name — noise, not a
+    # signal. Decided 2026-09-24 (agent-guard P-019, open question 9): the five categories whose
+    # names are unambiguous are mapped BY NAME and say so; the other twelve are null, meaning
+    # "unmeasured and not guessed", not "measured to map to nothing". Recompute by lift when the
+    # skills surface is large enough.
+    dimension_map:
+      prompt_injection: injection          # by name — n too small to measure (2026-09-24)
+      data_exfiltration: exfiltration      # by name — n too small to measure
+      command_injection: execution         # by name — n too small to measure
+      supply_chain_attack: supply-chain    # by name — n too small to measure
+      resource_abuse: resource-abuse       # by name — n too small to measure
+      # Unmeasured, not guessed. Each of these has a defensible name-based reading and at least
+      # one competing one (unauthorized_tool_use → permission? execution?; malware → backdoor?;
+      # tool_chaining_abuse → exfiltration?), and 23 samples cannot choose. Null keeps the
+      # attribution figure honest at the cost of understating the tool when it does name these.
+      unauthorized_tool_use: ~
+      obfuscation: ~
+      hardcoded_secrets: ~
+      social_engineering: ~
+      policy_violation: ~
+      malware: ~
+      harmful_content: ~
+      skill_discovery_abuse: ~
+      transitive_trust_abuse: ~
+      autonomy_abuse: ~
+      tool_chaining_abuse: ~
+      unicode_steganography: ~
