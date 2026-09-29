@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -20,16 +21,17 @@ import (
 // what its numbers are and what each one is allowed to mean. The exit code is 0 whenever the
 // verdicts were readable and scored — a low recall is a finding, not a tool error.
 func cmdScore(root string, args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: corpus score <verdicts.jsonl>   (use - for stdin)")
+	toolID, path, err := parseScoreArgs(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "usage: corpus score [-tool <id>] <verdicts.jsonl>   (use - for stdin)")
 		return 2
 	}
 
 	var raw *os.File
-	if args[0] == "-" {
+	if path == "-" {
 		raw = os.Stdin
 	} else {
-		f, err := os.Open(args[0])
+		f, err := os.Open(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "cannot read verdicts: %v\n", err)
 			return 2
@@ -70,9 +72,76 @@ func cmdScore(root string, args []string) int {
 		}
 	}
 
+	// Resolve the declaration before printing anything, so a bad -tool or a stale source stops
+	// the run instead of producing a report whose last section is missing or wrong.
+	var tool taxonomy.Tool
+	if toolID != "" {
+		entries := make([]string, 0, len(mf.Entries))
+		for _, e := range mf.Entries {
+			entries = append(entries, e.ID)
+		}
+		if tool, err = resolveOutOfScope(tax, entries, toolID); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			return 2
+		}
+	}
+
 	rep := score.Score(labels, verdicts, tax, basisSpec, populationOf, prov)
 	printReport(rep, labels)
+	// Appended, never interleaved: every line above is exactly what it was without -tool, so the
+	// full denominator is always on the page and the narrow one can only ever appear beside it.
+	if toolID != "" {
+		printOutOfScope(score.OutOfScope(labels, verdicts, toolID, tool, populationOf))
+	}
 	return 0
+}
+
+// parseScoreArgs accepts `[-tool <id>] <verdicts.jsonl|->`.
+func parseScoreArgs(args []string) (toolID, path string, err error) {
+	if len(args) >= 2 && args[0] == "-tool" {
+		toolID, args = args[1], args[2:]
+		if toolID == "" {
+			return "", "", fmt.Errorf("-tool needs a tool id")
+		}
+	}
+	if len(args) != 1 {
+		return "", "", fmt.Errorf("want exactly one verdicts path")
+	}
+	return toolID, args[0], nil
+}
+
+// resolveOutOfScope returns the registered tool whose declaration will be applied, refusing an
+// unregistered tool and a source selector the manifest has no entry for: either would print a
+// narrow denominator that nobody could trace back to the corpus.
+func resolveOutOfScope(tax *taxonomy.Set, entries []string, toolID string) (taxonomy.Tool, error) {
+	tool, ok := tax.Tools[toolID]
+	if !ok {
+		return taxonomy.Tool{}, fmt.Errorf("-tool %s: not a tool registered in taxonomy/tools.yaml", toolID)
+	}
+	for i, o := range tool.OutOfScope {
+		if o.Source != "" && !slices.Contains(entries, o.Source) {
+			return taxonomy.Tool{}, fmt.Errorf("tool %s: out_of_scope[%d] names source %q, which is not an "+
+				"entry in manifest/corpora.yaml", toolID, i, o.Source)
+		}
+	}
+	return tool, nil
+}
+
+// printOutOfScope lists what the tool declared it does not detect, and gives recall over BOTH
+// denominators. Group ids are printed when a group is small enough to read.
+func printOutOfScope(r score.OutOfScopeReport) {
+	fmt.Printf("\nout of scope — declared by %s itself, so the full denominator is printed beside it:\n", r.Tool)
+	for _, g := range r.Groups {
+		fmt.Printf("  %-36s %4d  %s", g.Selector, len(g.IDs), g.Reason)
+		if n := len(g.IDs); n > 0 && n < 10 {
+			fmt.Printf(": %s", strings.Join(g.IDs, ", "))
+		}
+		fmt.Println()
+	}
+	fmt.Printf("  malicious, all       %4d of %d\n", r.AllHits, r.All)
+	p, lo, hi := score.Wilson(r.InScopeHits, r.InScope)
+	fmt.Printf("  malicious, in scope  %4d of %d  (%.0f%%, [%.0f, %.0f])\n",
+		r.InScopeHits, r.InScope, p*100, lo*100, hi*100)
 }
 
 func printReport(rep score.Report, labels []*label.Label) {

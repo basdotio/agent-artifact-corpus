@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/label"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
 )
 
 // idLbl builds a label whose population is its originating repository, which is the `default`
@@ -66,5 +67,45 @@ func TestUncoveredBySourceIgnoresIDsTheCorpusDoesNotHave(t *testing.T) {
 	}
 	if got[0].Missing != 1 || got[0].Total != 1 {
 		t.Errorf("got %+v, want 1 of 1 — a stranger id must not be counted", got[0])
+	}
+}
+
+// TestScoreArgs: `-tool` is optional and comes before the verdicts path; `-` still means stdin.
+func TestScoreArgs(t *testing.T) {
+	for _, tc := range []struct {
+		args       []string
+		tool, path string
+		ok         bool
+	}{
+		{[]string{"v.jsonl"}, "", "v.jsonl", true},
+		{[]string{"-tool", "scanner-x", "v.jsonl"}, "scanner-x", "v.jsonl", true},
+		{[]string{"-tool", "scanner-x", "-"}, "scanner-x", "-", true},
+		{[]string{"-"}, "", "-", true},
+		{[]string{}, "", "", false},
+		{[]string{"-tool", "scanner-x"}, "", "", false},
+	} {
+		tool, path, err := parseScoreArgs(tc.args)
+		if (err == nil) != tc.ok || (tc.ok && (tool != tc.tool || path != tc.path)) {
+			t.Errorf("parseScoreArgs(%q) = %q, %q, %v; want %q, %q, ok=%v", tc.args, tool, path, err, tc.tool, tc.path, tc.ok)
+		}
+	}
+}
+
+// TestResolveOutOfScope: an unknown tool, or a source the manifest does not have, stops the run
+// rather than printing a narrow denominator nobody can check.
+func TestResolveOutOfScope(t *testing.T) {
+	tax := &taxonomy.Set{Tools: map[string]taxonomy.Tool{
+		"scanner-x": {OutOfScope: []taxonomy.OutOfScopeSelector{{Source: "server-src", Reason: "r"}}},
+		"scanner-y": {OutOfScope: []taxonomy.OutOfScopeSelector{{Source: "no-such-entry", Reason: "r"}}},
+	}}
+	entries := []string{"server-src", "other"}
+	if _, err := resolveOutOfScope(tax, entries, "scanner-x"); err != nil {
+		t.Errorf("known tool, known source: %v", err)
+	}
+	if _, err := resolveOutOfScope(tax, entries, "scanner-z"); err == nil {
+		t.Error("an unregistered tool must be refused")
+	}
+	if _, err := resolveOutOfScope(tax, entries, "scanner-y"); err == nil {
+		t.Error("a source the manifest does not have must be refused")
 	}
 }

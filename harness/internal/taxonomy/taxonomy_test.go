@@ -375,3 +375,39 @@ func TestTierOrdering(t *testing.T) {
 		t.Fatal("an unknown tier must never satisfy a bound")
 	}
 }
+
+// TestValidateOutOfScopeSelectors: a declaration that names a source AND an evasion, names neither,
+// gives no reason, or names an evasion outside the vocabulary is a typo that would silently exclude
+// the wrong samples, or none. Each must be caught at validation, before any score is printed.
+func TestValidateOutOfScopeSelectors(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, block, wantErr string }{
+		{"both keys", "    out_of_scope:\n      - {source: s, evasion: base64-wrapper, reason: r}\n", "exactly one of source or evasion"},
+		{"neither key", "    out_of_scope:\n      - {reason: r}\n", "exactly one of source or evasion"},
+		{"no reason", "    out_of_scope:\n      - {source: s}\n", "needs a reason"},
+		{"unknown evasion", "    out_of_scope:\n      - {evasion: nope, reason: r}\n", "not in the evasion vocabulary"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := loadFrom(t, goodTechniques, goodTools+tc.block)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, e := range s.Validate() {
+				if strings.Contains(e.Error(), tc.wantErr) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("want an error containing %q, got %v", tc.wantErr, s.Validate())
+			}
+		})
+	}
+	ok, err := loadFrom(t, goodTechniques, goodTools+"    out_of_scope:\n      - {source: s, reason: r}\n      - {evasion: base64-wrapper, reason: r}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errs := ok.Validate(); len(errs) != 0 {
+		t.Errorf("a well-formed declaration must validate clean: %v", errs)
+	}
+}
