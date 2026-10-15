@@ -1,0 +1,114 @@
+---
+name: hd2-bilingual-doc-verify
+description: "Verify that a translated markdown file still matches its source — Lua blocks, code fences, headings, links, directory trees. Use after editing either side of a bilingual docs pair."
+---
+
+# hd2-bilingual-doc-verify
+
+English / [简体中文](https://github.com/Puipipi/HD2-Agent-Skills/blob/main/docs/skills/hd2-bilingual-doc-verify_cn.md)
+
+> **Confidence:** verified here; both of its failure modes were provoked deliberately.
+
+`scripts/verify_translations.py` checks the things a translation must **not** change, so review
+attention can go to the prose instead of to whether a code sample is still correct.
+
+Written after this repository grew an English/Chinese pair for every document: the docs pairs,
+and a translation of every skill. A stale code block in the Chinese copy is a bug nobody
+notices, so the pairs are checked rather than assumed.
+
+The pairs come in two layouts, and the difference is deliberate. A doc translation sits beside
+its source (`X.md` / `X_cn.md`). A skill translation does not: an agent that installs a skill
+copies the whole skill folder, so that folder must contain English only. The Chinese text lives
+in `docs/skills/<name>_cn.md`.
+
+## Prerequisites
+
+| Need | Why | If missing |
+|---|---|---|
+| Python 3.8+ | the script | — |
+| **`lupa`** | recompiles the translated Lua blocks on real LuaJIT (check 1) | the other five checks still run; the script prints what it skipped |
+| the pairs, in a repo layout | discovery finds any `X.md` with an `X_cn.md` beside it anywhere in the tree, plus every `skills/<name>/SKILL.md` whose translation is `docs/skills/<name>_cn.md` | point it with `--root` |
+
+Nothing else: no game, no loader tools, no network. It writes nothing.
+
+## Use
+
+```powershell
+python -B scripts/verify_translations.py                     # scan the repo root
+python -B scripts/verify_translations.py --root <repo>       # or point at one
+python -B scripts/verify_translations.py --no-luajit         # force the degraded mode
+```
+
+Exit 0 = every pair passed; non-zero = at least one failed, with the pair named.
+
+## The nine checks
+
+1. **Translated Lua still compiles on LuaJIT** — extracts every `lua` fence from the
+   *translation* and compiles it. Catches a translation that touched code.
+2. **Code fences match the source after all comments are removed** — `--` and `--[[ ]]` for
+   Lua, `#` for shell/PowerShell **and Python** (an inline `# …` comment is translatable
+   text), `;` for pseudo-code. Comments *are* translated; code is not.
+3. **Documentation fences are compared as documentation** — a fence counts as documentation
+   when it has no executable code, i.e. a directory tree / package layout, a `text` block of
+   prose, or a code fence that quotes only a docstring or comments. Trees are compared by
+   skeleton (glyphs, indentation, first token per line), which still catches a dropped branch
+   or a renamed path; prose is compared by line count only, because every word is translated.
+4. **Heading structure matches** — count and levels, in order. Catches a dropped section.
+5. **Every relative link is carried over**, or is deliberately retargeted to a `_cn` peer
+   (reported as a note, not a failure). Links are compared as repo-relative targets, so a pair
+   split across two folders (a skill and its translation) still has to match. The source
+   pointing *at* a `_cn` file the translation *is* is also a note.
+6. **Frontmatter is intact** — same keys, `name:` unchanged (it is an identifier), and
+   `description:` translated (it is what a reader sees when choosing the skill).
+7. **The language switcher exists, once, and points at the counterpart** — in the header block
+   of both sides, with the current language left unlinked:
+   ```
+   English / [简体中文](https://github.com/Puipipi/HD2-Agent-Skills/blob/main/README_cn.md)
+   [English](https://github.com/Puipipi/HD2-Agent-Skills/blob/main/README.md) / 简体中文
+   ```
+   Absolute URLs are deliberate — copied from DeepSeek's own repositories, because the
+   switcher is the one link a reader needs before they can navigate anything else. It is
+   checked rather than trusted: removing one, pointing it at the wrong file, or leaving two
+   in the header all fail the run.
+
+8. **Every skill file carries its own switcher, even with no translation yet** — checked for
+   every `SKILL.md` under `skills/` and every translation under `docs/skills/`, independently of
+   pairing. The pair loop only runs when both sides exist, so a skill with an English file and
+   no translation escapes it entirely: that is exactly how five English skills ended up without
+   a switcher while their Chinese files had one.
+9. **Absolute GitHub URL targets must resolve** — reported by `check_absolute_targets()`,
+   because the switchers use absolute URLs by convention and a missing counterpart is otherwise
+   a dead link on the rendered page that nothing notices.
+
+## Two lessons baked into it
+
+- **A verifier that assumes the obvious layout reports false failures.** The first version
+  stripped only whole-line comments, so every code block containing a trailing `--` comment
+  looked like a mismatch. Fixing the verifier, not the translations, was the right call —
+  and it was only obvious because the failure count was implausibly high. The same thing then
+  happened twice more: an inline `#` comment in a **Python** fence (the stripper only knew
+  shell), and a `python` fence that quoted **only a docstring** (no executable code at all, so
+  the whole block is prose). Each fix made check 3 narrower and truer: *compare code as code,
+  and documentation as documentation, and decide that from the content rather than the fence
+  label.*
+- **Check 3 exists because of a false positive too.** Four "code" fences in a new skill were
+  directory trees; treating their translated annotations as a code change would have forced
+  the translator to leave prose in English.
+
+**When a verifier reports failures, look at the failures before touching the translation.**
+In all three of the above cases the translations were correct — including the one where the
+"code" was a docstring explaining the deploy incident, translated on purpose. A linter that is
+wrong costs more than no linter: it teaches people to ignore it.
+
+## Limitations
+
+- It proves **structural** correspondence, not that the translation is *correct*. A mistranslated
+  sentence passes every check. Read the prose.
+- Check 3's structural fingerprint ignores annotation text by design, so a translation that
+  replaced a path's description with something wrong is not caught.
+- It only knows the layouts in `discover_pairs()`; a differently-organised repo needs that
+  function extended.
+
+## See also
+
+`writing-mod-tools` (honest degradation, exit codes, stating what a tool cannot do).

@@ -1,0 +1,87 @@
+# Controllers and HTTP to Odoo 20
+
+## `odoo.http` is a package in 20
+
+`odoo/http/__init__.py` re-exports only `request`, `Response`, `Controller`, `route` and
+`request_var`. Importing anything else from `odoo.http` is an **ImportError at module load**, which
+blocks install.
+
+| Old import | Odoo 20 |
+|---|---|
+| `from odoo.http import content_disposition` | `from odoo.http.stream import content_disposition` |
+| `from odoo.http import Stream, STATIC_CACHE` | `from odoo.http.stream import Stream, STATIC_CACHE` |
+| `from odoo.http import serialize_exception` | `from odoo.http.dispatcher import serialize_exception` |
+| `from odoo.http import SessionExpiredException, Session` | `from odoo.http.session import ...` |
+| `from odoo.http import db_list, db_filter, dispatch_rpc, root` | `from odoo.http.router import ...` |
+
+Before writing a new import, confirm it:
+`grep -rn "^def <name>\|^class <name>\|^<name> =" $ODOO20_SERVER/odoo/http/`.
+
+## Route and request changes
+
+| Since | Old | Odoo 20 | Kind |
+|---|---|---|---|
+| 19 | `@http.route(..., type='json')` | `type='jsonrpc'` ('json' still accepted with a warning). `upgrade_code` only fixes it inside `controllers/` with a trailing comma, so grep for leftovers | W, UC partial |
+| 16 | `request.jsonrequest` | `request.get_json_data()` | R |
+| 20 | `odoo.http.Request` (e.g. `mock.patch.object(http.Request, ...)` in tests) | `odoo.http.requestlib.Request` | B |
+| 19 | `request.cr`, `request.uid`, `request.context` | `request.env.cr`, `request.env.uid`, `request.env.context` | W |
+| **20** | `request.website` | `request.env.website` (in models: `self.env.website`) | R |
+| 20 | `website.get_current_website()` | `self.env.website` | R |
+| 19 | `request.website.sale_get_order()` | `request.cart` | R |
+| 16 | `from odoo.addons.web.controllers.main import X` | the split modules: `odoo.addons.web.controllers.home`, `.session`, `.dataset`, `.binary`, `.export`, `.action`, `.report`, `.utils`. Grep `class X` in `addons/web/controllers/` | B |
+| 19 | `auth='user'/'public'/'none'` | unchanged; new `auth='bearer'` (needs `bearer_scope`) and `type='json2'` | – |
+| 19 | overriding a route | an override cannot change `type`; loosening `readonly` is reverted | – |
+
+Portal and website controller hook changes are in website-sale-portal.md.
+
+## Checks for every controller
+
+- An override of a core controller method must match the **20** signature. Open the core method and
+  compare the arguments and the return type.
+- Routes called from JS with `rpc()` must be `type='jsonrpc'`. Plain `<form method="post">` targets
+  stay `type='http'` and need `csrf_token`.
+- Where a method returns `request.render(...)`, check that the template id still exists in 20.
+
+### Public links that act on a record id
+
+A public route that takes a record id and does something to it (reset a password, unsubscribe,
+confirm, show a document) lets anyone act on every record by counting ids; seen: a "set up your
+account" link that redirected any visitor to a valid password reset page of any user. Sign the link
+instead of trusting the id:
+
+```python
+from odoo import api, models, tools
+from odoo.tools import consteq
+
+class ResPartner(models.Model):
+    _inherit = 'res.partner'
+
+    @api.private                     # callable from QWeb mail templates, not over RPC
+    def x_unsubscribe_token(self):
+        self.ensure_one()
+        return tools.hmac(self.env(su=True), 'x_module.unsubscribe', self.id)
+
+# controller
+partner = request.env['res.partner'].sudo().browse(partner_id).exists()
+if not partner or not token or not consteq(str(token), partner.x_unsubscribe_token()):
+    raise request.not_found()
+```
+
+Templates: `t-attf-href="/x/unsubscribe/#{object.id}?token=#{object.x_unsubscribe_token()}"`. Use a
+separate scope per purpose, limit what the link may do (e.g. account set-up only while the user has
+never logged in: `not user.login_date`), and send JSON follow-ups (feedback forms) with the same
+token. Links already sent without a token stop working: redirect them to the standard page.
+
+## More route and session changes (hit in practice)
+
+- **`auth='none'` routes are read-only by default** (`readonly` defaults to `auth == 'none'`,
+  `odoo/http/routing_map.py`): a POST endpoint that writes needs `readonly=False`.
+- **`request.session.logout()` is gone:** `from odoo.http.session import logout;
+  logout(request.session, keep_db=True)` (scan `session-logout`).
+- **Every sudo helper reachable over RPC carries `@api.private`**, not only token helpers.
+- **Every `sudo().browse(<id from the request>)` needs an ownership check right after it**, on
+  `auth='user'` and portal routes too; keep the sudo as narrow as the check allows.
+- **Inbound webhooks** (`auth='public'`, often `csrf=False`) check a signature or shared secret with
+  `consteq`; the secret lives in config or a system parameter, not in code.
+- **One-time processing** (webhook ids, codes, tokens): lock with `record.try_lock_for_update()`
+  (`FOR UPDATE SKIP LOCKED`, 19+) as payment post-processing does.

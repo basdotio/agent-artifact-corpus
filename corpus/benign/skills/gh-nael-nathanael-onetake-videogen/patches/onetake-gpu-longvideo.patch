@@ -1,0 +1,666 @@
+diff --git a/app/api/export.py b/app/api/export.py
+index 298998d..c3e2076 100644
+--- a/app/api/export.py
++++ b/app/api/export.py
+@@ -3,6 +3,7 @@ One Take API - 导出管理端点
+ """
+ 
+ import uuid
++import asyncio
+ from datetime import datetime
+ from pathlib import Path
+ from fastapi import APIRouter, HTTPException, BackgroundTasks
+@@ -42,7 +43,7 @@ async def process_export_task(export_id: str, task_id: str, request: ExportReque
+         input_video = task_info['file_path']
+         
+         # 检查是否是视频文件
+-        video_exts = {'.mp4', '.avi', '.mov'}
++        video_exts = {'.mp4', '.avi', '.mov', '.mkv'}
+         if Path(input_video).suffix.lower() not in video_exts:
+             raise ValueError("原始文件不是视频，无法剪辑")
+         
+@@ -54,7 +55,9 @@ async def process_export_task(export_id: str, task_id: str, request: ExportReque
+         
+         # 执行剪辑
+         ffmpeg_service = FFmpegService(ffmpeg_path=settings.ffmpeg_path)
+-        clipped_path = ffmpeg_service.clip_video(
++        # 在线程中运行，避免长视频编码阻塞事件循环
++        clipped_path = await asyncio.to_thread(
++            ffmpeg_service.clip_video,
+             input_video=input_video,
+             edl=edl,
+             output_path=output_path,
+@@ -97,7 +100,8 @@ async def process_export_task(export_id: str, task_id: str, request: ExportReque
+             
+             # 烧录字幕
+             final_output = settings.storage_path / "exports" / f"{export_id}_final.{request.format.value}"
+-            result_path = ffmpeg_service.burn_subtitles(
++            result_path = await asyncio.to_thread(
++                ffmpeg_service.burn_subtitles,
+                 input_video=clipped_path,
+                 subtitle_file=str(srt_path),
+                 output_path=final_output,
+diff --git a/app/api/upload.py b/app/api/upload.py
+index 5edf189..721c0a9 100644
+--- a/app/api/upload.py
++++ b/app/api/upload.py
+@@ -18,14 +18,26 @@ router = APIRouter()
+ logger = get_logger("upload")
+ 
+ # 支持的文件类型
+-ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".mp4", ".avi", ".mov", ".flac", ".ogg"}
++ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".mp4", ".avi", ".mov", ".mkv", ".flac", ".ogg"}
+ 
+ 
+-async def save_upload_file(upload_file: UploadFile, destination: Path) -> None:
+-    """异步保存上传的文件"""
+-    async with aiofiles.open(destination, 'wb') as f:
+-        content = await upload_file.read()
+-        await f.write(content)
++async def save_upload_file(upload_file: UploadFile, destination: Path, max_size: int) -> int:
++    """分块异步保存上传的文件（不把整个文件读入内存），返回文件大小"""
++    size = 0
++    try:
++        async with aiofiles.open(destination, 'wb') as f:
++            while chunk := await upload_file.read(8 * 1024 * 1024):
++                size += len(chunk)
++                if size > max_size:
++                    raise HTTPException(
++                        status_code=400,
++                        detail=f"文件过大，最大允许 {max_size / 1024 / 1024:.0f}MB"
++                    )
++                await f.write(chunk)
++    except BaseException:
++        destination.unlink(missing_ok=True)
++        raise
++    return size
+ 
+ 
+ async def process_asr_task(task_id: str, file_path: str, language: str = None, model_size: str = None) -> None:
+@@ -128,24 +140,13 @@ async def upload_file(
+             detail=f"不支持的文件类型 {file_ext}。支持的类型：{', '.join(ALLOWED_EXTENSIONS)}"
+         )
+     
+-    # 检查文件大小
+-    content = await file.read()
+-    file_size = len(content)
+-    await file.seek(0)  # 重置文件指针
+-    
+-    if file_size > settings.max_file_size:
+-        raise HTTPException(
+-            status_code=400,
+-            detail=f"文件过大（{file_size / 1024 / 1024:.2f}MB），最大允许 {settings.max_file_size / 1024 / 1024}MB"
+-        )
+-    
+     # 生成唯一文件名
+     file_id = str(uuid.uuid4())
+     safe_filename = f"{file_id}{file_ext}"
+     file_path = settings.storage_path / "uploads" / safe_filename
+     
+-    # 保存文件
+-    await save_upload_file(file, file_path)
++    # 保存文件（边写边检查大小）
++    file_size = await save_upload_file(file, file_path, settings.max_file_size)
+     
+     # 创建任务（异步）
+     task_id = await task_manager.create_task(str(file_path), language=language)
+diff --git a/app/config.py b/app/config.py
+index 5a1b7e2..ae031d4 100644
+--- a/app/config.py
++++ b/app/config.py
+@@ -16,7 +16,9 @@ class Settings(BaseSettings):
+     
+     # 存储配置
+     storage_path: Path = Path("./storage")
+-    max_file_size: int = 500 * 1024 * 1024  # 500MB
++    max_file_size: int = 20 * 1024 * 1024 * 1024  # 20GB
++    # 上传/导出/结果文件保留时长（小时），0 表示永不自动清理
++    retention_hours: int = 24 * 7
+     
+     # ASR 配置
+     whisper_model: str = "medium"  # 升级到 medium 模型，准确率 ~95%
+@@ -24,6 +26,10 @@ class Settings(BaseSettings):
+     
+     # FFmpeg 配置
+     ffmpeg_path: str = "ffmpeg"
++    # 视频编码器: auto（优先 NVENC，失败回退 libx264）, nvenc, x264
++    video_encoder: str = "auto"
++    # FFmpeg 超时（秒），0 表示不限制（长视频导出需要）
++    ffmpeg_timeout: int = 0
+     
+     # 服务器配置
+     host: str = "0.0.0.0"
+diff --git a/app/services/cleanup.py b/app/services/cleanup.py
+index deed15d..f249fba 100644
+--- a/app/services/cleanup.py
++++ b/app/services/cleanup.py
+@@ -20,7 +20,7 @@ class CleanupService:
+     def __init__(
+         self,
+         storage_path: Path = None,
+-        max_age_hours: int = 24,
++        max_age_hours: Optional[int] = None,
+         check_interval_minutes: int = 30
+     ):
+         """
+@@ -32,6 +32,8 @@ class CleanupService:
+             check_interval_minutes: 检查间隔（分钟）
+         """
+         self.storage_path = storage_path or settings.storage_path
++        if max_age_hours is None:
++            max_age_hours = settings.retention_hours
+         self.max_age = timedelta(hours=max_age_hours)
+         self.check_interval = check_interval_minutes * 60  # 转换为秒
+         self._running = False
+@@ -42,6 +44,10 @@ class CleanupService:
+         if self._running:
+             return
+         
++        if self.max_age.total_seconds() <= 0:
++            logger.info("清理服务已禁用 (RETENTION_HOURS=0)")
++            return
++        
+         self._running = True
+         self._task = asyncio.create_task(self._cleanup_loop())
+         logger.info(f"清理服务已启动 (保留 {self.max_age.total_seconds() / 3600:.0f} 小时)")
+diff --git a/app/services/ffmpeg_service.py b/app/services/ffmpeg_service.py
+index bb72619..1e053e3 100644
+--- a/app/services/ffmpeg_service.py
++++ b/app/services/ffmpeg_service.py
+@@ -6,7 +6,7 @@ import subprocess
+ import uuid
+ import logging
+ from pathlib import Path
+-from typing import Dict, List, Tuple
++from typing import Dict, List, Optional, Tuple
+ from app.config import settings
+ 
+ logger = logging.getLogger(__name__)
+@@ -78,29 +78,44 @@ class FFmpegService:
+         
+         return segments
+     
+-    def create_concat_file(self, input_video: str, segments: List[Tuple[float, float]], concat_file: Path) -> None:
++    def _run(self, cmd: List[str]) -> subprocess.CompletedProcess:
++        """执行 FFmpeg 命令（超时由 FFMPEG_TIMEOUT 控制，0 表示不限制）"""
++        logger.info(f"执行FFmpeg命令: {' '.join(cmd)}")
++        timeout = settings.ffmpeg_timeout or None
++        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
++
++    def _has_audio(self, input_video: str) -> bool:
++        """检查输入文件是否包含音频流"""
++        result = subprocess.run(
++            ["ffprobe", "-v", "error", "-select_streams", "a:0",
++             "-show_entries", "stream=index", "-of", "csv=p=0", input_video],
++            capture_output=True, text=True
++        )
++        return bool(result.stdout.strip())
++
++    def _build_video_filter(self, segments: List[Tuple[float, float]], post_filter: Optional[str] = None) -> str:
+         """
+-        创建 FFmpeg concat 文件
+-        
+-        Args:
+-            input_video: 输入视频路径
+-            segments: 保留片段列表
+-            concat_file: concat 文件路径
++        构建视频滤镜：select 选出保留帧，setpts 把每帧映射到输出时间轴
++
++        输出时间 = 该片段之前已保留的总时长 + (T - 片段起点)，
++        与音频时间轴完全一致，可变帧率素材也不会音画不同步
+         """
+-        # 使用绝对路径,避免路径解析问题
+-        abs_input_video = str(Path(input_video).resolve())
+-        logger.info(f"创建concat文件: {concat_file}, 输入视频: {abs_input_video}, 片段数: {len(segments)}")
+-        
+-        with open(concat_file, 'w') as f:
+-            for start, end in segments:
+-                f.write(f"file '{abs_input_video}'\n")
+-                f.write(f"inpoint {start}\n")
+-                f.write(f"outpoint {end}\n")
+-        
+-        # 记录concat文件内容以便调试
+-        with open(concat_file, 'r') as f:
+-            logger.debug(f"Concat文件内容:\n{f.read()}")
+-    
++        select_terms = []
++        offset_terms = []
++        kept = 0.0
++        for start, end in segments:
++            # select 中时间变量是 t，setpts 中是 T
++            select_terms.append(f"gte(t,{start:.6f})*lt(t,{end:.6f})")
++            offset_terms.append(f"gte(T,{start:.6f})*lt(T,{end:.6f})*({kept - start:.6f})")
++            kept += end - start
++        select_expr = "+".join(select_terms)
++        offset_expr = "+".join(offset_terms)
++        post = f",{post_filter}" if post_filter else ""
++        return (
++            f"[0:v]select='{select_expr}',"
++            f"setpts='(T+{offset_expr})/TB'{post}[v]"
++        )
++
+     def clip_video(
+         self,
+         input_video: str,
+@@ -110,24 +125,24 @@ class FFmpegService:
+     ) -> str:
+         """
+         根据 EDL 剪辑视频
+-        
++
+         Args:
+             input_video: 输入视频路径
+             edl: Edit Decision List
+             output_path: 输出视频路径
+             quality: 质量设定 (low, medium, high)
+-        
++
+         Returns:
+             输出文件路径
+         """
+         # 提取保留片段
+         segments = self.extract_keep_segments(edl)
+         logger.info(f"提取到 {len(segments)} 个保留片段")
+-        
++
+         if not segments:
+             logger.error("没有可保留的片段")
+             raise ValueError("没有可保留的片段")
+-        
++
+         # 如果只有一个片段且是完整视频，直接复制
+         if len(segments) == 1:
+             start, end = segments[0]
+@@ -136,87 +151,130 @@ class FFmpegService:
+                 import shutil
+                 shutil.copy2(input_video, output_path)
+                 return str(output_path)
+-        
+-        # 创建 concat 文件
+-        concat_file = output_path.parent / f"{uuid.uuid4()}_concat.txt"
++
++        return self.clip_segments(input_video, segments, output_path, quality)
++
++    def clip_segments(
++        self,
++        input_video: str,
++        segments: List[Tuple[float, float]],
++        output_path: Path,
++        quality: str = "high",
++        post_filter: Optional[str] = None
++    ) -> str:
++        """
++        按保留片段剪辑视频（帧级精确，单次编码）
++
++        Args:
++            input_video: 输入视频路径
++            segments: [(start, end), ...] 保留片段（秒）
++            output_path: 输出视频路径
++            quality: 质量设定 (low, medium, high)
++            post_filter: 追加在输出时间轴上的视频滤镜（如字幕、缩放）
++
++        Returns:
++            输出文件路径
++        """
++        output_path = Path(output_path)
++        abs_input = str(Path(input_video).resolve())
++        work_id = uuid.uuid4()
++        filter_file = output_path.parent / f"{work_id}_filter.txt"
++        audio_wav = output_path.parent / f"{work_id}_audio.wav"
++        audio_concat = output_path.parent / f"{work_id}_audio_concat.txt"
++        temp_files = [filter_file, audio_wav, audio_concat]
++
+         try:
+-            self.create_concat_file(input_video, segments, concat_file)
+-            
+-            # 设置编码参数
+-            codec_args = self._get_codec_args(quality)
+-            
+-            # 构建 FFmpeg 命令
+-            cmd = [
+-                self.ffmpeg_path,
+-                '-f', 'concat',
+-                '-safe', '0',
+-                '-i', str(concat_file),
+-                *codec_args,
+-                '-y',  # 覆盖输出文件
+-                str(output_path)
+-            ]
+-            
+-            # 记录FFmpeg命令
+-            logger.info(f"执行FFmpeg命令: {' '.join(cmd)}")
+-            
+-            # 执行 FFmpeg
+-            result = subprocess.run(
+-                cmd,
+-                capture_output=True,
+-                text=True,
+-                timeout=300  # 5 分钟超时
+-            )
+-            
+-            if result.returncode != 0:
+-                logger.error(f"FFmpeg执行失败 (返回码: {result.returncode})")
+-                logger.error(f"FFmpeg stderr: {result.stderr}")
+-                logger.error(f"FFmpeg stdout: {result.stdout}")
+-                raise RuntimeError(f"FFmpeg 失败: {result.stderr}")
+-            
+-            logger.info(f"视频剪辑成功: {output_path}")
+-            
+-            return str(output_path)
+-        
++            filter_file.write_text(self._build_video_filter(segments, post_filter))
++            inputs = [*self._decode_args(), '-i', abs_input]
++            maps = ['-map', '[v]']
++
++            if self._has_audio(abs_input):
++                # 音频先解码为 PCM，再用 concat 按采样精度裁剪
++                result = self._run([
++                    self.ffmpeg_path, '-y', '-i', abs_input,
++                    '-map', '0:a:0', '-vn', '-c:a', 'pcm_s16le',
++                    '-rf64', 'auto', str(audio_wav)
++                ])
++                if result.returncode != 0:
++                    raise RuntimeError(f"音频提取失败: {result.stderr[-2000:]}")
++                with open(audio_concat, 'w') as f:
++                    for start, end in segments:
++                        f.write(f"file '{audio_wav.resolve()}'\n")
++                        f.write(f"inpoint {start:.6f}\n")
++                        f.write(f"outpoint {end:.6f}\n")
++                inputs += ['-f', 'concat', '-safe', '0', '-i', str(audio_concat)]
++                maps += ['-map', '1:a:0']
++
++            result = None
++            for encoder in self._encoder_candidates():
++                cmd = [
++                    self.ffmpeg_path,
++                    *inputs,
++                    '-/filter_complex', str(filter_file),
++                    *maps,
++                    *self._get_codec_args(quality, encoder),
++                    '-movflags', '+faststart',
++                    '-y',
++                    str(output_path)
++                ]
++                if encoder != 'nvenc':
++                    # CPU 编码时不使用 CUDA 解码参数
++                    cmd = [a for a in cmd if a not in self._decode_args()]
++                result = self._run(cmd)
++                if result.returncode == 0:
++                    logger.info(f"视频剪辑成功 ({encoder}): {output_path}")
++                    return str(output_path)
++                logger.warning(f"{encoder} 编码失败，返回码 {result.returncode}: {result.stderr[-2000:]}")
++
++            raise RuntimeError(f"FFmpeg 失败: {result.stderr[-2000:]}")
++
+         finally:
+-            # 清理 concat 文件
+-            if concat_file.exists():
+-                concat_file.unlink()
+-    
+-    def _get_codec_args(self, quality: str) -> List[str]:
++            for f in temp_files:
++                f.unlink(missing_ok=True)
++
++    def _decode_args(self) -> List[str]:
++        """NVENC 时用 CUDA 解码（不支持的编码会自动回退软件解码）"""
++        return ['-hwaccel', 'cuda'] if 'nvenc' in self._encoder_candidates() else []
++
++    def _encoder_candidates(self) -> List[str]:
++        """按 VIDEO_ENCODER 配置返回要尝试的编码器顺序"""
++        mode = settings.video_encoder.lower()
++        if mode == 'nvenc':
++            return ['nvenc']
++        if mode == 'x264':
++            return ['x264']
++        return ['nvenc', 'x264']
++
++    def _get_codec_args(self, quality: str, encoder: str = 'x264') -> List[str]:
+         """
+         获取编码参数
+-        
++
+         Args:
+             quality: 质量设定
+-        
++            encoder: nvenc 或 x264
++
+         Returns:
+             FFmpeg 参数列表
+         """
+-        if quality == "high":
+-            return [
+-                '-c:v', 'libx264',
+-                '-preset', 'slow',
+-                '-crf', '18',
+-                '-c:a', 'aac',
+-                '-b:a', '192k'
++        audio_bitrate = {'high': '192k', 'medium': '128k'}.get(quality, '96k')
++        if encoder == 'nvenc':
++            preset, cq = {'high': ('p5', 19), 'medium': ('p4', 23)}.get(quality, ('p3', 28))
++            video = [
++                '-c:v', 'h264_nvenc',
++                '-preset', preset,
++                '-rc', 'vbr',
++                '-cq', str(cq),
++                '-b:v', '0',
+             ]
+-        elif quality == "medium":
+-            return [
++        else:
++            preset, crf = {'high': ('slow', 18), 'medium': ('medium', 23)}.get(quality, ('fast', 28))
++            video = [
+                 '-c:v', 'libx264',
+-                '-preset', 'medium',
+-                '-crf', '23',
+-                '-c:a', 'aac',
+-                '-b:a', '128k'
++                '-preset', preset,
++                '-crf', str(crf),
+             ]
+-        else:  # low
+-            return [
+-                '-c:v', 'libx264',
+-                '-preset', 'fast',
+-                '-crf', '28',
+-                '-c:a', 'aac',
+-                '-b:a', '96k'
+-            ]
+-    
++        return [*video, '-c:a', 'aac', '-b:a', audio_bitrate]
++
+     def clip_video_simple(
+         self,
+         input_video: str,
+@@ -252,7 +310,7 @@ class FFmpegService:
+             cmd,
+             capture_output=True,
+             text=True,
+-            timeout=60
++            timeout=settings.ffmpeg_timeout or None
+         )
+         
+         if result.returncode != 0:
+@@ -300,7 +358,7 @@ class FFmpegService:
+             cmd,
+             capture_output=True,
+             text=True,
+-            timeout=600
++            timeout=settings.ffmpeg_timeout or None
+         )
+         
+         if result.returncode != 0:
+diff --git a/asr_demo.py b/asr_demo.py
+index 443d84c..b02a7c3 100755
+--- a/asr_demo.py
++++ b/asr_demo.py
+@@ -92,6 +92,11 @@ class FasterWhisperASR:
+         "i mean", "sort of", "kind of"
+     }
+     
++    # 印尼语常见语气词（只收录不会误删正常词的）
++    INDONESIAN_FILLERS = {
++        "eh", "ehm", "em", "emm", "hmm", "hm", "mm", "mmm", "umm"
++    }
++    
+     def __init__(
+         self, 
+         model_size: str = "base",
+@@ -111,13 +116,12 @@ class FasterWhisperASR:
+         # 自动选择设备
+         if device == "auto":
+             try:
+-                import torch
+-                device = "cuda" if torch.cuda.is_available() else "cpu"
+-                if device == "cpu":
+-                    compute_type = "int8"  # CPU 模式使用 int8
+-            except ImportError:
++                import ctranslate2
++                device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
++            except Exception:
+                 device = "cpu"
+-                compute_type = "int8"
++        if device == "cpu":
++            compute_type = "int8"  # CPU 模式使用 int8
+         
+         print(f"📱 使用设备: {device}, 计算类型: {compute_type}")
+         
+@@ -168,6 +172,9 @@ class FasterWhisperASR:
+             language=language,
+             beam_size=beam_size,
+             word_timestamps=True,  # 🔑 关键参数
++            # 减少长视频中的重复/幻觉文本（如结尾重复的 "Terima kasih sudah menonton"）
++            condition_on_previous_text=False,
++            hallucination_silence_threshold=2.0,
+             vad_filter=True,  # 启用 VAD 过滤
+             vad_parameters=dict(
+                 min_silence_duration_ms=500  # 最小静音时长
+@@ -250,7 +257,8 @@ class FillerDetector:
+             custom_fillers: 自定义语气词集合
+         """
+         self.fillers = FasterWhisperASR.CHINESE_FILLERS.union(
+-            FasterWhisperASR.ENGLISH_FILLERS
++            FasterWhisperASR.ENGLISH_FILLERS,
++            FasterWhisperASR.INDONESIAN_FILLERS
+         )
+         
+         if custom_fillers:
+@@ -270,7 +278,7 @@ class FillerDetector:
+         
+         for word in words:
+             # 去除标点符号后比较
+-            clean_word = word.word.strip().lower().replace(",", "").replace(".", "")
++            clean_word = word.word.strip().lower().strip(",.!?…")
+             
+             if clean_word in self.fillers:
+                 word.type = "filler"
+diff --git a/frontend/src/api/client.js b/frontend/src/api/client.js
+index aa031f1..fdaad66 100644
+--- a/frontend/src/api/client.js
++++ b/frontend/src/api/client.js
+@@ -24,6 +24,7 @@ export const api = {
+     }
+     return apiClient.post('/api/v1/upload', formData, {
+       headers: { 'Content-Type': 'multipart/form-data' },
++      timeout: 0, // 大文件上传不设超时
+     });
+   },
+   
+diff --git a/frontend/src/pages/Home.jsx b/frontend/src/pages/Home.jsx
+index 786ae7a..b2446ae 100644
+--- a/frontend/src/pages/Home.jsx
++++ b/frontend/src/pages/Home.jsx
+@@ -8,7 +8,8 @@ function Home() {
+   const [progress, setProgress] = useState('');
+   const [progressPercent, setProgressPercent] = useState(0);
+   const [historyTasks, setHistoryTasks] = useState([]);
+-  const [modelSize, setModelSize] = useState('medium'); // 新增：模型选择
++  const [modelSize, setModelSize] = useState('large-v3-turbo'); // 新增：模型选择
++  const [language, setLanguage] = useState('id'); // 识别语言，空字符串表示自动检测
+   const navigate = useNavigate();
+ 
+   useEffect(() => {
+@@ -59,7 +60,7 @@ function Home() {
+       setProgress('正在上传...');
+       setProgressPercent(10);
+ 
+-      const uploadResponse = await api.upload(file, 'zh', modelSize);
++      const uploadResponse = await api.upload(file, language || null, modelSize);
+       const taskId = uploadResponse.data.task_id;
+       setProgress('上传成功，正在处理...');
+       setProgressPercent(30);
+@@ -217,6 +218,21 @@ function Home() {
+               <option value="base">Base (快速 · 准确率 ~85%)</option>
+               <option value="medium">Medium (推荐 · 准确率 ~95%)</option>
+               <option value="large">Large (最准 · 准确率 ~97%)</option>
++              <option value="large-v3-turbo">Large-v3 Turbo (GPU 推荐 · 快且准)</option>
++            </select>
++          </label>
++          <label style={styles.modelLabel}>
++            <span style={styles.modelLabelText}>🌐 语言 / Bahasa:</span>
++            <select
++              value={language}
++              onChange={(e) => setLanguage(e.target.value)}
++              disabled={uploading}
++              style={styles.modelSelect}
++            >
++              <option value="id">Bahasa Indonesia</option>
++              <option value="en">English</option>
++              <option value="zh">中文</option>
++              <option value="">自动检测 / Auto</option>
+             </select>
+           </label>
+           <p style={styles.modelHint}>
+diff --git a/requirements.txt b/requirements.txt
+index 7560e31..71e00d7 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,9 +1,13 @@
+ # FastAPI 后端服务依赖
+ 
+ # 阶段 1 依赖（保留）
+-faster-whisper>=1.0.0
+-torch>=2.0.0
+-torchaudio>=2.0.0
++faster-whisper>=1.1.0
++# PyAV 17+ 移除了 faster-whisper 使用的 metadata_errors 参数
++av<17
++# GPU (CUDA 12) 运行库，CTranslate2 需要；不再依赖 torch
++nvidia-cublas-cu12; sys_platform == 'linux'
++nvidia-cudnn-cu12==9.*; sys_platform == 'linux'
++ffmpeg-python>=0.2.0
+ numpy>=1.24.0
+ pydub>=0.25.0
+ 
+diff --git a/start_local.sh b/start_local.sh
+new file mode 100755
+index 0000000..b64d130
+--- /dev/null
++++ b/start_local.sh
+@@ -0,0 +1,27 @@
++#!/usr/bin/env bash
++# 本地启动（Linux + NVIDIA GPU，无需 conda）：后端 :8000 + 前端 :5173
++set -euo pipefail
++cd "$(dirname "$0")"
++
++VENV=.venv
++SITE=$("$VENV/bin/python" -c 'import site; print(site.getsitepackages()[0])')
++# CTranslate2 (faster-whisper) 需要 pip 安装的 cuBLAS / cuDNN
++export LD_LIBRARY_PATH="$SITE/nvidia/cublas/lib:$SITE/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}"
++# 上传文件的临时缓冲写到磁盘，而不是 /tmp（可能是 tmpfs，占内存）
++mkdir -p storage/tmp
++export TMPDIR="$PWD/storage/tmp"
++
++"$VENV/bin/python" run.py &
++BACKEND_PID=$!
++trap 'kill $BACKEND_PID ${FRONTEND_PID:-} 2>/dev/null' EXIT INT TERM
++
++for _ in $(seq 30); do
++  curl -sf http://localhost:8000/health >/dev/null && break
++  sleep 1
++done
++
++(cd frontend && npm run dev -- --host 127.0.0.1) &
++FRONTEND_PID=$!
++
++echo "后端: http://localhost:8000/docs   前端: http://localhost:5173"
++wait

@@ -1,0 +1,73 @@
+POST /bengaluru-sources/_search
+{
+  "retriever": {
+    "text_similarity_reranker": {
+      "inference_id": "jina-reranker-v2",
+      "inference_text": "BMRCL Purple Line shutdown Tuesday",
+      "field": "body",
+      "rank_window_size": 20,
+      "retriever": {
+        "rrf": {
+          "window_size": 20,
+          "rank_constant": 60,
+          "retrievers": [
+            {
+              "standard": {
+                "query": {
+                  "function_score": {
+                    "query": {
+                      "bool": {
+                        "must": {
+                          "multi_match": {
+                            "query": "BMRCL Purple Line shutdown Tuesday",
+                            "fields": ["title^3", "body"]
+                          }
+                        },
+                        "filter": [
+                          { "terms": { "source_tier": ["official", "news"] } }
+                        ]
+                      }
+                    },
+                    "functions": [
+                      {
+                        "gauss": {
+                          "published_date": {
+                            "origin": "now",
+                            "scale": "7d",
+                            "offset": "1d",
+                            "decay": 0.5
+                          }
+                        }
+                      }
+                    ],
+                    "boost_mode": "multiply"
+                  }
+                }
+              }
+            },
+            {
+              "standard": {
+                "query": {
+                  "bool": {
+                    "must": {
+                      "sparse_vector": {
+                        "field": "body_elser",
+                        "inference_id": ".elser-2-elasticsearch",
+                        "query": "BMRCL Purple Line shutdown Tuesday"
+                      }
+                    },
+                    "filter": [
+                      { "terms": { "source_tier": ["official", "news"] } }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "_source": ["title", "body", "source_name", "source_url", "published_date"],
+  "size": 5
+}

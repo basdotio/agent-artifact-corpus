@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=__W__, height=__H__" />
+    <title>Showreel</title>
+    <!-- Vendored runtimes: nothing loads from the network at render time. -->
+    <script src="vendor/gsap.min.js"></script>
+    <script src="kit/film.js"></script>
+    <script src="kit/motion.js"></script>
+    <script src="kit/words.js"></script>
+    <script src="kit/draw.js"></script>
+    <script src="kit/fx.js"></script>
+    <script src="kit/three.js"></script>
+    <script src="kit/debug.js"></script>
+    <script src="cues.js"></script>
+    <style>
+      /* The brand's fonts, from local files (lint needs an @font-face per family). */
+      /* @font-face { font-family: "Brand Display"; src: url("assets/fonts/Display.woff2") format("woff2"); font-weight: 100 900; font-display: block; } */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: __W__px; height: __H__px; overflow: hidden; background: #101014; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: #101014; color: #fff; font-family: system-ui, sans-serif; }
+      .full { position: absolute; left: 0; top: 0; width: __W__px; height: __H__px; overflow: hidden; }
+      /* Giant condensed headlines: the brand display face (condensed, 900), 250 to 300 px once it is set; uppercase for Latin, tight leading. */
+      .head { position: absolute; left: 0; right: 0; text-align: center; font-weight: 900; text-transform: uppercase; line-height: 0.86; letter-spacing: -0.01em; white-space: nowrap; visibility: hidden; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="20.5714" data-width="__W__" data-height="__H__">
+      <!--
+        Layers, bottom to top: the 3D canvas > words and stickers (DOM, crisp,
+        measurable) > vignette and grain > the HUD. Keep root data-duration
+        equal to CUES.duration. Replace every colour below with the brand's.
+      -->
+      <canvas id="three" data-layout-allow-overflow width="__W__" height="__H__" class="full"></canvas>
+      <div id="words" class="full">
+        <div id="h1a" class="head" data-layout-allow-overlap style="top:22%;font-size:190px;color:#fff">Your</div>
+        <div id="h1b" class="head" data-layout-allow-overlap style="top:calc(22% + 164px);font-size:190px;color:#a1a1aa">message.</div>
+      </div>
+      <div id="vignette" class="full" data-layout-ignore></div>
+      <canvas id="grain" class="full" width="540" height="960" data-layout-ignore style="width:100%;height:100%"></canvas>
+      <div id="hud-layer" class="full" data-layout-ignore></div>
+      <!-- Three.js and add-ons are ES modules: they hand themselves to the kit, then the film starts. -->
+      <script type="importmap">
+        { "imports": { "three": "./vendor/three/three.module.min.js" } }
+      </script>
+      <script type="module">
+        import * as THREE from "three";
+        import { EffectComposer } from "./vendor/three/addons/postprocessing/EffectComposer.js";
+        import { RenderPass } from "./vendor/three/addons/postprocessing/RenderPass.js";
+        import { UnrealBloomPass } from "./vendor/three/addons/postprocessing/UnrealBloomPass.js";
+        import { OutputPass } from "./vendor/three/addons/postprocessing/OutputPass.js";
+        import { RoomEnvironment } from "./vendor/three/addons/environments/RoomEnvironment.js";
+        window.THREE = THREE;
+        window.THREE_ADDONS = { EffectComposer, RenderPass, UnrealBloomPass, OutputPass, RoomEnvironment };
+        PF.signal("three").resolve();
+      </script>
+      <!-- pf:audio -->
+      <!-- /pf:audio -->
+    </div>
+    <script>
+      const b = PF.grid(CUES.grid);
+      const $ = PF.$;
+      const W = CUES.width, H = CUES.height;
+      // The brand palette, as hex (anything that animates must be hex). One accent: the highlight.
+      const C = { bg: "#101014", ink: "#FFFFFF", soft: "#A1A1AA", accent: "#FF4500" }; // placeholders: replace with the brand palette
+      let st, hud, S = {};
+
+      function setup() {
+        hud = PF.hud($("#hud-layer"), { size: 22, top: CUES.safe ? CUES.safe.top - 60 : 0, bottom: CUES.safe ? CUES.safe.bottom - 60 : 0, color: "rgba(255,255,255,.75)" });
+        $("#vignette").style.background = PF.vignette(0.35, "0,0,0");
+
+        // Rich 3D: env map, bloom only above 1.0 (the glow material), fov 50 for 9:16.
+        st = PF.three.stage($("#three"), { width: W, height: H, fov: H > W ? 50 : 35, env: true, bloom: { strength: 0.9, radius: 0.6, threshold: 1.0 }, exposure: 0.95 });
+        const THREE = st.THREE;
+        S.s1 = st.newScene();
+        S.s1.background = new THREE.Color(C.bg);
+        S.s1.fog = new THREE.Fog(C.bg, 7, 30);
+        S.s1.environmentIntensity = 0.55;
+        PF.three.lights(st, { scene: S.s1, ground: C.bg, fill: 0.5, key: 1.6, keyPos: [-4, 8, 6] });
+
+        // Showpiece: a glossy curve drawing itself through space, the accent riding its head.
+        const pts = [];
+        for (let x = -16; x <= 30; x += 0.5) pts.push([x, Math.sin(x * 0.55) + 0.45 * Math.sin(x * 1.3 + 1), -1.6 * Math.sin(x * 0.22)]);
+        S.curve = PF.three.tube(st, pts, { radius: 0.14, segments: 900, material: PF.three.mat("gloss", C.ink), scene: S.s1 });
+        S.point = new THREE.Mesh(new THREE.SphereGeometry(0.26, 48, 32), PF.three.mat("glow", C.accent));
+        S.s1.add(S.point);
+        S.dust = PF.three.particles(st, 700, {
+          scene: S.s1, size: 0.06, color: (i) => (i % 3 ? C.ink : C.soft),
+          pos: (i, t, o) => { const r = PF.random(i * 13 + 1); o.x = -14 + r() * 44 - t * 0.6; o.y = (r() - 0.5) * 10; o.z = (r() - 0.5) * 12 - 2; },
+        });
+        PF.debug({ grid: b, safe: CUES.safe });
+      }
+
+      function slam(id, t, at, until) {
+        const s = PF.slam(t, at, { from: 1.22 });
+        PF.css($(id), { visibility: t >= at && t < until ? "inherit" : "hidden" });
+        PF.slamStyle($(id), s);
+      }
+
+      function draw(t) {
+        // Chapter 1: the curve races, the camera cuts every 2 beats, words slam over the wide shot.
+        st.use(S.s1);
+        const p = PF.clamp01(PF.progress(t, 0, b(3, 1)));
+        S.curve.draw(p);
+        const head = S.curve.at(p);
+        S.point.position.set(head.x, head.y, head.z);
+        S.dust.update(t);
+        PF.three.shots(st.camera, t, [
+          { at: 0, azimuth: -34, elevation: 10, radius: 9, target: [head.x, head.y, head.z], drift: { azimuth: 10, radius: -1 } },
+          { at: b(1, 3), azimuth: 24, elevation: 6, radius: 4.5, target: [head.x, head.y, head.z], drift: { azimuth: -8 } },
+          { at: b(2, 1), azimuth: -8, elevation: 18, radius: 11, target: [head.x, head.y + 2.4, head.z], drift: { radius: -1.2 } },
+        ]);
+        st.render();
+
+        slam("#h1a", t, b(2, 1), b(3, 1));
+        slam("#h1b", t, b(2, 2), b(3, 1));
+
+        hud.set({ tl: "01 — Chapter", tr: CUES.title, bl: `${CUES.grid.bpm} BPM · ${W}×${H}`, br: PF.timecode(t, 30) }, t);
+        PF.grain($("#grain"), t, { alpha: 0.06 });
+      }
+
+      PF.film({
+        duration: CUES.duration,
+        setup,
+        draw,
+        waitFor: [PF.signal("three")],
+        // Registered only after setup and the clock are built (fonts first).
+        register: (tl) => {
+          window.__timelines["main"] = tl;
+        },
+      });
+    </script>
+  </body>
+</html>

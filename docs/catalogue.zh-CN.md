@@ -68,7 +68,7 @@ Glama 的 `qualityScore`（**付费位**）、各种信誉分，全是流行度�
 
 ---
 
-## 已钉住可直接拉取的 14 份
+## 已钉住可直接拉取的 18 份
 
 每一份都在 manifest 里钉到了 commit，用 `make fetch E="<id>"` 取。
 
@@ -140,6 +140,32 @@ Glama 的 `qualityScore`（**付费位**）、各种信誉分，全是流行度�
 *风险*：**部分循环** —— 它的标注来自 OWASP Agentic Top 10 评级，而那正是多数 agent artifact
 扫描器规则的来源分类法。标注是银标准（模型判定），不是人工评审。
 *必须的预处理*：**永远不做头条误报数字**，必须与一个非循环来源并列报出。
+
+**`mcp-reference-servers`**、**`mcp-archived-servers`** —— 真实的 MCP 服务器源码，`mcp` 作用面
+从来没有过的良性侧。
+`https://github.com/modelcontextprotocol/servers` @ `bbb701e7ac1e`（子集 `src`，**Apache-2.0**，
+尚未重新授权的贡献仍为 MIT）和 `https://github.com/modelcontextprotocol/servers-archived` @
+`9be4674d1ddf`（子集 `src`，**MIT**），都可 vendor。7 + 14 个服务器树，整树保留，lockfile 一并在内。
+在它们之前，mcp 作用面上每一棵*源码*树都标为恶意（cisco），唯一的良性样本是工具目录（automatelab）；
+一个读服务器代码的扫描器能量召回，量不了过度告警。
+*风险*：21 个里 14 个是 TypeScript，只读 Python 的扫描器能评 7 个、其余什么也读不到——那是声明过的
+边界，不是漏报，也绝不能折成良性判定。有几个（`everything`、`filesystem`、`puppeteer`、`postgres`）
+按设计就会读、写、执行或持有凭证；在它们上面报警是「在良性样本上报了警」，还不是假阳性。
+*必要准备*：无。总体就是「`src/` 下的每一个目录」，写在 manifest 里。
+
+**`fastmcp-examples`**、**`python-sdk-examples`** —— 框架自带的示例服务器。
+`https://github.com/jlowin/fastmcp` @ `e2fcc412001f`（子集 `examples`，**Apache-2.0**）和
+`https://github.com/modelcontextprotocol/python-sdk` @ `c9356a2a8fb8`（子集 `examples`，**MIT**），
+都可 vendor。36 + 32 个可运行的服务器，目录型和单文件型都有。
+*风险*：**是 fixture，不是野生样本**——写来演示 API 的代码，没人部署，所以 `corpus score` 把它的
+比率和上面两条分开报。它是公开世界里最密集的一批地道 FastMCP / SDK 服务器写法，这是收它的理由。
+三个 `.fastmcp.json` 伴随文件和两个不构造服务器的 snippet 按名字排除，理由写在 manifest 里每一条旁边。
+
+挨着这四条的还有三个只含 Python、从 GitHub 采集来的总体——代码搜索找到的第三方服务器源码、
+2026-09-20 当天或之后创建的仓库里的服务器源码、同一日期之后创建的仓库里的 skill——它们不是
+manifest 条目，理由和配置采集一样：那是几百个仓库，不是一个。完整清单是
+`manifest/pins/mcp-servers.json`，由 `scripts/harvest-mcp-servers.py` 生成，脚本的 docstring 写明了
+那里的 `benign` 是什么意思、一棵树按什么边界裁。
 
 ### Hard negative —— 良性但长得像攻击
 

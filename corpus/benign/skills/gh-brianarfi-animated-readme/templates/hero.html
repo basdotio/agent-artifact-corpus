@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hero</title>
+<!-- Scene template: hero. Filled by scripts/render.py from the "data" block of a scene in
+     readme-scenes.json. Do not put project copy in this file; put it in the JSON.
+     Runs once in about 9 s: headline, then a terminal types the prompt, the work lines appear,
+     the result card lands, the footnote fades in, and the frame fades back to paper to loop. -->
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800;900&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --paper: #F1F3EE; --field: #0D453E; --ink: #072B27; --signal: #C8F751; --warn: #F2A65A;
+          --head: "Archivo", Arial, sans-serif; --body: "Inter", "Segoe UI", sans-serif;
+          --mono: "JetBrains Mono", Consolas, monospace; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1600px; height: 800px; overflow: hidden; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--body); position: relative; }
+  .a { animation-duration: .55s; animation-timing-function: cubic-bezier(.2,.8,.2,1);
+       animation-fill-mode: both; animation-iteration-count: 1; }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  @keyframes pop { 0% { opacity: 0; transform: scale(.85); } 70% { opacity: 1; transform: scale(1.03); } 100% { opacity: 1; transform: none; } }
+  @keyframes type { from { width: 0; } to { width: var(--chars); } }
+  @keyframes on { from { opacity: 0; } to { opacity: 1; } }
+
+  .left { position: absolute; left: 80px; top: 120px; width: 640px; }
+  .eyebrow { font: 700 20px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--field); animation-name: rise; animation-delay: .1s; }
+  h1 { font: 900 66px/1.04 var(--head); letter-spacing: -.035em; margin-top: 22px; animation-name: rise; animation-delay: .3s; }
+  h1 mark { background: var(--signal); color: var(--ink); padding: 0 8px; border-radius: 8px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+  .sub { font-size: 27px; line-height: 1.4; margin-top: 26px; color: #23443F; animation-name: rise; animation-delay: .6s; }
+
+  .term { position: absolute; left: 790px; top: 96px; width: 730px; height: 470px; background: var(--ink); border-radius: 18px;
+          border: 3px solid var(--ink); box-shadow: 8px 8px 0 var(--field); overflow: hidden; animation-name: pop; animation-delay: .5s; }
+  .chrome { height: 46px; background: #0A3833; display: flex; align-items: center; gap: 9px; padding: 0 18px; }
+  .chrome i { width: 13px; height: 13px; border-radius: 50%; background: #2C5C55; display: block; }
+  .chrome span { margin-left: 10px; color: #9DB7AF; font: 500 17px var(--mono); }
+  .s { padding: 22px 26px; color: #DDE7E2; font: 400 21px/1.6 var(--mono); }
+  .p { color: var(--signal); }
+  .typed { display: inline-block; vertical-align: bottom; overflow: hidden; white-space: nowrap; color: #fff; max-width: 620px; }
+  .line { animation-name: rise; }
+  .dim { color: #8FB0A7; }
+
+  .card { position: absolute; left: 880px; top: 420px; width: 640px; background: #fff; border: 3px solid var(--ink); border-radius: 16px;
+          padding: 22px 26px; box-shadow: 7px 7px 0 var(--ink); animation-name: pop; }
+  .card h3 { font: 800 25px var(--head); letter-spacing: -.01em; }
+  .card ul { list-style: none; margin-top: 12px; }
+  .card li { font-size: 21px; line-height: 1.35; font-weight: 600; padding: 7px 0 7px 34px; position: relative; }
+  .card li::before { content: ""; position: absolute; left: 0; top: 11px; width: 20px; height: 20px; border-radius: 6px; background: var(--signal); border: 2px solid var(--ink); }
+  .card li.warn::before { background: var(--warn); }
+
+  .foot { position: absolute; left: 80px; bottom: 70px; font: 700 24px var(--head); color: var(--field); animation-name: rise; }
+  .foot b { background: var(--signal); color: var(--ink); padding: 2px 10px; border-radius: 8px; }
+  .cover { position: absolute; inset: 0; background: var(--paper); z-index: 9; }
+</style>
+</head>
+<body>
+<div class="left">
+  <div class="eyebrow a" id="eyebrow"></div>
+  <h1 class="a" id="title"></h1>
+  <p class="sub a" id="sub"></p>
+</div>
+<div class="term a">
+  <div class="chrome"><i></i><i></i><i></i><span id="app"></span></div>
+  <div class="s" id="s"></div>
+</div>
+<div class="card a" id="card"><h3 id="cardTitle"></h3><ul id="cardList"></ul></div>
+<div class="foot a" id="foot"></div>
+<div class="cover" id="cover"></div>
+<script>
+const D = /*DATA*/null;
+(function () {
+  const $ = id => document.getElementById(id);
+  const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // **word** in the title becomes the highlighted part.
+  const mark = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<mark>$1</mark>');
+  if (D.theme) for (const [k, v] of Object.entries(D.theme)) document.documentElement.style.setProperty('--' + k, v);
+  $('eyebrow').textContent = D.eyebrow || '';
+  $('title').innerHTML = mark(D.title);
+  $('sub').textContent = D.subtitle || '';
+  $('app').textContent = D.app || 'Claude Code';
+
+  const prompt = D.prompt || '';
+  // Mono glyphs are about 0.6em wide. Shrink the typed line so a long prompt fits on one line.
+  const fitPx = Math.min(21, Math.floor(620 / (Math.max(prompt.length, 1) * 0.6)));
+  const T0 = 1.4, typeDur = Math.min(2.2, 0.045 * prompt.length + 0.3);
+  let html = `<div><span class="p">&gt; </span><span class="typed a" style="font-size:${fitPx}px;--chars:${prompt.length}ch;animation-name:type;animation-duration:${typeDur}s;animation-timing-function:steps(${Math.max(prompt.length, 1)},end);animation-delay:${T0}s">${esc(prompt)}</span></div>`;
+  let t = T0 + typeDur + 0.35;
+  (D.lines || []).forEach(l => {
+    html += `<div class="line a dim" style="animation-delay:${t.toFixed(2)}s">${esc(l)}</div>`;
+    t += 0.5;
+  });
+  $('s').innerHTML = html;
+
+  const card = $('card');
+  card.style.animationDelay = (t + 0.2).toFixed(2) + 's';
+  $('cardTitle').textContent = (D.result && D.result.title) || '';
+  $('cardList').innerHTML = ((D.result && D.result.items) || []).map(i => {
+    const warn = typeof i === 'object' && i.warn;
+    return `<li class="${warn ? 'warn' : ''}">${esc(typeof i === 'object' ? i.text : i)}</li>`;
+  }).join('');
+  t += 1.1;
+
+  const foot = $('foot');
+  foot.innerHTML = esc(D.footnote || '').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  foot.style.animationDelay = t.toFixed(2) + 's';
+
+  // Fade to paper at the end so the loop restarts cleanly. Duration comes from the scene config.
+  const dur = (D._dur || 9) - 0.5;
+  $('cover').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 450, delay: dur * 1000, fill: 'both' });
+})();
+</script>
+</body>
+</html>

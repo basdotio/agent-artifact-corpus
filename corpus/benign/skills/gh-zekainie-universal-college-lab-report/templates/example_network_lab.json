@@ -1,0 +1,407 @@
+{
+  "course_name": "网络协议分析",
+  "lab_name": "实验二 协议分析和学习工具（Packet Tracer、Wireshark 与 GNS3 的使用）",
+  "instruments": "微型计算机（Windows 11 64位）、Cisco Packet Tracer 8.0 官方网络仿真平台、Wireshark 4.x 网络抓包与协议分析软件、GNS3 0.8.3.1 真实网络模拟器、Cisco c3640/c3725 路由器官方 IOS 映像固件、Chrome/Edge Web 浏览器。",
+  "student_info": {
+    "university": "四川轻化工大学",
+    "department": "计算机科学与工程学院",
+    "major": "网络工程",
+    "class_num": "20241",
+    "name": "张三",
+    "student_id": "20240001",
+    "group_num": "01",
+    "lab_name": "网络工程专业实验室",
+    "date": "2026年秋季"
+  },
+  "purposes": [
+    {
+      "title": "掌握 Cisco Packet Tracer 8.0 仿真平台的基本操作与规范连接",
+      "desc": "熟练在工作区添加 1841 路由器、2950-24 交换机、PC 终端及服务器等节点；准确掌握直通双绞线、交叉双绞线及控制台反转线缆的电气规范选用及端口互联方法。"
+    },
+    {
+      "title": "掌握 Packet Tracer 实时模式与模拟模式的运行机理",
+      "desc": "学会配置事件过滤器捕获 ICMP 等指定报文；通过单步回放报文转发过程，使用 PDU Information 对话框深入观察 OSI 模型各层封装及内部各字段处理细节。"
+    },
+    {
+      "title": "深刻掌握默认网关与静态路由的本质转发控制原理",
+      "desc": "通过仿真对比探究跨网段通信时主机查找网关及网关缺失时的丢包现象；通过 PDU 丢包日志深入分析因路由器缺乏回程路由引发通信失败的机理，熟练掌握网络拓扑排错与静态路由配置技能。"
+    },
+    {
+      "title": "熟练掌握 Wireshark 抓包软件的网卡监听与报文截获方法",
+      "desc": "学会利用显示过滤器筛选报文；通过逐层展开以太网帧、IPv4 数据报、TCP 报文段及 HTTP 请求，深刻理解协议栈 PDU 的封装与分用机制；准确辨析捕获与显示过滤器的运行机理。"
+    },
+    {
+      "title": "了解 GNS3 仿真工具的体系结构与真实网络模拟机制",
+      "desc": "掌握 Dynamips 虚拟化引擎与 Cisco 真实 IOS 固件的加载；掌握 IDLE PC 值的优化计算方法，有效解决虚拟机 CPU 100% 占用的工程难题；掌握在 GNS3 中直接右键挂载调用 Wireshark 进行链路抓包分析的操作技术。"
+    }
+  ],
+  "principles": [
+    {
+      "title": "计算机网络体系结构与协议数据单元（PDU）",
+      "summary": "计算机网络采用层次化体系结构。ISO 提出 OSI 七层参考模型，而现代 Internet 广泛遵循 TCP/IP 四层（或原理教学五层）模型。各层次之间通过严格定义的接口提供服务，且每一层都具有自身独立的数据结构，称为协议数据单元（PDU）：",
+      "items": [
+        {
+          "prefix": "• 应用层（Application Layer）：",
+          "text": "向用户进程提供服务，PDU 称为报文（Message），如 HTTP 请求/响应报文、DNS 报文等；"
+        },
+        {
+          "prefix": "• 传输层（Transport Layer）：",
+          "text": "负责端到端的应用进程通信，PDU 称为报文段（Segment, TCP）或用户数据报（Datagram, UDP）；"
+        },
+        {
+          "prefix": "• 网络层（Network Layer）：",
+          "text": "负责主机到主机的路由选择与逻辑寻址，PDU 称为分组或 IP 数据报（Packet / IP Datagram）；"
+        },
+        {
+          "prefix": "• 数据链路层（Data Link Layer）：",
+          "text": "负责相邻节点间的无差错点到点帧传输，PDU 称为帧（Frame），包含 MAC 地址与 Type 标识；"
+        },
+        {
+          "prefix": "• 物理层（Physical Layer）：",
+          "text": "负责传输介质上的原始比特流传输，PDU 称为比特（Bit）。"
+        }
+      ]
+    },
+    {
+      "title": "协议逐层封装与分用机制（Encapsulation & Demultiplexing）",
+      "summary": "发送端自顶向下逐层封装：高层 SDU 前附控制信息首部（Header，链路层追加尾部 FCS），封装成该层 PDU。接收端网卡收到比特流恢复为以太网帧后，自底向上进行剥离与分用：依据以太网首部 Type 字段（0x0800 代表 IPv4）分用到网络层；网络层依据 Protocol 字段（6 代表 TCP，17 代表 UDP，1 代表 ICMP）分用到传输层；传输层依据目的端口号（80 对应 HTTP）分用递交给对应的应用进程。"
+    },
+    {
+      "title": "网络传输介质与双绞线接线规范",
+      "summary": "以太局域网中，设备分为 DTE（数据终端设备）和 DCE（数据通信设备）。接线规范如下：",
+      "items": [
+        {
+          "prefix": "• 直通双绞线（Straight-Through）：",
+          "text": "两端采用相同线序（如 T568B-T568B），用于连接异种设备（如 PC 到交换机）；"
+        },
+        {
+          "prefix": "• 交叉双绞线（Cross-Over）：",
+          "text": "一端为 T568A，另一端为 T568B，用于连接同种设备（如路由到路由、PC 到 PC）；"
+        },
+        {
+          "prefix": "• 控制台反转线（Console Cable）：",
+          "text": "一端为 DB-9/USB，另一端为 RJ-45 接入 Console 口，提供本地带外管理控制通道。"
+        }
+      ]
+    },
+    {
+      "title": "跨网段通信与默认网关、路由表转发原理",
+      "summary": "主机发送报文前将目的 IP 与本机掩码进行“与”运算。若判断为同子网则直接 ARP 寻址发送；若为跨网段通信，必须交由默认网关转发。若主机未配默认网关，数据包在网络层直接被丢弃。路由器收到 IP 数据报后执行最长前缀匹配，直连网段直接 ARP 转发，非直连网段查路由表转发，若无路由则丢弃并返回 ICMP 差错报文。"
+    },
+    {
+      "title": "Wireshark 核心架构与双重过滤机理",
+      "summary": "Wireshark 基于 Npcap 驱动库实现混杂模式抓包，具备两套互补过滤机制：",
+      "items": [
+        {
+          "prefix": "• 捕获过滤器（Capture Filter）：",
+          "text": "运行于内核驱动层（BPF 机制），在报文存入缓冲区前进行筛选，大幅降低系统损耗，语法为类 tcpdump 语法；"
+        },
+        {
+          "prefix": "• 显示过滤器（Display Filter）：",
+          "text": "运行于应用程序渲染层，所有报文已载入内存，仅改变界面呈现，语法为专有协议字段表达式。"
+        }
+      ]
+    }
+  ],
+  "process_part1": {
+    "main_title": "一、 实验 2-1：Cisco Packet Tracer 8.0 的使用与 PDU 仿真分析",
+    "sections": [
+      {
+        "title": "1. 拓扑搭建与线缆电气选型",
+        "paragraphs": [
+          "在 Packet Tracer 8.0 工作区添加 3 台 1841 路由器、1 台 2950-24 交换机、3 台 PC 及 1 台服务器。PC0/PC1 与 Router0 连接到 Switch0 采用直通双绞线；Router0 与 Router1、Router1 与 Router2 以及 Router2 与 Server0 互联采用交叉双绞线；PC2 RS-232 串口与 Router1 Console 口采用反转线连接。连线后链路指示灯经历 STP 学习后转为常绿。"
+        ],
+        "image": {
+          "path": "C:\\Users\\niezekai\\.gemini\\antigravity\\brain\\f26cca08-e8b8-4f44-ae27-154b710d0746\\scratch\\pt8_topo_ui.jpg",
+          "caption": "图 2-1 Cisco Packet Tracer 8.0 软件主界面与实验拓扑搭建实测截图",
+          "width": 4.0
+        }
+      },
+      {
+        "title": "2. 默认网关作用的深度仿真剖析",
+        "paragraphs": [
+          "切换至 Simulation 模拟模式，清空 PC0 默认网关（0.0.0.0），在终端执行 ping 192.168.2.2。PC0 处立即弹出带有红色叉号信封，通信在源端即刻中止。打开 PDU Information 窗口观察各层处理："
+        ],
+        "image": {
+          "path": "C:\\Users\\niezekai\\.gemini\\antigravity\\brain\\f26cca08-e8b8-4f44-ae27-154b710d0746\\scratch\\pt8_simulation_ui.jpg",
+          "caption": "图 2-2 Cisco Packet Tracer 8.0 模拟模式 PDU 分析与网络层报文诊断截图",
+          "width": 4.0
+        },
+        "analyses": [
+          {
+            "prefix": "【机理分析】：",
+            "text": "在 Out Layers 栏中处理止步于 Layer 3，Layer 2 为空。日志记录：Step 4 判断目的 IP（192.168.2.2）跨网段；Step 5 提示：“The default gateway is not set. The device drops the packet.”。这证实：跨网段报文必须由默认网关的 ARP 解析提供二层目标 MAC；未配网关时主机网络层无法解析下一跳链路地址，在网络层直接被丢弃。"
+          }
+        ]
+      },
+      {
+        "title": "3. 路由表作用与反向路由排错分析",
+        "paragraphs": [
+          "恢复 PC0 默认网关（192.168.1.1）后 ping 192.168.2.2 依然连续超时。Simulation 模式单步跟踪发现：Echo Request 正常到达 Router1；但当 Router1 准备回复 Echo Reply（目的 IP 为 192.168.1.2）时，检索自身路由表发现缺少去往 192.168.1.0/24 的回程路由，提示路由缺失并丢弃应答包。"
+        ],
+        "analyses": [
+          {
+            "prefix": "【排错与全网互通】：",
+            "text": "在 Router1 配置反向静态路由：ip route 192.168.1.0 255.255.255.0 192.168.2.1，并在各路由器补齐去往 192.168.4.0/24 的路由。配置后再次 ping 测试，网络瞬间连通，时延 8~11ms，实现全网全双工零丢包互通！"
+          }
+        ]
+      }
+    ]
+  },
+  "process_part2": {
+    "main_title": "二、 实验 2-2：Wireshark 的使用与各层协议 PDU 深度剖析",
+    "sections": [
+      {
+        "title": "1. 报文截获与显示过滤器实测",
+        "paragraphs": [
+          "启动 Wireshark 进入网卡混杂模式抓包。打开浏览器访问 http://www.cnpaf.net，页面加载后停止抓包。在显示过滤器栏输入表达式 http 并回车，输入框呈现绿色高亮，分组列表精准过滤出完整的 HTTP 会话报文。"
+        ],
+        "image": {
+          "path": "C:\\Users\\niezekai\\.gemini\\antigravity\\brain\\f26cca08-e8b8-4f44-ae27-154b710d0746\\scratch\\fig4_wireshark_capture.png",
+          "caption": "图 2-3 Wireshark 报文捕获与显示过滤器实测界面",
+          "width": 4.0
+        }
+      },
+      {
+        "title": "2. 网络各层协议 PDU 逐层封装与分用解剖",
+        "paragraphs": [
+          "选中 HTTP GET 请求报文，在 Packet Details 窗格中逐层展开协议树，解剖 TCP/IP 各层 PDU 构成："
+        ],
+        "items": [
+          {
+            "prefix": "1. 物理层（Frame 1）：",
+            "text": "捕获总长度 524 字节，记录物理介质到达时间戳及通道编号；"
+          },
+          {
+            "prefix": "2. 数据链路层（Ethernet II）：",
+            "text": "源 MAC 为本机网卡，目的 MAC 为默认网关出口，Type: 0x0800 指示载荷为 IPv4；"
+          },
+          {
+            "prefix": "3. 网络层（IPv4）：",
+            "text": "首部 20 字节，源 IP: 192.168.1.102，目的 IP: 123.56.44.131，TTL: 64，Protocol: 6（TCP）；"
+          },
+          {
+            "prefix": "4. 传输层（TCP）：",
+            "text": "源端口 52418，目的端口 80（HTTP），包含 Seq/Ack 序号及 [PSH, ACK] 标志；"
+          },
+          {
+            "prefix": "5. 应用层（HTTP）：",
+            "text": "首行为请求行 GET / HTTP/1.1\\r\\n，后随 Host: www.cnpaf.net 等头部字段。"
+          }
+        ],
+        "image": {
+          "path": "C:\\Users\\niezekai\\.gemini\\antigravity\\brain\\f26cca08-e8b8-4f44-ae27-154b710d0746\\scratch\\fig5_pdu_encapsulation.png",
+          "caption": "图 2-4 网络各层协议 PDU 逐层封装与分用全景图",
+          "width": 4.0
+        }
+      },
+      {
+        "title": "3. 捕获过滤器与显示过滤器核心差异总结",
+        "table": {
+          "width_dxa": "8300",
+          "col_widths_dxa": [
+            "1600",
+            "3350",
+            "3350"
+          ],
+          "rows": [
+            [
+              "特性维度",
+              "捕获过滤器 (Capture Filter)",
+              "显示过滤器 (Display Filter)"
+            ],
+            [
+              "运行环境",
+              "操作系统内核驱动层 (BPF 机制)",
+              "Wireshark 应用程序渲染层"
+            ],
+            [
+              "生效时机",
+              "抓包前设置，抓包过程中不可更改",
+              "抓包中或抓包后随时动态调整"
+            ],
+            [
+              "系统影响",
+              "大幅降低 CPU/内存占用，防止丢包",
+              "报文已存内存，不影响底层抓包"
+            ],
+            [
+              "典型语法",
+              "host 192.168.1.1 / tcp port 80",
+              "ip.addr == 192.168.1.1 && tcp.port == 80"
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "raw_records": [
+    {
+      "title": "【原始记录一】网络节点规划与端口 IP 分配表",
+      "type": "table",
+      "table": {
+        "width_dxa": "8400",
+        "col_widths_dxa": [
+          "1200",
+          "1600",
+          "2000",
+          "2400",
+          "1200"
+        ],
+        "rows": [
+          [
+            "设备名称",
+            "端口编号",
+            "相连对端节点 / 端口",
+            "IP 地址与子网掩码",
+            "默认网关"
+          ],
+          [
+            "PC0",
+            "FastEthernet0",
+            "Switch0 / Fa0/1",
+            "192.168.1.2  255.255.255.0",
+            "192.168.1.1"
+          ],
+          [
+            "PC1",
+            "FastEthernet0",
+            "Switch0 / Fa0/2",
+            "192.168.1.3  255.255.255.0",
+            "192.168.1.1"
+          ],
+          [
+            "Router0",
+            "Fa0/0\\nFa0/1",
+            "Switch0 / Fa0/24\\nRouter1 / Fa0/0",
+            "192.168.1.1  255.255.255.0\\n192.168.2.1  255.255.255.0",
+            "直连网段\\n直连网段"
+          ],
+          [
+            "Router1",
+            "Fa0/0\\nFa0/1",
+            "Router0 / Fa0/1\\nRouter2 / Fa0/0",
+            "192.168.2.2  255.255.255.0\\n192.168.3.1  255.255.255.0",
+            "直连网段\\n直连网段"
+          ],
+          [
+            "Router2",
+            "Fa0/0\\nFa0/1",
+            "Router1 / Fa0/1\\nServer0 / Fa0",
+            "192.168.3.2  255.255.255.0\\n192.168.4.1  255.255.255.0",
+            "直连网段\\n直连网段"
+          ],
+          [
+            "Server0",
+            "FastEthernet0",
+            "Router2 / Fa0/1",
+            "192.168.4.2  255.255.255.0",
+            "192.168.4.1"
+          ]
+        ]
+      }
+    },
+    {
+      "title": "【原始记录二】Cisco 路由器接口与静态路由核心配置命令",
+      "type": "code",
+      "code_lines": [
+        "! === Router0 核心配置 ===",
+        "Router0(config)# interface FastEthernet0/0 && ip address 192.168.1.1 255.255.255.0 && no shutdown",
+        "Router0(config)# interface FastEthernet0/1 && ip address 192.168.2.1 255.255.255.0 && no shutdown",
+        "Router0(config)# ip route 192.168.3.0 255.255.255.0 192.168.2.2",
+        "Router0(config)# ip route 192.168.4.0 255.255.255.0 192.168.2.2",
+        "! === Router1 反向回程路由与全网互通配置（关键排错命令） ===",
+        "Router1(config)# ip route 192.168.1.0 255.255.255.0 192.168.2.1  <-- [反向回程路由，解决丢包问题]",
+        "Router1(config)# ip route 192.168.4.0 255.255.255.0 192.168.3.2  <-- [去往 Server0 网段路由]"
+      ]
+    },
+    {
+      "title": "【原始记录三】控制台 ping 测试与 GNS3 仿真实测截图",
+      "type": "images",
+      "images": [
+        {
+          "path": "C:\\Users\\niezekai\\.gemini\\antigravity\\brain\\f26cca08-e8b8-4f44-ae27-154b710d0746\\scratch\\pt8_terminal_ui.jpg",
+          "caption": "图 2-5 Cisco Packet Tracer 8.0 PC0 终端命令行 ipconfig 与 ping 测试截图",
+          "width": 4.0
+        },
+        {
+          "path": "C:\\Users\\niezekai\\.gemini\\antigravity\\brain\\f26cca08-e8b8-4f44-ae27-154b710d0746\\scratch\\fig6_gns3_topo.png",
+          "caption": "图 2-6 GNS3 拓扑搭建与链路抓包实测截图",
+          "width": 4.0
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "question": "什么是单播、组播和广播？各自在网络协议中的应用场景是什么？",
+      "answers": [
+        {
+          "prefix": "• 单播（Unicast）：",
+          "text": "源节点向单个特定的目的节点发送数据，点对点通信。以太网中目的 MAC 地址第 8 位恒为 0。应用场景：HTTP 网页浏览、FTP 文件传输、SSH 远程连接等绝大多数网络通信。"
+        },
+        {
+          "prefix": "• 组播（Multicast）：",
+          "text": "源节点向特定多播组内所有成员发送数据，一点对多点通信。目的 IP 属于 D 类地址（224.0.0.0~239.255.255.255），对应 MAC 具有固定前缀 01-00-5E。应用场景：路由协议邻居保活（OSPF 组播 224.0.0.5、RIPv2 224.0.0.9）、IPTV 视频流组播推送。"
+        },
+        {
+          "prefix": "• 广播（Broadcast）：",
+          "text": "源节点向本地物理子网所有节点发送数据，一点对全网。目的 IP 为受限广播 255.255.255.255，目的 MAC 为全 F。应用场景：ARP 地址解析请求、DHCP Discover 发现广播。路由器默认隔离广播风暴。"
+        }
+      ]
+    },
+    {
+      "question": "在 Packet Tracer 中怎样把两台路由器连接起来？要怎样操作？",
+      "intro": "连接两台路由器通常采用高速串行 WAN 链路（Serial Interface），标准操作规范如下：",
+      "steps": [
+        {
+          "prefix": "步骤 1【断电关机】：",
+          "text": "双击路由器进入 Physical 面板，关闭物理电源开关（模拟真实硬件禁止带电热拔插规范）；"
+        },
+        {
+          "prefix": "步骤 2【安装 WIC-2T 模块】：",
+          "text": "在 Modules 列表中选中 WIC-2T 模块，鼠标拖拽插入右侧空闲槽位；"
+        },
+        {
+          "prefix": "步骤 3【加电开机】：",
+          "text": "单击电源开关接通电源，等待设备完成 POST 自检；对对端路由器重复上述操作；"
+        },
+        {
+          "prefix": "步骤 4【串行线缆互联】：",
+          "text": "在 Connections 工具栏选择带有红色时钟图标的“Serial DCE”线缆，依次连接两台路由器的 Serial0/0/0 接口。先点击的一端成为提供时钟同步的 DCE 端；"
+        },
+        {
+          "prefix": "步骤 5【配置 DCE 时钟频率】：",
+          "text": "进入 DCE 端路由器的接口模式配置时钟频率：Router(config-if)# clock rate 64000 && no shutdown。"
+        }
+      ]
+    },
+    {
+      "question": "使用 Wireshark 捕获网页报文时，怎样才能只看该网页产生的报文？",
+      "intro": "通过以下多维度复合过滤策略，可精准排除后台干扰流量，仅锁定目标网页报文：",
+      "steps": [
+        {
+          "prefix": "方法 1【应用层协议过滤】：",
+          "text": "在过滤栏输入 http，仅显示超文本传输协议的请求（GET/POST）与响应（200 OK 等）报文；"
+        },
+        {
+          "prefix": "方法 2【目标主机 IP 过滤】：",
+          "text": "输入 ip.addr == [目标Web服务器公网IP]（如 ip.addr == 123.56.44.131），双向过滤本机与该服务器间的通信；"
+        },
+        {
+          "prefix": "方法 3【复合条件过滤】：",
+          "text": "利用逻辑运算符组合多重条件，如：http && ip.addr == 123.56.44.131；"
+        },
+        {
+          "prefix": "方法 4【追踪 TCP 流】：",
+          "text": "右键单击目标 HTTP 报文，选择“追踪流 -> TCP 流（Follow TCP Stream）”，直接提取完整明文交互内容。"
+        }
+      ]
+    },
+    {
+      "question": "协议分析软件有何用途？为什么在网络工程与学习中不可或缺？",
+      "intro": "协议分析软件是网络工程师的“数字显微镜”。其核心用途包括：① 报文透视与底层解剖：将不可见电磁比特还原为结构化协议字段；② 故障诊断与排错：通过报文时延、重传标志定位网络瓶颈与断点；③ 网络性能调优：评估 TCP 窗口滑动效率与带宽吞吐；④ 安全审计与入侵取证：检测非法嗅探、ARP 欺骗与未授权访问。在网络学习中将抽象概念具象化，是理解协议栈运转的关键利器。"
+    }
+  ],
+  "summary": "本次实验综合运用了 Cisco Packet Tracer 8.0、Wireshark 4.x 与 GNS3 三大主流工具。在 Packet Tracer 仿真中，通过置空网关与回程路由排错，深刻体会到了“跨网段通信依赖默认网关 ARP 解析下一跳 MAC”和“路由双向可达性”的底层本质；在 Wireshark 抓包中，自底向上解剖了 HTTP 请求从物理层比特流到应用层文本的逐层封装机制；在 GNS3 中掌握了真实 IOS 模拟与 IDLE PC 计算调优。实验将理论与工程实践深度融合，建立了“自底向上、分层排查”的系统性网络工程思维。"
+}

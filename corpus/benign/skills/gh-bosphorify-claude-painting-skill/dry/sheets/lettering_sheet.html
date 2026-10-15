@@ -1,0 +1,137 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>dry media: lettering</title>
+<!-- Render: node render.mjs sheets/lettering_sheet.html out/lettering_sheet.png   (from painting-kit/dry) -->
+<script src="/dry/node_modules/p5/lib/p5.min.js"></script>
+<script src="/dry/node_modules/p5.brush/dist/p5.brush.js"></script>
+<script src="/dry/paper.js"></script>
+<script src="/dry/lettering.js"></script>
+<style>
+  body { margin: 0; background: #777; }
+  #stage { position: relative; width: max-content; }
+  #stage canvas { display: block; }
+  #stage canvas + canvas { position: absolute; left: 0; top: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+const W = 1800, H = 1660, SEED = 7;
+const PAPER = '#f4efe4';
+let labels;
+
+// Caption on the overlay (typeset: this is the sheet's own small print, not the lettering under test)
+function label(text, x, y, size = 14, color = '#7a705f') {
+  labels.font = `${size}px Helvetica, Arial, sans-serif`;
+  labels.fillStyle = color;
+  labels.textBaseline = 'top';
+  labels.fillText(text, x, y);
+}
+
+function setup() {
+  randomSeed(SEED);
+  noiseSeed(SEED);
+  pixelDensity(1);
+  createCanvas(W, H, WEBGL).parent('stage');
+  const overlay = document.createElement('canvas');
+  overlay.width = W; overlay.height = H;
+  document.getElementById('stage').append(overlay);
+  labels = overlay.getContext('2d');
+  angleMode(DEGREES);
+  brush.scaleBrushes(W / 200);
+  background(PAPER);
+  Paper.init(W, H, SEED, { kind: 'cold' });
+  Lettering.brushes();
+}
+
+let layer = 0, beforeTooth = null;
+function draw() {
+  if (beforeTooth) { Paper.tooth(beforeTooth, LAYERS[layer - 1].tooth); beforeTooth = null; }
+  if (layer === LAYERS.length) { noLoop(); window.__done = true; return; }
+  translate(-W / 2, -H / 2);
+  const fn = LAYERS[layer++];
+  if (fn.tooth) beforeTooth = Paper.read();
+  fn();
+}
+
+const INK = '#1f1b17', GRAPHITE = '#3a3632', BLUE = '#2f6f9f', RED = '#b23a2a';
+const L = Lettering.text;
+
+const LAYERS = [
+// 1. the drawing's frame and its title block
+function titleBlock() {
+  label('Lettering sheet  ·  single-stroke lettering with the current brush  ·  seed ' + SEED, 60, 24, 18, '#3a352e');
+  brush.set('fineliner', INK, 1.3);
+  brush.rect(60, 70, W - 120, 1000);
+  brush.set('fineliner', INK, 1);
+  const x0 = 1100, y0 = 860;                       // the title block, bottom right
+  brush.rect(x0, y0, 640, 180);
+  brush.line(x0, y0 + 100, x0 + 640, y0 + 100); brush.line(x0 + 430, y0 + 100, x0 + 430, y0 + 180);
+  brush.set('fineliner', INK, 1.5);
+  L('THE BOSPHORUS, A SECTION', x0 + 20, y0 + 58, { size: 23, spacing: 0.06, seed: 1 });
+  brush.set('fineliner', INK, 1);
+  L('Kadıköy to Karaköy, pen and tints', x0 + 20, y0 + 138, { size: 16, slant: 10, seed: 2 });
+  L('sheet 3 / 7', x0 + 450, y0 + 128, { size: 16, seed: 3 });
+  L('1 : 2000', x0 + 450, y0 + 162, { size: 16, seed: 4 });
+  label('title: size 23 spacing 0.06 · subtitle: size 16 slant 10 · small: size 16', x0, y0 + 192);
+},
+// 2. a map: a shore, a label set along it in spaced capitals, place names and annotations
+function map() {
+  brush.set('HB', GRAPHITE, 1.3);
+  const shore = [[140, 560, 1], [330, 500, 1], [520, 470, 1], [700, 500, 1], [860, 440, 1], [1040, 360, 1], [1240, 330, 1], [1420, 300, 1], [1660, 320, 1]];
+  brush.spline(shore, 0.6);
+  brush.spline(shore.map(([x, y]) => [x + 8, y + 22, 0.8]), 0.6);
+  brush.set('HB', GRAPHITE, 0.8);
+  for (let i = 0; i < 7; i++) { const y = 640 + i * 38; brush.spline([[180 + i * 30, y], [420 + i * 20, y - 8], [700, y + 4], [940, y - 6]], 0.5); }
+  brush.set('fineliner', INK, 1.4);
+  const coast = shore.map(([x, y]) => [x, y - 62]);
+  L('KADIKÖY', 0, 0, { size: 38, spacing: 0.34, jitter: 0.3, along: coast.slice(0, 5), seed: 5 });
+  brush.set('fineliner', BLUE, 1.3);
+  L('B O Ğ A Z', 0, 0, { size: 28, spacing: 0.7, jitter: 0.25, along: [[300, 720], [560, 700], [820, 716], [1080, 700]], seed: 6 });
+  brush.set('fineliner', INK, 1.4);
+  L('Karaköy', 1170, 252, { size: 30, slant: 12, seed: 7 });
+  L('Üsküdar', 240, 350, { size: 26, slant: 12, seed: 8 });
+  L('Haydarpaşa', 150, 616, { size: 20, slant: 12, seed: 9 });
+  brush.set('fineliner', INK, 1);
+  L('iskele 3', 600, 436, { size: 15, seed: 10 });
+  L('vapur 06:40', 1290, 420, { size: 15, seed: 11 });
+  L('Galata Köprüsü, 490 m', 1380, 360, { size: 15, seed: 12 });
+  L('Çamlıca', 130, 290, { size: 15, seed: 13 });
+  L('Şişhane · İstiklal · Işık sk.', 1290, 200, { size: 15, seed: 14 });
+  brush.set('fineliner', RED, 1);
+  brush.line(688, 444, 720, 492); brush.line(1330, 400, 1290, 336);
+  L('kuzey', 1500, 130, { size: 16, seed: 15 });
+  brush.line(1610, 160, 1610, 96); brush.line(1610, 96, 1600, 112); brush.line(1610, 96, 1620, 112);
+},
+// 3. the line from the brief, in three pens
+function line() {
+  brush.set('fineliner', INK, 1.8);
+  L('Kadıköy–Karaköy 06:40', 900, 1180, { size: 76, align: 'center', seed: 21 });
+  label('fineliner 1.8 · size 76', 60, 1150);
+  brush.set('finepencil', GRAPHITE, 1.3);
+  L('Kadıköy–Karaköy 06:40', 330, 1270, { size: 30, align: 'center', seed: 22 });
+  brush.set('finepencil', BLUE, 1.3);
+  L('Kadıköy–Karaköy 06:40', 900, 1270, { size: 30, align: 'center', seed: 23 });
+  brush.set('fineliner', RED, 1.3);
+  L('Kadıköy–Karaköy 06:40', 1470, 1270, { size: 30, align: 'center', seed: 24 });
+  label('finepencil 1.3 · size 30', 330 - 70, 1290); label('finepencil, blue', 900 - 50, 1290); label('fineliner, red', 1470 - 40, 1290);
+},
+// 4. the options: jitter, slant, spacing
+function options() {
+  brush.set('fineliner', INK, 1.2);
+  [['jitter 0', { jitter: 0 }], ['jitter 0.35 (default)', {}], ['jitter 1', { jitter: 1 }]].forEach(([t, o], i) => {
+    L('Kadıköy 06:40', 60 + i * 560, 1370, { size: 34, seed: 31, ...o }); label(t, 60 + i * 560, 1386);
+  });
+  [['slant 14', { slant: 14 }], ['slant -10', { slant: -10 }], ['spacing 0.3', { spacing: 0.3 }]].forEach(([t, o], i) => {
+    L('Şişli İşçi Öğrenci', 60 + i * 560, 1470, { size: 34, seed: 32, ...o }); label(t, 60 + i * 560, 1486);
+  });
+  brush.set('fineliner', INK, 1);
+  L('ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789', 60, 1560, { size: 30, seed: 33 });
+  L('.,:;!?\'"-–—/()[]&+=%#@*°·_<>  Ç Ğ İ Ö Ş Ü  ç ğ ı i ö ş ü', 60, 1615, { size: 30, seed: 34 });
+},
+];
+</script>
+</body>
+</html>

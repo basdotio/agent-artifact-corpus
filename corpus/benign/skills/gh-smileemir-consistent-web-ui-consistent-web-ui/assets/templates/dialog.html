@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dialog</title>
+<!--
+  Dialog: one modal pattern for the whole project, built on the native
+  <dialog> element. If the project already has a dialog component (Radix or
+  shadcn/ui Dialog, MUI Dialog, Bootstrap modal), keep it and apply the same
+  rules.
+
+  Rules this template enforces:
+  - Only the top layer moves and responds.
+    - While the dialog is open, the page behind cannot scroll.
+    - The page behind is inert: no clicks, hover or Tab.
+    - A click on the backdrop never reaches the page.
+    - The dialog's own scroll never passes to the page.
+  - Size to content:
+    - small (400 px), medium (560 px) or large (720 px);
+    - height grows with content up to 85% of the screen;
+    - media is capped, so the text and the actions show without scrolling;
+    - when content is really long, only the body scrolls; the header and
+      the action bar stay visible.
+  - Close:
+    - a quiet 36 px icon button in the header, with a 20 px icon;
+    - no second "Close" button in the footer of a content dialog;
+    - Escape closes;
+    - a backdrop click closes, unless the dialog has data-dialog-persistent
+      (forms with input, destructive confirmations).
+  - Focus:
+    - on opening, focus goes to the element marked data-dialog-initial, or
+      else to the title, so the close button does not start with a focus
+      ring;
+    - in a destructive confirmation, mark Cancel as data-dialog-initial;
+    - on closing, focus returns to the button that opened the dialog.
+
+  Copy the CSS and the script between the "copy" markers. The CSS reads the
+  roles from assets/templates/theme-tokens.css, with fallbacks.
+
+  Markup:
+  - opener: <button type="button" data-dialog-open="ID">…</button>
+  - dialog: <dialog class="dialog" id="ID" aria-labelledby="ID-title">, see
+    the demo below.
+-->
+<style>
+/* ===== Dialog: copy from here ===== */
+.dialog {
+  --dialog-width: 560px;
+  box-sizing: border-box;
+  inline-size: min(var(--dialog-width), calc(100vw - 2 * var(--space-4, 16px)));
+  max-inline-size: none;
+  max-block-size: min(85vh, 760px);
+  max-block-size: min(85dvh, 760px);
+  padding: 0;
+  border: 1px solid var(--color-border, #dcdce2);
+  border-radius: var(--radius-card, 12px);
+  background: var(--color-surface-raised, #ffffff);   /* opaque: nothing shows through */
+  color: var(--color-text, #1b1b21);
+  box-shadow: var(--shadow-overlay, 0 12px 32px rgb(16 16 24 / 0.18));
+  overflow: hidden;                                      /* the body scrolls, not the whole dialog */
+}
+.dialog[open] {
+  display: flex;
+  flex-direction: column;
+  animation: dialog-in var(--duration-panel, 280ms) var(--ease-out, ease-out);
+}
+.dialog--sm { --dialog-width: 400px; }
+.dialog--lg { --dialog-width: 720px; }
+.dialog::backdrop { background: var(--color-overlay, rgb(12 12 16 / 0.56)); }
+.dialog[open]::backdrop { animation: dialog-backdrop-in var(--duration-panel, 280ms) var(--ease-out, ease-out); }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@keyframes dialog-backdrop-in { from { opacity: 0; } }
+
+.dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  padding: var(--space-4, 16px) var(--space-5, 24px);
+  border-block-end: 1px solid var(--color-border, #dcdce2);
+}
+.dialog__title {
+  margin: 0;
+  font-size: var(--text-h3, 1.25rem);
+  line-height: var(--leading-heading, 1.2);
+}
+.dialog__title:focus { outline: none; }                 /* focused on open for screen readers; not a control */
+.dialog__close {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  inline-size: 36px;
+  block-size: 36px;
+  margin: calc(var(--space-2, 8px) * -1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control, 8px);
+  background: transparent;
+  color: var(--color-text-subtle, #595963);
+  cursor: pointer;
+  transition: background-color var(--duration-instant, 100ms) var(--ease-out, ease-out),
+              color var(--duration-instant, 100ms) var(--ease-out, ease-out);
+}
+.dialog__close:hover { background: var(--color-surface, #f6f6f8); color: var(--color-text, #1b1b21); }
+.dialog__close svg { inline-size: 20px; block-size: 20px; }
+
+.dialog__body {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;                          /* the dialog's scroll never passes to the page */
+  padding: var(--space-5, 24px);
+}
+.dialog__body > * + * { margin-block-start: var(--space-3, 12px); }
+.dialog__body > :first-child { margin-block-start: 0; }
+.dialog__media {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 16 / 10;
+  max-block-size: 32vh;                                  /* media never pushes the actions off screen */
+  object-fit: cover;
+  border-radius: var(--radius-control, 8px);
+}
+.dialog__footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-3, 12px);
+  padding: var(--space-4, 16px) var(--space-5, 24px);
+  border-block-start: 1px solid var(--color-border, #dcdce2);
+}
+
+/* Only the top layer moves: the page behind an open dialog does not scroll */
+html.is-scroll-locked { overflow: hidden; }
+html.is-scroll-locked.has-scrollbar { scrollbar-gutter: stable; }   /* no layout jump where scrollbars take space */
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog[open],
+  .dialog[open]::backdrop { animation: none; }
+}
+/* ===== Dialog: copy until here ===== */
+
+/* Demo page only: theme roles, buttons and filler content */
+:root {
+  color-scheme: light dark;
+  --color-canvas: #f4f1ea; --color-surface: #ece8df; --color-surface-raised: #fffdf8;
+  --color-text: #1f2320; --color-text-subtle: #5a5f5a; --color-border: #d9d4c9; --color-border-strong: #8b8c84;
+  --color-brand: #24473a; --color-brand-hover: #1c382e; --color-on-brand: #ffffff; --color-focus: #1f6feb;
+  --color-danger: #b42318; --color-on-danger: #ffffff; --color-info-surface: #e8eef7;
+  --color-overlay: rgb(20 24 20 / 0.5);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: #131614; --color-surface: #1d211e; --color-surface-raised: #252a26;
+    --color-text: #ecefeb; --color-text-subtle: #a9b0aa; --color-border: #343a35; --color-border-strong: #7f877f;
+    --color-brand: #8fc7ae; --color-brand-hover: #a7d6c1; --color-on-brand: #0f1a15; --color-focus: #6ea8ff;
+    --color-danger: #ff8a80; --color-on-danger: #2a0805; --color-info-surface: #1f2a36;
+    --color-overlay: rgb(0 0 0 / 0.6);
+  }
+}
+body { margin: 0; padding: 32px 16px; font: 1rem/1.55 system-ui, sans-serif; background: var(--color-canvas); color: var(--color-text); }
+main { max-inline-size: 760px; margin: 0 auto; }
+:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; min-block-size: 40px; padding: 0 16px; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-surface-raised); color: var(--color-text); font: inherit; font-weight: 500; text-decoration: none; cursor: pointer; }
+.btn--primary { border-color: transparent; background: var(--color-brand); color: var(--color-on-brand); }
+.btn--danger { border-color: transparent; background: var(--color-danger); color: var(--color-on-danger); }
+.eyebrow { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-subtle); }
+.note { padding: 12px 16px; border-inline-start: 3px solid var(--color-brand); border-radius: 4px; background: var(--color-info-surface); }
+.filler { block-size: 1400px; margin-block-start: 24px; border-radius: 12px; background: repeating-linear-gradient(var(--color-surface) 0 48px, transparent 48px 96px); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Dialog</h1>
+  <p>
+    <button type="button" class="btn" data-dialog-open="quick-view">Quick view</button>
+    <button type="button" class="btn" data-dialog-open="confirm-delete">Delete 3 items</button>
+  </p>
+  <div class="filler" aria-hidden="true"></div>
+</main>
+
+<!-- A content dialog: X in the header, one action in the footer -->
+<dialog class="dialog" id="quick-view" aria-labelledby="quick-view-title">
+  <header class="dialog__header">
+    <h2 class="dialog__title" id="quick-view-title" tabindex="-1">Nido side table</h2>
+    <button type="button" class="dialog__close" data-dialog-close aria-label="Close">
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
+  </header>
+  <div class="dialog__body">
+    <img class="dialog__media" alt="Round oak side table beside a linen sofa" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100'%3E%3Crect width='160' height='100' fill='%23d8cdb9'/%3E%3Crect x='62' y='40' width='36' height='46' rx='3' fill='%23a37b52'/%3E%3Cellipse cx='80' cy='40' rx='26' ry='5' fill='%23b88d62'/%3E%3C/svg%3E">
+    <p class="eyebrow">Side table · Solid oak</p>
+    <p>A round top and a single base make it a small, useful companion to any seat.</p>
+    <p>Size: Ø 48 × 44 cm</p>
+    <p class="note">This object is showroom content; it cannot be bought.</p>
+  </div>
+  <footer class="dialog__footer">
+    <a class="btn btn--primary" href="#details">View details</a>
+  </footer>
+</dialog>
+
+<!-- A destructive confirmation: no backdrop close, first focus on Cancel -->
+<dialog class="dialog dialog--sm" id="confirm-delete" aria-labelledby="confirm-delete-title" data-dialog-persistent>
+  <header class="dialog__header">
+    <h2 class="dialog__title" id="confirm-delete-title" tabindex="-1">Delete 3 items?</h2>
+  </header>
+  <div class="dialog__body">
+    <p>The items and their photos are removed for everyone. This can't be undone.</p>
+  </div>
+  <footer class="dialog__footer">
+    <button type="button" class="btn" data-dialog-close data-dialog-initial>Cancel</button>
+    <button type="button" class="btn btn--danger" data-dialog-close value="delete">Delete items</button>
+  </footer>
+</dialog>
+
+<script>
+/* ===== Dialog: copy from here ===== */
+(() => {
+  const root = document.documentElement;
+  let openCount = 0;
+
+  function lockScroll() {
+    if (openCount++ > 0) return;
+    const scrollbar = window.innerWidth - root.clientWidth;
+    root.classList.add("is-scroll-locked");
+    root.classList.toggle("has-scrollbar", scrollbar > 0);
+  }
+  function unlockScroll() {
+    openCount = Math.max(0, openCount - 1);
+    if (openCount === 0) root.classList.remove("is-scroll-locked", "has-scrollbar");
+  }
+
+  function openDialog(dialog, opener) {
+    if (dialog.open) return;
+    dialog.returnFocusTo = opener || document.activeElement;
+    dialog.showModal();
+    lockScroll();
+    const first = dialog.querySelector("[data-dialog-initial]") || dialog.querySelector(".dialog__title");
+    if (first) first.focus();
+  }
+
+  document.addEventListener("click", (event) => {
+    const opener = event.target.closest("[data-dialog-open]");
+    if (opener) {
+      const dialog = document.getElementById(opener.getAttribute("data-dialog-open"));
+      if (dialog) openDialog(dialog, opener);
+      return;
+    }
+    const closer = event.target.closest("[data-dialog-close]");
+    if (closer) {
+      const dialog = closer.closest("dialog");
+      if (dialog) dialog.close(closer.value || "");
+    }
+  });
+
+  document.querySelectorAll("dialog.dialog").forEach((dialog) => {
+    let pressedOnBackdrop = false;
+    // A backdrop click closes; a drag that starts inside the dialog does not.
+    dialog.addEventListener("pointerdown", (event) => { pressedOnBackdrop = event.target === dialog; });
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog && pressedOnBackdrop && !dialog.hasAttribute("data-dialog-persistent")) dialog.close("");
+      pressedOnBackdrop = false;
+    });
+    dialog.addEventListener("cancel", (event) => {
+      if (dialog.hasAttribute("data-dialog-persistent") && dialog.dataset.dialogPersistent === "strict") event.preventDefault();
+    });
+    dialog.addEventListener("close", () => {
+      unlockScroll();
+      const target = dialog.returnFocusTo;
+      if (target && target.isConnected) target.focus();
+    });
+  });
+})();
+/* ===== Dialog: copy until here ===== */
+</script>
+</body>
+</html>

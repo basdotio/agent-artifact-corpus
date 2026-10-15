@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-en="How Planetary Gears Work" data-zh="行星齿轮是怎么工作的">How Planetary Gears Work</title>
+<meta name="description" content="An explorable explanation: spin 3D gears, hold one part, drive another, and see why a Prius needs no gearbox.">
+<script>
+  // Pick the language before anything renders: ?lang= wins, then the last choice, then the browser.
+  (() => {
+    let l = new URLSearchParams(location.search).get('lang');
+    if (!l) { try { l = localStorage.getItem('explorable-lang'); } catch { /* storage may be blocked */ } }
+    if (!l) l = (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+    l = l === 'zh' ? 'zh' : 'en';
+    document.documentElement.dataset.lang = l;
+    document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1f1f22; --muted: #6d6b66; --rule: #e6e2d8; --panel: #ffffff; --grid: #ece8de;
+    --c1: #e0662f; --c2: #2f6fd6; --c3: #c8961f; --c4: #8a6fcf;
+    --good: #2e9a5e; --bad: #d23c3c;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416; --fg: #ececef; --muted: #9a9892; --rule: #2a2a2e; --panel: #1b1b1f; --grid: #25252a;
+      --c1: #f08a55; --c2: #6b9cf0; --c3: #dcae40; --c4: #a58af0;
+      --good: #52c283; --bad: #f06060;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  [data-lang="en"] [lang="zh"], [data-lang="zh"] [lang="en"] { display: none !important; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 19px/1.62 "Source Serif 4", Georgia, serif; }
+  [data-lang="zh"] body { font: 17.5px/1.85 Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  [data-lang="zh"] h1, [data-lang="zh"] h2 { font-family: Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; letter-spacing: 0; }
+  main { max-width: 720px; margin: 0 auto; padding: 28px 20px 96px; }
+  .langbar { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 26px; }
+  .langbar button { padding: 3px 12px; font-size: 13px; }
+  h1 { font-size: 2.35em; line-height: 1.12; margin: 0 0 .3em; letter-spacing: -.01em; }
+  h2 { font: 600 1.28em/1.3 "Source Serif 4", Georgia, serif; margin: 2.2em 0 .6em; }
+  .lede { font-size: 1.12em; color: var(--muted); margin: 0 0 2em; }
+  p { margin: 0 0 1.05em; }
+  .c1 { color: var(--c1); font-weight: 600; } .c2 { color: var(--c2); font-weight: 600; }
+  .c3 { color: var(--c3); font-weight: 600; } .c4 { color: var(--c4); font-weight: 600; }
+  figure { margin: 1.8em -12px 2em; padding: 14px 14px 10px; background: var(--panel); border-radius: 14px; box-shadow: var(--shadow); }
+  canvas { display: block; width: 100%; user-select: none; -webkit-user-select: none; }
+  .stage { position: relative; cursor: grab; touch-action: pan-y; }
+  .stage:active { cursor: grabbing; }
+  .stage canvas.ov { position: absolute; inset: 0; pointer-events: none; }
+  .stage .hint { position: absolute; right: 8px; top: 6px; font: 12px Inter, system-ui, sans-serif; color: var(--muted); pointer-events: none; }
+  .lever { touch-action: none; cursor: ns-resize; margin-top: 6px; }
+  figcaption { font: 14px/1.5 Inter, "PingFang SC", system-ui, sans-serif; color: var(--muted); margin-top: 8px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font: 14px/1.3 Inter, "PingFang SC", system-ui, sans-serif; margin-top: 10px; }
+  .controls label { display: flex; align-items: center; gap: 10px; flex: 1 1 210px; }
+  .controls .k { white-space: nowrap; color: var(--muted); min-width: 4.8em; }
+  .controls output { font-variant-numeric: tabular-nums; min-width: 5.2em; text-align: right; }
+  .group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  input[type=range] { flex: 1; accent-color: var(--fg); min-width: 90px; }
+  button { font: 500 14px Inter, "PingFang SC", system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  button:disabled { opacity: .35; cursor: default; }
+  .readout { font: 14px/1.45 Inter, "PingFang SC", system-ui, sans-serif; margin-top: 8px; font-variant-numeric: tabular-nums; min-height: 1.45em; }
+  footer { margin-top: 4em; padding-top: 1.2em; border-top: 1px solid var(--rule); font: 14px/1.6 Inter, "PingFang SC", system-ui, sans-serif; color: var(--muted); }
+  @media (max-width: 560px) { body { font-size: 17.5px; } figure { margin-left: -8px; margin-right: -8px; padding: 10px; } }
+</style>
+</head>
+<body>
+<main>
+<div class="langbar"><button data-setlang="en">English</button><button data-setlang="zh">中文</button></div>
+
+<h1><span lang="en">How Planetary Gears Work</span><span lang="zh">行星齿轮是怎么工作的</span></h1>
+<p class="lede" lang="en">Three gears nested inside each other can slow things down, speed them up, run them backwards, or blend two motors into one. It is why a Toyota Prius has no gearbox. Drag any model to look around it.</p>
+<p class="lede" lang="zh">三个套在一起的齿轮，可以减速、增速、反转，还能把两台电机的转速“调和”在一起。丰田普锐斯没有传统变速箱，靠的就是它。每个模型都可以拖动，换个角度看。</p>
+
+<h2><span lang="en">Two gears</span><span lang="zh">先看两个齿轮</span></h2>
+<p lang="en">When two gears mesh, their teeth pass the contact point at the same rate. A gear with twice as many teeth therefore turns half as fast. And because the teeth push each other sideways, the two gears always turn in opposite directions.</p>
+<p lang="zh">两个齿轮啮合时，两边的齿以同样的节奏经过接触点。所以齿数多一倍的齿轮，转速就慢一半。又因为齿是互相侧推的，两个齿轮永远朝相反方向转。</p>
+
+<figure id="fig-pair">
+  <div class="stage" data-aspect="0.5"><canvas class="gl"></canvas><canvas class="ov"></canvas><span class="hint"><span lang="en">drag to rotate</span><span lang="zh">拖动旋转</span></span></div>
+  <div class="controls">
+    <label><span class="k"><span lang="en">Right gear</span><span lang="zh">右边齿数</span></span><input type="range" min="9" max="45" step="1" value="36"><output></output></label>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">The <span class="c1">orange</span> gear has 18 teeth and turns at a steady speed. Change the number of teeth on the <span class="c2">blue</span> gear and watch its speed change.</figcaption>
+  <figcaption lang="zh"><span class="c1">橙色</span>齿轮 18 个齿，匀速转动。改变<span class="c2">蓝色</span>齿轮的齿数，看它的转速怎么变。</figcaption>
+</figure>
+
+<h2><span lang="en">Gears inside a gear</span><span lang="zh">齿轮里的齿轮</span></h2>
+<p lang="en">A planetary gear set puts a <span class="c1">sun</span> gear in the middle, several <span class="c2">planet</span> gears around it, and a <span class="c3">ring</span> gear with teeth on the inside that wraps around them all. The planets are held on a frame called the <span class="c4">carrier</span>, which can turn too.</p>
+<p lang="zh">行星齿轮组的中间是<span class="c1">太阳轮</span>，周围一圈是几个<span class="c2">行星轮</span>，最外面是一个齿长在内侧的<span class="c3">齿圈</span>，把它们整个包住。行星轮装在一个叫<span class="c4">行星架</span>的框架上，这个框架本身也能转。</p>
+
+<figure id="fig-anatomy">
+  <div class="stage" data-aspect="0.62"><canvas class="gl"></canvas><canvas class="ov"></canvas><span class="hint"><span lang="en">drag to rotate</span><span lang="zh">拖动旋转</span></span></div>
+  <div class="controls">
+    <label><span class="k"><span lang="en">Pull apart</span><span lang="zh">拆开</span></span><input type="range" min="0" max="1" step="0.001" value="0" data-role="explode"><output></output></label>
+    <div class="group" data-role="focus">
+      <button data-part="all" class="on"><span lang="en">All</span><span lang="zh">全部</span></button>
+      <button data-part="sun"><span lang="en">Sun</span><span lang="zh">太阳轮</span></button>
+      <button data-part="planets"><span lang="en">Planets</span><span lang="zh">行星轮</span></button>
+      <button data-part="ring"><span lang="en">Ring</span><span lang="zh">齿圈</span></button>
+      <button data-part="carrier"><span lang="en">Carrier</span><span lang="zh">行星架</span></button>
+    </div>
+  </div>
+  <figcaption lang="en">Pull the set apart to see how the four parts stack. Here the ring is held still and the sun drives, so the planets roll around inside the ring and drag the carrier along.</figcaption>
+  <figcaption lang="zh">把它拆开，看四个部件是怎么叠在一起的。这里齿圈固定、太阳轮驱动，于是行星轮贴着齿圈内侧滚动，带着行星架一起转。</figcaption>
+</figure>
+
+<p lang="en">Every tooth in this model is placed by the same rule as a real gear set, so what you see is what would happen: the sun has 18 teeth, each planet 15, and the ring 48. Those numbers are not arbitrary. The ring has to equal the sun plus two planets (18 + 2×15 = 48), or the planets would not fit.</p>
+<p lang="zh">这个模型里每一个齿的位置都按真实齿轮组的规则摆放，所以你看到的运动就是真实会发生的运动：太阳轮 18 齿，每个行星轮 15 齿，齿圈 48 齿。这些数字不是随便取的：齿圈齿数必须等于太阳轮加上两个行星轮（18 + 2×15 = 48），否则行星轮塞不进去。</p>
+
+<h2><span lang="en">Hold one, drive another</span><span lang="zh">固定一个，驱动另一个</span></h2>
+<p lang="en">Here is where it gets clever. The set has three parts that can connect to the outside world: sun, carrier and ring. Hold any one of them still, turn another, and the third becomes the output. Each choice gives a different ratio.</p>
+<p lang="zh">巧妙的地方来了。这套齿轮有三个部件可以和外界相连：太阳轮、行星架、齿圈。固定其中任意一个，转动另一个，第三个就是输出。每一种选法都得到不同的传动比。</p>
+
+<figure id="fig-modes">
+  <div class="stage" data-aspect="0.56"><canvas class="gl"></canvas><canvas class="ov"></canvas><span class="hint"><span lang="en">drag to rotate</span><span lang="zh">拖动旋转</span></span></div>
+  <div class="controls">
+    <div class="group" data-role="hold"><span class="k"><span lang="en">Hold</span><span lang="zh">固定</span></span>
+      <button data-part="sun"><span lang="en">Sun</span><span lang="zh">太阳轮</span></button>
+      <button data-part="carrier"><span lang="en">Carrier</span><span lang="zh">行星架</span></button>
+      <button data-part="ring" class="on"><span lang="en">Ring</span><span lang="zh">齿圈</span></button>
+    </div>
+    <div class="group" data-role="drive"><span class="k"><span lang="en">Drive</span><span lang="zh">驱动</span></span>
+      <button data-part="sun" class="on"><span lang="en">Sun</span><span lang="zh">太阳轮</span></button>
+      <button data-part="carrier"><span lang="en">Carrier</span><span lang="zh">行星架</span></button>
+      <button data-part="ring"><span lang="en">Ring</span><span lang="zh">齿圈</span></button>
+    </div>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">The held part turns grey. Try all six combinations: you'll find two ways to slow down, two ways to speed up, and two ways to run backwards.</figcaption>
+  <figcaption lang="zh">被固定的部件会变成灰色。把六种组合都试一遍：你会找到两种减速、两种增速、两种反转。</figcaption>
+</figure>
+
+<p lang="en">An automatic transmission is essentially a few of these sets in a row, with clutches and brakes that grab different parts. Shifting gear means changing which part is held.</p>
+<p lang="zh">汽车的自动变速箱，本质上就是几组这样的行星齿轮串在一起，再用离合器和制动器去“抓住”不同的部件。所谓换挡，就是换一个被固定的部件。</p>
+
+<h2><span lang="en">One straight line</span><span lang="zh">一条直线管住全部</span></h2>
+<p lang="en">You don't have to hold anything. All three parts can turn at once, and their speeds always obey one rule: the carrier's speed is a weighted average of the sun's and the ring's, with the tooth counts as weights. Drawn as three vertical bars spaced by those tooth counts, the three speeds always sit on one straight line.</p>
+<p lang="zh">其实不必固定任何部件。三个部件可以同时转，而它们的转速永远服从一条规则：行星架的转速，是太阳轮和齿圈转速的加权平均，权重就是它们的齿数。把三个转速画成三根竖杆，杆的间距按齿数排，三个点永远落在同一条直线上。</p>
+
+<figure id="fig-lever">
+  <div class="stage" data-aspect="0.42"><canvas class="gl"></canvas><canvas class="ov"></canvas><span class="hint"><span lang="en">drag to rotate</span><span lang="zh">拖动旋转</span></span></div>
+  <canvas class="lever" data-aspect="0.36"></canvas>
+  <div class="readout"></div>
+  <figcaption lang="en">Drag any of the three dots up or down to set a speed (above the middle line is forward, below is backward). The line pivots, and the gears follow.</figcaption>
+  <figcaption lang="zh">上下拖动三个圆点中的任意一个来设定转速（中线以上是正转，以下是反转）。直线会绕着转动，上面的齿轮跟着变。</figcaption>
+</figure>
+
+<p lang="en">This picture is called a lever diagram, and engineers use it to design transmissions. It also explains the trick in the next section.</p>
+<p lang="zh">这张图叫杠杆图，工程师设计变速箱时就用它。下一节的“把戏”，也要靠它来看懂。</p>
+
+<h2><span lang="en">The Prius trick</span><span lang="zh">普锐斯的把戏</span></h2>
+<p lang="en">A petrol engine is most efficient in a narrow range of speeds, but the wheels need every speed from standstill to motorway. A normal car bridges the gap with a gearbox. The Prius uses a single planetary set instead: the engine turns the <span class="c4">carrier</span>, the wheels are connected to the <span class="c3">ring</span>, and a motor-generator sits on the <span class="c1">sun</span>.</p>
+<p lang="zh">汽油发动机只在很窄的转速区间里最省油，可车轮需要从静止到高速的所有转速。普通汽车用变速箱来弥合这个矛盾。普锐斯只用了一组行星齿轮：发动机带动<span class="c4">行星架</span>，车轮连在<span class="c3">齿圈</span>上，一台电动发电机装在<span class="c1">太阳轮</span>上。</p>
+
+<figure id="fig-prius">
+  <div class="stage" data-aspect="0.5"><canvas class="gl"></canvas><canvas class="ov"></canvas><span class="hint"><span lang="en">drag to rotate</span><span lang="zh">拖动旋转</span></span></div>
+  <canvas class="lever" data-aspect="0.36" style="cursor:default;touch-action:pan-y"></canvas>
+  <div class="controls">
+    <label><span class="k"><span lang="en">Car speed</span><span lang="zh">车速</span></span><input type="range" min="0" max="140" step="1" value="50" data-role="speed"><output></output></label>
+    <label><span class="k"><span lang="en">Engine</span><span lang="zh">发动机</span></span><input type="range" min="0" max="5000" step="50" value="2000" data-role="engine"><output></output></label>
+  </div>
+  <div class="controls">
+    <div class="group">
+      <button data-scene="ev"><span lang="en">Electric only</span><span lang="zh">纯电行驶</span></button>
+      <button data-scene="cruise"><span lang="en">Cruising</span><span lang="zh">巡航</span></button>
+      <button data-scene="charge"><span lang="en">Parked, charging</span><span lang="zh">停车充电</span></button>
+    </div>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">Set the car speed and the engine speed independently. The generator on the sun takes up the difference, whatever it is. Try "Electric only" and look at the generator.</figcaption>
+  <figcaption lang="zh">车速和发动机转速可以各自独立设定，两者之间的差额，全部由太阳轮上的发电机吸收。点“纯电行驶”，看看发电机在干什么。</figcaption>
+</figure>
+
+<p lang="en">That is the whole idea. Because the sun can absorb any speed difference, the engine can stay near its most efficient speed while the car speeds up or slows down, and the generator's electricity helps drive the wheels through a second motor. There are no gears to shift. With the engine off, the generator simply spins backwards. Past a certain car speed it would spin too fast, which is one reason the engine has to join in.</p>
+<p lang="zh">这就是全部的秘密。太阳轮能吸收任何转速差，所以车子加速减速时，发动机可以一直待在最省油的转速附近；发电机发出的电，再通过另一台电机帮着驱动车轮。整个过程没有挡位可换。发动机熄火时，发电机只是在反转；车速超过某个值，它会转得太快，这也是发动机必须介入的原因之一。</p>
+
+<h2><span lang="en">Everywhere once you look</span><span lang="zh">一旦留意，到处都是</span></h2>
+<p lang="en">Planetary gears pack a big reduction into a small, balanced package, with the load shared across several planets. You'll find them in bicycle hub gears, electric screwdrivers, wind turbines, robot joints and the wheel hubs of excavators, all built on the same straight line you dragged above.</p>
+<p lang="zh">行星齿轮能把很大的减速比塞进一个小巧、对称的结构里，负载还分摊在好几个行星轮上。自行车内变速花鼓、电动螺丝刀、风力发电机、机器人关节、挖掘机的轮毂里都有它，全都遵循你刚才拖动的那条直线。</p>
+
+<footer>
+  <p lang="en">An explorable explanation. Everything on this page is one HTML file: the 3D figures are rendered live with WebGL and every gear position follows the gear-set equations. Tooth shapes are simplified. The Prius figure uses the commonly published sun/ring tooth counts of its power-split device (30 and 78; planets drawn with 24 teeth so they mesh), and the link between road speed and ring speed is illustrative.</p>
+  <p lang="zh">一篇可交互讲解。整个页面是一个 HTML 文件：3D 图形由 WebGL 实时渲染，每个齿轮的位置都由齿轮组方程计算。齿形做了简化。普锐斯一图采用其动力分配装置公开资料中常见的太阳轮/齿圈齿数（30 与 78；为了能啮合，行星轮画成 24 齿），车速与齿圈转速的换算是示意性的。</p>
+</footer>
+</main>
+
+<script>
+(() => {
+  const root = document.documentElement;
+  const css = (name) => getComputedStyle(root).getPropertyValue(name).trim();
+  const TAU = Math.PI * 2;
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+
+  // ---------- language ----------
+  const t = (en, zh) => (root.dataset.lang === 'zh' ? zh : en);
+  const langHooks = [];
+  function setLang(l) {
+    root.dataset.lang = l; root.lang = l === 'zh' ? 'zh-CN' : 'en';
+    const title = document.querySelector('title'); document.title = title.dataset[l];
+    document.querySelectorAll('[data-setlang]').forEach((b) => b.classList.toggle('on', b.dataset.setlang === l));
+    try { localStorage.setItem('explorable-lang', l); } catch { /* ignore */ }
+    const u = new URL(location.href); u.searchParams.set('lang', l); history.replaceState(null, '', u);
+    langHooks.forEach((f) => f());
+  }
+  document.querySelectorAll('[data-setlang]').forEach((b) => (b.onclick = () => setLang(b.dataset.setlang)));
+  document.querySelectorAll('[data-setlang]').forEach((b) => b.classList.toggle('on', b.dataset.setlang === root.dataset.lang));
+  document.title = document.querySelector('title').dataset[root.dataset.lang];
+
+  // Colors are re-read when the color scheme changes.
+  const colorHooks = [];
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => colorHooks.forEach((f) => f()));
+  const hexRGB = (hex) => { const n = parseInt(hex.replace('#', ''), 16); return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; };
+
+  // ---------- visible-only animation ----------
+  const animated = new Set();
+  function animate(el, step) {
+    const entry = { step, visible: false };
+    new IntersectionObserver(([e]) => { entry.visible = e.isIntersecting; }).observe(el);
+    animated.add(entry);
+  }
+  let lastT = performance.now();
+  requestAnimationFrame(function frame(now) {
+    const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+    for (const e of animated) if (e.visible) e.step(now / 1000, dt);
+    requestAnimationFrame(frame);
+  });
+
+  // ---------- tiny matrix library (column-major) ----------
+  const M4 = {
+    mul(a, b) {
+      const o = new Float32Array(16);
+      for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+        let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s;
+      }
+      return o;
+    },
+    perspective(fovy, aspect, near, far) {
+      const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+      return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
+    },
+    lookAt(e, c, up) {
+      const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+      const norm = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+      const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+      const z = norm(sub(e, c)), x = norm(cross(up, z)), y = cross(z, x);
+      const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, e), -dot(y, e), -dot(z, e), 1]);
+    },
+    // Translate by (x, y, z) after rotating by `a` about the z axis.
+    trz(x, y, z, a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return new Float32Array([c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, x, y, z, 1]);
+    },
+  };
+
+  // ---------- geometry ----------
+  // Gear outline radius at tooth phase u (0 = tooth centre, ±0.5 = middle of a gap).
+  const TOOTH_U = [-0.5, -0.4, -0.3, -0.11, -0.04, 0.04, 0.11, 0.3, 0.4];
+  function toothRadius(u, tip, root) {
+    const d = Math.abs(u);
+    const k = d <= 0.11 ? 0 : d >= 0.3 ? 1 : (d - 0.11) / 0.19;
+    return tip + (root - tip) * k;
+  }
+  // Angles and radii around a gear with Z teeth; tooth 0 is centred on angle 0.
+  function gearRing(Z, m, internal) {
+    const r = (m * Z) / 2, tip = internal ? r - m : r + m, root = internal ? r + 1.25 * m : r - 1.25 * m;
+    const pts = [];
+    for (let k = 0; k < Z; k++) for (const u of TOOTH_U) {
+      const a = ((k + u) / Z) * TAU;
+      const rad = toothRadius(u, tip, root);
+      pts.push([a, rad]);
+    }
+    return pts;
+  }
+  const circleAt = (angles, r) => angles.map(([a]) => [a, r]);
+  const polar = (pts) => pts.map(([a, r]) => [Math.cos(a) * r, Math.sin(a) * r]);
+
+  // Extrude the band between an outer and an inner outline (same angular samples) from z0 to z1.
+  function extrude(outerPolar, innerPolar, z0, z1) {
+    const o = polar(outerPolar), i = polar(innerPolar), n = o.length;
+    const P = [], N = [];
+    const push = (x, y, z, nx, ny, nz) => { P.push(x, y, z); N.push(nx, ny, nz); };
+    const quad = (a, b, c, d, nrm) => { for (const v of [a, b, c, a, c, d]) push(...v, ...nrm); };
+    for (let k = 0; k < n; k++) {
+      const k2 = (k + 1) % n;
+      const [o0, o1, i0, i1] = [o[k], o[k2], i[k], i[k2]];
+      quad([...o0, z1], [...o1, z1], [...i1, z1], [...i0, z1], [0, 0, 1]);
+      quad([...o0, z0], [...i0, z0], [...i1, z0], [...o1, z0], [0, 0, -1]);
+      const ex = o1[0] - o0[0], ey = o1[1] - o0[1], el = Math.hypot(ex, ey) || 1;
+      quad([...o0, z0], [...o1, z0], [...o1, z1], [...o0, z1], [ey / el, -ex / el, 0]);
+      const fx = i1[0] - i0[0], fy = i1[1] - i0[1], fl = Math.hypot(fx, fy) || 1;
+      quad([...i0, z0], [...i0, z1], [...i1, z1], [...i1, z0], [-fy / fl, fx / fl, 0]);
+    }
+    return { P: new Float32Array(P), N: new Float32Array(N) };
+  }
+  const gearMesh = (Z, m, z0, z1, bore) => { const g = gearRing(Z, m, false); return extrude(g, circleAt(g, bore), z0, z1); };
+  const ringMesh = (Z, m, z0, z1, outer) => { const g = gearRing(Z, m, true); return extrude(circleAt(g, outer), g, z0, z1); };
+  function cylinderMesh(r, z0, z1, inner = 0.0005, seg = 48) {
+    const a = []; for (let k = 0; k < seg; k++) a.push([(k / seg) * TAU, r]);
+    return extrude(a, circleAt(a, inner), z0, z1);
+  }
+  // A carrier plate: a disc with a lobe reaching out to each planet pin.
+  function carrierMesh(orbit, planets, z0, z1, bore) {
+    const seg = 240, pts = [];
+    for (let k = 0; k < seg; k++) {
+      const a = (k / seg) * TAU;
+      let bump = 0;
+      for (let p = 0; p < planets; p++) {
+        let d = Math.abs(((a - (p / planets) * TAU + Math.PI) % TAU + TAU) % TAU - Math.PI);
+        bump = Math.max(bump, Math.pow(Math.max(0, Math.cos(Math.min(d * planets * 0.55, Math.PI / 2))), 1.6));
+      }
+      pts.push([a, orbit * 0.62 + (orbit * 0.62) * bump]);
+    }
+    return extrude(pts, circleAt(pts, bore), z0, z1);
+  }
+
+  // ---------- gear set kinematics ----------
+  // Speeds obey  Zs·ωs + Zr·ωr = (Zs + Zr)·ωc  (the Willis equation).
+  function makeSet(Zs, Zp, N, m) {
+    const Zr = Zs + 2 * Zp, orbit = (m * (Zs + Zp)) / 2;
+    // Phase offsets so every tooth meets a gap (tooth centre ↔ gap centre).
+    const planetOffset = [], phi = [];
+    for (let i = 0; i < N; i++) {
+      const p = (i / N) * TAU; phi.push(p);
+      const f = ((p * Zs) / TAU) % 1;
+      planetOffset.push(p + Math.PI - ((0.5 - f) * TAU) / Zp);
+    }
+    // Ring offset from planet 0 at the start (angles all zero).
+    const g0 = (((phi[0] - planetOffset[0]) * Zp) / TAU) % 1;
+    const ringOffset = phi[0] - ((g0 + 0.5) * TAU) / Zr;
+    const st = { Zs, Zp, Zr, N, m, orbit, s: 0, c: 0, r: 0 };
+    // Positions follow from the sun and carrier angles.
+    st.pose = () => {
+      const planets = [];
+      for (let i = 0; i < N; i++) {
+        const a = st.c + phi[i];
+        const spin = st.c - ((st.s - st.c) * Zs) / Zp + planetOffset[i];
+        planets.push({ x: Math.cos(a) * orbit, y: Math.sin(a) * orbit, spin });
+      }
+      const ring = st.c - ((st.s - st.c) * Zs) / Zr + ringOffset;
+      return { planets, ring };
+    };
+    // Advance by speeds of any two members; the third follows.
+    st.step = (ws, wc, dt) => { st.s += ws * dt; st.c += wc * dt; };
+    return st;
+  }
+  const carrierSpeed = (Zs, Zr, ws, wr) => (Zs * ws + Zr * wr) / (Zs + Zr);
+  const sunSpeed = (Zs, Zr, wc, wr) => ((Zs + Zr) * wc - Zr * wr) / Zs;
+  const ringSpeed = (Zs, Zr, ws, wc) => ((Zs + Zr) * wc - Zs * ws) / Zr;
+
+  // ---------- WebGL stage ----------
+  const VS = `attribute vec3 p; attribute vec3 n; uniform mat4 M; uniform mat4 VP; uniform mat3 NM;
+    varying vec3 vN; varying vec3 vW;
+    void main() { vec4 w = M * vec4(p, 1.0); vW = w.xyz; vN = NM * n; gl_Position = VP * w; }`;
+  const FS = `precision mediump float; varying vec3 vN; varying vec3 vW;
+    uniform vec3 color; uniform vec3 eye; uniform float dim;
+    void main() {
+      vec3 n = normalize(vN); vec3 v = normalize(eye - vW);
+      if (dot(n, v) < 0.0) n = -n;
+      vec3 l1 = normalize(vec3(0.35, 0.75, 0.9)), l2 = normalize(vec3(-0.7, -0.2, 0.5));
+      float d = max(dot(n, l1), 0.0) * 0.75 + max(dot(n, l2), 0.0) * 0.22;
+      vec3 h = normalize(l1 + v);
+      float s = pow(max(dot(n, h), 0.0), 60.0) * 0.55;
+      float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.25;
+      vec3 base = mix(color, vec3(dot(color, vec3(0.33))), dim);
+      vec3 c = base * (0.32 + d) + vec3(s) * (1.0 - dim * 0.7) + base * rim;
+      gl_FragColor = vec4(pow(c, vec3(0.95)), 1.0);
+    }`;
+
+  function stage(fig, el, { dist = 7, yaw = 0.55, pitch = 0.42, target = [0, 0, 0] } = {}) {
+    const glc = el.querySelector('canvas.gl'), ov = el.querySelector('canvas.ov');
+    const aspect = +el.dataset.aspect;
+    const gl = glc.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: false });
+    const s = { gl, ov, octx: ov.getContext('2d'), w: 680, h: 680 * aspect, yaw, pitch, dist, target, parts: [] };
+    const fit = () => {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const cw = el.clientWidth, ch = Math.round(cw * aspect);
+      for (const c of [glc, ov]) { c.width = Math.round(cw * dpr); c.height = Math.round(ch * dpr); c.style.height = ch + 'px'; }
+      el.style.height = ch + 'px';
+      s.k = cw / 680;
+      s.octx.setTransform(dpr * s.k, 0, 0, dpr * s.k, 0, 0);
+      if (gl) gl.viewport(0, 0, glc.width, glc.height);
+    };
+    fit();
+    new ResizeObserver(fit).observe(el);
+    if (!gl) {
+      s.render = () => { s.octx.clearRect(0, 0, s.w, s.h); label(s.octx, t('Your browser cannot show 3D figures.', '你的浏览器无法显示 3D 图形。'), s.w / 2, s.h / 2, css('--muted'), 'center', 14); };
+      s.mesh = () => null;
+      return s;
+    }
+    const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
+    gl.useProgram(prog);
+    const loc = (n) => gl.getUniformLocation(prog, n);
+    const U = { M: loc('M'), VP: loc('VP'), NM: loc('NM'), color: loc('color'), eye: loc('eye'), dim: loc('dim') };
+    const aP = gl.getAttribLocation(prog, 'p'), aN = gl.getAttribLocation(prog, 'n');
+    gl.enable(gl.DEPTH_TEST);
+    s.mesh = (geo) => {
+      const pb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, pb); gl.bufferData(gl.ARRAY_BUFFER, geo.P, gl.STATIC_DRAW);
+      const nb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, nb); gl.bufferData(gl.ARRAY_BUFFER, geo.N, gl.STATIC_DRAW);
+      return { pb, nb, count: geo.P.length / 3, free() { gl.deleteBuffer(pb); gl.deleteBuffer(nb); } };
+    };
+    s.camera = () => {
+      const cp = Math.cos(s.pitch), e = [s.target[0] + s.dist * cp * Math.sin(s.yaw), s.target[1] + s.dist * Math.sin(s.pitch), s.target[2] + s.dist * cp * Math.cos(s.yaw)];
+      const VP = M4.mul(M4.perspective(0.62, s.w / s.h, 0.1, 100), M4.lookAt(e, s.target, [0, 1, 0]));
+      return { e, VP };
+    };
+    // items: [{ mesh, M, color: [r,g,b], dim }]
+    s.render = (items) => {
+      const { e, VP } = s.camera();
+      s.VP = VP;
+      gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.uniformMatrix4fv(U.VP, false, VP); gl.uniform3fv(U.eye, e);
+      for (const it of items) {
+        if (!it.mesh) continue;
+        const M = it.M;
+        gl.uniformMatrix4fv(U.M, false, M);
+        gl.uniformMatrix3fv(U.NM, false, new Float32Array([M[0], M[1], M[2], M[4], M[5], M[6], M[8], M[9], M[10]]));
+        gl.uniform3fv(U.color, it.color); gl.uniform1f(U.dim, it.dim || 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, it.mesh.pb); gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, it.mesh.nb); gl.enableVertexAttribArray(aN); gl.vertexAttribPointer(aN, 3, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, it.mesh.count);
+      }
+      s.octx.clearRect(0, 0, s.w, s.h);
+    };
+    // World point -> overlay coordinates.
+    s.project = ([x, y, z]) => {
+      const V = s.VP, cx = V[0] * x + V[4] * y + V[8] * z + V[12], cy = V[1] * x + V[5] * y + V[9] * z + V[13], cw = V[3] * x + V[7] * y + V[11] * z + V[15];
+      return [((cx / cw) * 0.5 + 0.5) * s.w, (1 - ((cy / cw) * 0.5 + 0.5)) * s.h];
+    };
+    // Orbit the camera by dragging (horizontal only on touch, so the page still scrolls).
+    let drag = null;
+    el.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, yaw: s.yaw, pitch: s.pitch, touch: e.pointerType === 'touch' }; });
+    window.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      s.yaw = drag.yaw - (e.clientX - drag.x) * 0.008;
+      if (!drag.touch) s.pitch = clamp(drag.pitch + (e.clientY - drag.y) * 0.006, -0.2, 1.35);
+    });
+    window.addEventListener('pointerup', () => { drag = null; });
+    window.addEventListener('pointercancel', () => { drag = null; });
+    return s;
+  }
+
+  function label(ctx, text, x, y, color, align = 'left', size = 12, weight = 500) {
+    ctx.font = `${weight} ${size}px Inter, "PingFang SC", system-ui, sans-serif`;
+    ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y);
+  }
+  // A label with a small dot at the anchor, offset to keep it off the part.
+  function tag(s, world, text, color, dx = 0, dy = -18) {
+    const [x, y] = s.project(world), c = s.octx;
+    c.fillStyle = color; c.beginPath(); c.arc(x, y, 2.5, 0, TAU); c.fill();
+    c.strokeStyle = color; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(x + dx, y + dy + 6 * Math.sign(dy || 1)); c.stroke();
+    // A soft plate behind the text keeps it readable over parts of the same color.
+    const align = dx < 0 ? 'right' : dx > 0 ? 'left' : 'center';
+    c.font = '600 12.5px Inter, "PingFang SC", system-ui, sans-serif';
+    const tw = c.measureText(text).width, bx = align === 'right' ? x + dx - tw : align === 'left' ? x + dx : x + dx - tw / 2;
+    c.fillStyle = css('--panel'); c.globalAlpha = 0.86;
+    c.beginPath(); c.roundRect(bx - 6, y + dy - 10, tw + 12, 20, 10); c.fill(); c.globalAlpha = 1;
+    label(c, text, x + dx, y + dy, color, align, 12.5, 600);
+  }
+
+  const palette = () => ({ sun: hexRGB(css('--c1')), planet: hexRGB(css('--c2')), ring: hexRGB(css('--c3')), carrier: hexRGB(css('--c4')), steel: [0.62, 0.64, 0.68] });
+  let colors = palette();
+  colorHooks.push(() => { colors = palette(); });
+
+  // Builds all meshes for a planetary set.
+  function setMeshes(s, set, thick = 0.5) {
+    const { Zs, Zp, Zr, N, m, orbit } = set;
+    const h = thick / 2;
+    return {
+      sun: s.mesh(gearMesh(Zs, m, -h, h, m * 2.2)),
+      sunShaft: s.mesh(cylinderMesh(m * 2.0, h, h + 1.4)),
+      planet: s.mesh(gearMesh(Zp, m, -h * 0.96, h * 0.96, m * 1.3)),
+      ring: s.mesh(ringMesh(Zr, m, -h, h, (m * Zr) / 2 + m * 3.2)),
+      carrier: s.mesh(carrierMesh(orbit, N, -h - 0.22, -h - 0.06, m * 2.2)),
+      carrierShaft: s.mesh(cylinderMesh(m * 2.0, -h - 1.5, -h - 0.2)),
+      pin: s.mesh(cylinderMesh(m * 1.2, -h - 0.16, h + 0.08)),
+    };
+  }
+  function setItems(set, meshes, { held = null, focus = 'all', explode = 0, thick = 0.5 } = {}) {
+    const pose = set.pose(), items = [];
+    const dimOf = (part) => (held === part ? 0.85 : focus !== 'all' && focus !== part ? 0.75 : 0);
+    const z = { sun: explode * 1.6, planets: 0, ring: -explode * 0.6, carrier: -explode * 1.5 };
+    items.push({ mesh: meshes.sun, M: M4.trz(0, 0, z.sun, set.s), color: colors.sun, dim: dimOf('sun') });
+    items.push({ mesh: meshes.sunShaft, M: M4.trz(0, 0, z.sun, set.s), color: colors.sun, dim: dimOf('sun') });
+    for (const p of pose.planets) {
+      items.push({ mesh: meshes.planet, M: M4.trz(p.x, p.y, z.planets, p.spin), color: colors.planet, dim: dimOf('planets') });
+      items.push({ mesh: meshes.pin, M: M4.trz(p.x, p.y, z.carrier * 0.5, set.c), color: colors.carrier, dim: dimOf('carrier') });
+    }
+    items.push({ mesh: meshes.ring, M: M4.trz(0, 0, z.ring, pose.ring), color: colors.ring, dim: dimOf('ring') });
+    items.push({ mesh: meshes.carrier, M: M4.trz(0, 0, z.carrier, set.c), color: colors.carrier, dim: dimOf('carrier') });
+    items.push({ mesh: meshes.carrierShaft, M: M4.trz(0, 0, z.carrier, set.c), color: colors.carrier, dim: dimOf('carrier') });
+    return { items, pose, z };
+  }
+  const partName = (p) => ({ sun: t('sun', '太阳轮'), planets: t('planets', '行星轮'), ring: t('ring', '齿圈'), carrier: t('carrier', '行星架') }[p]);
+  const fmt = (x, d = 0) => x.toFixed(d).replace('-', '−');
+
+  // ================= Figure 1: a pair of gears =================
+  {
+    const fig = document.getElementById('fig-pair');
+    const s = stage(fig, fig.querySelector('.stage'), { dist: 7.2, yaw: 0.35, pitch: 0.38 });
+    const slider = fig.querySelector('input'), out = fig.querySelector('output'), readout = fig.querySelector('.readout');
+    const m = 0.1, Z1 = 18, thick = 0.5;
+    const g1 = s.mesh(gearMesh(Z1, m, -thick / 2, thick / 2, 0.22));
+    let g2 = null, Z2 = 0, a1 = 0;
+    function sync() {
+      const z = +slider.value;
+      if (z !== Z2) { g2 && g2.free && g2.free(); Z2 = z; g2 = s.mesh(gearMesh(Z2, m, -thick / 2, thick / 2, 0.22)); }
+      out.textContent = t(`${Z2} teeth`, `${Z2} 齿`);
+      const ratio = Z1 / Z2;
+      readout.innerHTML = t(`The blue gear turns <b>${ratio.toFixed(2)}×</b> as fast as the orange one, in the opposite direction.`,
+        `蓝色齿轮的转速是橙色的 <b>${ratio.toFixed(2)} 倍</b>，方向相反。`);
+    }
+    slider.oninput = sync; langHooks.push(sync); sync();
+    animate(fig, (time, dt) => {
+      a1 += 0.55 * dt;
+      const d = (m * (Z1 + Z2)) / 2, x1 = -d * (Z2 / (Z1 + Z2)), x2 = x1 + d;
+      // Mesh at angle 0 of gear 1 (pointing at gear 2): gear 2 needs a gap there.
+      const off = Math.PI - Math.PI / Z2;
+      const a2 = (-a1 * Z1) / Z2 + off;
+      s.target = [0, 0, 0];
+      s.dist = 5.2 + 0.09 * Z2;
+      s.render([
+        { mesh: g1, M: M4.trz(x1, 0, 0, a1), color: colors.sun },
+        { mesh: g2, M: M4.trz(x2, 0, 0, a2), color: colors.planet },
+      ]);
+      const r1 = (m * Z1) / 2 + m, r2 = (m * Z2) / 2 + m;
+      tag(s, [x1, r1, 0.25], t(`${Z1} teeth`, `${Z1} 齿`), css('--c1'), 0, -22);
+      tag(s, [x2, r2, 0.25], t(`${Z2} teeth`, `${Z2} 齿`), css('--c2'), 0, -22);
+    });
+  }
+
+  // ================= Figure 2: anatomy =================
+  {
+    const fig = document.getElementById('fig-anatomy');
+    const s = stage(fig, fig.querySelector('.stage'), { dist: 9.5, yaw: 0.6, pitch: 0.5 });
+    const set = makeSet(18, 15, 3, 0.1);
+    const meshes = setMeshes(s, set);
+    const slider = fig.querySelector('[data-role=explode]'), out = fig.querySelector('output');
+    let focus = 'all', explode = 0;
+    const sync = () => { explode = +slider.value; out.textContent = Math.round(explode * 100) + '%'; };
+    slider.oninput = sync; sync();
+    fig.querySelectorAll('[data-role=focus] button').forEach((b) => (b.onclick = () => {
+      focus = b.dataset.part;
+      fig.querySelectorAll('[data-role=focus] button').forEach((x) => x.classList.toggle('on', x === b));
+    }));
+    animate(fig, (time, dt) => {
+      // Ring held, sun drives: the carrier follows at Zs/(Zs+Zr) of the sun's speed.
+      const ws = 0.6, wc = carrierSpeed(set.Zs, set.Zr, ws, 0);
+      set.step(ws, wc, dt);
+      s.target = [0, 0, -explode * 0.2];
+      s.dist = 9.5 + explode * 2.5;
+      const { items, pose, z } = setItems(set, meshes, { focus, explode });
+      s.render(items);
+      const R = (set.m * set.Zr) / 2 + set.m * 3.2;
+      tag(s, [0, 0.4, z.sun + 0.9], partName('sun'), css('--c1'), 40, -26);
+      tag(s, [pose.planets[0].x, pose.planets[0].y, 0.3], partName('planets'), css('--c2'), 30, -24);
+      tag(s, [-R * 0.72, R * 0.72, z.ring + 0.25], partName('ring'), css('--c3'), -20, -20);
+      tag(s, [0, -set.orbit * 0.9, z.carrier - 0.2], partName('carrier'), css('--c4'), -34, 26);
+    });
+  }
+
+  // ================= Figure 3: hold one, drive one =================
+  {
+    const fig = document.getElementById('fig-modes');
+    const s = stage(fig, fig.querySelector('.stage'), { dist: 9.2, yaw: 0.45, pitch: 0.46 });
+    const set = makeSet(18, 15, 3, 0.1);
+    const meshes = setMeshes(s, set);
+    const readout = fig.querySelector('.readout');
+    let held = 'ring', drive = 'sun';
+    const holdBtns = fig.querySelectorAll('[data-role=hold] button'), driveBtns = fig.querySelectorAll('[data-role=drive] button');
+    function speeds() {
+      const w = { sun: 0, carrier: 0, ring: 0 };
+      w[drive] = 0.5;
+      const out = ['sun', 'carrier', 'ring'].find((p) => p !== held && p !== drive);
+      const { Zs, Zr } = set;
+      if (out === 'carrier') w.carrier = carrierSpeed(Zs, Zr, w.sun, w.ring);
+      if (out === 'sun') w.sun = sunSpeed(Zs, Zr, w.carrier, w.ring);
+      if (out === 'ring') w.ring = ringSpeed(Zs, Zr, w.sun, w.carrier);
+      return { w, out };
+    }
+    function sync() {
+      holdBtns.forEach((b) => b.classList.toggle('on', b.dataset.part === held));
+      driveBtns.forEach((b) => { b.classList.toggle('on', b.dataset.part === drive); b.disabled = b.dataset.part === held; });
+      const { w, out } = speeds();
+      const ratio = w[out] / w[drive];
+      const kind = ratio < 0 ? t('reverse', '反转') : Math.abs(ratio) < 1 ? t('slower', '减速') : t('faster', '增速');
+      readout.innerHTML = t(`Hold the ${partName(held)}, drive the ${partName(drive)}: the <b>${partName(out)}</b> turns at <b>${fmt(ratio, 2)}×</b> the input speed (${kind}).`,
+        `固定${partName(held)}、驱动${partName(drive)}：<b>${partName(out)}</b>的转速是输入的 <b>${fmt(ratio, 2)} 倍</b>（${kind}）。`);
+    }
+    holdBtns.forEach((b) => (b.onclick = () => {
+      held = b.dataset.part;
+      if (drive === held) drive = ['sun', 'carrier', 'ring'].find((p) => p !== held);
+      sync();
+    }));
+    driveBtns.forEach((b) => (b.onclick = () => { if (b.dataset.part !== held) { drive = b.dataset.part; sync(); } }));
+    langHooks.push(sync); sync();
+    animate(fig, (time, dt) => {
+      const { w, out } = speeds();
+      set.step(w.sun, w.carrier, dt);
+      const { items, pose } = setItems(set, meshes, { held });
+      s.render(items);
+      const R = (set.m * set.Zr) / 2 + set.m * 3.2;
+      const anchor = { sun: [0, 0, 1.6], carrier: [0, -set.orbit, -0.4], ring: [-R * 0.7, R * 0.7, 0.25] };
+      const offs = { sun: [36, -30], carrier: [-40, 28], ring: [-20, -22] };
+      for (const p of ['sun', 'carrier', 'ring']) {
+        const tagText = p === held ? t('held', '固定') : p === drive ? t('input', '输入') : t('output', '输出');
+        tag(s, anchor[p], `${partName(p)} · ${tagText}`, p === held ? css('--muted') : css({ sun: '--c1', carrier: '--c4', ring: '--c3' }[p]), ...offs[p]);
+      }
+    });
+  }
+
+  // ---------- lever diagram ----------
+  // Three vertical bars (sun, carrier, ring) spaced Zr : Zs apart; speeds lie on one line.
+  function leverSurface(canvas) {
+    const ctx = canvas.getContext('2d'), aspect = +canvas.dataset.aspect;
+    const s = { canvas, ctx, w: 680, h: 680 * aspect };
+    const fit = () => {
+      const dpr = window.devicePixelRatio || 1, cw = canvas.clientWidth, ch = Math.round(cw * aspect);
+      canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr); canvas.style.height = ch + 'px';
+      s.k = cw / 680; ctx.setTransform(dpr * s.k, 0, 0, dpr * s.k, 0, 0);
+      s.draw && s.draw();
+    };
+    fit(); new ResizeObserver(fit).observe(canvas);
+    s.at = (e) => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / s.k, (e.clientY - r.top) / s.k]; };
+    return s;
+  }
+  function drawLever(L, { Zs, Zr, speeds, labels, colorsCss, max, digits = 2, active = -1 }) {
+    const { ctx, w, h } = L;
+    ctx.clearRect(0, 0, w, h);
+    const x0 = 110, x1 = w - 110, mid = (h - 20) / 2, amp = mid - 22;
+    const xs = [x0, x0 + ((x1 - x0) * Zr) / (Zs + Zr), x1];
+    const ys = speeds.map((v) => mid - (clamp(v, -max * 1.15, max * 1.15) / max) * amp);
+    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x0 - 40, mid); ctx.lineTo(x1 + 40, mid); ctx.stroke();
+    xs.forEach((x) => { ctx.beginPath(); ctx.moveTo(x, 12); ctx.lineTo(x, h - 30); ctx.stroke(); });
+    // The line through all three points.
+    const slope = (ys[2] - ys[0]) / (xs[2] - xs[0]);
+    ctx.strokeStyle = css('--fg'); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x0 - 40, ys[0] - slope * 40); ctx.lineTo(x1 + 40, ys[2] + slope * 40); ctx.stroke();
+    xs.forEach((x, i) => {
+      ctx.fillStyle = colorsCss[i]; ctx.beginPath(); ctx.arc(x, ys[i], active === i ? 9 : 7, 0, TAU); ctx.fill();
+      label(ctx, labels[i], x, h - 14, colorsCss[i], 'center', 12.5, 600);
+      label(ctx, fmt(speeds[i], digits), x + 12, ys[i] - 12, css('--fg'), 'left', 12);
+    });
+    label(ctx, t('forward', '正转'), 8, mid - 12, css('--muted'));
+    label(ctx, t('backward', '反转'), 8, mid + 12, css('--muted'));
+    return xs;
+  }
+
+  // ================= Figure 4: the lever =================
+  {
+    const fig = document.getElementById('fig-lever');
+    const s = stage(fig, fig.querySelector('.stage'), { dist: 9.2, yaw: 0.5, pitch: 0.42 });
+    const set = makeSet(18, 15, 3, 0.1);
+    const meshes = setMeshes(s, set);
+    const L = leverSurface(fig.querySelector('canvas.lever'));
+    const readout = fig.querySelector('.readout');
+    const w = { sun: 0.8, carrier: 0, ring: -0.1 };
+    w.carrier = carrierSpeed(set.Zs, set.Zr, w.sun, w.ring);
+    let active = -1, xs = [];
+    const keys = ['sun', 'carrier', 'ring'];
+    const max = 1.2;
+    function draw() {
+      xs = drawLever(L, { Zs: set.Zs, Zr: set.Zr, speeds: [w.sun, w.carrier, w.ring], labels: keys.map(partName),
+        colorsCss: [css('--c1'), css('--c4'), css('--c3')], max, active });
+      readout.innerHTML = t(`Carrier = (18 × sun + 48 × ring) ÷ 66 = <b>${fmt(w.carrier, 2)}</b>`,
+        `行星架 = (18 × 太阳轮 + 48 × 齿圈) ÷ 66 = <b>${fmt(w.carrier, 2)}</b>`);
+    }
+    L.draw = draw; langHooks.push(draw); colorHooks.push(draw);
+    let dragKey = null;
+    L.canvas.addEventListener('pointerdown', (e) => {
+      const [x] = L.at(e);
+      let best = -1, bd = 60; xs.forEach((px, i) => { if (Math.abs(px - x) < bd) { bd = Math.abs(px - x); best = i; } });
+      if (best < 0) return;
+      active = best; dragKey = keys[best];
+      try { L.canvas.setPointerCapture(e.pointerId); } catch { /* best effort */ }
+      move(e);
+    });
+    function move(e) {
+      if (!dragKey) return;
+      const [, y] = L.at(e), mid = (L.h - 20) / 2, amp = mid - 22;
+      const v = clamp(((mid - y) / amp) * max, -max, max);
+      const { Zs, Zr } = set;
+      // Dragging one point keeps the next one fixed and moves the third, so the line stays straight.
+      if (dragKey === 'sun') { w.sun = v; w.carrier = carrierSpeed(Zs, Zr, w.sun, w.ring); }
+      if (dragKey === 'ring') { w.ring = v; w.carrier = carrierSpeed(Zs, Zr, w.sun, w.ring); }
+      if (dragKey === 'carrier') { w.carrier = v; w.sun = sunSpeed(Zs, Zr, w.carrier, w.ring); }
+      draw();
+    }
+    L.canvas.addEventListener('pointermove', move);
+    const end = () => { dragKey = null; active = -1; draw(); };
+    L.canvas.addEventListener('pointerup', end); L.canvas.addEventListener('pointercancel', end);
+    draw();
+    animate(fig, (time, dt) => {
+      set.step(w.sun, w.carrier, dt);
+      const { items } = setItems(set, meshes, {});
+      s.render(items);
+      const R = (set.m * set.Zr) / 2 + set.m * 3.2;
+      tag(s, [0, 0, 1.6], partName('sun'), css('--c1'), 36, -30);
+      tag(s, [0, -set.orbit, -0.4], partName('carrier'), css('--c4'), -40, 28);
+      tag(s, [-R * 0.7, R * 0.7, 0.25], partName('ring'), css('--c3'), -20, -22);
+    });
+  }
+
+  // ================= Figure 5: the Prius power split =================
+  {
+    const fig = document.getElementById('fig-prius');
+    const s = stage(fig, fig.querySelector('.stage'), { dist: 14.5, yaw: 0.5, pitch: 0.42 });
+    const set = makeSet(30, 24, 4, 0.1);
+    const meshes = setMeshes(s, set, 0.55);
+    const L = leverSurface(fig.querySelector('canvas.lever'));
+    const speed = fig.querySelector('[data-role=speed]'), engine = fig.querySelector('[data-role=engine]');
+    const [outSpeed, outEngine] = fig.querySelectorAll('output');
+    const readout = fig.querySelector('.readout');
+    const RING_RPM_PER_KMH = 30; // illustrative: 100 km/h -> 3000 rpm at the ring
+    const MG1_LIMIT = 10000;     // illustrative generator speed limit
+    const rpm = () => {
+      const ring = +speed.value * RING_RPM_PER_KMH, eng = +engine.value;
+      return { ring, eng, gen: sunSpeed(set.Zs, set.Zr, eng, ring) };
+    };
+    function sync() {
+      const r = rpm();
+      outSpeed.textContent = speed.value + ' km/h';
+      outEngine.textContent = engine.value + ' rpm';
+      const over = Math.abs(r.gen) > MG1_LIMIT;
+      const dir = r.gen < -1 ? t('backwards', '反向') : r.gen > 1 ? t('forwards', '正向') : '';
+      readout.innerHTML = t(
+        `Generator on the sun: <b style="color:${over ? 'var(--bad)' : 'inherit'}">${fmt(r.gen)} rpm</b> ${dir}` + (over ? ` — <b style="color:var(--bad)">too fast</b>: the engine must speed up.` : r.eng === 0 && +speed.value > 0 ? ' — engine off, car moving on electricity.' : '.'),
+        `太阳轮上的发电机：<b style="color:${over ? 'var(--bad)' : 'inherit'}">${fmt(r.gen)} rpm</b>${dir ? '，' + dir : ''}` + (over ? `——<b style="color:var(--bad)">转速过高</b>，发动机必须提速。` : r.eng === 0 && +speed.value > 0 ? '——发动机熄火，车靠电行驶。' : '。'));
+      drawL();
+    }
+    function drawL() {
+      const r = rpm();
+      drawLever(L, { Zs: set.Zs, Zr: set.Zr, speeds: [r.gen, r.eng, r.ring],
+        labels: [t('generator (sun)', '发电机（太阳轮）'), t('engine (carrier)', '发动机（行星架）'), t('wheels (ring)', '车轮（齿圈）')],
+        colorsCss: [css('--c1'), css('--c4'), css('--c3')], max: 11000, digits: 0 });
+    }
+    L.draw = drawL;
+    speed.oninput = engine.oninput = sync;
+    const scenes = { ev: [40, 0], cruise: [100, 2000], charge: [0, 1300] };
+    fig.querySelectorAll('[data-scene]').forEach((b) => (b.onclick = () => {
+      const [v, e] = scenes[b.dataset.scene];
+      const from = [+speed.value, +engine.value], t0 = performance.now();
+      (function step(now) {
+        const k = Math.min(1, (now - t0) / 900), q = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+        speed.value = from[0] + (v - from[0]) * q; engine.value = from[1] + (e - from[1]) * q; sync();
+        if (k < 1) requestAnimationFrame(step);
+      })(t0);
+    }));
+    langHooks.push(sync); colorHooks.push(drawL); sync();
+    animate(fig, (time, dt) => {
+      const r = rpm();
+      const toRad = TAU / 60 / 10; // slowed 10x so the motion stays readable
+      set.step(r.gen * toRad, r.eng * toRad, dt);
+      const { items } = setItems(set, meshes, {});
+      s.render(items);
+      const R = (set.m * set.Zr) / 2 + set.m * 3.2;
+      tag(s, [0, 0, 1.7], t('generator', '发电机'), css('--c1'), 40, -30);
+      tag(s, [0, -set.orbit, -0.45], t('engine', '发动机'), css('--c4'), -44, 30);
+      tag(s, [-R * 0.7, R * 0.7, 0.28], t('wheels', '车轮'), css('--c3'), -20, -22);
+    });
+  }
+})();
+</script>
+</body>
+</html>

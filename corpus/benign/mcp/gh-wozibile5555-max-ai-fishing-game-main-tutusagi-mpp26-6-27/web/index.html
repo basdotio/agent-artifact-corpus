@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>钓鱼游戏 · 调度面板</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/style.css?v=202606270857">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <i data-lucide="fish" class="header-icon"></i>
+                <h1>钓鱼游戏调度面板</h1>
+            </div>
+            <div class="header-right">
+                <div class="status-dot" id="mcpStatus"></div>
+                <span class="status-text" id="mcpStatusText">MCP 就绪</span>
+                <button class="btn btn-sm" onclick="newGame()">
+                    <i data-lucide="refresh-cw"></i>
+                    重开一局
+                </button>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">
+                <i data-lucide="layout-dashboard"></i>
+                <span>总览</span>
+            </button>
+            <button class="nav-tab" data-tab="baits" onclick="switchTab('baits')">
+                <i data-lucide="package"></i>
+                <span>鱼饵调度</span>
+            </button>
+            <button class="nav-tab" data-tab="locations" onclick="switchTab('locations')">
+                <i data-lucide="map-pin"></i>
+                <span>地点管理</span>
+            </button>
+            <button class="nav-tab" data-tab="fish" onclick="switchTab('fish')">
+                <i data-lucide="waves"></i>
+                <span>渔获编辑</span>
+            </button>
+            <button class="nav-tab" data-tab="probability" onclick="switchTab('probability')">
+                <i data-lucide="pie-chart"></i>
+                <span>概率分析</span>
+            </button>
+            <button class="nav-tab" data-tab="tooldescs" onclick="switchTab('tooldescs')">
+                <i data-lucide="file-text"></i>
+                <span>工具描述</span>
+            </button>
+            <button class="nav-tab" data-tab="logs" onclick="switchTab('logs')">
+                <i data-lucide="scroll-text"></i>
+                <span>实时日志</span>
+            </button>
+            <button class="nav-tab" data-tab="transfer" onclick="switchTab('transfer')">
+                <i data-lucide="hard-drive-download"></i>
+                <span>导入导出</span>
+            </button>
+        </nav>
+
+        <!-- Content -->
+        <main class="content">
+            <!-- Dashboard Tab -->
+            <section class="tab-panel active" id="tab-dashboard">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+                    <div class="card card-hover">
+                        <div class="card-header">
+                            <i data-lucide="activity"></i>
+                            <h3>游戏状态</h3>
+                        </div>
+                        <div class="card-body" id="gameStatusCard">
+                            <p class="text-muted">加载中...</p>
+                        </div>
+                    </div>
+                    <div class="card card-hover">
+                        <div class="card-header">
+                            <i data-lucide="info"></i>
+                            <h3>连接信息</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-list">
+                                <div class="info-item">
+                                    <span class="info-label">MCP Endpoint</span>
+                                    <code>http://localhost:11125/mcp</code>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">管理面板</span>
+                                    <code>http://localhost:11125</code>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">WebSocket</span>
+                                    <code>ws://localhost:11125/ws/logs</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid">
+                    <div class="card card-hover">
+                        <div class="card-header">
+                            <i data-lucide="terminal"></i>
+                            <h3>快捷指令</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="quick-commands">
+                                <button class="btn btn-ghost" onclick="runCommand('status')">查看状态</button>
+                                <button class="btn btn-ghost" onclick="runCommand('shop')">商店</button>
+                                <button class="btn btn-ghost" onclick="runCommand('cast 5')">连钓5竿</button>
+                                <button class="btn btn-ghost" onclick="runCommand('inventory')">背包</button>
+                                <button class="btn btn-ghost" onclick="runCommand('encyclopedia')">图鉴</button>
+                                <button class="btn btn-ghost" onclick="runCommand('goto')">地点列表</button>
+                            </div>
+                            <div class="command-input-group">
+                                <input type="text" id="commandInput" placeholder="输入自定义指令..." onkeydown="if(event.key==='Enter')runCustomCommand()">
+                                <button class="btn" onclick="runCustomCommand()">
+                                    <i data-lucide="send"></i>
+                                </button>
+                            </div>
+                            <pre class="result-text" id="commandResult" style="margin-top:12px;display:none;"></pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Baits Tab -->
+            <section class="tab-panel" id="tab-baits">
+                <div class="section-header">
+                    <div>
+                        <h2>鱼饵调度配置</h2>
+                        <p class="text-muted">调整鱼饵价格、使用限制，或新增自定义鱼饵</p>
+                    </div>
+                    <button class="btn" onclick="showAddBaitPrompt()">
+                        <i data-lucide="plus"></i>
+                        新增鱼饵
+                    </button>
+                </div>
+                <div class="filter-bar">
+                    <input type="text" id="baitSearchInput" placeholder="搜索鱼饵名称..." oninput="loadBaits()">
+                </div>
+                <div class="grid grid-3" id="baitsGrid">
+                    <p class="text-muted">加载中...</p>
+                </div>
+            </section>
+
+            <!-- Locations Tab -->
+            <section class="tab-panel" id="tab-locations">
+                <div class="section-header">
+                    <div>
+                        <h2>钓点管理</h2>
+                        <p class="text-muted">管理所有钓点，新增/编辑/删除</p>
+                    </div>
+                    <button class="btn" onclick="showAddLocationModal()">
+                        <i data-lucide="plus"></i>
+                        新增地点
+                    </button>
+                </div>
+                <div class="filter-bar">
+                    <div class="custom-dropdown" id="locSeasonFilterDropdown">
+                        <div class="custom-dropdown-trigger" onclick="toggleDropdown('locSeasonFilterDropdown')">
+                            <span id="locSeasonFilterLabel">全部季节</span>
+                            <i data-lucide="chevron-down" style="width:14px;height:14px;"></i>
+                        </div>
+                        <div class="custom-dropdown-menu">
+                            <div class="custom-dropdown-item active" data-value="" onclick="selectLocSeasonFilter('')">全部季节</div>
+                            <div class="custom-dropdown-item" data-value="spring" onclick="selectLocSeasonFilter('spring')">春</div>
+                            <div class="custom-dropdown-item" data-value="summer" onclick="selectLocSeasonFilter('summer')">夏</div>
+                            <div class="custom-dropdown-item" data-value="autumn" onclick="selectLocSeasonFilter('autumn')">秋</div>
+                            <div class="custom-dropdown-item" data-value="winter" onclick="selectLocSeasonFilter('winter')">冬</div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="locSeasonFilter" value="">
+                    <input type="text" id="locSearchInput" placeholder="搜索地点名称..." oninput="loadLocations()">
+                </div>
+                <div class="grid grid-2" id="locationsGrid">
+                    <p class="text-muted">加载中...</p>
+                </div>
+            </section>
+
+            <!-- Fish Tab -->
+            <section class="tab-panel" id="tab-fish">
+                <div class="section-header">
+                    <div>
+                        <h2>渔获物编辑</h2>
+                        <p class="text-muted">增加、编辑或删除鱼种</p>
+                    </div>
+                    <button class="btn" onclick="showAddFishModal()">
+                        <i data-lucide="plus"></i>
+                        添加鱼种
+                    </button>
+                </div>
+                <div class="filter-bar">
+                    <div class="custom-dropdown" id="fishRarityDropdown">
+                        <div class="custom-dropdown-trigger" onclick="toggleDropdown('fishRarityDropdown')">
+                            <span id="fishRarityLabel">全部稀有度</span>
+                            <i data-lucide="chevron-down" style="width:14px;height:14px;"></i>
+                        </div>
+                        <div class="custom-dropdown-menu">
+                            <div class="custom-dropdown-item active" data-value="" onclick="selectRarity('')">全部稀有度</div>
+                            <div class="custom-dropdown-item" data-value="common" onclick="selectRarity('common')">常见</div>
+                            <div class="custom-dropdown-item" data-value="uncommon" onclick="selectRarity('uncommon')">少见</div>
+                            <div class="custom-dropdown-item" data-value="rare" onclick="selectRarity('rare')">稀有</div>
+                            <div class="custom-dropdown-item" data-value="epic" onclick="selectRarity('epic')">史诗</div>
+                            <div class="custom-dropdown-item" data-value="legendary" onclick="selectRarity('legendary')">传说</div>
+                            <div class="custom-dropdown-item" data-value="mythic" onclick="selectRarity('mythic')">神话</div>
+                        </div>
+                    </div>
+                    <input type="text" id="fishSearchInput" placeholder="搜索鱼名..." oninput="loadFishList()">
+                    <input type="hidden" id="fishRarityFilter" value="">
+                </div>
+                <div class="fish-table-wrapper">
+                    <table class="fish-table" id="fishTable">
+                        <thead>
+                            <tr>
+                                <th>名称</th>
+                                <th>稀有度</th>
+                                <th>价值</th>
+                                <th>地点</th>
+                                <th>季节</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fishTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Probability Tab -->
+            <section class="tab-panel" id="tab-probability">
+                <div class="section-header">
+                    <h2>概率分析</h2>
+                    <p class="text-muted">查看各地点各季节的鱼种出现概率</p>
+                </div>
+                <div class="filter-bar">
+                    <div class="custom-dropdown" id="probLocationDropdown">
+                        <div class="custom-dropdown-trigger" onclick="toggleDropdown('probLocationDropdown')">
+                            <span id="probLocationLabel">选择地点</span>
+                            <i data-lucide="chevron-down" style="width:14px;height:14px;"></i>
+                        </div>
+                        <div class="custom-dropdown-menu" id="probLocationMenu"></div>
+                    </div>
+                    <input type="hidden" id="probLocation" value="">
+                    <div class="custom-dropdown" id="probSeasonDropdown">
+                        <div class="custom-dropdown-trigger" onclick="toggleDropdown('probSeasonDropdown')">
+                            <span id="probSeasonLabel">春</span>
+                            <i data-lucide="chevron-down" style="width:14px;height:14px;"></i>
+                        </div>
+                        <div class="custom-dropdown-menu">
+                            <div class="custom-dropdown-item active" data-value="spring" onclick="selectProbSeason('spring')">春</div>
+                            <div class="custom-dropdown-item" data-value="summer" onclick="selectProbSeason('summer')">夏</div>
+                            <div class="custom-dropdown-item" data-value="autumn" onclick="selectProbSeason('autumn')">秋</div>
+                            <div class="custom-dropdown-item" data-value="winter" onclick="selectProbSeason('winter')">冬</div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="probSeason" value="spring">
+                    <div class="mode-segmented">
+                        <button type="button" class="mode-segment active" id="probModeCast" onclick="selectProbabilityMode('cast')">水面概率</button>
+                        <button type="button" class="mode-segment" id="probModeDive" onclick="selectProbabilityMode('dive')">深水概率</button>
+                    </div>
+                    <input type="hidden" id="probMode" value="cast">
+                </div>
+                <div class="grid grid-2">
+                    <div class="card">
+                        <div class="card-header">
+                            <i data-lucide="bar-chart-3"></i>
+                            <h3>概率分布</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="probChart" class="prob-chart"></div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <i data-lucide="list"></i>
+                            <h3>详细列表</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="probList" class="prob-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tool Descriptions Tab -->
+            <section class="tab-panel" id="tab-tooldescs">
+                <div class="section-header">
+                    <div>
+                        <h2>MCP 工具描述编辑</h2>
+                        <p class="text-muted">自定义 Claude 看到的工具说明，教它怎么玩、限制行为、设定角色。保存后 Claude 下次连接生效。</p>
+                    </div>
+                    <button class="btn" onclick="saveToolDescs()">
+                        <i data-lucide="save"></i>
+                        保存描述
+                    </button>
+                </div>
+                <div class="grid grid-2">
+                    <div class="card">
+                        <div class="card-header">
+                            <i data-lucide="gamepad-2"></i>
+                            <h3>play_fishing 工具描述</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted" style="margin-bottom:10px;">Claude 每次调用钓鱼工具时看到的说明。写指令教程、行为限制、角色设定均可。</p>
+                            <textarea id="descPlayFishing" rows="16" style="font-size:12px;line-height:1.6;font-family:monospace;"></textarea>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <i data-lucide="rotate-ccw"></i>
+                            <h3>new_fishing_game 工具描述</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted" style="margin-bottom:10px;">Claude 调用重开一局时看到的说明。</p>
+                            <textarea id="descNewGame" rows="6" style="font-size:12px;line-height:1.6;font-family:monospace;"></textarea>
+                            <div style="margin-top:20px;padding:16px;background:rgba(180,160,200,0.06);border-radius:10px;">
+                                <p style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
+                                    <strong>提示</strong><br>
+                                    这两个工具是 Claude 唯一能调用的 MCP 接口。所有游戏操作都通过 play_fishing 的 command 参数传入。<br><br>
+                                    你可以在描述里写：<br>
+                                    · 指令教程（教 Claude 怎么用）<br>
+                                    · 行为限制（"只能钓稀有鱼""不准卖传说鱼"）<br>
+                                    · 角色设定（"你是一个贪心的渔夫"）<br>
+                                    · 策略提示（"先攒钱解锁高级钓点"）
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Logs Tab -->
+            <section class="tab-panel" id="tab-logs">
+                <div class="section-header">
+                    <h2>实时日志</h2>
+                    <p class="text-muted">AI 调用 MCP 的实时记录</p>
+                </div>
+                <div class="card log-card">
+                    <div class="card-body">
+                        <div class="log-container" id="logContainer">
+                            <p class="text-muted">等待日志...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Transfer Tab -->
+            <section class="tab-panel" id="tab-transfer">
+                <div class="section-header">
+                    <h2>导入导出</h2>
+                    <p class="text-muted">导出/导入所有配置和游戏进度（gzip 压缩）</p>
+                </div>
+                <div class="grid grid-2">
+                    <div class="card card-hover">
+                        <div class="card-header">
+                            <i data-lucide="download"></i>
+                            <h3>导出存档</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted" style="margin-bottom:16px;">将当前所有设置（鱼饵/地点/鱼种/工具描述）和游戏存档打包为压缩文件下载。</p>
+                            <button class="btn" onclick="exportData()">
+                                <i data-lucide="download"></i>
+                                导出全部数据
+                            </button>
+                            <div id="exportResult" style="margin-top:12px;display:none;" class="text-muted"></div>
+                        </div>
+                    </div>
+                    <div class="card card-hover">
+                        <div class="card-header">
+                            <i data-lucide="upload"></i>
+                            <h3>导入存档</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted" style="margin-bottom:16px;">选择之前导出的 .fish-save 文件，恢复所有配置和游戏进度。导入后当前数据将被覆盖。</p>
+                            <input type="file" id="importFileInput" accept=".fish-save" style="display:none" onchange="importData(this)">
+                            <button class="btn" onclick="document.getElementById('importFileInput').click()">
+                                <i data-lucide="upload"></i>
+                                选择文件导入
+                            </button>
+                            <div id="importResult" style="margin-top:12px;display:none;" class="text-muted"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Global Footer -->
+        <footer class="credit-line">
+            <span>基于 <a href="https://github.com/tutusagi/ai-fishing-game" target="_blank">tutusagi/ai-fishing-game</a> 开源项目二次开发</span>
+            <span class="credit-sep">·</span>
+            <span>原作者 <a href="https://xhslink.com/m/AU0BolwMD9Q" target="_blank">tutusagi</a>（小红书：初一）</span>
+            <span class="credit-sep">·</span>
+            <span>MCP 调度面板 by <a href="https://xhslink.com/m/6HoMhRcELnP" target="_blank">猫屁屁</a></span>
+            <span class="credit-sep">·</span>
+            <span>2026.6.26</span>
+        </footer>
+    </div>
+
+    <!-- Add Fish Modal -->
+    <div class="modal-overlay" id="addFishModal" style="display:none;" onclick="if(event.target===this)closeModal('addFishModal')">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="fishModalTitle">添加鱼种</h3>
+                <button class="btn-icon" onclick="closeModal('addFishModal')">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="fishEditMode" value="add">
+                <input type="hidden" id="fishFormId">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>名称</label>
+                        <input type="text" id="fishFormName" placeholder="自定义鱼名">
+                    </div>
+                    <div class="form-group">
+                        <label>稀有度</label>
+                        <select id="fishFormRarity">
+                            <option value="common">常见</option>
+                            <option value="uncommon">少见</option>
+                            <option value="rare">稀有</option>
+                            <option value="epic">史诗</option>
+                            <option value="legendary">传说</option>
+                            <option value="mythic">神话</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>基础价值</label>
+                        <input type="number" id="fishFormValue" value="10">
+                    </div>
+                    <div class="form-group">
+                        <label>潜水专属</label>
+                        <div class="form-inline-hint">
+                            <div class="toggle" id="fishFormDive" onclick="toggleFishDiveForm()"></div>
+                            <span class="text-muted">开启后只能在 dive 深水/潜水中出现</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>标签</label>
+                        <div id="fishFormTagsContainer" class="multi-select-wrap"></div>
+                    </div>
+                    <div class="form-group full-width">
+                        <label>描述</label>
+                        <textarea id="fishFormDesc" rows="2" placeholder="这条鱼的描述..."></textarea>
+                    </div>
+                    <div class="form-group full-width" id="fishCaptureFeelGroup" style="display:none;">
+                        <label>潜水捕获手感</label>
+                        <textarea id="fishFormCaptureFeel" rows="2" placeholder="例如：指尖触到冰凉鳞片，水压沿手腕震颤..."></textarea>
+                    </div>
+                    <div class="form-group full-width">
+                        <label>出没地点</label>
+                        <div id="fishFormLocsContainer" class="multi-select-wrap"></div>
+                    </div>
+                    <div class="form-group full-width">
+                        <label>出没季节</label>
+                        <div id="fishFormSeasonsContainer" class="multi-select-wrap"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeModal('addFishModal')">取消</button>
+                <button class="btn" onclick="submitFishForm()">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Bait Modal -->
+    <div class="modal-overlay" id="addBaitModal" style="display:none;" onclick="if(event.target===this)closeModal('addBaitModal')">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>新增鱼饵</h3>
+                <button class="btn-icon" onclick="closeModal('addBaitModal')">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>鱼饵名称</label>
+                        <input type="text" id="baitFormName" placeholder="如：梦幻荧光饵">
+                    </div>
+                    <div class="form-group">
+                        <label>价格</label>
+                        <input type="number" id="baitFormCost" value="20">
+                    </div>
+                    <div class="form-group full-width">
+                        <label>描述</label>
+                        <textarea id="baitFormDesc" rows="2" placeholder="这个鱼饵的效果描述..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>购买上限 (0=不限)</label>
+                        <input type="number" id="baitFormLimit" value="0" placeholder="0=不限">
+                    </div>
+                    <div class="form-group">
+                        <label>是否启用</label>
+                        <div style="padding-top:6px;">
+                            <div class="toggle active" id="baitFormEnabled" onclick="this.classList.toggle('active')"></div>
+                        </div>
+                    </div>
+                    <div class="form-group full-width">
+                        <label>特殊效果（可选）</label>
+                        <div style="padding:12px;background:rgba(180,160,200,0.04);border:1px solid var(--border-color);border-radius:var(--radius-xs);">
+                            <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.6;padding:8px;background:rgba(180,160,200,0.06);border-radius:6px;">
+                                💡 倍率说明：<strong>1.0</strong>=无加成（默认，留空即可）｜<strong>2.0</strong>=翻倍｜<strong>0.5</strong>=减半｜<strong>0</strong>=完全屏蔽。理论无上限，建议不超过 5.0。<br>
+                                垃圾概率倍率：0.8=减20%垃圾，0=完全无垃圾。事件概率增加：0.05=多5%触发漂流瓶/宝箱。
+                            </p>
+                            <div style="margin-bottom:10px;">
+                                <label style="font-size:11px;color:var(--text-muted);">稀有度权重倍率（提高某些稀有度鱼的出现概率）</label>
+                                <div class="bait-effect-grid" id="baitEffectRarity">
+                                    <div class="bait-effect-row"><span>常见</span><input type="number" step="0.1" min="0" id="baitEffRarityCommon" placeholder="1.0"></div>
+                                    <div class="bait-effect-row"><span>少见</span><input type="number" step="0.1" min="0" id="baitEffRarityUncommon" placeholder="1.0"></div>
+                                    <div class="bait-effect-row"><span>稀有</span><input type="number" step="0.1" min="0" id="baitEffRarityRare" placeholder="1.0"></div>
+                                    <div class="bait-effect-row"><span>史诗</span><input type="number" step="0.1" min="0" id="baitEffRarityEpic" placeholder="1.0"></div>
+                                    <div class="bait-effect-row"><span>传说</span><input type="number" step="0.1" min="0" id="baitEffRarityLegendary" placeholder="1.0"></div>
+                                    <div class="bait-effect-row"><span>神话</span><input type="number" step="0.1" min="0" id="baitEffRarityMythic" placeholder="1.0"></div>
+                                </div>
+                            </div>
+                            <div style="margin-bottom:10px;">
+                                <label style="font-size:11px;color:var(--text-muted);">标签权重倍率（提高某些标签鱼的出现概率）</label>
+                                <div class="bait-effect-grid" id="baitEffectTags"></div>
+                            </div>
+                            <div style="display:flex;gap:16px;">
+                                <div style="flex:1;">
+                                    <label style="font-size:11px;color:var(--text-muted);">垃圾概率倍率</label>
+                                    <input type="number" step="0.1" min="0" id="baitEffJunk" placeholder="1.0（<1减少垃圾）">
+                                </div>
+                                <div style="flex:1;">
+                                    <label style="font-size:11px;color:var(--text-muted);">事件概率增加</label>
+                                    <input type="number" step="0.01" min="0" id="baitEffEvent" placeholder="0（如0.05=+5%）">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeModal('addBaitModal')">取消</button>
+                <button class="btn" onclick="submitBaitForm()">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Location Modal -->
+    <div class="modal-overlay" id="addLocationModal" style="display:none;" onclick="if(event.target===this)closeModal('addLocationModal')">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="locModalTitle">新增地点</h3>
+                <button class="btn-icon" onclick="closeModal('addLocationModal')">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="locEditMode" value="add">
+                <input type="hidden" id="locFormId">
+                <div class="location-mode-tabs">
+                    <button type="button" class="location-mode-tab active" data-loc-mode="surface" onclick="switchLocationFormPage('surface')">水面</button>
+                    <button type="button" class="location-mode-tab" data-loc-mode="dive" onclick="switchLocationFormPage('dive')">深水 · 潜水</button>
+                </div>
+                <div class="location-form-page active" id="locPageSurface">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>地点名称</label>
+                            <input type="text" id="locFormName" placeholder="如：幽暗深潭">
+                        </div>
+                        <div class="form-group">
+                            <label>解锁金额 (0=免费)</label>
+                            <input type="number" id="locFormCost" value="0">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>水面地点描述</label>
+                            <textarea id="locFormDesc" rows="3" placeholder="描述这个钓点的水面环境..."></textarea>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>水面开放季节</label>
+                            <div id="locFormSeasonsContainer" class="multi-select-wrap"></div>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>水面可钓鱼类</label>
+                            <div class="location-fish-picker">
+                                <input type="text" id="locFishSearchInput" placeholder="搜索已有鱼类名称或 ID..." oninput="renderLocationFishPicker('surface')">
+                                <div class="location-fish-selected" id="locSelectedFishList">
+                                    <span class="text-muted">还没选择鱼类</span>
+                                </div>
+                                <div class="location-fish-results" id="locFishSearchResults"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="location-form-page" id="locPageDive">
+                    <div class="form-grid">
+                        <div class="form-group full-width">
+                            <label>启用深水/潜水模式</label>
+                            <div class="form-inline-hint">
+                                <div class="toggle active" id="locDiveEnabled" onclick="this.classList.toggle('active')"></div>
+                                <span class="text-muted">关闭后此地点无法 dive</span>
+                            </div>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>深水描述</label>
+                            <textarea id="locDiveDesc" rows="3" placeholder="描述这个地点水下/深处是什么样..."></textarea>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>深水开放季节</label>
+                            <div id="locDiveSeasonsContainer" class="multi-select-wrap"></div>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>深水可遇鱼类</label>
+                            <div class="location-fish-picker">
+                                <input type="text" id="locDiveFishSearchInput" placeholder="搜索已有鱼类名称或 ID..." oninput="renderLocationFishPicker('dive')">
+                                <div class="location-fish-selected" id="locDiveSelectedFishList">
+                                    <span class="text-muted">还没选择深水鱼类</span>
+                                </div>
+                                <div class="location-fish-results" id="locDiveFishSearchResults"></div>
+                            </div>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>潜水氛围文案（一行一句，dive 开始时随机出现）</label>
+                            <div class="dive-ambience-grid">
+                                <textarea id="locDiveAmbSpring" rows="3" placeholder="春季潜水文案..."></textarea>
+                                <textarea id="locDiveAmbSummer" rows="3" placeholder="夏季潜水文案..."></textarea>
+                                <textarea id="locDiveAmbAutumn" rows="3" placeholder="秋季潜水文案..."></textarea>
+                                <textarea id="locDiveAmbWinter" rows="3" placeholder="冬季潜水文案..."></textarea>
+                            </div>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>深潜说明 / 传闻 / 装备提示</label>
+                            <textarea id="locDiveNotes" rows="2" placeholder="可写危险提示、装备需求、深处传闻等，自定义展示备用..."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeModal('addLocationModal')">取消</button>
+                <button class="btn" onclick="submitLocationForm()">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=202606270857"></script>
+</body>
+</html>

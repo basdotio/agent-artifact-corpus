@@ -1,0 +1,102 @@
+"""{{title}} -- {{description}}
+
+Run it directly (``python server.py``) and it speaks MCP over stdio.
+Every tool below is a plain function: edit them, add your own, delete the rest.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import os
+from pathlib import Path
+
+from mcp_forge import Server, ToolError, log
+
+# Tools can only read inside this directory. Point MCP_ROOT at your project.
+ROOT = Path(os.environ.get("MCP_ROOT", ".")).resolve()
+
+app = Server(
+    "{{project_name}}",
+    "0.1.0",
+    instructions="{{description}}",
+)
+
+
+def _safe(relative: str) -> Path:
+    """Resolve a user-supplied path and refuse anything outside ROOT."""
+    target = (ROOT / relative).resolve()
+    if target != ROOT and ROOT not in target.parents:
+        raise ToolError(f"path escapes the allowed root: {relative!r}")
+    return target
+
+
+@app.tool(
+    description="Current date and time of the server, ISO-8601.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "timezone": {"type": "string", "enum": ["utc", "local"], "default": "utc"},
+        },
+        "additionalProperties": False,
+    },
+)
+def now(timezone: str = "utc") -> str:
+    moment = dt.datetime.now(dt.timezone.utc) if timezone == "utc" else dt.datetime.now()
+    return moment.isoformat(timespec="seconds")
+
+
+@app.tool(
+    description="List the files inside a directory, relative to the server root.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "directory": {"type": "string", "default": "."},
+            "pattern": {"type": "string", "default": "*"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+        },
+        "additionalProperties": False,
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "root": {"type": "string"},
+            "files": {"type": "array", "items": {"type": "string"}},
+            "truncated": {"type": "boolean"},
+        },
+    },
+)
+def list_files(directory: str = ".", pattern: str = "*", limit: int = 50) -> dict:
+    base = _safe(directory)
+    if not base.is_dir():
+        raise ToolError(f"not a directory: {directory!r}")
+    matches = sorted(p for p in base.glob(pattern) if p.is_file())
+    shown = [str(p.relative_to(ROOT)).replace("\\", "/") for p in matches[:limit]]
+    return {"root": str(ROOT), "files": shown, "truncated": len(matches) > limit}
+
+
+@app.tool(
+    description="Read a UTF-8 text file (first N lines) from inside the server root.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "max_lines": {"type": "integer", "minimum": 1, "maximum": 2000, "default": 200},
+        },
+        "required": ["path"],
+        "additionalProperties": False,
+    },
+)
+def read_text(path: str, max_lines: int = 200) -> str:
+    target = _safe(path)
+    if not target.is_file():
+        raise ToolError(f"file not found: {path!r}")
+    lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+    body = "\n".join(lines[:max_lines])
+    if len(lines) > max_lines:
+        body += f"\n... [{len(lines) - max_lines} more lines]"
+    return body
+
+
+if __name__ == "__main__":
+    log("serving from", ROOT)
+    app.run()

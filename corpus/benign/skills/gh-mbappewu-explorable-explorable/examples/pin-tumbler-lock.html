@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-en="How a Pin Tumbler Lock Works" data-zh="弹子锁是怎么工作的">How a Pin Tumbler Lock Works</title>
+<meta name="description" content="An explorable explanation: slide a key in, cut your own, then pick the lock yourself.">
+<script>
+  // Pick the language before anything renders: ?lang= wins, then the last choice, then the browser.
+  (() => {
+    let l = new URLSearchParams(location.search).get('lang');
+    if (!l) { try { l = localStorage.getItem('explorable-lang'); } catch { /* storage may be blocked */ } }
+    if (!l) l = (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+    l = l === 'zh' ? 'zh' : 'en';
+    document.documentElement.dataset.lang = l;
+    document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1f1f22; --muted: #6d6b66; --rule: #e6e2d8; --panel: #ffffff;
+    --housing: #e4ddcd; --plug: #cfc4ad; --brass: #c8961f; --steel: #9ea4ad; --key: #aab1ba;
+    --spring: #8c8f95; --shear: #d23c3c; --good: #2e9a5e; --grid: #ece8de;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416; --fg: #ececef; --muted: #9a9892; --rule: #2a2a2e; --panel: #1b1b1f;
+      --housing: #3e3c37; --plug: #5e574c; --brass: #dcae40; --steel: #b4bac4; --key: #8d96a1;
+      --spring: #8f939a; --shear: #f06060; --good: #52c283; --grid: #25252a;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  [data-lang="en"] [lang="zh"], [data-lang="zh"] [lang="en"] { display: none !important; }
+  [data-lang="zh"] body { font: 17.5px/1.85 Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  [data-lang="zh"] h1, [data-lang="zh"] h2 { font-family: Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; letter-spacing: 0; }
+  .langbar { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 26px; }
+  .langbar button { padding: 3px 12px; font-size: 13px; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 19px/1.62 "Source Serif 4", Georgia, serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 20px 96px; }
+  h1 { font-size: 2.35em; line-height: 1.12; margin: 0 0 .3em; letter-spacing: -.01em; }
+  h2 { font: 600 1.28em/1.3 "Source Serif 4", Georgia, serif; margin: 2.2em 0 .6em; }
+  .lede { font-size: 1.12em; color: var(--muted); margin: 0 0 2em; }
+  p { margin: 0 0 1.05em; }
+  .br { color: var(--brass); font-weight: 600; }
+  .st { color: var(--steel); font-weight: 600; }
+  .sh { color: var(--shear); font-weight: 600; }
+  figure { margin: 1.8em -12px 2em; padding: 14px 14px 10px; background: var(--panel); border-radius: 14px; box-shadow: var(--shadow); }
+  canvas { display: block; width: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
+  figcaption { font: 14px/1.5 Inter, system-ui, sans-serif; color: var(--muted); margin-top: 8px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; font: 14px/1.3 Inter, system-ui, sans-serif; margin-top: 10px; }
+  .controls label { display: flex; align-items: center; gap: 10px; flex: 1 1 200px; }
+  .controls label span.k { white-space: nowrap; color: var(--muted); min-width: 4.5em; }
+  .controls output { font-variant-numeric: tabular-nums; min-width: 3em; text-align: right; }
+  input[type=range] { flex: 1; accent-color: var(--fg); min-width: 90px; }
+  button { font: 500 14px Inter, system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .readout { font: 14px/1.45 Inter, system-ui, sans-serif; margin-top: 8px; font-variant-numeric: tabular-nums; min-height: 1.45em; }
+  .big { font: 600 28px/1.2 Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  footer { margin-top: 4em; padding-top: 1.2em; border-top: 1px solid var(--rule); font: 14px/1.6 Inter, system-ui, sans-serif; color: var(--muted); }
+  @media (max-width: 560px) { body { font-size: 17.5px; } figure { margin-left: -8px; margin-right: -8px; padding: 10px; } }
+</style>
+</head>
+<body>
+<main>
+<div class="langbar"><button data-setlang="en">English</button><button data-setlang="zh">中文</button></div>
+<h1><span lang="en">How a Pin Tumbler Lock Works</span><span lang="zh">弹子锁是怎么工作的</span></h1>
+<p class="lede" lang="en">The lock on your front door is a row of tiny stacked pins. Slide a key in, cut your own, and then pick one yourself.</p>
+<p class="lede" lang="zh">你家门上的锁，里面是一排叠在一起的小弹子。插一把钥匙、自己削一把，最后亲手撬开一把锁。</p>
+
+<h2><span lang="en">A cylinder that refuses to turn</span><span lang="zh">一个拒绝转动的圆柱</span></h2>
+<p lang="en">Look at the lock face-on and you see a smaller cylinder, the <em>plug</em>, sitting inside a fixed <em>housing</em>. The key goes into the plug, and turning the key turns the plug, which pulls back the bolt. The whole job of the lock is to stop that plug from turning unless the right key is inside.</p>
+<p lang="zh">从正面看锁，你会看到一个小圆柱（<em>锁芯</em>）装在固定的<em>锁壳</em>里。钥匙插进锁芯，转动钥匙就转动锁芯，从而拉回锁舌。锁的全部任务，就是在插入正确钥匙之前，不让锁芯转动。</p>
+<p lang="en">It does that with a stack of pins in a hole drilled through both parts. The bottom one, the <span class="br">key pin</span>, touches the key. The top one, the <span class="st">driver pin</span>, is pushed down by a spring. The boundary between plug and housing is called the <span class="sh">shear line</span>.</p>
+<p lang="zh">它靠的是一组叠放在孔里的弹子，这个孔同时穿过锁芯和锁壳。下面那颗叫<span class="br">下弹子</span>，直接碰到钥匙；上面那颗叫<span class="st">上弹子</span>，被弹簧往下压。锁芯和锁壳之间的分界面叫<span class="sh">剪切线</span>。</p>
+
+<figure id="fig-face">
+  <canvas data-aspect="0.46"></canvas>
+  <div class="controls">
+    <label><span class="k"><span lang="en">Lift pins</span><span lang="zh">抬起弹子</span></span><input type="range" min="0" max="1" step="0.001" value="0" data-role="lift"><output></output></label>
+    <label><span class="k"><span lang="en">Turn</span><span lang="zh">转动</span></span><input type="range" min="0" max="90" step="0.5" value="0" data-role="turn"><output></output></label>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">Try to turn the plug, then lift the pins and try again. It only turns when the gap between the two pins sits exactly on the shear line. Lift too far and the key pin blocks it instead.</figcaption>
+  <figcaption lang="zh">先试着转动锁芯，再抬起弹子试一次。只有当两颗弹子之间的缝恰好落在剪切线上时，锁芯才转得动。抬过头了，就换成下弹子把它卡住。</figcaption>
+</figure>
+
+<p lang="en">Whatever crosses the shear line locks the two parts together, like a bolt through a hinge. Nothing crosses it only when the split between the pins lands precisely on the line.</p>
+<p lang="zh">任何横跨剪切线的东西，都会像插销穿过合页一样把两部分锁死。只有当弹子之间的缝精确落在这条线上，才没有东西横跨它。</p>
+
+<h2><span lang="en">What the key does</span><span lang="zh">钥匙在做什么</span></h2>
+<p lang="en">A real lock has five or six of these stacks in a row, each with a key pin of a different length. Seen from the side, the cuts along the top of a key are a set of heights. Slide the key in and each cut lifts its stack by exactly the amount that parks the gap on the shear line.</p>
+<p lang="zh">真实的锁有五六组这样的弹子排成一排，每组的下弹子长短不一。从侧面看，钥匙上的齿就是一组高度。钥匙插到底时，每个齿恰好把对应的那组弹子抬到让缝落在剪切线上的位置。</p>
+
+<figure id="fig-key">
+  <canvas data-aspect="0.58"></canvas>
+  <div class="controls">
+    <button data-key="right" class="on"><span lang="en">The right key</span><span lang="zh">正确的钥匙</span></button>
+    <button data-key="wrong"><span lang="en">A wrong key</span><span lang="zh">错误的钥匙</span></button>
+    <span style="flex:1"></span>
+    <button data-role="turn"></button>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">Drag the key in and out. Notice how the sloped tip and the ramps between cuts push the pins up and let them fall as it slides. With the right key fully inserted, every gap is on the shear line.</figcaption>
+  <figcaption lang="zh">把钥匙拖进拖出。注意钥匙尖的斜面和齿之间的坡道，是怎样在滑动中把弹子顶起、又让它们落下的。正确的钥匙插到底时，每一道缝都在剪切线上。</figcaption>
+</figure>
+
+<h2><span lang="en">Cut your own key</span><span lang="zh">自己削一把钥匙</span></h2>
+<p lang="en">Each cut can be one of a handful of standard depths. Drag the cuts below up and down. The lock tells you which stacks are still in the way.</p>
+<p lang="zh">每个齿只能是几种标准深度之一。上下拖动下面钥匙上的齿，锁会告诉你哪几组弹子还挡着路。</p>
+
+<figure id="fig-cut">
+  <canvas data-aspect="0.58"></canvas>
+  <div class="controls">
+    <button data-role="new"><span lang="en">New lock</span><span lang="zh">换一把锁</span></button>
+    <span style="flex:1"></span>
+    <button data-role="turn"></button>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">Drag a cut up or down. A ✓ means that stack's gap sits on the shear line; an arrow shows which way the cut needs to go. The numbers on the key blade are the depth codes a locksmith would write down.</figcaption>
+  <figcaption lang="zh">上下拖动一个齿。✓ 表示这组弹子的缝已经在剪切线上；箭头告诉你这个齿该往哪个方向改。钥匙上的数字，就是锁匠会记下来的齿深编码。</figcaption>
+</figure>
+
+<h2><span lang="en">How many different keys are there?</span><span lang="zh">一共能有多少种钥匙？</span></h2>
+<p lang="en">A lock with 5 pins and 10 depths could in principle have 10<sup>5</sup> = 100,000 different keys. Manufacturers throw many of those away. Neighbouring cuts can't differ by too much, or the steep slope between them would break off or jam the pins. That rule is called the maximum adjacent cut specification.</p>
+<p lang="zh">5 组弹子、10 种齿深的锁，理论上有 10<sup>5</sup> = 100,000 种钥匙。但厂家会扔掉其中很多：相邻两个齿的深度不能差太多，否则中间的陡坡要么容易折断，要么会卡住弹子。这条规则叫“最大相邻齿差”。</p>
+
+<figure id="fig-count">
+  <div class="controls" style="margin-top:0">
+    <label><span class="k"><span lang="en">Pins</span><span lang="zh">弹子组数</span></span><input type="range" min="3" max="7" step="1" value="5" data-role="n"><output></output></label>
+    <label><span class="k"><span lang="en">Depths</span><span lang="zh">齿深种类</span></span><input type="range" min="4" max="10" step="1" value="10" data-role="d"><output></output></label>
+    <label><span class="k"><span lang="en">Max step</span><span lang="zh">最大齿差</span></span><input type="range" min="1" max="9" step="1" value="7" data-role="m"><output></output></label>
+  </div>
+  <div class="readout" style="margin-top:14px"></div>
+  <canvas data-aspect="0.16"></canvas>
+  <figcaption lang="en">The bar compares all possible cut combinations (outline) with the ones allowed by the maximum step between neighbouring cuts (filled).</figcaption>
+  <figcaption lang="zh">长条对比了所有可能的齿深组合（外框）和满足相邻齿差限制的组合（填充）。</figcaption>
+</figure>
+
+<p lang="en">Tens of thousands of combinations sounds like a lot, until you notice that a lock doesn't really check the key all at once. It checks one pin at a time.</p>
+<p lang="zh">几万种组合听起来很多。可你很快会发现，锁其实并不是一次性检查整把钥匙，而是一次检查一颗弹子。</p>
+
+<h2><span lang="en">Why a lock can be picked</span><span lang="zh">锁为什么能被撬开</span></h2>
+<p lang="en">Nothing is machined perfectly. The holes for the pins are drilled a hair off from a straight line. So when you gently twist the plug with a small lever called a tension wrench, it rotates by a fraction of a millimetre and one driver pin gets pinched before all the others. That pin is <em>binding</em>.</p>
+<p lang="zh">没有任何东西能加工得绝对精确。弹子孔总会稍微偏离一条直线。所以当你用一根叫“张力扳手”的小杠杆轻轻拧锁芯时，它会转动不到一毫米，某一颗上弹子会比其他所有弹子先被夹住。这颗弹子就是<em>卡紧</em>的那颗。</p>
+<p lang="en">Push the binding pin up with a pick and you'll feel it stiff and gritty. The moment its gap reaches the shear line, the plug rotates a tiny bit further and the driver pin gets stranded on top of the plug's edge. It is now <em>set</em>. Then the next-tightest pin starts binding, and you do it again. The lock is being solved one digit at a time instead of all at once.</p>
+<p lang="zh">用拨片往上推这颗卡紧的弹子，你会感觉它又紧又涩。它的缝一到剪切线，锁芯就再多转一点点，上弹子被搁在了锁芯边沿上方。这颗就<em>到位</em>了。接着，下一颗最紧的弹子开始卡紧，你再来一次。锁就这样被一位一位地解开，而不是一次性破解。</p>
+
+<figure id="fig-pick">
+  <canvas data-aspect="0.56"></canvas>
+  <div class="controls">
+    <button data-role="tension" class="on"></button>
+    <button data-role="new"><span lang="en">New lock</span><span lang="zh">换一把锁</span></button>
+    <span style="flex:1"></span>
+    <label style="flex:0 1 auto"><input type="checkbox" data-role="hint"> <span lang="en">Show binding pin</span><span lang="zh">显示卡紧的弹子</span></label>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">Press and drag a pin up with the pick, then let go. The binding pin resists and sets with a click at the shear line; the others just spring back. Push too far and you overset it: turn the tension off to reset. The misalignment is exaggerated so you can see it.</figcaption>
+  <figcaption lang="zh">按住一颗弹子往上拖（相当于用拨片推），再松手。卡紧的那颗会有阻力，到剪切线时“咔”一声到位；其余的只会弹回去。推过头就会过位：关掉张力即可复位。图中的偏差被放大了，方便你看清。</figcaption>
+</figure>
+
+<p lang="en">Real locks fight back. Many use <em>security pins</em> shaped like spools or with serrations, which fake a set and then trap the pick. Better locks add sidebars and extra rows of pins. But the basic weakness stays the same: a lock that can be tested one pin at a time can be solved one pin at a time. (Only pick locks you own.)</p>
+<p lang="zh">真实的锁会反击。很多锁用了<em>防盗弹子</em>，做成线轴形或带锯齿，会制造假的到位、再把拨片卡住；更好的锁还加了侧杆和额外的弹子排。但根本弱点不变：一把能被逐颗测试的锁，就能被逐颗解开。（只撬你自己的锁。）</p>
+
+<footer>
+  <p lang="en">An explorable explanation. Everything on this page is one HTML file: the figures are live simulations running in your browser. Geometry is simplified and the manufacturing error in the last figure is greatly exaggerated.</p>
+  <p lang="zh">一篇可交互讲解。整个页面是一个 HTML 文件：图形是在你浏览器里实时运行的模拟。几何做了简化，最后一张图中的加工误差被大幅放大。</p>
+</footer>
+</main>
+
+<script>
+(() => {
+  // ---------- language ----------
+  const t = (en, zh) => (document.documentElement.dataset.lang === 'zh' ? zh : en);
+  const langHooks = [];
+  function setLang(l) {
+    const root = document.documentElement;
+    root.dataset.lang = l; root.lang = l === 'zh' ? 'zh-CN' : 'en';
+    document.title = document.querySelector('title').dataset[l];
+    document.querySelectorAll('[data-setlang]').forEach((b) => b.classList.toggle('on', b.dataset.setlang === l));
+    try { localStorage.setItem('explorable-lang', l); } catch { /* ignore */ }
+    const u = new URL(location.href); u.searchParams.set('lang', l); history.replaceState(null, '', u);
+    langHooks.forEach((f) => f());
+  }
+  document.querySelectorAll('[data-setlang]').forEach((b) => (b.onclick = () => setLang(b.dataset.setlang)));
+  document.querySelectorAll('[data-setlang]').forEach((b) => b.classList.toggle('on', b.dataset.setlang === document.documentElement.dataset.lang));
+  document.title = document.querySelector('title').dataset[document.documentElement.dataset.lang];
+
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const TAU = Math.PI * 2;
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+
+  // A canvas with a logical coordinate system of `lw` units across, kept sharp on any screen.
+  function surface(canvas, lw = 680) {
+    const ctx = canvas.getContext('2d');
+    const aspect = +canvas.dataset.aspect;
+    const s = { canvas, ctx, lw, lh: lw * aspect, k: 1 };
+    const fit = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth, h = Math.round(w * aspect);
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+      canvas.style.height = h + 'px';
+      s.k = w / lw;
+      ctx.setTransform(dpr * s.k, 0, 0, dpr * s.k, 0, 0);
+    };
+    fit();
+    new ResizeObserver(() => { fit(); s.draw && s.draw(); }).observe(canvas);
+    // Pointer position in logical units.
+    s.at = (e) => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / s.k, (e.clientY - r.top) / s.k]; };
+    return s;
+  }
+  function drag(s, { down, move, up }) {
+    let id = null;
+    s.canvas.addEventListener('pointerdown', (e) => {
+      if (id !== null || down(...s.at(e)) === false) return;
+      id = e.pointerId;
+      try { s.canvas.setPointerCapture(id); } catch { /* capture is best-effort */ }
+      e.preventDefault();
+    });
+    s.canvas.addEventListener('pointermove', (e) => { if (e.pointerId === id) move(...s.at(e)); });
+    const end = (e) => {
+      if (e.pointerId !== id) return;
+      id = null;
+      try { s.canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+      up && up();
+    };
+    s.canvas.addEventListener('pointerup', end);
+    s.canvas.addEventListener('pointercancel', end);
+  }
+  function label(ctx, text, x, y, color, align = 'left', size = 12) {
+    ctx.font = `500 ${size}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y);
+  }
+  function rr(ctx, x, y, w, h, r, fill) {
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fillStyle = fill; ctx.fill();
+  }
+  function spring(ctx, x, y0, y1, width) {
+    const turns = 7, step = (y1 - y0) / turns;
+    ctx.beginPath(); ctx.moveTo(x, y0);
+    for (let i = 0; i < turns; i++) {
+      ctx.lineTo(x + width / 2, y0 + step * (i + 0.25));
+      ctx.lineTo(x - width / 2, y0 + step * (i + 0.75));
+    }
+    ctx.lineTo(x, y1);
+    ctx.strokeStyle = css('--spring'); ctx.lineWidth = 1.6; ctx.stroke();
+  }
+  // Key pins are brass with a rounded tip; driver pins are plain steel.
+  function keyPin(ctx, x, top, len, w, color = css('--brass')) {
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2, top); ctx.lineTo(x + w / 2, top);
+    ctx.lineTo(x + w / 2, top + len - w / 2);
+    ctx.quadraticCurveTo(x, top + len + w / 4, x - w / 2, top + len - w / 2);
+    ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+  }
+  function driverPin(ctx, x, top, len, w, color = css('--steel')) { rr(ctx, x - w / 2, top, w, len, 2, color); }
+
+  let clickCtx = null;
+  function click() {
+    try {
+      clickCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+      const ac = clickCtx, now = ac.currentTime;
+      const buf = ac.createBuffer(1, ac.sampleRate * 0.03, ac.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * 0.003));
+      const src = ac.createBufferSource(); src.buffer = buf;
+      const g = ac.createGain(); g.gain.value = 0.25;
+      const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1800;
+      src.connect(f).connect(g).connect(ac.destination); src.start(now);
+    } catch { /* sound is a nicety */ }
+  }
+
+  // ================= Figure 1: face-on view =================
+  {
+    const fig = document.getElementById('fig-face');
+    const s = surface(fig.querySelector('canvas'));
+    const lift = fig.querySelector('[data-role=lift]'), turn = fig.querySelector('[data-role=turn]');
+    const [outLift, outTurn] = fig.querySelectorAll('output');
+    const readout = fig.querySelector('.readout');
+    const cx = 230, cy = 190, R = 88, pinW = 24;
+    const shearY = cy - R;                 // top of the plug, where the stack crosses
+    const keyLen = 62, drvLen = 50;
+    const keyTopRest = shearY + 30;         // with no key the key pin sits this low
+    const setLift = keyTopRest - shearY;    // lifting by this much puts the gap on the shear line
+    const tol = 3;
+    let angle = 0, blockedFlash = 0;
+
+    const state = () => {
+      const gap = keyTopRest - (+lift.value) * (setLift + 34);
+      const off = gap - shearY; // >0: driver crosses; <0: key pin crosses
+      return { gap, off, ok: Math.abs(off) <= tol };
+    };
+    let lastLift = lift.value;
+    function sync() {
+      const st = state();
+      outLift.textContent = Math.round(+lift.value * 100) + '%';
+      outTurn.textContent = Math.round(angle) + '°';
+      readout.innerHTML = st.ok ? t('<b style="color:var(--good)">The gap is on the shear line.</b> Nothing crosses it, so the plug turns.', '<b style="color:var(--good)">缝正好在剪切线上。</b>没有东西横跨它，所以锁芯能转。')
+        : st.off > 0 ? t('<b style="color:var(--shear)">Blocked:</b> the steel driver pin crosses the shear line.', '<b style="color:var(--shear)">卡住了：</b>钢制的上弹子横跨了剪切线。')
+        : t('<b style="color:var(--shear)">Blocked:</b> lifted too far, now the brass key pin crosses the shear line.', '<b style="color:var(--shear)">卡住了：</b>抬过头了，现在是黄铜下弹子横跨了剪切线。');
+      draw();
+    }
+    // Once the plug has turned, the pins are no longer lined up with the key, so lifting does nothing.
+    lift.oninput = () => { if (angle > 1.5) lift.value = lastLift; lastLift = lift.value; sync(); };
+    turn.oninput = () => {
+      if (!state().ok && +turn.value > 1.5) { turn.value = 1.5; blockedFlash = 1; }
+      angle = +turn.value;
+      sync();
+    };
+
+    function draw() {
+      const { ctx, lw, lh } = s;
+      ctx.clearRect(0, 0, lw, lh);
+      const st = state();
+      // Housing: a rounded body with a tower for the pin stack.
+      ctx.fillStyle = css('--housing');
+      ctx.beginPath(); ctx.arc(cx, cy, R + 34, 0, TAU); ctx.fill();
+      rr(ctx, cx - 40, 18, 80, cy - 18, 14, css('--housing'));
+      // Chamber in the housing.
+      rr(ctx, cx - pinW / 2 - 2, 26, pinW + 4, shearY - 26 + 2, 3, css('--bg'));
+      // Plug, rotated.
+      const a = (angle * Math.PI) / 180;
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
+      ctx.fillStyle = css('--plug'); ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
+      // Plug chamber and keyway.
+      rr(ctx, -pinW / 2 - 2, -R, pinW + 4, R - 6, 3, css('--bg'));
+      ctx.fillStyle = css('--bg');
+      ctx.beginPath(); ctx.moveTo(-10, -8); ctx.lineTo(10, -8); ctx.lineTo(14, 20); ctx.lineTo(4, 40); ctx.lineTo(10, 64); ctx.lineTo(-10, 64); ctx.lineTo(-4, 40); ctx.lineTo(-14, 20); ctx.closePath(); ctx.fill();
+      // Key pin rides with the plug once it turns.
+      const keyTop = st.gap - cy;
+      keyPin(ctx, 0, keyTop, keyLen, pinW, css('--brass'));
+      ctx.restore();
+      // Driver pin and spring stay in the housing.
+      const drvTop = angle > 1.5 ? shearY - drvLen : st.gap - drvLen;
+      driverPin(ctx, cx, drvTop, drvLen, pinW);
+      spring(ctx, cx, 26, drvTop, 16);
+      // Shear line.
+      ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = css('--shear'); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI / 2 - 0.9, -Math.PI / 2 + 0.9); ctx.stroke(); ctx.restore();
+      if (!st.ok) {
+        const y = shearY;
+        ctx.strokeStyle = css('--shear'); ctx.globalAlpha = 0.25 + 0.6 * blockedFlash; ctx.lineWidth = 3;
+        ctx.strokeRect(cx - pinW / 2 - 4, y - 8, pinW + 8, 16); ctx.globalAlpha = 1;
+      }
+      // Labels.
+      const lx = 420;
+      const items = [
+        [t('spring', '弹簧'), 36, css('--spring')], [t('driver pin', '上弹子'), drvTop + drvLen / 2, css('--steel')],
+        [t('shear line', '剪切线'), shearY, css('--shear')], [t('key pin', '下弹子'), Math.min(st.gap + keyLen / 2, cy + 20), css('--brass')],
+        [t('plug', '锁芯'), cy + 52, css('--muted')], [t('housing', '锁壳'), cy + R + 22, css('--muted')],
+      ];
+      // Keep labels at least 20 units apart, then draw leader lines from the true position.
+      items.sort((p, q) => p[1] - q[1]);
+      let prev = -Infinity;
+      for (const it of items) { it[3] = Math.max(it[1], prev + 20); prev = it[3]; }
+      for (const [t, y, c, ly] of items) {
+        ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx + 44, y); ctx.lineTo(lx - 30, y); ctx.lineTo(lx - 8, ly); ctx.stroke();
+        label(ctx, t, lx, ly, c, 'left', 14);
+      }
+    }
+    s.draw = draw;
+    langHooks.push(sync);
+    (function fade() { if (blockedFlash > 0) { blockedFlash = Math.max(0, blockedFlash - 0.04); draw(); } requestAnimationFrame(fade); })();
+    sync();
+  }
+
+  // ================= Shared side view (figures 2, 3 and 5) =================
+  // Logical geometry, in units of a 680-wide canvas.
+  const G = {
+    top: 24, shear: 150, plugBottom: 268, faceX: 70, backX: 640,
+    pins: [180, 262, 344, 426, 508], pinW: 24, drvLen: 46,
+    baseLen: 36, step: 6, depths: 8,
+    keyBottom: 258, rest: 240,
+  };
+  G.bladeTop = G.shear + G.baseLen;
+  G.fullTip = G.pins[4] + 64;
+  const keyLenFor = (depth) => G.baseLen + depth * G.step;
+
+  // The key's top edge at world x, for a key with the given cuts whose tip is at tipX.
+  function keySurface(x, tipX, cuts) {
+    const u = tipX - x; // distance back from the tip
+    if (u < 0) return Infinity;
+    let y = Math.max(G.bladeTop, G.keyBottom - u * 1.1); // sloped tip
+    cuts.forEach((d, j) => {
+      const uj = G.fullTip - G.pins[j];
+      const cutY = G.shear + keyLenFor(d);
+      const v = cutY - Math.max(0, Math.abs(u - uj) - 5) * 1.2;
+      y = Math.max(y, v);
+    });
+    return y;
+  }
+  function drawSide(ctx, { tipX = null, cuts = [], lens, gaps, drvTops, plugShift = 0, marks = [], keyColor, pickAt = null }) {
+    const W = G.pinW;
+    // Housing and plug.
+    rr(ctx, G.faceX - 20, G.top - 10, G.backX - G.faceX + 40, G.plugBottom - G.top + 34, 10, css('--housing'));
+    rr(ctx, G.faceX + plugShift, G.shear, G.backX - G.faceX, G.plugBottom - G.shear, 4, css('--plug'));
+    // Keyway.
+    ctx.fillStyle = css('--bg');
+    ctx.fillRect(G.faceX + plugShift, G.bladeTop - 12, G.backX - G.faceX, G.keyBottom - G.bladeTop + 16);
+    G.pins.forEach((x) => {
+      rr(ctx, x - W / 2 - 2, G.top, W + 4, G.shear - G.top + 1, 2, css('--bg'));
+      rr(ctx, x - W / 2 - 2 + plugShift, G.shear - 1, W + 4, G.bladeTop - G.shear, 2, css('--bg'));
+    });
+    // Key.
+    if (tipX !== null) {
+      const x0 = Math.max(0, tipX - 600), pts = [];
+      for (let x = x0; x <= tipX; x += 1) pts.push([x, keySurface(x, tipX, cuts)]);
+      ctx.beginPath(); ctx.moveTo(x0, G.keyBottom);
+      pts.forEach(([x, y]) => ctx.lineTo(x, Math.min(y, G.keyBottom)));
+      ctx.lineTo(tipX, G.keyBottom); ctx.closePath();
+      ctx.fillStyle = keyColor || css('--key'); ctx.fill();
+      // Bow of the key, outside the lock.
+      const bowR = tipX - (G.fullTip - G.faceX) - 10;
+      if (bowR > -60) rr(ctx, bowR - 60, G.bladeTop - 34, 70, G.keyBottom - G.bladeTop + 50, 16, keyColor || css('--key'));
+    }
+    // Pins and springs.
+    G.pins.forEach((x, i) => {
+      keyPin(ctx, x + (gaps[i] >= G.shear ? plugShift : 0), gaps[i], lens[i], W);
+      driverPin(ctx, x, drvTops[i], G.drvLen, W);
+      spring(ctx, x, G.top + 2, drvTops[i], 15);
+    });
+    // Shear line.
+    ctx.save(); ctx.setLineDash([6, 5]); ctx.strokeStyle = css('--shear'); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(G.faceX - 20, G.shear); ctx.lineTo(G.backX + 20, G.shear); ctx.stroke(); ctx.restore();
+    label(ctx, t('shear line', '剪切线'), G.backX + 16, G.shear - 11, css('--shear'), 'right');
+    // Per-pin marks.
+    marks.forEach((m, i) => { if (m) label(ctx, m.text, G.pins[i], G.top - 12 + 2, m.color, 'center', 13); });
+    if (pickAt) {
+      ctx.strokeStyle = css('--fg'); ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(0, G.keyBottom - 6); ctx.lineTo(pickAt[0] - 18, G.keyBottom - 6);
+      ctx.quadraticCurveTo(pickAt[0] - 4, G.keyBottom - 6, pickAt[0], pickAt[1]); ctx.stroke(); ctx.lineCap = 'butt';
+    }
+  }
+  const markFor = (gap) => {
+    const off = gap - G.shear;
+    if (Math.abs(off) <= 2.5) return { text: '✓', color: css('--good') };
+    return off > 0 ? { text: '↑', color: css('--shear') } : { text: '↓', color: css('--shear') };
+  };
+
+  // Stacks resting on a key (or on the bottom of the keyway if there's no key under them).
+  function restOnKey(tipX, cuts, lens) {
+    return G.pins.map((x, i) => {
+      const surf = tipX === null ? Infinity : keySurface(x, tipX, cuts);
+      return Math.min(G.rest, surf) - lens[i];
+    });
+  }
+
+  // A little turning animation drawn as a face-on inset.
+  function turnInset(ctx, x, y, deg, ok) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.fillStyle = css('--housing'); ctx.beginPath(); ctx.arc(0, 0, 34, 0, TAU); ctx.fill();
+    ctx.rotate((deg * Math.PI) / 180);
+    ctx.fillStyle = css('--plug'); ctx.beginPath(); ctx.arc(0, 0, 24, 0, TAU); ctx.fill();
+    rr(ctx, -2.5, -18, 5, 30, 2, css('--bg'));
+    ctx.restore();
+    label(ctx, ok ? t('turns', '能转') : t('stuck', '卡住'), x, y + 46, ok ? css('--good') : css('--shear'), 'center');
+  }
+
+  // ================= Figure 2: inserting a key =================
+  {
+    const fig = document.getElementById('fig-key');
+    const s = surface(fig.querySelector('canvas'));
+    const readout = fig.querySelector('.readout');
+    const turnBtn = fig.querySelector('[data-role=turn]');
+    const lockDepths = [3, 6, 1, 5, 2];
+    const lens = lockDepths.map(keyLenFor);
+    const keys = { right: lockDepths, wrong: [3, 4, 1, 6, 2] };
+    let which = 'right', tipX = G.fullTip - 170, dragFrom = null, turning = 0, turnTarget = 0, wiggle = 0;
+
+    fig.querySelectorAll('[data-key]').forEach((b) => (b.onclick = () => {
+      which = b.dataset.key; turnTarget = 0;
+      fig.querySelectorAll('[data-key]').forEach((x) => x.classList.toggle('on', x === b));
+      draw();
+    }));
+    const gapsNow = () => restOnKey(tipX, keys[which], lens);
+    const allOk = () => Math.abs(tipX - G.fullTip) < 1 && gapsNow().every((g) => Math.abs(g - G.shear) <= 2.5);
+    turnBtn.onclick = () => {
+      if (turnTarget) { turnTarget = 0; return; }
+      if (allOk()) turnTarget = 90; else wiggle = 1;
+    };
+    drag(s, {
+      down: (x, y) => { if (turnTarget) return false; dragFrom = x - tipX; },
+      move: (x) => { tipX = clamp(x - dragFrom, G.faceX - 30, G.fullTip); draw(); },
+      up: () => { if (G.fullTip - tipX < 8) tipX = G.fullTip; draw(); },
+    });
+    function draw() {
+      const { ctx, lw, lh } = s;
+      ctx.clearRect(0, 0, lw, lh);
+      const gaps = gapsNow();
+      const inFully = Math.abs(tipX - G.fullTip) < 1;
+      drawSide(ctx, {
+        tipX, cuts: keys[which], lens, gaps, drvTops: gaps.map((g) => g - G.drvLen),
+        marks: inFully ? gaps.map(markFor) : [],
+        keyColor: which === 'wrong' ? css('--steel') : css('--key'),
+      });
+      turnInset(ctx, 620, 338, turning + Math.sin(wiggle * 30) * wiggle * 6, allOk());
+      label(ctx, inFully ? '' : t('← drag the key →', '← 拖动钥匙 →'), (G.faceX + tipX) / 2 - 40, G.keyBottom + 22, css('--muted'), 'center');
+      const bad = gaps.map((g, i) => (Math.abs(g - G.shear) > 2.5 ? i + 1 : 0)).filter(Boolean);
+      readout.innerHTML = !inFully ? t('Slide the key all the way in.', '把钥匙一直插到底。')
+        : bad.length ? t(`<b style="color:var(--shear)">Won't turn:</b> stack${bad.length > 1 ? 's' : ''} ${bad.join(', ')} still cross${bad.length > 1 ? '' : 'es'} the shear line.`, `<b style="color:var(--shear)">转不动：</b>第 ${bad.join('、')} 组仍横跨剪切线。`)
+        : t('<b style="color:var(--good)">Every gap is on the shear line.</b> Press Turn.', '<b style="color:var(--good)">每道缝都在剪切线上。</b>按“转动”。');
+      turnBtn.textContent = turnTarget ? t('Turn back', '转回来') : t('Turn', '转动');
+    }
+    s.draw = draw;
+    langHooks.push(draw);
+    (function tick() {
+      const before = turning + wiggle;
+      turning += (turnTarget - turning) * 0.12;
+      if (Math.abs(turnTarget - turning) < 0.2) turning = turnTarget;
+      wiggle = Math.max(0, wiggle - 0.03);
+      if (turning + wiggle !== before) draw();
+      requestAnimationFrame(tick);
+    })();
+    draw();
+  }
+
+  // ================= Figure 3: cut your own key =================
+  {
+    const fig = document.getElementById('fig-cut');
+    const s = surface(fig.querySelector('canvas'));
+    const readout = fig.querySelector('.readout');
+    const turnBtn = fig.querySelector('[data-role=turn]');
+    const randomLock = () => G.pins.map(() => Math.floor(Math.random() * G.depths));
+    let lock = [5, 2, 6, 0, 4], lens = lock.map(keyLenFor);
+    let cuts = [0, 0, 0, 0, 0], active = -1, turning = 0, turnTarget = 0, wiggle = 0, tries = 0;
+    const gaps = () => restOnKey(G.fullTip, cuts, lens);
+    const ok = () => gaps().every((g) => Math.abs(g - G.shear) <= 2.5);
+    fig.querySelector('[data-role=new]').onclick = () => {
+      lock = randomLock(); lens = lock.map(keyLenFor); cuts = [0, 0, 0, 0, 0]; turnTarget = 0; tries = 0; draw();
+    };
+    turnBtn.onclick = () => { if (turnTarget) { turnTarget = 0; return; } tries++; if (ok()) turnTarget = 90; else wiggle = 1; draw(); };
+    const depthAt = (y) => clamp(Math.round((y - G.shear - G.baseLen) / G.step), 0, G.depths - 1);
+    drag(s, {
+      down: (x, y) => {
+        if (turnTarget) return false;
+        let best = -1, bd = 36;
+        G.pins.forEach((px, i) => { if (Math.abs(px - x) < bd) { bd = Math.abs(px - x); best = i; } });
+        if (best < 0 || y < G.shear) return false;
+        active = best; cuts[active] = depthAt(y); draw();
+      },
+      move: (x, y) => { cuts[active] = depthAt(y); draw(); },
+      up: () => { active = -1; draw(); },
+    });
+    function draw() {
+      const { ctx, lw, lh } = s;
+      ctx.clearRect(0, 0, lw, lh);
+      const g = gaps();
+      drawSide(ctx, { tipX: G.fullTip, cuts, lens, gaps: g, drvTops: g.map((y) => y - G.drvLen), marks: g.map(markFor) });
+      cuts.forEach((d, i) => {
+        const x = G.pins[i];
+        label(ctx, String(d), x, G.keyBottom - 12, active === i ? css('--fg') : css('--muted'), 'center', 12);
+        ctx.strokeStyle = active === i ? css('--fg') : css('--muted'); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x - 14, G.shear + keyLenFor(d)); ctx.lineTo(x + 14, G.shear + keyLenFor(d)); ctx.stroke();
+      });
+      turnInset(ctx, 620, 338, turning + Math.sin(wiggle * 30) * wiggle * 6, ok());
+      const nOk = g.filter((y) => Math.abs(y - G.shear) <= 2.5).length;
+      readout.innerHTML = ok() ? t(`<b style="color:var(--good)">You cut a working key:</b> ${cuts.join('')}. Press Turn.`, `<b style="color:var(--good)">你削出了一把能用的钥匙：</b>${cuts.join('')}。按“转动”。`)
+        : t(`${nOk} of 5 stacks are on the shear line. Your key so far: <b>${cuts.join('')}</b>`, `5 组里有 ${nOk} 组在剪切线上。你目前的钥匙：<b>${cuts.join('')}</b>`);
+      turnBtn.textContent = turnTarget ? t('Turn back', '转回来') : t('Turn', '转动');
+    }
+    s.draw = draw;
+    langHooks.push(draw);
+    (function tick() {
+      const before = turning + wiggle;
+      turning += (turnTarget - turning) * 0.12;
+      if (Math.abs(turnTarget - turning) < 0.2) turning = turnTarget;
+      wiggle = Math.max(0, wiggle - 0.03);
+      if (turning + wiggle !== before) draw();
+      requestAnimationFrame(tick);
+    })();
+    draw();
+  }
+
+  // ================= Figure 4: counting keys =================
+  {
+    const fig = document.getElementById('fig-count');
+    const s = surface(fig.querySelector('canvas'));
+    const [nIn, dIn, mIn] = ['n', 'd', 'm'].map((r) => fig.querySelector(`[data-role=${r}]`));
+    const outs = fig.querySelectorAll('output');
+    const readout = fig.querySelector('.readout');
+    // Count cut sequences whose neighbouring depths differ by at most m.
+    function count(n, D, m) {
+      let ways = new Array(D).fill(1);
+      for (let i = 1; i < n; i++) {
+        const next = new Array(D).fill(0);
+        for (let a = 0; a < D; a++) for (let b = 0; b < D; b++) if (Math.abs(a - b) <= m) next[b] += ways[a];
+        ways = next;
+      }
+      return ways.reduce((x, y) => x + y, 0);
+    }
+    const fmt = (x) => x.toLocaleString('en-US');
+    function sync() {
+      const n = +nIn.value, D = +dIn.value;
+      mIn.max = D - 1; if (+mIn.value > D - 1) mIn.value = D - 1;
+      const m = +mIn.value;
+      outs[0].textContent = n; outs[1].textContent = D; outs[2].textContent = m;
+      const all = Math.pow(D, n), allowed = count(n, D, m);
+      readout.innerHTML = t(`<span class="big">${fmt(allowed)}</span> usable keys, out of ${fmt(all)} raw combinations (${Math.round((allowed / all) * 100)}%).`, `<span class="big">${fmt(allowed)}</span> 种可用钥匙，原始组合共 ${fmt(all)} 种（${Math.round((allowed / all) * 100)}%）。`);
+      const { ctx, lw, lh } = s;
+      ctx.clearRect(0, 0, lw, lh);
+      rr(ctx, 0, 20, lw, lh - 40, 8, css('--grid'));
+      rr(ctx, 0, 20, lw * (allowed / all), lh - 40, 8, css('--brass'));
+    }
+    [nIn, dIn, mIn].forEach((el) => (el.oninput = sync));
+    langHooks.push(sync);
+    s.draw = sync;
+    sync();
+  }
+
+  // ================= Figure 5: picking =================
+  {
+    const fig = document.getElementById('fig-pick');
+    const s = surface(fig.querySelector('canvas'));
+    const readout = fig.querySelector('.readout');
+    const tensionBtn = fig.querySelector('[data-role=tension]');
+    const hint = fig.querySelector('[data-role=hint]');
+    const SET_TOL = 3, OVERSHOOT = 20, SHIFT_UNIT = 1.2;
+    let lock, lens, order, set, overset, lifted, tension = true, active = -1, openAngle = 0, opened = false, attempts = 0, shake = 0;
+
+    function newLock() {
+      lock = G.pins.map(() => 1 + Math.floor(Math.random() * (G.depths - 1)));
+      lens = lock.map(keyLenFor);
+      // The drilling error decides which stack binds first, second, and so on.
+      order = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
+      set = [false, false, false, false, false];
+      overset = [false, false, false, false, false];
+      lifted = [0, 0, 0, 0, 0];
+      opened = false; openAngle = 0; attempts = 0;
+      draw();
+    }
+    const restGap = (i) => G.rest - lens[i];
+    const bindingPin = () => (tension && !overset.some(Boolean) ? order.find((i) => !set[i]) : undefined);
+    const nSet = () => set.filter(Boolean).length;
+    // Each set pin lets the plug rotate a little further before the next one catches.
+    const plugShift = () => (tension ? SHIFT_UNIT * (1 + nSet()) : 0);
+
+    const syncTension = () => { tensionBtn.classList.toggle('on', tension); tensionBtn.textContent = tension ? t('Tension: on', '张力：开') : t('Tension: off', '张力：关'); };
+    langHooks.push(() => { syncTension(); draw(); });
+    syncTension();
+    tensionBtn.onclick = () => {
+      tension = !tension;
+      syncTension();
+      if (!tension) {
+        // Without torque the drivers fall back and everything resets.
+        set = set.map(() => false); overset = overset.map(() => false); opened = false; openAngle = 0;
+      }
+      draw();
+    };
+    fig.querySelector('[data-role=new]').onclick = () => { newLock(); };
+    hint.onchange = () => draw();
+
+    let startY = 0;
+    drag(s, {
+      down: (x, y) => {
+        if (opened) return false;
+        let best = -1, bd = 30;
+        G.pins.forEach((px, i) => { if (Math.abs(px - x) < bd) { bd = Math.abs(px - x); best = i; } });
+        if (best < 0 || set[best]) return false;
+        active = best; startY = y; attempts++; draw();
+      },
+      move: (x, y) => {
+        const i = active;
+        if (i < 0) return;
+        const want = clamp(startY - y, 0, 90);
+        const gapIfLifted = restGap(i) - want;
+        if (i === bindingPin()) {
+          // The binding pin sets the moment its gap reaches the shear line. Only a hard jab that
+          // carries the key pin well past the line in one motion oversets it instead.
+          lifted[i] = want;
+          if (gapIfLifted <= G.shear + SET_TOL) {
+            if (gapIfLifted >= G.shear - OVERSHOOT) {
+              set[i] = true; lifted[i] = 0; active = -1; click(); shake = 1;
+              if (set.every(Boolean)) opened = true;
+            } else {
+              overset[i] = true;
+            }
+          }
+        } else if (overset[i]) {
+          lifted[i] = Math.max(lifted[i], want);
+        } else {
+          lifted[i] = want; // a loose pin just moves with the pick
+        }
+        draw();
+      },
+      up: () => {
+        if (active >= 0 && !overset[active]) lifted[active] = 0;
+        active = -1; draw();
+      },
+    });
+
+    function draw() {
+      const { ctx, lw, lh } = s;
+      ctx.clearRect(0, 0, lw, lh);
+      const shift = plugShift();
+      const binding = bindingPin();
+      const gaps = G.pins.map((_, i) => {
+        if (set[i]) return restGap(i);
+        if (overset[i]) return Math.min(restGap(i) - lifted[i], G.shear - SET_TOL - 1);
+        return restGap(i) - lifted[i];
+      });
+      // A set driver pin sits stranded on top of the plug; an overset key pin jams across the line.
+      const drvTops = gaps.map((g, i) => (set[i] ? G.shear - G.drvLen : g - G.drvLen));
+      const marks = G.pins.map((_, i) => {
+        if (set[i]) return { text: t('set', '到位'), color: css('--good') };
+        if (overset[i]) return { text: t('overset', '过位'), color: css('--shear') };
+        if (hint.checked && i === binding) return { text: t('binding', '卡紧'), color: css('--brass') };
+        return null;
+      });
+      const pickAt = active >= 0 ? [G.pins[active], gaps[active] + lens[active] - 2] : null;
+      ctx.save();
+      if (shake > 0) ctx.translate(Math.sin(shake * 40) * shake * 1.5, 0);
+      drawSide(ctx, { tipX: null, lens, gaps, drvTops, plugShift: shift * 3, marks, pickAt });
+      // Tension wrench at the bottom of the keyway.
+      if (tension) {
+        ctx.fillStyle = css('--fg');
+        rr(ctx, 0, G.keyBottom - 2, G.faceX + 26, 7, 2, css('--fg'));
+        label(ctx, t('tension ↻', '张力 ↻'), 6, G.keyBottom + 20, css('--muted'));
+      }
+      ctx.restore();
+      turnInset(ctx, 620, 330, opened ? openAngle : tension ? 3 + nSet() * 1.5 : 0, opened);
+      readout.innerHTML = opened ? t(`<b style="color:var(--good)">Open!</b> You picked it after ${attempts} push${attempts === 1 ? '' : 'es'}. Press New lock to try another.`, `<b style="color:var(--good)">开了！</b>你推了 ${attempts} 次就撬开了。按“换一把锁”再来。`)
+        : overset.some(Boolean) ? t('<b style="color:var(--shear)">Overset.</b> A key pin is jammed across the shear line. Turn tension off to reset.', '<b style="color:var(--shear)">过位了。</b>一颗下弹子卡在剪切线上。关掉张力即可复位。')
+        : !tension ? t('No tension: every pin moves freely and nothing sets. Turn tension on.', '没有张力：每颗弹子都能自由移动，什么都不会到位。打开张力。')
+        : t(`${nSet()} of 5 pins set. Find the one that resists.`, `5 颗里已有 ${nSet()} 颗到位。找出有阻力的那一颗。`);
+    }
+    s.draw = draw;
+    langHooks.push(draw);
+    (function tick() {
+      let dirty = false;
+      if (shake > 0) { shake = Math.max(0, shake - 0.05); dirty = true; }
+      if (opened && openAngle < 90) { openAngle = Math.min(90, openAngle + 2.5); dirty = true; }
+      if (dirty) draw();
+      requestAnimationFrame(tick);
+    })();
+    newLock();
+  }
+})();
+</script>
+</body>
+</html>

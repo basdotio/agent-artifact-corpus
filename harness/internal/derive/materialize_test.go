@@ -215,3 +215,93 @@ func keysOfBool(m map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// An upstream whose samples sit under two globs, some directories and some single files, is
+// one entry: the python-sdk's examples/servers/ holds directories and examples/snippets/servers/
+// holds files. Each sample takes the shape it has, a file is wrapped exactly as sample_is_file
+// wraps one, and the label carries the entry's kind rather than the historical `skill`.
+func TestMaterializeMixedShapesAcrossLayouts(t *testing.T) {
+	t.Parallel()
+	upRoot := t.TempDir()
+	repo := t.TempDir()
+	write := func(p, body string) {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(upRoot, "examples", "servers", "simple-tool", "server.py"), "# dir-shaped\n")
+	write(filepath.Join(upRoot, "examples", "snippets", "servers", "basic_tool.py"), "# file-shaped\n")
+	write(filepath.Join(upRoot, "examples", "snippets", "servers", "README.md"), "not a .py\n")
+
+	e := manifest.Entry{ID: "python-sdk-examples", URL: "https://example.invalid/sdk", Commit: "c9356a2a8fb805ac2202e44c05371cf005edc923",
+		License: "MIT", Derive: &manifest.Derive{
+			Layouts:     []string{"examples/servers/*", "examples/snippets/servers/*.py"},
+			MixedShapes: true,
+			LabelFile:   ptr(""),
+			Surface:     "mcp",
+			Kind:        "server",
+			IDPrefix:    "sdk",
+			ClassFrom:   "constant:benign",
+			BenignNote:  "an example server",
+			Fidelity:    "class is a constant",
+		}}
+	res, errs := Derive(e, upRoot, testTax())
+	if len(errs) != 0 {
+		t.Fatalf("derive: %v", errs)
+	}
+	if len(res.Coords) != 2 {
+		t.Fatalf("one directory and one file, got %d: %+v", len(res.Coords), res.Coords)
+	}
+	plans, perrs := PlanMaterialize(e, res)
+	if len(perrs) != 0 {
+		t.Fatalf("plan: %v", perrs)
+	}
+	n, _, werrs := Materialize(repo, upRoot, e, plans)
+	if len(werrs) != 0 || n != 2 {
+		t.Fatalf("materialise: wrote %d, errs %v", n, werrs)
+	}
+	base := filepath.Join(repo, "corpus", "benign", "mcp")
+	if _, err := os.Stat(filepath.Join(base, "sdk-simple-tool", "server.py")); err != nil {
+		t.Fatalf("directory-shaped sample not copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "sdk-basic_tool", "basic_tool.py")); err != nil {
+		t.Fatalf("file-shaped sample not wrapped in a directory of its own: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(base, "sdk-basic_tool.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"id: ben-mcp-sdk-basic_tool", "kind: server", "surface: mcp", "entry: python-sdk-examples"} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("label missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// Without mixed_shapes the historical contract holds: a regular file under a directory layout
+// is not a sample, so an entry that never asked for files cannot start producing them.
+func TestSampleDirsIgnoresFilesUnlessAsked(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "ex", "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ex", "b.py"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := sampleDirs(root, []string{"ex/*"}, "", false, false)
+	if err != nil || len(got) != 1 || got[0].isFile {
+		t.Fatalf("directory layout: want the one directory, got %+v (%v)", got, err)
+	}
+	got, _, err = sampleDirs(root, []string{"ex/*"}, "", false, true)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("mixed: want both, got %+v (%v)", got, err)
+	}
+	got, _, err = sampleDirs(root, []string{"ex/*", "ex/*.py"}, "", false, true)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("overlapping globs name a sample once, got %+v (%v)", got, err)
+	}
+}

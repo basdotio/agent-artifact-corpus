@@ -1,0 +1,61 @@
+name: "Publish"
+
+on:
+  push:
+    tags:
+      # Publish on any tag starting with a `v`, e.g., v0.1.0
+      - v*
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Install Python 3.12
+        run: uv python install 3.12
+      - name: Build
+        run: uv build
+      # Check that basic features work and we didn't miss to include crucial files
+      - name: Smoke test (wheel)
+        run: uv run --isolated --no-project --with dist/*.whl python -c "import lit_mcp; print('Package imports successfully')"
+      - name: Smoke test (source distribution)
+        run: uv run --isolated --no-project --with dist/*.tar.gz python -c "import lit_mcp; print('Package imports successfully')"
+      - name: Validate server.json
+        run: uv run python scripts/validate-server.py
+      - name: Publish to PyPI
+        run: uv publish
+      - name: Install MCP Publisher
+        run: |
+          # Get the latest release info
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/modelcontextprotocol/registry/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+          echo "Latest release: $LATEST_RELEASE"
+
+          # Extract version number (remove 'v' prefix)
+          VERSION=${LATEST_RELEASE#v}
+          echo "Version: $VERSION"
+
+          # Download the appropriate binary
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+          URL="https://github.com/modelcontextprotocol/registry/releases/download/$LATEST_RELEASE/mcp-publisher_${VERSION}_${OS}_${ARCH}.tar.gz"
+          echo "Downloading from: $URL"
+
+          curl -L "$URL" | tar xz mcp-publisher
+          chmod +x mcp-publisher
+      - name: Update server.json version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > tmp && mv tmp server.json
+      - name: Login to MCP Registry
+        run: ./mcp-publisher login github-oidc
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish

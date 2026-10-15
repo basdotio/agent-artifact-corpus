@@ -1,0 +1,41 @@
+const $ = id => document.getElementById(id);
+let demos = [], mode = 'evidence', lastResult = null, lastRequest = null;
+function element(tag, text, cls) { const e=document.createElement(tag); if(text!==undefined)e.textContent=text; if(cls)e.className=cls; return e; }
+function fail(error){$('error').textContent=error.message || String(error);$('error').hidden=false;}
+function clearResult(){lastResult=null;lastRequest=null;$('export').disabled=true;$('result').replaceChildren(element('p','Inputs changed. Run the analysis to create a new decision record.','result-note'));}
+function addSource(source={}){
+  const card=element('div',undefined,'source'), row=element('div',undefined,'source-row');
+  const title=element('input');title.value=source.title||'';title.placeholder='Source title';title.setAttribute('aria-label','Source title');title.className='title';
+  const remove=element('button','×','text-button remove');remove.setAttribute('aria-label','Remove source');remove.onclick=()=>{card.remove();clearResult();};row.append(title,remove);
+  const text=element('textarea');text.value=source.text||'';text.rows=4;text.placeholder='Paste a short, exact passage from your source';text.setAttribute('aria-label','Evidence passage');
+  const url=element('input');url.value=source.url||'';url.placeholder='Source URL (optional, attribution only)';url.className='url';url.setAttribute('aria-label','Source URL');
+  const locator=element('input');locator.value=source.locator||'';locator.placeholder='Page / section (optional)';locator.className='locator url';locator.setAttribute('aria-label','Source locator');
+  card.append(row,text,url,locator);$('sources').append(card);
+}
+function setMode(next){mode=next;$('evidence-form').hidden=mode!=='evidence';$('decision-form').hidden=mode!=='decision';$('evidence-tab').classList.toggle('active',mode==='evidence');$('decision-tab').classList.toggle('active',mode==='decision');$('editor-title').textContent=mode==='evidence'?'Put a claim to the test':'Make a small decision';}
+function fill(data){if(lastResult)clearResult();setMode(data.mode || (data.claim ? 'evidence':'decision'));$('error').hidden=true;if(mode==='evidence'){$('claim').value=data.claim||'';$('sources').replaceChildren();(data.sources||[{}]).forEach(addSource);}else{$('state').value=data.state||'';$('question').value=data.question||'';$('choices').value=Object.entries(data.choices||{}).map(([k,v])=>`${k} | ${v}`).join('\n');}$('demo-description').textContent=data.description||'Your own input. No content is sent to a cloud model.';if(data.threshold!==undefined)$('threshold').value=data.threshold;if(data.minimum_margin!==undefined)$('margin').value=data.minimum_margin;}
+function request(){const policy={threshold:Number($('threshold').value),minimum_margin:Number($('margin').value)};if(mode==='evidence'){return{...policy,claim:$('claim').value,sources:[...$('sources').children].map(c=>({title:c.querySelector('.title').value,text:c.querySelector('textarea').value,url:c.querySelector('.url').value,locator:c.querySelector('.locator').value}))};}const choices={};for(const line of $('choices').value.split('\n').filter(x=>x.trim())){const p=line.indexOf('|');if(p<1)throw new Error('Use label | description for each answer.');const key=line.slice(0,p).trim();if(Object.hasOwn(choices,key))throw new Error('Choice labels must be unique.');choices[key]=line.slice(p+1).trim();}return{...policy,state:$('state').value,question:$('question').value,choices};}
+function metric(value,label){const e=element('div',undefined,'metric');e.append(element('b',value),element('small',label));return e;}
+function render(data){
+  const root=$('result');root.replaceChildren();const metrics=element('div',undefined,'metrics');metrics.append(metric(`${Math.round(data.latency_ms)} ms`,'engine time'),metric('0','cloud calls'),metric('0','generated tokens'));root.append(metrics);
+  if(data.mixed_evidence)root.append(element('div','Conflicting model assessments: inspect each source. Do not collapse these into a single conclusion.','notice'));
+  const rows=data.assessments||[data];
+  for(const row of rows){const card=element('article',undefined,'verdict');card.append(element('span',row.status==='review'?'Human review':'Passes review policy',`badge ${row.status==='review'?'review':''}`));card.append(element('h3',`Model proposal: ${row.proposal}`));
+    for(const [label,p] of Object.entries(row.probabilities).sort((a,b)=>b[1]-a[1])){const bar=element('div',undefined,'bar-row');const meter=element('meter');meter.min=0;meter.max=1;meter.value=p;meter.setAttribute('aria-label',`${label} model probability`);bar.append(element('span',label),meter,element('span',`${(p*100).toFixed(1)}%`));card.append(bar);}
+    if(row.reasons.length){const list=element('ul');row.reasons.forEach(r=>list.append(element('li',r)));card.append(list);}
+    if(row.source){card.append(element('div',row.source.title||'User-supplied passage','source-name'),element('blockquote',row.source.text));try{const url=new URL(row.source.url);if(['https:','http:'].includes(url.protocol)){const link=element('a','Open original source ↗');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';card.append(link);}}catch{}if(row.source.locator)card.append(element('p',row.source.locator,'result-note'));card.append(element('div',`Passage SHA-256 · ${row.passage_sha256}`,'provenance'));}
+    card.append(element('div',`${row.local_input_tokens} local input tokens · ${row.cache_hit?'memory cache':'fresh inference'} · ${row.latency_ms} ms`,'provenance'));root.append(card);
+  }
+  root.append(element('p',data.scope||'This is a proposed classification. No task was executed.','result-note'),element('p','Model probabilities are not verified accuracy. No cloud-token savings have been measured.','result-note'));
+}
+$('run').onclick=async()=>{try{$('error').hidden=true;const payload=request(),currentMode=mode;$('run').disabled=true;$('run').textContent='Running locally…';const response=await fetch(`/api/${mode==='evidence'?'evidence':'decide'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw new Error(data.error);if(currentMode!==mode||JSON.stringify(request())!==JSON.stringify(payload))throw new Error('Inputs changed during analysis. Run again for the new input.');lastResult=data;lastRequest={mode:currentMode,...payload};render(data);$('export').disabled=false;}catch(e){fail(e);}finally{$('run').disabled=false;$('run').textContent='Run local analysis →';}};
+$('add-source').onclick=()=>{if($('sources').children.length<12){addSource();clearResult();}else fail(new Error('Maximum 12 passages per review.'));};
+document.querySelector('.editor').addEventListener('input',()=>{if(lastResult)clearResult();});
+$('demo').onchange=()=>fill(demos.find(d=>d.id===$('demo').value));
+$('evidence-tab').onclick=()=>{const d=demos.find(d=>d.mode==='evidence');$('demo').value=d.id;fill(d);};
+$('decision-tab').onclick=()=>{const d=demos.find(d=>d.mode==='decision');$('demo').value=d.id;fill(d);};
+$('how-tab').onclick=()=>{$('how').hidden=!$('how').hidden;};
+$('export').onclick=()=>{const blob=new Blob([JSON.stringify({schema_version:'0.1',request:lastRequest,result:lastResult},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=element('a');a.href=url;a.download='evidence-gate-review.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+$('import').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>65536)throw new Error('Use a JSON file smaller than 64 KB.');const data=JSON.parse(await file.text());fill(data.request||data);$('demo').value='';}catch(err){fail(err);}finally{e.target.value='';}};
+async function init(){try{const [a,b]=await Promise.all([fetch('/api/demos'),fetch('/api/status')]);demos=await a.json();const status=await b.json();for(const d of demos){const o=element('option',d.name);o.value=d.id;$('demo').append(o);}fill(demos[0]);$('connection').textContent='Local model ready';$('model').textContent=`${status.backend.model} · ${status.backend.device}`;}catch(e){$('connection').textContent='Local server unavailable';fail(e);}}
+init();

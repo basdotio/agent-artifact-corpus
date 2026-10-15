@@ -1,0 +1,98 @@
+<head>
+<style>
+  /* 创角表单骨架：宽度自适应、深浅主题通用、无 vh */
+  .cf-wrap { font-size: 14px; border: 1px solid rgba(128,128,128,.35); border-radius: 12px; padding: 16px; max-width: 640px; margin: 0 auto; }
+  .cf-wrap h3 { margin: 0 0 12px; font-size: 16px; }
+  .cf-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+  .cf-row label { flex: 0 0 72px; opacity: .8; }
+  .cf-row input, .cf-row select { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid rgba(128,128,128,.4); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
+  .cf-submit { width: 100%; margin-top: 12px; padding: 10px; border: 1px solid rgba(128,128,128,.5); border-radius: 10px; background: rgba(128,128,128,.12); color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+  .cf-submit:hover { background: rgba(128,128,128,.22); }
+  .cf-status { margin-top: 8px; font-size: 12px; opacity: .75; min-height: 1.2em; }
+</style>
+<script>
+  (async () => {
+    // 等楼层变量就绪（表单本身不依赖 MVU，但拿到楼层后可做草稿/写变量，可选）
+    await waitGlobalInitialized('Mvu');
+
+    // 找到酒馆页面文档（本表单运行在消息 iframe 里）
+    function findRoot() {
+      let w = window;
+      try {
+        while (w.parent && w.parent !== w) {
+          const d = w.parent.document;
+          if (d && d.getElementById('send_textarea')) { w = w.parent; break; }
+          w = w.parent;
+        }
+      } catch (e) { /* 跨域保护忽略 */ }
+      const d = w.document;
+      return { doc: d, win: w, ta: d.getElementById('send_textarea'), sendBtn: d.getElementById('send_but') };
+    }
+
+    // ① 组装提交内容：纯文本 + 结构化数据块（与世界书协议条目约定一致）
+    function compose() {
+      const v = (sel) => document.querySelector(sel)?.value?.trim() || '';
+      const name = v('#cf-name') || '未命名';
+      const gender = v('#cf-gender');
+      const talent = v('#cf-talent');
+      const mode = v('#cf-mode');
+      return [
+        '【开局配置】',
+        `<OpeningConfig>`,
+        `姓名: ${name}`,
+        `性别: ${gender}`,
+        `天赋: ${talent}`,
+        `难度: ${mode}`,
+        `</OpeningConfig>`,
+        '',
+        `请以上述配置为我生成开局：先完整初始化变量（JSONPatch），再从适合的时机切入剧情。`,
+      ].join('\n');
+    }
+
+    // ② 提交方式 A（推荐）：写入输入框并点击发送（模拟玩家输入）
+    async function submitBySend(text) {
+      const { ta, sendBtn } = findRoot();
+      if (!ta || !sendBtn) throw new Error('找不到酒馆输入框（请确认在酒馆中游玩）');
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (setter) setter.call(ta, text); else ta.value = text;
+      ta.dispatchEvent(new Event('input', { bubbles: true }));  // 让框架感知内容变化
+      sendBtn.click();
+    }
+
+    // ② 提交方式 B：SDK 创建楼层并触发生成（需要在酒馆助手 ≥ 4.x 环境）
+    // async function submitByCreate(text) {
+    //   await createChatMessages([{ role: 'user', message: text }]);
+    //   await triggerSlash('/trigger');
+    // }
+
+    document.addEventListener('click', async (ev) => {
+      if (!ev.target.closest('.cf-submit')) return;
+      const status = document.querySelector('.cf-status');
+      try {
+        status.textContent = '正在创建存档…';
+        await submitBySend(compose());
+        status.textContent = '已提交，等待 AI 初始化变量与开局。';
+      } catch (e) {
+        status.textContent = '提交失败：' + e.message;
+      }
+    });
+  })();
+</script>
+</head>
+<body>
+  <div class="cf-wrap">
+    <h3>创建你的角色</h3>
+    <div class="cf-row"><label>姓名</label><input id="cf-name" placeholder="你的名字"></div>
+    <div class="cf-row"><label>性别</label>
+      <select id="cf-gender"><option>女</option><option>男</option><option>其他</option></select>
+    </div>
+    <div class="cf-row"><label>天赋</label>
+      <select id="cf-talent"><option>均衡</option><option>天才</option><option>体弱多病</option></select>
+    </div>
+    <div class="cf-row"><label>难度</label>
+      <select id="cf-mode"><option>普通</option><option>困难</option><option>休闲</option></select>
+    </div>
+    <button class="cf-submit">开始游戏</button>
+    <div class="cf-status"></div>
+  </div>
+</body>

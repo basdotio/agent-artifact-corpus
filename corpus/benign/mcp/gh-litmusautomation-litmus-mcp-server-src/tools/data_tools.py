@@ -1,0 +1,1527 @@
+import asyncio
+import difflib
+import json
+import re
+from datetime import datetime
+
+import influxdb
+import nats
+import pandas as pd
+from litmussdk.devicehub import devices as dh_devices
+from litmussdk.devicehub import tags as dh_tags
+from mcp.shared.exceptions import McpError
+from mcp.types import (
+    INTERNAL_ERROR,
+    INVALID_PARAMS,
+    ErrorData,
+    TextContent,
+    ToolAnnotations,
+)
+from numpy import zeros
+from starlette.requests import Request
+
+from config import logger, ssl_config
+from utils.auth import (
+    get_influx_connection_params,
+    get_litmus_connection,
+    get_nats_connection_params,
+)
+from utils.formatting import format_error_response, format_success_response
+
+from .sdk_cli_tools import run_cli_function
+
+INFLUXDB_AVAILABLE = True
+
+# How long to wait for a NATS message before giving up
+NATS_TIMEOUT = 30  # seconds
+
+
+def _nats_connection_note(params: dict) -> str | None:
+    """Human/LLM-facing note when the broker address was derived from EDGE_URL."""
+    if params.get("derived_from_edge_url"):
+        return (
+            f"NATS host not configured; using "
+            f"nats://{params['nats_source']}:{params['nats_port']} derived "
+            "from EDGE_URL. Set NATS_SOURCE (and NATS_PORT if needed) in the "
+            "MCP configuration to override."
+        )
+    return None
+
+
+def _influx_connection_note(params: dict) -> str | None:
+    """Human/LLM-facing note when the InfluxDB address was derived from EDGE_URL."""
+    if params.get("derived_from_edge_url"):
+        return (
+            f"InfluxDB host not configured; using "
+            f"http://{params['INFLUX_HOST']}:{params['INFLUX_PORT']} derived "
+            "from EDGE_URL. Set INFLUX_HOST (and INFLUX_PORT if needed) in "
+            "the MCP configuration to override."
+        )
+    return None
+
+
+def _with_connection_note(result: dict, note: str | None) -> dict:
+    if note:
+        result["connection_note"] = note
+    return result
+
+
+def _error_with_note(message: str, note: str | None) -> str:
+    return f"{message} ({note})" if note else message
+
+
+async def get_current_value_on_topic(
+    topic: str,
+    nats_source: str | None = None,
+    nats_port: str | None = None,
+    request: Request | None = None,
+) -> tuple[dict, str | None]:
+    """
+    Subscribes to a NATS topic and retrieves the next published message.
+
+    Returns the decoded payload and the subject it arrived on, which differs
+    from `topic` when `topic` is a wildcard.
+
+    Explicitly passed nats_source/nats_port win over the request-resolved
+    values (which themselves fall back to the EDGE_URL host).
+    """
+    try:
+        params = get_nats_connection_params(request)
+    except McpError:
+        if not nats_source:
+            raise
+        params = {}
+
+    nats_source = nats_source or params.get("nats_source")
+    nats_port = nats_port or params.get("nats_port") or "4222"
+
+    stop_event = asyncio.Event()
+    return await _nc_single_topic(
+        nats_source,
+        nats_port,
+        topic,
+        stop_event,
+        nats_user=params.get("nats_user"),
+        nats_password=params.get("nats_password"),
+        nats_token=params.get("nats_token"),
+        use_tls=params.get("use_tls", True),
+    )
+
+
+async def get_current_value_on_topic_tool(
+    request: Request, arguments: dict
+) -> list[TextContent]:
+    """
+    Gets the current value from a NATS topic.
+
+    Waits for the next message published to the topic and returns it.
+    """
+    note = None
+    try:
+        topic = arguments.get("topic")
+
+        if not topic:
+            raise McpError(
+                ErrorData(code=INVALID_PARAMS, message="'topic' parameter is required")
+            )
+
+        note = _nats_connection_note(get_nats_connection_params(request))
+        message, subject = await get_current_value_on_topic(
+            topic=topic, request=request
+        )
+
+        logger.info(f"Retrieved value from topic: {topic} (subject: {subject})")
+
+        # 'topic' echoes what was asked for, 'subject' names what actually
+        # delivered the message; they differ whenever 'topic' is a wildcard.
+        result = {
+            "topic": topic,
+            "subject": subject,
+            "data": message,
+        }
+
+        return format_success_response(_with_connection_note(result, note))
+
+    except McpError:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting value from topic: {e}", exc_info=True)
+        return format_error_response("retrieval_failed", _error_with_note(str(e), note))
+
+
+async def get_multiple_values_from_topic_tool(
+    request: Request, arguments: dict
+) -> list[TextContent]:
+    """
+    Collects multiple sequential values from a NATS topic for trend analysis.
+
+    WARNING: This function blocks until num_samples messages are received.
+    """
+    note = None
+    try:
+        topic = arguments.get("topic")
+        num_samples = arguments.get("num_samples", 10)
+        arg_source = arguments.get("nats_source")
+        arg_port = arguments.get("nats_port")
+
+        if not topic:
+            raise McpError(
+                ErrorData(code=INVALID_PARAMS, message="'topic' parameter is required")
+            )
+
+        if num_samples > 100:
+            logger.warning(f"num_samples={num_samples} is high, capping at 100")
+            num_samples = 100
+
+        # Explicit tool arguments win over header/derived values; they also
+        # keep the tool usable when no host is configured at all.
+        try:
+            params = get_nats_connection_params(request)
+        except McpError:
+            if not arg_source:
+                raise
+            params = {}
+
+        nats_source = arg_source or params.get("nats_source")
+        nats_port = arg_port or params.get("nats_port") or "4222"
+        if not arg_source:
+            note = _nats_connection_note(params)
+
+        stop_event = asyncio.Event()
+
+        output = await _collect_multiple_values_from_topic(
+            nats_source,
+            nats_port,
+            topic,
+            stop_event,
+            num_samples,
+            nats_user=params.get("nats_user"),
+            nats_password=params.get("nats_password"),
+            nats_token=params.get("nats_token"),
+            use_tls=params.get("use_tls", True),
+        )
+
+        logger.info(f"Collected {num_samples} samples from topic: {topic}")
+
+        # 'topic' echoes what was asked for, 'subjects' names what actually
+        # delivered the samples; they differ whenever 'topic' is a wildcard.
+        result = {
+            "topic": topic,
+            "subjects": output["subjects"],
+            "num_samples": num_samples,
+            "values": output["values"].tolist(),  # Convert numpy array to list
+            "timestamps": output["humanTimestamps"],
+        }
+
+        return format_success_response(_with_connection_note(result, note))
+
+    except McpError:
+        raise
+    except Exception as e:
+        logger.error(f"Error collecting values from topic: {e}", exc_info=True)
+        return format_error_response(
+            "collection_failed", _error_with_note(str(e), note)
+        )
+
+
+def _get_connect_options(
+    nats_source, nats_port, nats_user, nats_password, use_tls=True, nats_token=None
+):
+    connect_options = {
+        "servers": [f"nats://{nats_source}:{nats_port}"],
+        "allow_reconnect": False,  # per-call connections; no background reconnect loop
+    }
+
+    if use_tls:
+        connect_options["tls"] = ssl_config()
+
+    # The LE gateway broker validates the access-account API key as the
+    # password and ignores the username, so a single secret (NATS_PASSWORD,
+    # or NATS_TOKEN as an alias) is all that is needed. A username from a
+    # legacy config is still sent; otherwise the secret doubles as the user
+    # field, mirroring litmussdk-go.
+    secret = nats_password or nats_token
+    if secret:
+        connect_options["user"] = nats_user or secret
+        connect_options["password"] = secret
+
+    return connect_options
+
+
+async def _nc_single_topic(
+    nats_source: str,
+    nats_port: str,
+    nats_subscription_topic: str,
+    stop_event: asyncio.Event,
+    nats_user: str | None = None,
+    nats_password: str | None = None,
+    nats_token: str | None = None,
+    use_tls: bool = True,
+) -> tuple[dict, str | None]:
+    """
+    Subscribe to a single topic and return a single message and its subject.
+
+    The subject is reported separately from the requested topic because a
+    subscription may be a wildcard, in which case the requested pattern does
+    not name the subject that actually delivered the message.
+    """
+
+    connect_options = _get_connect_options(
+        nats_source,
+        nats_port,
+        nats_user,
+        nats_password,
+        use_tls=use_tls,
+        nats_token=nats_token,
+    )
+    nc = await nats.connect(**connect_options)
+
+    result_message = {}
+    result_subject = None
+
+    async def message_handler(msg):
+        nonlocal result_message, result_subject
+        if result_message:
+            stop_event.set()
+            return
+
+        data = msg.data.decode()
+        message = json.loads(data)
+        result_message = message
+        result_subject = msg.subject
+        stop_event.set()
+
+    try:
+        await nc.subscribe(nats_subscription_topic, cb=message_handler)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=NATS_TIMEOUT)
+        except TimeoutError:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=(
+                        f"Timed out waiting for a message on topic "
+                        f"'{nats_subscription_topic}' after {NATS_TIMEOUT}s. "
+                        "Check that the topic is active and publishing data."
+                    ),
+                )
+            )
+    finally:
+        try:
+            await nc.drain()
+        except Exception:
+            await nc.close()
+
+    return result_message, result_subject
+
+
+# ── topic discovery ─────────────────────────────────────────────────────────
+#
+# The two topic-reading tools need an exact subject, and nothing else on the
+# server lists what exists, so a caller had to know subjects out of band. No
+# single Litmus API returns every topic either: each component publishes its
+# own, so they are collected from all three that expose them and merged.
+
+# Tags scanned before the DeviceHub sweep stops. A fleet can hold tens of
+# thousands of tags at two topics each; stopping is reported in the response
+# rather than passed off as a complete listing.
+_MAX_TAG_SCAN = 2000
+_TAG_SCAN_PAGE = 500
+
+_TOPIC_SOURCES = ("analytics", "devicehub", "digitaltwins")
+
+
+async def _topics_from_analytics(request: Request) -> list[dict]:
+    """Topics known to the analytics engine: the broadest single registry.
+
+    Needs Litmus Edge 4.0.x or later; older firmware rejects the call, which
+    the caller sees as this source being unavailable.
+    """
+    rows = await run_cli_function(request, "le.analytics.GetTopics", {}) or []
+    return [
+        {
+            "topic": row.get("Topic"),
+            "direction": row.get("Direction"),
+            "format": row.get("Format"),
+        }
+        for row in rows
+        if isinstance(row, dict) and row.get("Topic")
+    ]
+
+
+async def _topics_from_devicehub(request: Request) -> tuple[list[dict], int, int]:
+    """Topics attached to DeviceHub tags, with the total tag count and how
+    many tags were actually scanned."""
+    found: list[dict] = []
+    scanned = 0
+    total = 0
+    offset = 0
+    while scanned < _MAX_TAG_SCAN:
+        page = await run_cli_function(
+            request,
+            "le.devicehub.ListAllTags",
+            {"limit": min(_TAG_SCAN_PAGE, _MAX_TAG_SCAN - scanned), "offset": offset},
+        )
+        if not isinstance(page, dict):
+            break
+        registers = page.get("Registers") or []
+        total = page.get("TotalCount") or total
+        for tag in registers:
+            if not isinstance(tag, dict):
+                continue
+            for topic in tag.get("Topics") or []:
+                if isinstance(topic, dict) and topic.get("Topic"):
+                    found.append(
+                        {
+                            "topic": topic["Topic"],
+                            "direction": topic.get("Direction"),
+                            "format": topic.get("Format"),
+                            "interval_ms": topic.get("IntervalMs"),
+                            "owner": tag.get("TagName") or tag.get("Name"),
+                        }
+                    )
+        scanned += len(registers)
+        offset += len(registers)
+        if page.get("Last") or not registers:
+            break
+    return found, total, scanned
+
+
+async def _topics_from_digitaltwins(request: Request) -> list[dict]:
+    """Topics each digital twin instance publishes its assembled payload on."""
+    instances = (
+        await run_cli_function(request, "le.digitaltwins.ListAllInstances", {}) or []
+    )
+    return [
+        {
+            "topic": inst.get("Topic"),
+            "direction": "Output",
+            "owner": inst.get("Name"),
+        }
+        for inst in instances
+        if isinstance(inst, dict) and inst.get("Topic")
+    ]
+
+
+async def list_nats_topics(request: Request, arguments: dict) -> list[TextContent]:
+    """Lists NATS topics published across Litmus Edge components."""
+    arguments = arguments or {}
+    requested = arguments.get("sources") or list(_TOPIC_SOURCES)
+    if isinstance(requested, str):
+        requested = [requested]
+    unknown = [s for s in requested if s not in _TOPIC_SOURCES]
+    if unknown:
+        raise McpError(
+            ErrorData(
+                code=INVALID_PARAMS,
+                message=(
+                    f"Unknown source(s) {unknown}; valid sources are "
+                    f"{list(_TOPIC_SOURCES)}"
+                ),
+            )
+        )
+
+    pattern = (arguments.get("pattern") or "").strip().lower()
+    limit = max(1, min(int(arguments.get("limit", 200)), 1000))
+    offset = max(0, int(arguments.get("offset", 0)))
+
+    # Keyed by topic string: the same subject legitimately appears in more than
+    # one component's view, and a caller wants one row naming all of them.
+    merged: dict[str, dict] = {}
+    status: dict[str, dict] = {}
+
+    for source in requested:
+        try:
+            if source == "analytics":
+                rows = await _topics_from_analytics(request)
+                status[source] = {"status": "ok", "topics_found": len(rows)}
+            elif source == "devicehub":
+                rows, total_tags, scanned = await _topics_from_devicehub(request)
+                status[source] = {
+                    "status": "ok",
+                    "topics_found": len(rows),
+                    "tags_scanned": scanned,
+                    "tags_total": total_tags,
+                }
+                if total_tags > scanned:
+                    status[source]["status"] = "partial"
+                    status[source]["note"] = (
+                        f"stopped after {scanned} of {total_tags} tags "
+                        f"({_MAX_TAG_SCAN} tag scan limit); narrow with "
+                        "'pattern' or read tags per device with "
+                        "get_devicehub_device_tags"
+                    )
+            else:
+                rows = await _topics_from_digitaltwins(request)
+                status[source] = {"status": "ok", "topics_found": len(rows)}
+        except Exception as e:
+            # One component being unavailable (old firmware, disabled feature)
+            # must not hide the topics the others do publish.
+            logger.warning(f"Topic source '{source}' unavailable: {e}")
+            status[source] = {"status": "unavailable", "reason": str(e)}
+            continue
+
+        for row in rows:
+            entry = merged.setdefault(
+                row["topic"], {"topic": row["topic"], "sources": []}
+            )
+            if source not in entry["sources"]:
+                entry["sources"].append(source)
+            for key, value in row.items():
+                if key != "topic" and value is not None:
+                    entry.setdefault(key, value)
+
+    topics = sorted(merged.values(), key=lambda t: t["topic"])
+    if pattern:
+        topics = [t for t in topics if pattern in t["topic"].lower()]
+
+    page = topics[offset : offset + limit]
+    result = {
+        "topics": page,
+        "total_count": len(topics),
+        "has_more": offset + len(page) < len(topics),
+        "next_offset": offset + len(page),
+        "sources": status,
+    }
+    if not topics and all(s.get("status") == "unavailable" for s in status.values()):
+        return format_error_response(
+            "topic_discovery_failed",
+            "No topic source could be queried: "
+            + "; ".join(f"{k}: {v.get('reason')}" for k, v in status.items()),
+        )
+    return format_success_response(result)
+
+
+async def _collect_multiple_values_from_topic(
+    nats_source: str,
+    nats_port: str,
+    topic: str,
+    stop_event: asyncio.Event,
+    num_samples: int = 10,
+    nats_user: str | None = None,
+    nats_password: str | None = None,
+    nats_token: str | None = None,
+    use_tls: bool = True,
+) -> dict:
+    """
+    Collect multiple values from a topic for plotting or analysis.
+    """
+    connect_options = _get_connect_options(
+        nats_source,
+        nats_port,
+        nats_user,
+        nats_password,
+        use_tls=use_tls,
+        nats_token=nats_token,
+    )
+    nc = await nats.connect(**connect_options)
+
+    results = {
+        "humanTimestamps": ["" for _ in range(num_samples)],
+        "values": zeros(num_samples),
+        # Distinct subjects that delivered samples, in first-seen order. A
+        # wildcard subscription can be fed by several subjects, so the
+        # requested pattern alone does not identify the data's origin.
+        "subjects": [],
+    }
+    counter = 0
+
+    async def message_handler(msg):
+        nonlocal counter, results
+        data = msg.data.decode()
+        payload = json.loads(data)
+
+        value = payload.get("value")
+        timestamp = payload.get("timestamp")
+
+        if value is None or timestamp is None:
+            return
+
+        human_ts = str(datetime.fromtimestamp(timestamp / 1000))
+
+        if counter < num_samples:
+            # Recorded here, not before the bound check, so the list names
+            # only subjects that actually contributed a returned sample.
+            if msg.subject not in results["subjects"]:
+                results["subjects"].append(msg.subject)
+            results["values"][counter] = value
+            results["humanTimestamps"][counter] = human_ts
+            counter += 1
+            if counter >= num_samples:
+                stop_event.set()
+        else:
+            stop_event.set()
+
+    try:
+        await nc.subscribe(topic, cb=message_handler)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=NATS_TIMEOUT)
+        except TimeoutError:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=(
+                        f"Timed out collecting {num_samples} samples from topic "
+                        f"'{topic}' after {NATS_TIMEOUT}s "
+                        f"(received {counter}/{num_samples}). "
+                        "Check that the topic is active and publishing data."
+                    ),
+                )
+            )
+    finally:
+        try:
+            await nc.drain()
+        except Exception:
+            await nc.close()
+
+    return results
+
+
+async def get_historical_data_from_influxdb_tool(
+    request: Request, arguments: dict
+) -> list[TextContent]:
+    """
+    Queries historical time-series data from InfluxDB.
+
+    User provides the measurement name and how much data they want (time range).
+    """
+    params = get_influx_connection_params(request)
+    note = _influx_connection_note(params)
+    try:
+        if not INFLUXDB_AVAILABLE:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message="InfluxDB library not installed. Install with: pip install influxdb",
+                )
+            )
+        logger.info("Influx query")
+        # Extract parameters
+        measurement = arguments.get("measurement")
+        time_range = arguments.get("time_range", "1h")
+        limit = min(int(arguments.get("limit", 10000)), 100000)
+
+        # Validate inputs
+        if not measurement:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message="'measurement' parameter is required",
+                )
+            )
+
+        # Validate inputs before interpolating into the query string
+        if not re.fullmatch(r"[\w][\w\-\.]*", measurement):
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Invalid measurement name '{measurement}'. Only alphanumeric characters, underscores, hyphens, and dots are allowed.",
+                )
+            )
+        if not re.fullmatch(r"\d+(ms|[usmhdw])", time_range):
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Invalid time_range '{time_range}'. Expected InfluxDB duration format, e.g. '1h', '30m', '7d'.",
+                )
+            )
+
+        # Build query - select all fields from the measurement
+        query = (
+            f'SELECT * FROM "{measurement}" WHERE time > now() - {time_range} '
+            f"LIMIT {limit}"
+        )
+
+        logger.info(f"Executing InfluxDB query: {query}")
+
+        influx_client = _make_influx_client(params)
+
+        # Execute query (never chunked - see note at _make_influx_client)
+        result = influx_client.query(query)
+        points = list(result.get_points())
+
+        if not points:
+            logger.warning(f"No data returned from InfluxDB for query: {query}")
+            return format_success_response(
+                _with_connection_note(
+                    {
+                        "query": query,
+                        "data": [],
+                        "count": 0,
+                        "message": "No data found for the specified query",
+                    },
+                    note,
+                )
+            )
+
+        # Convert to DataFrame for easier manipulation
+        df = pd.DataFrame(points)
+
+        # Convert DataFrame to list of dictionaries for JSON serialization
+        data_records = df.to_dict(orient="records")
+
+        logger.info(f"Retrieved {len(data_records)} records from InfluxDB")
+
+        result = {
+            "query": query,
+            "data": data_records,
+            "count": len(data_records),
+            "columns": list(df.columns),
+        }
+
+        return format_success_response(_with_connection_note(result, note))
+
+    except McpError:
+        raise
+    except influxdb.exceptions.InfluxDBClientError as e:
+        logger.error(f"InfluxDB client error: {e}", exc_info=True)
+        return format_error_response(
+            "influxdb_client_error", _error_with_note(str(e), note)
+        )
+    except influxdb.exceptions.InfluxDBServerError as e:
+        logger.error(f"InfluxDB server error: {e}", exc_info=True)
+        return format_error_response(
+            "influxdb_server_error", _error_with_note(str(e), note)
+        )
+    except Exception as e:
+        logger.error(f"Error querying InfluxDB: {e}", exc_info=True)
+        return format_error_response("query_failed", _error_with_note(str(e), note))
+
+
+# ── InfluxDB helpers ──────────────────────────────────────────────────────────
+
+# Per-request timeout for the InfluxDB client. Without it, an unreachable
+# host blocks for the OS TCP timeout times the client's retries (~300s),
+# which can starve the whole MCP server.
+INFLUX_TIMEOUT_SECONDS = 15
+
+# NOTE: never pass chunked=True to client.query() - influxdb-python requests
+# msgpack responses, and chunked msgpack bodies make it fail with
+# "unpack(b) received extra data" as soon as a result exceeds one chunk.
+# Bound result sizes with LIMIT instead.
+
+
+def _make_influx_client(params: dict) -> influxdb.InfluxDBClient:
+    return influxdb.InfluxDBClient(
+        host=params["INFLUX_HOST"],
+        port=params["INFLUX_PORT"],
+        username=params["INFLUX_USERNAME"],
+        password=params["INFLUX_PASSWORD"],
+        database=params["INFLUX_DB_NAME"],
+        ssl=False,
+        timeout=INFLUX_TIMEOUT_SECONDS,
+        retries=2,
+    )
+
+
+def _influx_quote(value: str) -> str:
+    """Escape a value for use inside single quotes in InfluxQL."""
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _list_measurement_names(client) -> list[str]:
+    points = client.query("SHOW MEASUREMENTS").get_points()
+    return [pt["name"] for pt in points if isinstance(pt, dict) and "name" in pt]
+
+
+def _device_measurement_name(measurement_names: list, device) -> str | None:
+    """Resolve the measurement holding a device's tag data.
+
+    Modern LE writes ALL of a device's registers into one measurement named
+    "<DeviceName>.<DeviceID>", indexed by register_id/tag/topic InfluxDB
+    tags; the NATS output topic (devicehub.alias.*) appears only as a tag
+    value there, not as a measurement name.
+    """
+    exact = f"{device.name}.{device.id}"
+    if exact in measurement_names:
+        return exact
+    if device.id:
+        for name in measurement_names:
+            if device.id in name:
+                return name
+    return None
+
+
+def _tag_data_source(
+    measurement_names: list, device, tag
+) -> tuple[str | None, str]:
+    """Return (measurement, where_prefix) for reading one tag's history.
+
+    Prefers a legacy per-topic measurement when one exists; otherwise the
+    per-device measurement filtered by the tag's register_id. The
+    where_prefix is either empty or an InfluxQL condition ending in ' AND '.
+    """
+    topic = _get_output_topic(tag)
+    if topic and topic in measurement_names:
+        return topic, ""
+    device_measurement = _device_measurement_name(measurement_names, device)
+    if device_measurement:
+        return (
+            device_measurement,
+            f"\"register_id\" = '{_influx_quote(tag.id)}' AND ",
+        )
+    # Nothing resolvable: fall back to the raw topic (query returns empty,
+    # matching the pre-existing behavior for absent data).
+    return topic, ""
+
+
+def _find_device(connection, device_name: str):
+    for d in dh_devices.list_devices(le_connection=connection):
+        if d.name == device_name:
+            return d
+    return None
+
+
+def _get_output_topic(tag) -> str | None:
+    for tp in tag.topics or []:
+        if tp.direction == "Output":
+            return tp.topic
+    return None
+
+
+def _validate_time_range(time_range: str) -> None:
+    if not re.fullmatch(r"\d+(ms|[usmhdw])", time_range):
+        raise McpError(
+            ErrorData(
+                code=INVALID_PARAMS,
+                message=f"Invalid time_range '{time_range}'. Use InfluxDB format e.g. '1h', '30m', '7d'.",
+            )
+        )
+
+
+# ── New tools ─────────────────────────────────────────────────────────────────
+
+
+async def list_influxdb_measurements(
+    request: Request, arguments: dict
+) -> list[TextContent]:
+    params = get_influx_connection_params(request)
+    note = _influx_connection_note(params)
+    try:
+        client = _make_influx_client(params)
+        rs = client.query("SHOW MEASUREMENTS")
+        measurements = sorted(pt["name"] for pt in rs.get_points())
+        return format_success_response(
+            _with_connection_note(
+                {
+                    "database": params["INFLUX_DB_NAME"],
+                    "count": len(measurements),
+                    "measurements": measurements,
+                },
+                note,
+            )
+        )
+    except McpError:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing measurements: {e}", exc_info=True)
+        return format_error_response("query_failed", _error_with_note(str(e), note))
+
+
+async def get_device_historical_data(
+    request: Request, arguments: dict
+) -> list[TextContent]:
+    note = None
+    try:
+        device_query = (arguments.get("device_query") or "").strip()
+        tag_name_query = (arguments.get("tag_name_query") or "").strip()
+        time_range = arguments.get("time_range", "1h")
+        limit = min(int(arguments.get("limit", 1000)), 100000)
+
+        if not device_query:
+            raise McpError(
+                ErrorData(code=INVALID_PARAMS, message="'device_query' is required")
+            )
+        _validate_time_range(time_range)
+
+        params = get_influx_connection_params(request)
+        note = _influx_connection_note(params)
+        client = _make_influx_client(params)
+
+        rs = client.query("SHOW MEASUREMENTS")
+        all_measurements = [pt["name"] for pt in rs.get_points()]
+
+        matches = difflib.get_close_matches(
+            device_query, all_measurements, n=20, cutoff=0.35
+        )
+        if not matches:
+            matches = [m for m in all_measurements if device_query.lower() in m.lower()]
+
+        if tag_name_query:
+            matches = [m for m in matches if tag_name_query.lower() in m.lower()]
+
+        if not matches:
+            return format_success_response(
+                _with_connection_note(
+                    {
+                        "device_query": device_query,
+                        "matched_measurements": [],
+                        "results": [],
+                        "message": "No measurements matched the query. Use list_influxdb_measurements to see available names.",
+                    },
+                    note,
+                )
+            )
+
+        results = []
+        for measurement in matches[:5]:
+            try:
+                q = f'SELECT * FROM "{measurement}" WHERE time > now() - {time_range} LIMIT {limit}'
+                r = client.query(q)
+                pts = list(r.get_points())
+                results.append(
+                    {"measurement": measurement, "count": len(pts), "data": pts}
+                )
+            except Exception as ex:
+                results.append({"measurement": measurement, "error": str(ex)})
+
+        return format_success_response(
+            _with_connection_note(
+                {
+                    "device_query": device_query,
+                    "matched_measurements": matches,
+                    "time_range": time_range,
+                    "results": results,
+                    "total_records": sum(r.get("count", 0) for r in results),
+                },
+                note,
+            )
+        )
+
+    except McpError:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_device_historical_data: {e}", exc_info=True)
+        return format_error_response("query_failed", _error_with_note(str(e), note))
+
+
+async def query_tag_data(request: Request, arguments: dict) -> list[TextContent]:
+    note = None
+    try:
+        device_name = (arguments.get("device_name") or "").strip()
+        tag_name = (arguments.get("tag_name") or "").strip()
+        tag_id = (arguments.get("tag_id") or "").strip()
+        time_range = arguments.get("time_range", "1h")
+        limit = min(int(arguments.get("limit", 500)), 500)
+
+        if not device_name:
+            raise McpError(
+                ErrorData(code=INVALID_PARAMS, message="'device_name' is required")
+            )
+        if not tag_name and not tag_id:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS, message="'tag_name' or 'tag_id' is required"
+                )
+            )
+        _validate_time_range(time_range)
+
+        connection = get_litmus_connection(request)
+        device = _find_device(connection, device_name)
+        if not device:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Device '{device_name}' not found. Use get_devicehub_devices to list devices.",
+                )
+            )
+
+        tag_list = dh_tags.list_registers_from_single_device(
+            device, le_connection=connection
+        )
+        if tag_id:
+            tag = next((t for t in tag_list if t.id == tag_id), None)
+            identifier = f"ID '{tag_id}'"
+        else:
+            tag = next((t for t in tag_list if t.tag_name == tag_name), None)
+            identifier = f"name '{tag_name}'"
+
+        if not tag:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Tag with {identifier} not found on device '{device_name}'.",
+                )
+            )
+
+        params = get_influx_connection_params(request)
+        note = _influx_connection_note(params)
+        client = _make_influx_client(params)
+
+        measurement, where_prefix = _tag_data_source(
+            _list_measurement_names(client), device, tag
+        )
+        if not measurement:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=(
+                        f"Tag '{tag.tag_name}' has no output topic and no "
+                        "per-device measurement was found - no data in InfluxDB."
+                    ),
+                )
+            )
+
+        q = (
+            f'SELECT * FROM "{measurement}" WHERE {where_prefix}'
+            f"time > now() - {time_range} ORDER BY time DESC LIMIT {limit}"
+        )
+        r = client.query(q)
+        pts = list(r.get_points())
+
+        return format_success_response(
+            _with_connection_note(
+                {
+                    "device_name": device_name,
+                    "tag_name": tag.tag_name,
+                    "tag_id": tag.id,
+                    "measurement": measurement,
+                    "filtered_by_register_id": bool(where_prefix),
+                    "time_range": time_range,
+                    "count": len(pts),
+                    "data": pts,
+                },
+                note,
+            )
+        )
+
+    except McpError:
+        raise
+    except Exception as e:
+        logger.error(f"Error in query_tag_data: {e}", exc_info=True)
+        return format_error_response("query_failed", _error_with_note(str(e), note))
+
+
+async def get_tag_statistics(request: Request, arguments: dict) -> list[TextContent]:
+    note = None
+    try:
+        device_name = (arguments.get("device_name") or "").strip()
+        tag_name = (arguments.get("tag_name") or "").strip()
+        tag_id = (arguments.get("tag_id") or "").strip()
+        time_range = arguments.get("time_range", "1h")
+
+        if not device_name:
+            raise McpError(
+                ErrorData(code=INVALID_PARAMS, message="'device_name' is required")
+            )
+        if not tag_name and not tag_id:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS, message="'tag_name' or 'tag_id' is required"
+                )
+            )
+        _validate_time_range(time_range)
+
+        connection = get_litmus_connection(request)
+        device = _find_device(connection, device_name)
+        if not device:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS, message=f"Device '{device_name}' not found."
+                )
+            )
+
+        tag_list = dh_tags.list_registers_from_single_device(
+            device, le_connection=connection
+        )
+        if tag_id:
+            tag = next((t for t in tag_list if t.id == tag_id), None)
+        else:
+            tag = next((t for t in tag_list if t.tag_name == tag_name), None)
+
+        if not tag:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Tag not found on device '{device_name}'.",
+                )
+            )
+
+        params = get_influx_connection_params(request)
+        note = _influx_connection_note(params)
+        client = _make_influx_client(params)
+
+        measurement, where_prefix = _tag_data_source(
+            _list_measurement_names(client), device, tag
+        )
+        if not measurement:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=(
+                        f"Tag '{tag.tag_name}' has no output topic and no "
+                        "per-device measurement was found."
+                    ),
+                )
+            )
+
+        q = (
+            f'SELECT mean("value") AS mean, min("value") AS min, max("value") AS max, '
+            f'count("value") AS count, stddev("value") AS stddev '
+            f'FROM "{measurement}" WHERE {where_prefix}time > now() - {time_range}'
+        )
+        r = client.query(q)
+        pts = list(r.get_points())
+        stats = pts[0] if pts else {}
+        # Aggregate queries without GROUP BY time() carry the epoch-0
+        # timestamp; drop it so it is not mistaken for a data timestamp.
+        stats.pop("time", None)
+
+        mean_v = stats.get("mean")
+        std_v = stats.get("stddev")
+        if mean_v is not None and std_v is not None:
+            stats["baseline_low"] = mean_v - 2 * std_v
+            stats["baseline_high"] = mean_v + 2 * std_v
+
+        return format_success_response(
+            _with_connection_note(
+                {
+                    "device_name": device_name,
+                    "tag_name": tag.tag_name,
+                    "tag_id": tag.id,
+                    "measurement": measurement,
+                    "filtered_by_register_id": bool(where_prefix),
+                    "time_range": time_range,
+                    "statistics": stats,
+                },
+                note,
+            )
+        )
+
+    except McpError:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_tag_statistics: {e}", exc_info=True)
+        return format_error_response("query_failed", _error_with_note(str(e), note))
+
+
+async def get_device_data_for_inference(
+    request: Request, arguments: dict
+) -> list[TextContent]:
+    note = None
+    try:
+        device_name = (arguments.get("device_name") or "").strip()
+        time_range = arguments.get("time_range", "1h")
+        include_statistics = bool(arguments.get("include_statistics", True))
+        sample_size = min(int(arguments.get("sample_size", 20)), 100)
+
+        if not device_name:
+            raise McpError(
+                ErrorData(code=INVALID_PARAMS, message="'device_name' is required")
+            )
+        _validate_time_range(time_range)
+
+        connection = get_litmus_connection(request)
+        device = _find_device(connection, device_name)
+        if not device:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS, message=f"Device '{device_name}' not found."
+                )
+            )
+
+        params = get_influx_connection_params(request)
+        note = _influx_connection_note(params)
+        client = _make_influx_client(params)
+
+        tag_list = dh_tags.list_registers_from_single_device(
+            device, le_connection=connection
+        )
+
+        measurement_names = _list_measurement_names(client)
+
+        tags_data = []
+        for tag in tag_list:
+            measurement, where_prefix = _tag_data_source(
+                measurement_names, device, tag
+            )
+            entry = {
+                "tag_name": tag.tag_name,
+                "tag_id": tag.id,
+                "value_type": tag.value_type,
+                "measurement": measurement,
+            }
+
+            if measurement and include_statistics:
+                try:
+                    q = (
+                        f'SELECT mean("value") AS mean, min("value") AS min, max("value") AS max, '
+                        f'count("value") AS count, stddev("value") AS stddev '
+                        f'FROM "{measurement}" WHERE {where_prefix}time > now() - {time_range}'
+                    )
+                    r = client.query(q)
+                    pts = list(r.get_points())
+                    if pts:
+                        s = pts[0]
+                        # Aggregate queries without GROUP BY time() carry the
+                        # epoch-0 timestamp; drop it so it is not mistaken for
+                        # a data timestamp.
+                        s.pop("time", None)
+                        mean_v, std_v = s.get("mean"), s.get("stddev")
+                        if mean_v is not None and std_v is not None:
+                            s["baseline_low"] = mean_v - 2 * std_v
+                            s["baseline_high"] = mean_v + 2 * std_v
+                        entry["statistics"] = s
+                except Exception as e:
+                    entry["statistics_error"] = str(e)
+                    logger.warning(
+                        f"Statistics query failed for measurement '{measurement}': {e}"
+                    )
+
+            if measurement and sample_size > 0:
+                try:
+                    q = (
+                        f'SELECT * FROM "{measurement}" WHERE {where_prefix}'
+                        f"time > now() - {time_range} ORDER BY time DESC LIMIT {sample_size}"
+                    )
+                    r = client.query(q)
+                    entry["recent_samples"] = list(r.get_points())
+                except Exception as e:
+                    entry["samples_error"] = str(e)
+                    logger.warning(
+                        f"Samples query failed for measurement '{measurement}': {e}"
+                    )
+
+            tags_data.append(entry)
+
+        driver_name = None
+        try:
+            driver_name = getattr(device.driver, "name", None) or str(device.driver)
+        except Exception:
+            pass
+
+        return format_success_response(
+            _with_connection_note(
+                {
+                    "device": {
+                        "name": device.name,
+                        "id": device.id,
+                        "driver": driver_name,
+                        "description": device.description,
+                    },
+                    "time_range": time_range,
+                    "sample_size": sample_size,
+                    "tag_count": len(tags_data),
+                    "tags": tags_data,
+                },
+                note,
+            )
+        )
+
+    except McpError:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_device_data_for_inference: {e}", exc_info=True)
+        return format_error_response("query_failed", _error_with_note(str(e), note))
+
+
+TOOLS = [
+    {
+        "name": "list_nats_topics",
+        "category": "nats.topics",
+        "annotations": ToolAnnotations(title="List NATS Topics", readOnlyHint=True),
+        "description": (
+            "Lists the NATS topics that exist on this Litmus Edge instance, so "
+            "topics can be discovered instead of guessed. Call this FIRST when "
+            "you need a topic for get_current_value_from_topic or "
+            "get_multiple_values_from_topic and do not already know the exact "
+            "subject. Topics are collected from every component that publishes "
+            "them and merged: 'analytics' (the broadest registry, Litmus Edge "
+            "4.0.x+), 'devicehub' (per-tag input/output topics) and "
+            "'digitaltwins' (per-instance payload topics). Each result names "
+            "which sources reported it. Narrow large fleets with 'pattern'. If "
+            "one component is unavailable the others are still returned, and "
+            "the per-source status says which was skipped and why. Note: users "
+            "may call these 'datahub subscribe topics' or 'pubsub topics'."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "sources": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(_TOPIC_SOURCES)},
+                    "description": (
+                        "Components to query (default: all three). Restrict this "
+                        "when you only care about, say, digital twin topics."
+                    ),
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": (
+                        "Case-insensitive substring filter on the topic name, "
+                        "e.g. 'Machine1' or 'PartMade'"
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Page size, 1-1000 (default 200)",
+                    "default": 200,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": (
+                        "Number of topics to skip; use next_offset from the "
+                        "previous page (default 0)"
+                    ),
+                    "default": 0,
+                },
+            },
+            "required": [],
+        },
+        "handler": list_nats_topics,
+    },
+    {
+        "name": "get_current_value_from_topic",
+        "category": "nats.topics",
+        "annotations": ToolAnnotations(title="Get Current Topic Value", readOnlyHint=True),
+        "description": (
+            "Gets the current value from a NATS topic. "
+            "Subscribes to the topic and returns the next published message. "
+            "Requires the exact subject: call list_nats_topics first if you do "
+            "not already know it, rather than guessing. "
+            "Note: User may refer to NATS topics as 'datahub subscribe topic' or 'pubsub topic'."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "NATS topic to subscribe to (also called datahub subscribe topic or pubsub topic)",
+                },
+            },
+            "required": ["topic"],
+        },
+        "handler": get_current_value_on_topic_tool,
+    },
+    {
+        "name": "get_multiple_values_from_topic",
+        "category": "nats.topics",
+        "annotations": ToolAnnotations(title="Get Multiple Topic Values", readOnlyHint=True),
+        "description": (
+            "Collects multiple sequential values from a NATS topic for trend analysis or plotting. "
+            "WARNING: This function blocks until num_samples messages are received. "
+            "Use this for time-series data collection, trend analysis, or creating charts. "
+            "Does NOT retrieve historical data - waits for new messages. "
+            "Requires the exact subject: call list_nats_topics first if you do "
+            "not already know it, rather than guessing. "
+            "Note: User may refer to NATS topics as 'datahub subscribe topic' or 'pubsub topic'."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "NATS topic to monitor (also called datahub subscribe topic or pubsub topic)",
+                },
+                "num_samples": {
+                    "type": "integer",
+                    "description": "Number of messages to collect (default: 10, max: 100)",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 100,
+                },
+                "nats_source": {
+                    "type": "string",
+                    "description": "Optional: NATS broker host. Overrides the configured NATS_SOURCE and the default (the Edge URL host).",
+                },
+                "nats_port": {
+                    "type": "string",
+                    "description": "Optional: NATS broker port (default: 4222)",
+                },
+            },
+            "required": ["topic"],
+        },
+        "handler": get_multiple_values_from_topic_tool,
+    },
+    {
+        "name": "get_historical_data_from_influxdb",
+        "category": "datahub.influx",
+        "annotations": ToolAnnotations(title="Query Historical Data", readOnlyHint=True),
+        "description": (
+            "Queries historical time-series data from InfluxDB. "
+            "Retrieve past data, historic trends, or perform data analysis on stored values. "
+            "User provides the measurement name and how much historical data they want. "
+            "Note: This retrieves PAST data already stored in the database, "
+            "unlike get_multiple_values_from_topic which waits for NEW messages."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "measurement": {
+                    "type": "string",
+                    "description": "Measurement/variable name in InfluxDB (e.g., 'variable0', 'temperature', 'pressure'). "
+                    "This is the name of the data series you want to retrieve.",
+                },
+                "time_range": {
+                    "type": "string",
+                    "description": "How much historical data to retrieve (e.g., '5m', '1h', '24h', '7d', '30d'). "
+                    "Examples: '5m' = last 5 minutes, '1h' = last hour, '24h' = last day. Default: '1h'",
+                    "default": "1h",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max records to return (default 10000, max 100000)",
+                    "default": 10000,
+                },
+            },
+            "required": ["measurement"],
+        },
+        "handler": get_historical_data_from_influxdb_tool,
+    },
+    {
+        "name": "list_influxdb_measurements",
+        "category": "datahub.influx",
+        "annotations": ToolAnnotations(title="List InfluxDB Measurements", readOnlyHint=True),
+        "description": (
+            "Lists all measurement names in the InfluxDB tsdata database. "
+            "Use this to discover available data series before querying historical data. "
+            "Measurement names are typically NATS topic strings."
+        ),
+        "schema": {"type": "object", "properties": {}, "required": []},
+        "handler": list_influxdb_measurements,
+    },
+    {
+        "name": "get_device_historical_data",
+        "category": "datahub.queries",
+        "annotations": ToolAnnotations(title="Get Device Historical Data", readOnlyHint=True),
+        "description": (
+            "Queries historical InfluxDB data using fuzzy device name matching. "
+            "Use this when you know a device name but not the exact InfluxDB measurement. "
+            "For precise measurement queries use get_historical_data_from_influxdb instead."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "device_query": {
+                    "type": "string",
+                    "description": "Device or measurement name to search for (fuzzy matched)",
+                },
+                "tag_name_query": {
+                    "type": "string",
+                    "description": "Optional: further filter matches by tag name substring",
+                },
+                "time_range": {
+                    "type": "string",
+                    "description": "InfluxDB duration (e.g. '1h', '24h', '7d'). Default '1h'",
+                    "default": "1h",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max records per measurement (default 1000, max 100000)",
+                    "default": 1000,
+                },
+            },
+            "required": ["device_query"],
+        },
+        "handler": get_device_historical_data,
+    },
+    {
+        "name": "query_tag_data",
+        "category": "datahub.queries",
+        "annotations": ToolAnnotations(title="Query Tag Data", readOnlyHint=True),
+        "description": (
+            "Queries historical time-series data for a specific tag by looking up its InfluxDB topic. "
+            "Returns data ordered newest first. "
+            "Use get_tag_statistics for aggregated stats instead of raw samples."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "device_name": {
+                    "type": "string",
+                    "description": "Device that owns the tag",
+                },
+                "tag_name": {
+                    "type": "string",
+                    "description": "Tag display name (use this or tag_id)",
+                },
+                "tag_id": {
+                    "type": "string",
+                    "description": "Tag UUID (alternative to tag_name)",
+                },
+                "time_range": {
+                    "type": "string",
+                    "description": "InfluxDB duration (default '1h')",
+                    "default": "1h",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max records (default 500, max 500)",
+                    "default": 500,
+                },
+            },
+            "required": ["device_name"],
+        },
+        "handler": query_tag_data,
+    },
+    {
+        "name": "get_tag_statistics",
+        "category": "datahub.queries",
+        "annotations": ToolAnnotations(title="Get Tag Statistics", readOnlyHint=True),
+        "description": (
+            "Returns aggregate statistics for a tag: mean, min, max, stddev, count, and baseline range (mean +/- 2sigma). "
+            "Use this for anomaly detection or understanding normal operating range. "
+            "Use query_tag_data to get raw samples instead."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "device_name": {
+                    "type": "string",
+                    "description": "Device that owns the tag",
+                },
+                "tag_name": {
+                    "type": "string",
+                    "description": "Tag display name (use this or tag_id)",
+                },
+                "tag_id": {
+                    "type": "string",
+                    "description": "Tag UUID (alternative to tag_name)",
+                },
+                "time_range": {
+                    "type": "string",
+                    "description": "InfluxDB duration (default '1h')",
+                    "default": "1h",
+                },
+            },
+            "required": ["device_name"],
+        },
+        "handler": get_tag_statistics,
+    },
+    {
+        "name": "get_device_data_for_inference",
+        "category": "datahub.queries",
+        "annotations": ToolAnnotations(title="Get Device Data for Inference", readOnlyHint=True),
+        "description": (
+            "Comprehensive data package for AI inference: device metadata, all tags, per-tag statistics, "
+            "and recent samples in one call. Preferred when asking the AI to analyze or diagnose a device. "
+            "Use get_tag_statistics or query_tag_data for single-tag queries."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "device_name": {
+                    "type": "string",
+                    "description": "Device to gather data for",
+                },
+                "time_range": {
+                    "type": "string",
+                    "description": "InfluxDB duration (default '1h')",
+                    "default": "1h",
+                },
+                "include_statistics": {
+                    "type": "boolean",
+                    "description": "Include per-tag statistics (default true)",
+                    "default": True,
+                },
+                "sample_size": {
+                    "type": "integer",
+                    "description": "Recent samples per tag (default 20, max 100)",
+                    "default": 20,
+                },
+            },
+            "required": ["device_name"],
+        },
+        "handler": get_device_data_for_inference,
+    },
+]

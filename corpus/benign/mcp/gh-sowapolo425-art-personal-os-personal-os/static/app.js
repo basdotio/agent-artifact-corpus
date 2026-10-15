@@ -1,0 +1,55 @@
+'use strict';
+const $=id=>document.getElementById(id);
+const names={record:'随手记录',thought:'思考反思',event:'经历事件',profile:'个人档案',goal:'目标',project:'项目',decision:'决策',knowledge:'知识'};
+const state={view:'overview',data:null,loading:false,request:0};
+const format=t=>new Date(t).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+function node(tag,text='',className=''){const n=document.createElement(tag);n.textContent=text;if(className)n.className=className;return n;}
+function notice(message,error=false){$('notice').hidden=false;$('notice').textContent=message;$('notice').classList.toggle('error',error);}
+async function api(path,body){const options=body?{method:'POST',headers:{'Content-Type':'application/json','X-Personal-OS':'dashboard'},body:JSON.stringify(body)}:{};const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||'请求失败');return data;}
+const restricted=()=>$('restricted').checked?'1':'0';
+function card(record){const el=node('button','','record-card');const tags=node('div');tags.append(node('span',names[record.kind]||record.kind,'chip'));if(record.effective_state&&record.effective_state!=='active')tags.append(node('span',typeof memoryStates!=='undefined'?(memoryStates[record.effective_state]||record.effective_state):record.effective_state,'chip pending'));if(record.status==='confirmed')tags.append(node('span',' 已确认','chip gray'));if(record.claim_type)tags.append(node('span',({user_statement:'用户陈述',inference:'AI 推测',conflict:'矛盾待确认'})[record.claim_type],'chip pending'));if(record.conversation)tags.append(node('span',record.conversation.role==='user'?'用户原话':'AI 回复','chip gray'));if(record.status==='imported_source')tags.append(node('span',' 导入资料','chip gray'));if(record.sensitivity==='restricted')tags.append(node('span',' 受限','chip pending'));el.append(tags,node('h3',record.title),node('p',record.excerpt),node('small',`${format(record.updated_at)} · v${record.revision}`));el.onclick=()=>openRecord(record.id);return el;}
+function records(target,items){target.replaceChildren();if(!items.length)target.append(node('div','还没有记录。在 Agent 中授权保存，或点击“记录一个想法”开始。','empty'));else items.forEach(r=>target.append(card(r)));}
+function setView(view){state.view=view;const titles={overview:['让经历成为可复用的资产。','看见你的积累，连接过去的思考与未来的方向。','总览'],records:['每一份记录，都有来处。','搜索原文，查看来源，保留当时的你。','资料库'],timeline:['看见你一路积累的轨迹。','让分散的记录沿着时间连接起来。','成长时间线'],proposals:['你的确认，让理解更准确。','AI 提出建议，由你决定哪些进入正式档案。','待确认草稿'],graph:['把你的资料连接起来。','从原始表达到确认结论，每一次理解都可以找到依据。','资料关联图'],imports:['历史资料，也能成为新的起点。','由你选择和确认，保留来源，避免重复积累。','导入历史资料'],backup:['把你的积累，稳妥地留在自己手中。','备份完整资料，校验后恢复到独立空间。','备份与恢复'],guide:['让你的 Agent，更了解你。','连接同一份本地资料，开始持续积累。','使用指南']};const t=titles[view];$('page-title').textContent=t[0];$('page-description').textContent=t[1];$('breadcrumb').textContent=t[2];Object.keys(titles).forEach(v=>$(v+'-view').hidden=v!==view);document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));load();}
+async function load(){const request=++state.request;try{const params=new URLSearchParams({restricted:restricted(),q:state.view==='records'?$('query').value:'',kind:state.view==='records'?$('kind').value:''});const data=await api('/api/snapshot?'+params);if(request!==state.request)return;state.data=data;render(data);$('last-refresh').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN');}catch(e){if(request===state.request)notice('无法读取资料库：'+e.message,true);}}
+function render(data){['total','pending','confirmed'].forEach(k=>$(k).textContent=data[k]);$('pending-badge').textContent=data.pending;$('modules').textContent=Object.keys(data.kinds).length;
+const counts=[];const labels=[];for(let i=6;i>=0;i--){const day=new Date();day.setDate(day.getDate()-i);const key=day.toDateString();counts.push(data.created_dates.filter(t=>new Date(t).toDateString()===key).length);labels.push((day.getMonth()+1)+'/'+day.getDate());}
+const max=Math.max(1,...counts);$('activity').replaceChildren();counts.forEach((c,i)=>{const d=node('div','','day');d.append(node('span',String(c)),node('div','',`bar level-${c===0?0:Math.max(1,Math.ceil(c/max*5))}`),node('span',labels[i]));$('activity').append(d);});
+$('distribution').replaceChildren();const kinds=Object.entries(data.kinds).sort((a,b)=>b[1]-a[1]);if(!kinds.length)$('distribution').append(node('p','记录之后，你会在这里看到资料分布。','muted'));kinds.forEach(([k,c])=>{const row=node('div','','distribution-row');const meter=node('progress','','meter');meter.max=Math.max(1,data.total);meter.value=c;row.append(node('span',names[k]),meter,node('span',String(c)));$('distribution').append(row);});
+records($('recent-records'),data.records.slice(0,6));records($('all-record-list'),data.records);$('result-count').textContent=data.matching>200?`找到 ${data.matching} 条，显示最近 200 条`:`${data.matching} 条记录`;
+$('timeline').replaceChildren();const timeline=[...data.records].sort((a,b)=>b.created_at.localeCompare(a.created_at));timeline.forEach(r=>{const row=node('div','','timeline-row');row.append(node('div',new Date(r.created_at).toLocaleDateString('zh-CN'),'timeline-date'),card(r));$('timeline').append(row);});if(!timeline.length)$('timeline').append(node('div','还没有时间线记录。','empty'));if(data.matching>200)$('timeline').prepend(node('p','显示最近更新的 200 条记录，按创建时间排列。','muted'));
+$('proposal-list').replaceChildren();data.proposals.forEach(p=>{const article=node('article','','panel proposal');article.append(node('span','待确认','chip pending'),node('h3',p.record.title),node('p',p.reason));const compare=node('div','','comparison');[[p.before?'原记录 · v'+p.before.revision:'原记录',p.before?.content||'这是新建档案，没有原记录。'],['建议内容 · v'+p.record.revision,p.record.content]].forEach(([title,body])=>{const panel=node('div');panel.append(node('strong',title),node('pre',body));compare.append(panel);});article.append(compare);article.append(node('p',`原记录时间：${p.before?format(p.before.updated_at):'无'} · 范围：${p.before?.memory?.scope||'未指定'}；草稿时间：${format(p.created_at)} · 范围：${p.record.memory?.scope||'未指定'}`,'muted'));if(p.record.claim_type)article.append(node('p','结论类型：'+({user_statement:'用户明确陈述',inference:'AI 推测',conflict:'矛盾待确认'})[p.record.claim_type],'chip pending'));const sources=node('div','依据：','muted');(p.record.source_ids||[]).forEach(id=>{const b=node('button',id.slice(0,8)+'…','text-button');b.onclick=()=>openRecord(id);sources.append(b);});if(!(p.record.source_ids||[]).length)sources.append(node('span','未关联证据记录，请仔细核对。'));article.append(sources);const resolution=typeof conflictControls==='function'?conflictControls(article,p):null;const actions=node('div','','actions');for(const action of ['approve','reject']){const b=node('button',action==='approve'?'批准，更新正式档案':'拒绝这份草稿',action==='approve'?'button primary':'button quiet');b.onclick=async()=>{if(!confirm(action==='approve'?'确认已核对内容与来源，并更新正式档案？':'确认拒绝这份草稿？'))return;b.disabled=true;try{await api('/api/review',{id:p.id,action,...(resolution?resolution():{})});notice(action==='approve'?'已批准并更新正式档案。':'已拒绝草稿，正式档案保持原内容。');await load();}catch(e){notice('未完成审核：'+e.message,true);b.disabled=false;}};actions.append(b);}article.append(actions);$('proposal-list').append(article);});if(!data.proposals.length)$('proposal-list').append(node('div','没有待确认草稿。Agent 提交新建议后会显示在这里。','empty'));
+if(typeof renderExtras==='function')renderExtras(data);
+}
+let recordRequest=0;
+function closeRecord(){
+  recordRequest++;
+  $('record-dialog').close();
+  if($('record-governance'))$('record-governance').replaceChildren();
+  for(const id of ['record-title','record-meta','record-content','record-sources','record-history'])$(id).replaceChildren();
+}
+async function openRecord(id){
+  const request=++recordRequest,scope=restricted();
+  try{
+    const query=new URLSearchParams({id,restricted:scope});
+    const [r,revisions]=await Promise.all([api('/api/record?'+query),api('/api/history?'+query)]);
+    if(request!==recordRequest||scope!==restricted())return;
+    $('record-title').textContent=r.title;
+    const status=r.status==='confirmed'?'已确认':r.status==='imported_source'?'导入资料':r.status==='conversation_source'?(r.conversation?.role==='user'?'用户原话':'AI 回复'):'本人表达';
+    $('record-meta').textContent=`${names[r.kind]} · ${status} · v${r.revision} · ${format(r.updated_at)}`;
+    $('record-content').textContent=r.content;
+    $('record-sources').replaceChildren(node('p',r.source),node('small','记录 ID：'+r.id));
+    if(r.import_locator)$('record-sources').append(node('p','文件位置：'+r.import_locator));
+    if(r.conversation)$('record-sources').append(node('p',`来源软件：${r.conversation.agent} · 会话：${r.conversation.conversation_id} · 消息：${r.conversation.message_id} · 原始时间：${r.conversation.timestamp||'未提供'}`));
+    if(r.claim_type)$('record-sources').append(node('p','结论类型：'+({user_statement:'用户明确陈述',inference:'AI 推测',conflict:'矛盾待确认'})[r.claim_type]));
+    (r.source_ids||[]).forEach(sid=>{const b=node('button','查看依据 '+sid.slice(0,8),'text-button');b.onclick=()=>openRecord(sid);$('record-sources').append(b);});
+    $('record-history').replaceChildren();
+    revisions.forEach(old=>{const details=node('details');details.append(node('summary',`v${old.revision} · ${format(old.updated_at)}`),node('pre',old.content));$('record-history').append(details);});
+    if(typeof renderGovernance==='function')renderGovernance(r);
+    if(!$('record-dialog').open)$('record-dialog').showModal();
+  }catch(e){if(request===recordRequest&&scope===restricted())notice('无法打开记录：'+e.message,true);}
+}
+$('record-dialog').addEventListener('cancel',()=>{recordRequest++;});
+document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));$('all-records').onclick=()=>setView('records');$('refresh').onclick=load;$('restricted').onchange=()=>{closeRecord();load();};$('kind').onchange=load;let timer;$('query').oninput=()=>{clearTimeout(timer);timer=setTimeout(load,250);};$('new-note').onclick=()=>$('note-dialog').showModal();$('close-note').onclick=()=>$('note-dialog').close();$('close-record').onclick=closeRecord;
+for(const [key,value]of Object.entries(names)){const option=node('option',value);option.value=key;$('kind').append(option);if(key!=='profile')$('note-kind').append(option.cloneNode(true));}$('note-kind').value='thought';
+$('note-form').onsubmit=async event=>{event.preventDefault();const button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;try{await api('/api/capture',{title:$('note-title').value,content:$('note-content').value,kind:$('note-kind').value,sensitivity:$('note-sensitivity').value,memory:typeof captureMemory==='function'?captureMemory():undefined});$('note-form').reset();$('note-kind').value='thought';$('note-kind').onchange?.();$('note-dialog').close();notice('原始表达已保存到本地。');await load();}catch(e){notice('保存失败：'+e.message,true);}finally{button.disabled=false;}};
+load();setInterval(()=>{if(!document.hidden&&!$('note-dialog').open&&!$('record-dialog').open&&!(state.view==='proposals'&&Array.from(document.querySelectorAll('#proposal-list select, #proposal-list input')).some(i=>i.value)))load();},30000);

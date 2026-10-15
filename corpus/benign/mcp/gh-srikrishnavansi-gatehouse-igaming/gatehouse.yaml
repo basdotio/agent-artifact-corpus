@@ -1,0 +1,70 @@
+# gatehouse config for a regulated iGaming support agent.
+# Rules use the same shape as an InteractiveAI policy (id, condition, action), but they are
+# enforced in code at the tool boundary, so no prompt, jailbreak or model swap can talk past them.
+
+upstream: backend.py                  # or http://operator-mcp:8765/mcp
+api_key: ${MCP_API_KEY}               # what the platform injects into a self-hosted MCP; checked on every request
+audit_log: audit.jsonl
+mode: enforce                         # or shadow: log what would be blocked, block nothing
+
+# Attaching a profile is the permission grant: run one gatehouse per profile and give each its
+# own entry under agent_config.mcps. A tool outside the profile is invisible and uncallable.
+profiles:
+  support-read:
+    tools: [get_player, list_transactions, get_ticket]
+  support-write:
+    tools: [get_player, list_transactions, get_ticket, add_ticket_comment, close_ticket,
+            apply_bonus, update_bank_account, set_self_exclusion]
+  # export_player_data is in no profile: a GDPR export is never an agent's call.
+
+# What the model may read back. Applied to every result before it reaches the agent,
+# and to the arguments written into the audit log.
+mask:
+  fields:
+    iban: last4
+    phone: last4
+    email: domain
+    date_of_birth: drop
+    document_number: drop
+  patterns: [iban, card, email, phone]   # PII inside free text, e.g. a ticket description
+
+# First match wins. allow is the default when nothing matches.
+rules:
+  - id: bank-account-changes-go-to-a-human
+    tools: [update_bank_account]
+    action: handoff
+    reason: Bank account changes are always handled by a person.
+
+  - id: self-exclusion-goes-to-a-human
+    tools: [set_self_exclusion]
+    action: handoff
+    reason: Responsible-gaming requests are confirmed by a trained agent.
+
+  - id: bonus-must-be-positive
+    tools: [apply_bonus]
+    when: {amount_eur: {lte: 0}}
+    action: deny
+    reason: A bonus is a credit; zero or negative amounts are not bonuses.
+
+  - id: bonus-above-50-needs-a-supervisor
+    tools: [apply_bonus]
+    when: {amount_eur: {gt: 50}}
+    action: handoff
+    reason: Goodwill bonuses above 50 EUR need a supervisor.
+
+  - id: close-only-with-a-resolution
+    tools: [close_ticket]
+    when: {resolution: {missing: true}}
+    action: deny
+    reason: close_ticket needs a resolution note for the audit trail.
+
+  - id: public-comments-carry-no-bank-details
+    tools: [add_ticket_comment]
+    when: {public: {equals: true}, body: {matches: "[A-Z]{2}\\d{2} ?\\d{4}"}}
+    action: deny
+    reason: A public comment must not contain an IBAN.
+
+# A retried write with the same arguments returns the first result instead of running again.
+idempotency:
+  tools: [apply_bonus, add_ticket_comment, update_bank_account]
+  window_seconds: 600

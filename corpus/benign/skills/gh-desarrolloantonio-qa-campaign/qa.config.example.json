@@ -1,0 +1,78 @@
+{
+  "_readBy": "Read by the scripts: `android.*`, `devices`, `managedDevices` and `campaign`. Everything else documents the plan for the humans and the agent filling CAMPAIGN.md. Secrets never go in this file",
+
+  "campaign": "my-app release QA",
+  "_campaign": "optional: the name the device claim uses to tell campaigns apart. Without it, the git root of this file's folder — so a second config for the same campaign (another app id for the release build) is still the same campaign.",
+
+  "app": {
+    "name": "My App",
+    "reference": "https://example.com/app  (REF: the implementation that is the full list of what the domain supports)"
+  },
+
+  "android": {
+    "_readBy": "harness/android/ui.py",
+    "package": "com.example.myapp.debug",
+    "_packagePrefix": "optional. What counts as 'the app' in the accessibility tree and the crash log. Without it, exactly `package`. Prefer a LIST of exact names to count several variants as one app: [\"com.example.myapp\", \"com.example.myapp.debug\"]. A bare prefix string still works, but it is REFUSED when more than one installed package matches it — the vendor's other apps would read as this one's, and a flow driven in one would count as the other's.",
+    "secretKeys": ["nfc", "idnummer"],
+    "_secretKeys": "optional: words that are credentials in THIS product — an NFC card id that signs someone in, an employee number. db, file and log hide values whose key contains one.",
+    "databases": {
+      "main": "main_database.db",
+      "other": "other_database.db",
+      "work": "no_backup/androidx.work.workdb"
+    },
+    "_databases": "alias → a SQLite file: a bare name is inside the app's databases/ folder, a path with / is relative to its data folder (WorkManager's queue lives in no_backup/). `ui.py db <alias>` refuses a name that is not listed here, unless it is itself a path (it has a / or ends in .db). `ui.py files` shows where the stores really are.",
+    "files": {
+      "settings": "shared_prefs/settings.xml",
+      "session": "files/datastore/session.preferences_pb"
+    },
+    "_files": "alias → any other file the app keeps, relative to its data folder. `ui.py file <alias>` prints text with secret-looking values hidden, and refuses to print binary (a Proto DataStore): copy it with --out for the project's own reader."
+  },
+
+  "ios": {
+    "_readBy": "nothing yet — the shape a harness/ios/ is expected to read",
+    "bundleId": "com.example.myapp",
+    "stores": {
+      "main": "Library/Application Support/Model.sqlite"
+    },
+    "_stores": "alias → path relative to the app's data container (or an App Group container)"
+  },
+
+  "web": {
+    "_readBy": "nothing yet — the shape a harness/web/ is expected to read",
+    "origin": "https://staging.example.com",
+    "stores": {
+      "main": "indexeddb:my-app-db"
+    }
+  },
+
+  "devices": {
+    "_readBy": "ui.py --device <alias>, net.sh --device <alias> / QA_DEVICE",
+    "phone": "avd:Pixel_8_API_36",
+    "tablet": "avd:Pixel_Tablet_API_36",
+    "test-phone": "0A1B2C3D4E5F",
+    "_note": "alias → the platform's identifier: `avd:<name>` for an Android emulator (its serial is only the console port it got at boot, so it is looked up on every command — start emulators with -port <even number>), an adb serial for a physical phone; a simulator UDID for iOS; a browser profile or viewport name for web. Once this lists any device, the scripts refuse every device that is not on the list (keys starting with _ are ignored)."
+  },
+
+  "managedDevices": ["test-phone"],
+  "_managedDevices": "aliases or serials of devices that are not the campaign's to alter (a managed work phone, someone's own phone): rotate, size, demo, clear-crashes and net.sh on/off/slow/full refuse on them unless --allow-device-change / QA_ALLOW_DEVICE_CHANGE=1.",
+
+  "server": {
+    "url": "http://127.0.0.1:8080",
+    "urlFromDevice": "http://127.0.0.1:8080",
+    "_note": "the test server agreed at setup (SKILL.md §2.1) — whether it is a disposable copy or a shared one, and whose data it holds. `net.sh reach` checks it from the DEVICE with urlFromDevice. This example is a server on this computer, reached after `adb reverse tcp:8080 tcp:8080`: 10.0.2.2 answers the device's SHELL but the app's own uid timed out on it (R10). A server on the LAN or a VPN: the address the DEVICE resolves, which may not be the one this computer uses."
+  },
+
+  "session": {
+    "injectCommand": "scripts/qa/relogin.sh {account}",
+    "_note": "for the plan, not executed by the scripts: the command that logs a device in WITHOUT anyone typing a password (R11). {account} is A, B or C. If no such command can exist (an iCloud sign-in), the sign-in is a one-time user-queue item (R2)."
+  },
+
+  "fixtures": {
+    "prefix": "QA_",
+    "markerField": "title",
+    "_markerField": "the field that carries the prefix. Pick one the server stores as sent: create one fixture, read it back through the API, and move the prefix (URL, tag, description) if the server rewrote it.",
+    "permanentDeletes": [
+      "for the plan: which of your backend's deletes are permanent rather than a trash"
+    ]
+  }
+}

@@ -1,0 +1,574 @@
+#!/usr/bin/env python3
+# src/multiclient_bridge.py - Clean Multi-client MCP Bridge
+
+"""
+Multi-Client MCP Bridge
+
+This bridge supports both:
+1. WebSocket connections (for Xiaozhi)
+2. Stdio connections (for Claude/Cursor)
+
+Clean, simple architecture with proper error handling.
+"""
+
+import asyncio
+import json
+import logging
+import os
+import signal
+import sys
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+if TYPE_CHECKING:
+    from mcp_server import SynologyMCPServer
+from urllib.parse import urlparse
+
+import websockets
+
+from config import config
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+# Keys whose VALUE is a credential, wherever it appears in a JSON-RPC frame.
+# The full-frame DEBUG logs below are the only place this process writes tool
+# arguments to disk, and a `tools/call` for synology_login, synology_create_user
+# or ds_create_task carries a live password in exactly these fields. LOG_LEVEL
+# is a documented setting and ./logs is a mounted volume, so at DEBUG those
+# passwords outlived the call in a file the user never thinks of as secret.
+_REDACTED_KEYS = frozenset(
+    {
+        "_sid",
+        "authorization",
+        "credential",
+        "credentials",
+        "device_id",
+        "did",
+        "otp_code",
+        "passwd",
+        "password",
+        "secret",
+        "secrets",
+        "session_id",
+        "sid",
+        "syno_token",
+        "synotoken",
+        "token",
+    }
+)
+
+
+def _redact(value: Any) -> Any:
+    """Copy a decoded JSON-RPC frame with credential values masked.
+
+    Masks rather than drops, so the frame keeps the shape that makes it worth
+    logging: you can still see that a password WAS sent, and where.
+
+    This is key-based, so it cannot mask a secret that appears inside a free
+    text value -- notably a `tools/call` RESULT, whose content is one JSON
+    string. Tool results are therefore still logged verbatim at DEBUG; treat
+    DEBUG logs as sensitive regardless.
+    """
+    if isinstance(value, dict):
+        return {
+            key: ("***" if str(key).lower() in _REDACTED_KEYS else _redact(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    return value
+
+
+class MCPBridge:
+    """Clean multi-client MCP bridge."""
+
+    def __init__(self, xiaozhi_endpoint: str, xiaozhi_token: str):
+        self.xiaozhi_endpoint = xiaozhi_endpoint
+        self.xiaozhi_token = xiaozhi_token
+        self.mcp_server: "SynologyMCPServer | None" = None
+        self.running = False
+        self.shutdown_event = asyncio.Event()
+
+    async def _initialize_mcp_server(self) -> bool:
+        """Initialize the MCP server instance."""
+        try:
+            from mcp_server import SynologyMCPServer
+
+            self.mcp_server = SynologyMCPServer()
+            logger.info("✅ MCP server initialized")
+
+            # Perform auto-login if configured
+            await self.mcp_server._auto_login_if_configured()
+
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize MCP server: {e}")
+            return False
+
+    async def _process_mcp_request(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a single MCP request and return response."""
+        method = request_data.get("method")
+        params = request_data.get("params", {})
+        request_id = request_data.get("id")
+
+        try:
+            if method == "initialize":
+                # Xiaozhi WS clients speak the legacy MCP handshake
+                # (protocolVersion + serverInfo), so this stays hardcoded rather
+                # than using the SDK's MCP 2.0 InitializationOptions shape.
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {
+                            "tools": {},
+                            "logging": {},
+                            "prompts": {},
+                            "resources": {},
+                        },
+                        "serverInfo": {
+                            "name": config.server_name,
+                            "version": config.server_version,
+                        },
+                    },
+                }
+
+            elif method == "notifications/initialized":
+                # No response for notifications
+                return {}
+
+            elif method == "tools/list":
+                # Call the MCP server methods directly
+                if not self.mcp_server:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32000, "message": "MCP server not initialized"},
+                    }
+                tools_list = self.mcp_server._get_tool_definitions()
+
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"tools": [tool.model_dump() for tool in tools_list]},
+                }
+
+            elif method == "tools/call":
+                # Call tool
+                tool_name = params.get("name")
+                arguments = params.get("arguments", {})
+
+                # Call the MCP server method directly
+                if not self.mcp_server:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32000, "message": "MCP server not initialized"},
+                    }
+                try:
+                    result = await self.mcp_server._dispatch_tool(tool_name, arguments)
+                except Exception as e:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "isError": True,
+                            "content": [{"type": "text", "text": f"Error executing {tool_name}: {e!s}"}],
+                        },
+                    }
+
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"content": [content.model_dump() for content in result]},
+                }
+
+            elif method == "ping":
+                # Handle Xiaozhi ping - respond with simple pong
+                return {"jsonrpc": "2.0", "id": request_id, "result": "pong"}
+
+            else:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {"code": -32601, "message": f"Method not found: {method}"},
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Error processing {method}: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
+            }
+
+    async def _handle_message(self, message: str, client_type: str) -> Optional[str]:
+        """Handle incoming message from any client."""
+        try:
+            data = json.loads(message)
+            method = data.get("method", "unknown")
+
+            # Use robot emoji for Xiaozhi, regular emoji for others
+            emoji_in = "🤖" if "XIAOZHI" in client_type else "📥"
+            emoji_out = "🤖" if "XIAOZHI" in client_type else "📤"
+
+            logger.info(f"{emoji_in} {client_type}: {method}")
+            logger.debug(f"📋 {client_type} full message: {json.dumps(_redact(data))}")
+
+            # Process request
+            response_data = await self._process_mcp_request(data)
+
+            if response_data is None:
+                # Notification - no response
+                logger.info(f"📢 {client_type}: notification processed")
+                return None
+
+            response = json.dumps(response_data)
+            logger.info(f"{emoji_out} {client_type}: response sent")
+            logger.debug(
+                f"📋 {client_type} full response: {json.dumps(_redact(response_data))}"
+            )
+            return response
+
+        except json.JSONDecodeError:
+            logger.error(f"❌ {client_type}: invalid JSON")
+            return None
+        except Exception as e:
+            logger.error(f"❌ {client_type}: error handling message: {e}")
+            return None
+
+    async def _stdio_handler(self):
+        """Handle stdio communication using shared MCP stdio server."""
+        logger.info("📟 Starting stdio handler")
+
+        try:
+            # Use the same server instance that handles Xiaozhi requests
+            if not self.mcp_server:
+                logger.error("❌ MCP server not available for stdio")
+                return
+
+            # Delegates to the shared _run_stdio() method on mcp_server
+            await self.mcp_server._run_stdio()
+
+        except Exception as e:
+            logger.error(f"❌ Stdio handler error: {e}")
+
+        logger.info("📟 Stdio handler stopped")
+
+    async def _xiaozhi_client(self):
+        """Connect to Xiaozhi as a client with robust keep-alive."""
+        reconnect_delay = 5.0  # Start with 5 seconds
+        max_reconnect_delay = 300  # Max 5 minutes
+        consecutive_failures = 0
+        connection_stable_threshold = 30  # Consider connection stable after 30 seconds
+
+        while not self.shutdown_event.is_set():
+            connection_start_time = None
+            websocket = None
+
+            try:
+                parsed_url = urlparse(self.xiaozhi_endpoint)
+                ws_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?token={self.xiaozhi_token}"
+
+                if consecutive_failures > 0:
+                    logger.info(
+                        f"🤖 Connecting to Xiaozhi (attempt #{consecutive_failures + 1})..."
+                    )
+                    logger.debug(
+                        f"🔍 Connection URL: {parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?token=***"
+                    )
+                    logger.debug(
+                        f"🔍 Token length: {len(self.xiaozhi_token) if self.xiaozhi_token else 0}"
+                    )
+                else:
+                    logger.info("🤖 Connecting to Xiaozhi...")
+
+                connection_start_time = asyncio.get_event_loop().time()
+
+                # More aggressive keep-alive settings
+                websocket = await websockets.connect(
+                    ws_url,
+                    ping_interval=20,  # Built-in ping every 20 seconds
+                    ping_timeout=10,  # Wait max 10 seconds for pong
+                    close_timeout=10,  # Close timeout
+                )
+
+                logger.info("🤖 Connected to Xiaozhi successfully")
+
+                # Test connection with initial ping
+                try:
+                    ping_start = asyncio.get_event_loop().time()
+                    pong_waiter = await websocket.ping()
+                    await asyncio.wait_for(pong_waiter, timeout=5.0)
+                    ping_duration = asyncio.get_event_loop().time() - ping_start
+                    logger.info(f"🏓 Initial ping successful ({ping_duration:.3f}s)")
+                except asyncio.TimeoutError:
+                    logger.warning("🏓 Initial ping failed - connection may be unstable")
+                except Exception as e:
+                    logger.warning(f"🏓 Initial ping error: {e}")
+
+                # Reset counters on successful connection
+                consecutive_failures = 0
+                reconnect_delay = 5.0
+
+                # No custom heartbeat needed - Xiaozhi sends its own pings
+
+                # Main message handling loop
+                async for message in websocket:
+                    if self.shutdown_event.is_set():
+                        logger.info("🤖 Shutdown requested, closing Xiaozhi connection")
+                        await websocket.close(code=1000, reason="Shutdown requested")
+                        return
+
+                    # Check if connection has been stable
+                    if connection_start_time:
+                        connection_duration = (
+                            asyncio.get_event_loop().time() - connection_start_time
+                        )
+                        if connection_duration > connection_stable_threshold:
+                            # Connection is considered stable, reset failure count
+                            consecutive_failures = 0
+                            # Don't reset connection_start_time - we need it for disconnect logging
+                            logger.debug(f"✅ Connection stable for {connection_duration:.1f}s")
+
+                    try:
+                        response = await self._handle_message(message, "XIAOZHI")
+                        if response:
+                            await websocket.send(response)
+                    except Exception as e:
+                        logger.error(f"❌ Error handling message: {e}")
+                        # Don't break on message handling errors, just log them
+
+            except websockets.exceptions.ConnectionClosed as e:
+                connection_duration = (
+                    asyncio.get_event_loop().time() - connection_start_time
+                    if connection_start_time
+                    else 0
+                )
+
+                if e.code == 1000:  # Normal closure
+                    logger.info("✅ Normal connection closure")
+                    if self.shutdown_event.is_set():
+                        return  # Only return if shutdown was requested
+                elif e.code == 1001:  # Going away
+                    logger.info("👋 Server going away")
+                    consecutive_failures += 1
+                elif e.code == 1006:  # Abnormal closure
+                    if connection_duration > connection_stable_threshold:
+                        logger.warning(
+                            f"🔌 Connection lost after {connection_duration:.1f}s (was stable)"
+                        )
+                        consecutive_failures = min(
+                            consecutive_failures + 1, 2
+                        )  # Cap failures for stable connections
+                    else:
+                        logger.warning(f"🔌 Connection lost after {connection_duration:.1f}s")
+                        consecutive_failures += 1
+                else:
+                    logger.warning(f"🔌 Connection closed: code={e.code}, reason={e.reason}")
+                    consecutive_failures += 1
+            except websockets.exceptions.InvalidHandshake as e:
+                logger.error(f"🤖 Xiaozhi handshake failed: {e}")
+                consecutive_failures += 1
+            except websockets.exceptions.InvalidURI as e:
+                logger.error(f"🤖 Invalid Xiaozhi URI: {e}")
+                # Don't retry on invalid URI - this is fatal
+                logger.error("🤖 Invalid URI is fatal, stopping Xiaozhi client")
+                return
+            except asyncio.TimeoutError:
+                logger.error("🤖 Xiaozhi connection error: timed out during opening handshake")
+                consecutive_failures += 1
+            except OSError as e:
+                logger.error(f"🤖 Xiaozhi network error: {e}")
+                consecutive_failures += 1
+            except Exception as e:
+                logger.error(f"🤖 Xiaozhi connection error: {e}")
+                consecutive_failures += 1
+            finally:
+                # Ensure websocket is properly closed.
+                #
+                # No `.closed` guard: that attribute belonged to the legacy
+                # WebSocketClientProtocol and is absent from the asyncio
+                # ClientConnection that `websockets.connect` returns from v14
+                # on (verified against 17.1, the floor this project pins).
+                # Reading it raised AttributeError from inside this `finally`,
+                # which propagated out of the reconnect loop and killed the
+                # Xiaozhi client for the rest of the process -- on the very
+                # first disconnect, the case the loop exists to survive.
+                # close() is idempotent, so just call it.
+                if websocket is not None:
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        pass
+
+            # Check if we should continue trying to reconnect
+            if self.shutdown_event.is_set():
+                break
+
+            # Implement reconnection backoff strategy
+            if consecutive_failures >= 10:
+                logger.error("❌ Too many consecutive failures (10+), extending delay...")
+                reconnect_delay = min(max_reconnect_delay, reconnect_delay * 2)
+            elif consecutive_failures >= 5:
+                logger.warning("⚠️ Multiple consecutive failures, increasing delay...")
+                reconnect_delay = min(max_reconnect_delay, reconnect_delay * 1.5)
+            elif consecutive_failures >= 3:
+                reconnect_delay = min(max_reconnect_delay, reconnect_delay * 1.2)
+
+            # Add jitter to prevent thundering herd
+            jitter = reconnect_delay * 0.1 * (0.5 - asyncio.get_event_loop().time() % 1)
+            actual_delay = reconnect_delay + jitter
+
+            logger.info(
+                f"🤖 Reconnecting to Xiaozhi in {actual_delay:.1f} seconds... (failures: {consecutive_failures})"
+            )
+
+            try:
+                await asyncio.wait_for(self.shutdown_event.wait(), timeout=actual_delay)
+                # If we get here, shutdown was requested
+                break
+            except asyncio.TimeoutError:
+                # Normal timeout, continue with reconnection
+                pass
+
+    async def start(self):
+        """Start the bridge."""
+        logger.info("🚀 Starting MCP Bridge...")
+
+        # Initialize MCP server
+        if not await self._initialize_mcp_server():
+            return False
+
+        self.running = True
+
+        # Start all handlers
+        tasks = [
+            asyncio.create_task(self._stdio_handler()),
+            asyncio.create_task(self._xiaozhi_client()),
+        ]
+
+        try:
+            # Wait for shutdown or any task to fail
+            await asyncio.wait(
+                tasks + [asyncio.create_task(self.shutdown_event.wait())],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except Exception as e:
+            logger.error(f"❌ Bridge error: {e}")
+        finally:
+            # Cancel remaining tasks with timeout
+            self.shutdown_event.set()
+
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+
+            # Wait for task cancellation with timeout
+            if tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True), timeout=3.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("⚠️ Task cancellation timeout")
+                except Exception:
+                    pass  # Ignore cancellation errors
+
+        await self.stop()
+        return True
+
+    async def stop(self):
+        """Stop the bridge."""
+        if not self.running:
+            return
+
+        logger.info("🛑 Stopping MCP Bridge...")
+        self.running = False
+        self.shutdown_event.set()
+
+        # Clean up MCP server
+        if self.mcp_server:
+            try:
+                if hasattr(self.mcp_server, "cleanup_sessions"):
+                    await asyncio.wait_for(self.mcp_server.cleanup_sessions(), timeout=2.0)
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ MCP server cleanup timeout")
+            except Exception as e:
+                logger.error(f"❌ Error cleaning up MCP server: {e}")
+
+        logger.info("✅ MCP Bridge stopped")
+
+
+async def main():
+    """Main entry point."""
+    # Get config from environment, falling back to the resolved settings.json config
+    xiaozhi_endpoint = os.getenv("XIAOZHI_MCP_ENDPOINT") or config.xiaozhi_endpoint
+    xiaozhi_token = os.getenv("XIAOZHI_TOKEN") or config.xiaozhi_token
+
+    if not xiaozhi_token:
+        logger.error("❌ XIAOZHI_TOKEN environment variable required")
+        return 1
+
+    # Validate endpoint
+    try:
+        parsed = urlparse(xiaozhi_endpoint)
+        if not parsed.scheme or not parsed.netloc:
+            logger.error(f"❌ Invalid XIAOZHI_MCP_ENDPOINT: {xiaozhi_endpoint}")
+            return 1
+        logger.info(f"📡 Xiaozhi Endpoint: {parsed.scheme}://{parsed.netloc}{parsed.path}")
+    except Exception as e:
+        logger.error(f"❌ Error parsing XIAOZHI_MCP_ENDPOINT: {e}")
+        return 1
+
+    # Create bridge
+    bridge = MCPBridge(xiaozhi_endpoint, xiaozhi_token)
+
+    # Setup asyncio-compatible signal handlers
+    loop = asyncio.get_running_loop()
+
+    def signal_handler():
+        logger.info("📡 Received shutdown signal (Ctrl+C)")
+        if not bridge.shutdown_event.is_set():
+            bridge.shutdown_event.set()
+            logger.info("🛑 Initiating graceful shutdown...")
+
+    # Register signal handlers with asyncio
+    try:
+        loop.add_signal_handler(signal.SIGINT, signal_handler)
+        loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    except NotImplementedError:
+        # Signal handlers not supported on this platform (Windows)
+        logger.warning("⚠️ Signal handlers not supported on this platform")
+
+    try:
+        await bridge.start()
+        return 0
+    except KeyboardInterrupt:
+        logger.info("⌨️ Keyboard interrupt")
+        bridge.shutdown_event.set()
+        await bridge.stop()
+        return 0
+    except Exception as e:
+        logger.error(f"❌ Fatal error: {e}")
+        bridge.shutdown_event.set()
+        await bridge.stop()
+        return 1
+    finally:
+        # Ensure cleanup
+        if bridge.running:
+            await bridge.stop()
+
+
+if __name__ == "__main__":
+    try:
+        exit_code = asyncio.run(main())
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        logger.info("🔴 Force exit")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"❌ Fatal error: {e}")
+        sys.exit(1)

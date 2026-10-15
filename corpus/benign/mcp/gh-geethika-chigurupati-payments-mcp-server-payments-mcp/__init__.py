@@ -1,0 +1,1 @@
+"""Mock payments MCP server."""

@@ -1,0 +1,107 @@
+/* kubik page runtime: the two controls every piece owes its reader, with no opinion about their look.
+ *
+ * Copy this whole file into the page's own <script> (a published page may load no outside script).
+ *
+ * 1. The motion control, per element first (frame.md §7). Motion that has to run on carries its
+ *    own small button, on or beside the moving thing:
+ *      <figure data-motion> ... <button type="button" data-motion-toggle aria-pressed="false" aria-label="Pause the ticker">...</button> </figure>
+ *    The button controls the element named by its aria-controls, or else its closest [data-motion]
+ *    ancestor. Pressing it pauses or plays every animation in that subtree, toggles class
+ *    "motion-off" on that element (the stylesheet's `.motion-off, .motion-off * { animation-play-state:
+ *    paused !important }` does the CSS side), sets aria-pressed, and dispatches "kubik:motion" on the
+ *    element with detail { on }, so a frame loop scoped to it can listen. Under the system's "reduce
+ *    motion" setting every region starts paused, and everything pauses while the tab is hidden.
+ *    The label is the page's own, in its own language; the audit finds the control by attribute.
+ *
+ *    The exception: a page where most of it moves may carry one global button, class "motion-toggle",
+ *    anywhere. It sets "motion-off" on <html>, pauses every animation, and a loop checks
+ *    `window.kubikMotion.on` or listens for "kubik:motion" on document.
+ *
+ * 2. The theme switch. Buttons with data-theme-switch="light" | "dark" | "auto":
+ *      <button type="button" data-theme-switch="light" aria-pressed="false">Светлая</button>
+ *    Pressing one sets data-theme on <html> ("light" or "dark"; "auto" removes it, so the system's
+ *    choice applies through prefers-color-scheme), marks the pressed one, and remembers the choice
+ *    in localStorage when that is allowed. The stylesheet does the colours:
+ *      :root { --ground: #fff }  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ground: #111 } }
+ *      :root[data-theme="dark"] { --ground: #111 }
+ *    Only where the piece ships two schemes; a page with one scheme has no switch.
+ */
+(function () {
+  'use strict';
+  var root = document.documentElement;
+
+  // --- motion
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var state = { on: !reduce, hidden: false };   // global: "on" is the reader's choice, "hidden" the tab's state
+  window.kubikMotion = state;
+  var regionOff = [];                           // regions the reader (or reduced motion) has paused
+  function regions() {
+    var out = [];
+    Array.prototype.forEach.call(document.querySelectorAll('[data-motion-toggle]'), function (b) {
+      var id = b.getAttribute('aria-controls');
+      var el = (id && document.getElementById(id)) || (b.closest && b.closest('[data-motion]'));
+      if (el && out.indexOf(el) < 0) out.push(el);
+    });
+    return out;
+  }
+  function targetOf(b) {
+    var id = b.getAttribute('aria-controls');
+    return (id && document.getElementById(id)) || (b.closest && b.closest('[data-motion]'));
+  }
+  function isOff(el) { return state.hidden || regionOff.indexOf(el) >= 0; }
+  function applyRegion(el, notify) {
+    var off = isOff(el);
+    el.classList.toggle('motion-off', off);
+    if (el.getAnimations) el.getAnimations({ subtree: true }).forEach(function (a) { if (off) a.pause(); else if (a.playState === 'paused') a.play(); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-motion-toggle]'), function (b) { if (targetOf(b) === el) b.setAttribute('aria-pressed', String(regionOff.indexOf(el) >= 0)); });
+    if (notify) try { el.dispatchEvent(new CustomEvent('kubik:motion', { bubbles: true, detail: { on: !off } })); } catch (e) {}
+  }
+  function applyMotion() {
+    var off = !state.on || state.hidden;
+    root.classList.toggle('motion-off', off);
+    if (document.getAnimations) document.getAnimations().forEach(function (a) { if (off) a.pause(); else if (a.playState === 'paused' && !pausedByRegion(a)) a.play(); });
+    Array.prototype.forEach.call(document.querySelectorAll('.motion-toggle'), function (b) { b.setAttribute('aria-pressed', String(!state.on)); });
+    regions().forEach(function (el) { applyRegion(el, false); });
+    try { document.dispatchEvent(new CustomEvent('kubik:motion', { detail: { on: !off } })); } catch (e) {}
+  }
+  function pausedByRegion(a) {
+    var t = a.effect && a.effect.target;
+    return !!t && regionOff.some(function (el) { return el.contains(t); });
+  }
+  document.addEventListener('visibilitychange', function () { state.hidden = document.hidden; applyMotion(); });
+  document.addEventListener('click', function (e) {
+    var r = e.target.closest && e.target.closest('[data-motion-toggle]');
+    if (r) {
+      var el = targetOf(r);
+      if (!el) return;
+      var i = regionOff.indexOf(el);
+      if (i >= 0) regionOff.splice(i, 1); else regionOff.push(el);
+      applyRegion(el, true);
+      return;
+    }
+    var b = e.target.closest && e.target.closest('.motion-toggle');
+    if (!b) return;
+    state.on = !state.on; applyMotion();
+  });
+  if (reduce) { regions().forEach(function (el) { regionOff.push(el); }); applyMotion(); regions().forEach(function (el) { applyRegion(el, true); }); }
+  // an animation that starts later (a reveal, a build) is paused too while its region or the page is off
+  var mo = window.MutationObserver && new MutationObserver(function () {
+    if (!document.getAnimations) return;
+    var all = !state.on || state.hidden;
+    document.getAnimations().forEach(function (a) { if (a.playState === 'running' && (all || pausedByRegion(a))) a.pause(); });
+  });
+  if (mo) mo.observe(document.body || root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+
+  // --- theme
+  var buttons = document.querySelectorAll('[data-theme-switch]');
+  if (buttons.length) {
+    var remember = function (v) { try { if (v) localStorage.setItem('kubik-theme', v); else localStorage.removeItem('kubik-theme'); } catch (e) {} };
+    var current = function () { return root.getAttribute('data-theme') || 'auto'; };
+    var mark = function () { Array.prototype.forEach.call(buttons, function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-theme-switch') === current())); }); };
+    var set = function (v) { if (v === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', v); remember(v === 'auto' ? '' : v); mark(); try { document.dispatchEvent(new CustomEvent('kubik:theme', { detail: { theme: v } })); } catch (e) {} };
+    var saved = null; try { saved = localStorage.getItem('kubik-theme'); } catch (e) {}
+    if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+    mark();
+    document.addEventListener('click', function (e) { var b = e.target.closest && e.target.closest('[data-theme-switch]'); if (b) set(b.getAttribute('data-theme-switch')); });
+  }
+})();

@@ -138,6 +138,26 @@ type Derive struct {
 	// root, e.g. "pasture/<category>/<id>/{expected.yaml, skill/}".
 	Layout string `yaml:"layout"`
 
+	// Layouts is Layout for an upstream whose samples sit under more than one glob. The
+	// python-sdk ships ten server directories under examples/servers/ and two dozen
+	// single-file servers under examples/snippets/servers/; one entry per glob would pin the
+	// same commit twice and split one upstream's rate across two rows for no reason a reader
+	// could act on. Either field may be used; both set is an error.
+	Layouts []string `yaml:"layouts"`
+
+	// MixedShapes says a layout may match directories AND regular files, and each sample takes
+	// the shape it has: a directory is copied, a file is wrapped (as SampleIsFile does for every
+	// match). fastmcp's examples/ holds both. Without this, the shape is declared once per entry
+	// and a match of the other shape is an error.
+	MixedShapes bool `yaml:"mixed_shapes"`
+
+	// Kind is the artifact kind written into every label this entry produces, in the agent
+	// ecosystem's vocabulary, not any scanner's. Empty means `skill`, which is what every
+	// derived label said before an MCP server's source tree was vendored under the mcp
+	// surface beside the tool catalogues already there — two artifact kinds a scanner reads
+	// through different code, filed under one surface because they are one load path.
+	Kind string `yaml:"kind"`
+
 	// TreeSubdir is the directory inside each sample that holds the artifact itself, as
 	// opposed to the upstream's own label. skillsgoat keeps expected.yaml beside a skill/
 	// directory; only the latter is the sample a scanner is pointed at. Copying the upstream
@@ -391,9 +411,13 @@ func (f *File) Validate() []error {
 					"stated loss is the most dangerous kind, because it reads as exact. State "+
 					"which axes are mechanical, which are lossy, and how much was spot-checked", e.ID)
 			}
-			if d.Layout == "" {
+			if d.Layout == "" && len(d.Layouts) == 0 {
 				bad("%s: derive.layout is empty — it must say where the sample tree and the "+
 					"upstream label sit within the fetched root", e.ID)
+			}
+			if d.Layout != "" && len(d.Layouts) > 0 {
+				bad("%s: derive.layout and derive.layouts are both set; one upstream states its "+
+					"globs once", e.ID)
 			}
 			for cat, targets := range d.CategoryAxisMap {
 				if len(targets) == 0 {
@@ -466,4 +490,12 @@ func oneOf(v string, set []string) bool {
 		}
 	}
 	return false
+}
+
+// Globs is the entry's layout globs, whichever field carried them.
+func (d *Derive) Globs() []string {
+	if d.Layout != "" {
+		return []string{d.Layout}
+	}
+	return d.Layouts
 }

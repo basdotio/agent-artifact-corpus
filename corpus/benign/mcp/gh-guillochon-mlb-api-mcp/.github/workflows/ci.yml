@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, add_tests ]
+  pull_request:
+    branches: [ main, add_tests ]
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        pip install uv
+        uv sync --extra test
+
+    - name: Run tests with coverage
+      run: uv run pytest --cov-report=xml
+
+    - name: Coverage report
+      if: always()
+      run: |
+        if [ ! -f coverage.xml ]; then
+          echo "coverage.xml not found; skipping coverage summary."
+          exit 0
+        fi
+
+        COVERAGE=$(python -c "
+        import xml.etree.ElementTree as ET
+        tree = ET.parse('coverage.xml')
+        root = tree.getroot()
+        coverage = float(root.attrib['line-rate']) * 100
+        print(f'{coverage:.2f}')
+        ")
+
+        echo "## Coverage Report" >> "$GITHUB_STEP_SUMMARY"
+        echo "Current coverage: **${COVERAGE}%**" >> "$GITHUB_STEP_SUMMARY"
+        echo "Coverage: ${COVERAGE}%"

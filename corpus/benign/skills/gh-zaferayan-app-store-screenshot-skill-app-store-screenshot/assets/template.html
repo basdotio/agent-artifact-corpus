@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en" class="{{PHOTO_CLASS}} {{SCENE_CLASS}}">
+<head>
+<meta charset="utf-8">
+<title>store screenshot</title>
+{{FONT_LINKS}}
+<style>
+  /* Headless Chrome lays the page out in a shorter viewport than it captures:
+     never use the vh unit or innerHeight, use these variables instead. */
+  :root {
+    --canvas-w: {{WIDTH}}px;
+    --canvas-h: {{HEIGHT}}px;
+    --vh: calc({{HEIGHT}}px / 100);
+    --bg: {{BG}};
+    --bg2: {{BG2}};
+    --accent: {{ACCENT}};
+    --accent2: {{ACCENT2}};
+    --text: {{TEXT}};
+    --line: {{LINE}};
+    --headline-lines: {{HEADLINE_LINES}};
+    --sub-lines: {{SUB_LINES}};
+    --headline-size: calc(var(--canvas-w) * 0.084);
+    --sub-size: calc(var(--canvas-w) * 0.036);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: var(--canvas-w); height: var(--canvas-h); overflow: hidden; background: var(--bg); }
+  #canvas { position: relative; width: var(--canvas-w); height: var(--canvas-h); overflow: hidden;
+            background: linear-gradient(180deg, var(--bg), var(--bg2)); }
+  .layer { position: absolute; inset: 0; overflow: hidden; }
+
+  /* Built-in background: accent glows, a pattern, grain */
+  .glows { background:
+      radial-gradient(60% 34% at 50% 64%, color-mix(in srgb, var(--accent) 55%, transparent), transparent 70%),
+      radial-gradient(45% 22% at 12% 4%, color-mix(in srgb, var(--accent) 35%, transparent), transparent 70%),
+      radial-gradient(40% 20% at 96% 96%, color-mix(in srgb, var(--accent2) 22%, transparent), transparent 70%); }
+  .pattern { -webkit-mask-image: radial-gradient(75% 55% at 50% 62%, #000 30%, transparent 100%);
+             mask-image: radial-gradient(75% 55% at 50% 62%, #000 30%, transparent 100%); }
+  .pattern-rings { background: repeating-radial-gradient(circle at 50% 62%, transparent 0 118px, var(--line) 118px 120px); }
+  .pattern-dots { background: radial-gradient(var(--line) 3px, transparent 4px) 0 0 / 64px 64px; }
+  .pattern-grid { background:
+      linear-gradient(var(--line) 2px, transparent 2px) 0 0 / 96px 96px,
+      linear-gradient(90deg, var(--line) 2px, transparent 2px) 0 0 / 96px 96px; }
+  .pattern-rays { background: repeating-conic-gradient(from 0deg at 50% 62%, var(--line) 0 0.35deg, transparent 0.35deg 9deg); }
+  .pattern-arcs { background: repeating-radial-gradient(circle at 50% 112%, transparent 0 158px, var(--line) 158px 160px); }
+  .pattern-diagonal { background: repeating-linear-gradient(135deg, transparent 0 78px, var(--line) 78px 80px); }
+  .pattern-frames::before, .pattern-frames::after { content: ""; position: absolute; border: 2px solid var(--line); }
+  .pattern-frames::before { inset: 3.5%; }
+  .pattern-frames::after { inset: 7%; }
+  .grain { opacity: .07; mix-blend-mode: overlay;
+           background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  .has-photo .glows, .has-photo .pattern, .has-photo .grain,
+  .has-scene .glows, .has-scene .pattern, .has-scene .grain { display: none; }
+
+  /* Background image: tinted toward bg by scrim, darkened behind the headline with bg2 */
+  .photo { display: none; background-image: {{BG_IMAGE_CSS}}; background-size: cover; background-position: {{BG_POSITION}}; }
+  .photo::before { content: ""; position: absolute; inset: 0; background: var(--bg); opacity: {{SCRIM}}; }
+  .photo::after { content: ""; position: absolute; inset: 0;
+                  background: linear-gradient(180deg, color-mix(in srgb, var(--bg2) 82%, transparent) 0%, transparent 34%); }
+  .has-photo .photo { display: block; }
+
+  /* Header */
+  #header { position: absolute; left: 0; top: calc(var(--vh) * 5.2); width: 100%; text-align: center; color: var(--text); }
+  #eyebrow { display: inline-block; margin-bottom: calc(var(--canvas-w) * 0.026); padding: .5em 1.15em; border-radius: 99em;
+             border: 2px solid var(--line); background: color-mix(in srgb, var(--text) 10%, transparent);
+             font: 600 calc(var(--canvas-w) * 0.0255)/1 {{HEADLINE_FONT}}; letter-spacing: .14em; text-transform: uppercase; }
+  #eyebrow:empty { display: none; }
+  #headline-box { width: 90%; margin: 0 auto; height: calc(var(--headline-size) * 1.08 * var(--headline-lines));
+                  display: flex; align-items: center; justify-content: center; }
+  #headline { margin: 0; white-space: nowrap; font: {{HEADLINE_WEIGHT}} var(--headline-size)/1.08 {{HEADLINE_FONT}};
+              letter-spacing: -.012em; text-shadow: 0 2px 40px color-mix(in srgb, var(--bg2) 55%, transparent); }
+  #headline em { color: var(--accent2); font-style: {{EM_STYLE}}; }
+  #sub { width: 80%; margin: calc(var(--canvas-w) * 0.02) auto 0; height: calc(var(--sub-size) * 1.32 * var(--sub-lines));
+         overflow: hidden; font: 500 var(--sub-size)/1.32 {{HEADLINE_FONT}}; opacity: .82; text-wrap: balance;
+         text-shadow: 0 2px 30px color-mix(in srgb, var(--bg2) 55%, transparent); }
+
+  /* Device: metal rim > black bezel > screen. Sizes come from --sw/--sh, set by the script below. */
+  #device { position: absolute; visibility: hidden; --rim: calc(var(--sw) * 0.009); --bezel: calc(var(--sw) * 0.024);
+            --radius: calc(var(--sw) * 0.125); padding: var(--rim); border-radius: calc(var(--radius) + var(--bezel) + var(--rim));
+            box-shadow: 0 70px 140px rgba(0,0,0,.42), 0 24px 48px rgba(0,0,0,.30), inset 0 0 0 1.5px rgba(255,255,255,.22); }
+  #device.android { --radius: calc(var(--sw) * 0.085); --bezel: calc(var(--sw) * 0.02); }
+  #device.frame-black    { --metal: linear-gradient(135deg, #4a4a50, #121214 28%, #2c2c31 52%, #0b0b0d 78%, #3a3a40); }
+  #device.frame-titanium { --metal: linear-gradient(135deg, #e6e0d5, #8a857c 28%, #cfc8bb 52%, #6d6962 78%, #d8d2c6); }
+  #device.frame-silver   { --metal: linear-gradient(135deg, #fbfcfd, #a3a6ac 28%, #eceef1 52%, #8f9298 78%, #f2f3f5); }
+  #device { background: var(--metal); }
+  #bezel { padding: var(--bezel); background: #050506; border-radius: calc(var(--radius) + var(--bezel)); }
+  #screen { position: relative; width: var(--sw); height: var(--sh); overflow: hidden; border-radius: var(--radius); background: #000; }
+  /* The screenshot is source artwork: no filters, overlays, or tints on this element. */
+  #shot { display: block; width: 100%; height: 100%; }
+  #cutout { position: absolute; background: #000; left: 50%; transform: translateX(-50%);
+            top: calc(var(--sw) * 0.028); width: calc(var(--sw) * 0.29); height: calc(var(--sw) * 0.084); border-radius: 99em; }
+  .android #cutout { top: calc(var(--sw) * 0.026); width: calc(var(--sw) * 0.058); height: calc(var(--sw) * 0.058); }
+  .no-cutout #cutout { display: none; }
+  .btn { position: absolute; width: calc(var(--sw) * 0.011); background: var(--metal); border-radius: 4px; }
+  .btn.left { left: calc(var(--sw) * -0.007); }
+  .btn.right { right: calc(var(--sw) * -0.007); }
+  .btn.b1 { top: 15.5%; height: 3.4%; }
+  .btn.b2 { top: 21.5%; height: 6.2%; }
+  .btn.b3 { top: 29.2%; height: 6.2%; }
+  .btn.b4 { top: 24%; height: 9.6%; }
+  .android .btn.left { display: none; }
+  .android .btn.b4 { top: 20%; height: 5%; }
+  .btn.b5 { display: none; top: 28%; height: 9%; }
+  .android .btn.b5 { display: block; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <div class="layer glows"></div>
+  <div class="layer pattern pattern-{{PATTERN}}"></div>
+  <div class="layer photo"></div>
+  <div class="layer" id="scene">{{SCENE_HTML}}</div>
+  <div class="layer grain"></div>
+
+  <div id="header">
+    <div id="eyebrow">{{EYEBROW}}</div>
+    <div id="headline-box"><h1 id="headline">{{HEADLINE_HTML}}</h1></div>
+    <div id="sub">{{SUB_HTML}}</div>
+  </div>
+
+  <div id="device" class="{{PLATFORM}} frame-{{FRAME}} {{CUTOUT_CLASS}}">
+    <span class="btn left b1"></span><span class="btn left b2"></span><span class="btn left b3"></span>
+    <span class="btn right b4"></span><span class="btn right b5"></span>
+    <div id="bezel"><div id="screen"><img id="shot" src="{{SCREENSHOT}}" alt=""><div id="cutout"></div></div></div>
+  </div>
+</div>
+
+<script>
+(async function () {
+  const W = {{WIDTH}}, H = {{HEIGHT}}, MAX_W = {{DEVICE_MAX_W}};
+  const $ = id => document.getElementById(id);
+  const shot = $('shot'), device = $('device'), headline = $('headline'), box = $('headline-box');
+
+  await Promise.all([
+    shot.complete && shot.naturalWidth ? null : new Promise(done => { shot.onload = shot.onerror = done; }),
+    document.fonts.ready,
+  ]);
+  if (!shot.naturalWidth) throw new Error('screenshot failed to load');
+
+  // Shrink the headline until it fits the lines reserved for it
+  let px = parseFloat(getComputedStyle(headline).fontSize);
+  while (px > 24 && (headline.scrollWidth > box.clientWidth || headline.getBoundingClientRect().height > box.getBoundingClientRect().height + 1)) {
+    px -= 1;
+    headline.style.fontSize = px + 'px';
+  }
+
+  // Fit the device between the header and the bottom margin
+  const headerBottom = Math.round($('header').getBoundingClientRect().bottom);
+  const gap = H * 0.03, bottomMargin = H * 0.034;
+  const aspect = shot.naturalWidth / shot.naturalHeight;
+  const android = device.classList.contains('android');
+  const edge = sw => 2 * sw * ((android ? 0.02 : 0.024) + 0.009);
+  let sw = W * MAX_W;
+  const available = H - headerBottom - gap - bottomMargin;
+  if (sw / aspect + edge(sw) > available) sw = available / (1 / aspect + edge(1));
+  sw = Math.floor(sw);
+  const sh = Math.round(sw / aspect);
+  device.style.setProperty('--sw', sw + 'px');
+  device.style.setProperty('--sh', sh + 'px');
+  const dw = device.offsetWidth, dh = device.offsetHeight;
+  device.style.left = Math.round((W - dw) / 2) + 'px';
+  device.style.top = Math.round(headerBottom + gap + (available - dh) / 2) + 'px';
+  device.style.visibility = 'visible';
+
+  const rect = el => { const r = el.getBoundingClientRect();
+    return { left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right), bottom: Math.round(r.bottom) }; };
+  window.LAYOUT = { canvas: { w: W, h: H }, device: rect(device), screen: rect($('screen')), headerBottom };
+  document.dispatchEvent(new CustomEvent('store:layout', { detail: window.LAYOUT }));
+
+  const s = window.LAYOUT.screen;
+  document.documentElement.setAttribute('data-meta', JSON.stringify({
+    screen_box: [s.left, s.top, s.right, s.bottom],
+    screenshot_scale: +(sw / shot.naturalWidth).toFixed(3),
+    headline_px: px,
+  }));
+})();
+</script>
+</body>
+</html>

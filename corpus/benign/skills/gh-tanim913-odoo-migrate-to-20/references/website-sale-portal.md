@@ -1,0 +1,164 @@
+# eCommerce (website_sale), website pages and portal to Odoo 20
+
+## Rule 1: re-diff every override against the 20 template
+
+Custom modules most often inherit `website_sale.product`, `cart_lines`,
+`products`, `cart` and `products_item`. In 20:
+- the templates moved to `website_sale/templates/{product_page,shop_page,checkout/*}_templates.xml`;
+- markup changed;
+- the JS became interactions bound to new classes.
+
+For each inherited template:
+1. `grep -rn 'id="<tmpl>"' $ODOO20_SERVER/addons/website_sale/` to find it, or confirm it is
+   gone.
+2. Read the 20 template and rewrite each xpath against its real structure, anchoring on
+   `@id`, `@name`, `hasclass('…')`.
+3. If a custom template **replaces** a core one, start again from the 20 core template and re-apply
+   the customisation. Keep every core class and id: `oe_website_sale`, `o_wsale_*`,
+   `js_product`, `o_wsale_product_page`, `o_cart_product`, `#o_wsale_container` classes. The 20
+   interactions select on them. Missing classes caused 32 responsive/JS regressions in the user's
+   16→19 migration.
+
+## Template ids removed
+
+| Step | Removed (frontend-relevant) |
+|---|---|
+| 16→17 | `cart_popover`, `cart_summary`, `short_cart_summary`, `extra_info_option`, `payment_footer`, `payment_sale_note` |
+| 17→18 | `cart_delivery`, `payment_delivery`, `payment_delivery_methods`, `products_fiscal_position`, `row_addresses` |
+| 18→19 | `address_kanban`, `address_on_payment`, `address_row`, `billing_address_row`, `delivery_address_row`, `add_to_cart_redirect`, `products_add_to_cart`, `product_variants`, `product_custom_text`, `product_share_buttons`, `products_description`, `products_design_*`, `products_thumb_*`, `product_picture_magnify_*`, `o_wsale_offcanvas_color_attribute`, `s_add_to_cart_options`, `add_grid_or_list_option` |
+| 19→20 | `pricelist_list`, `products_list_view`, `product_category_extra_link`, `s_mega_menu_*` |
+
+## Markup and JS
+
+| Old | Odoo 20 |
+|---|---|
+| cart `<table id="cart_products">` rows (16) | `<div id="cart_products">` with `.o_cart_product` (17+) |
+| `#add_to_cart`, `.a-submit`, `js_add_cart_json` | `<button name="add_to_cart" data-action="add_to_cart">` / `data-action="buy_now"` |
+| product tile title `h6.o_wsale_products_item_title` | `h2` (19+) |
+| `WebsiteSale` publicWidget (`website_sale.website_sale`), `VariantMixin`, `sale.VariantMixin` | interactions `ProductPage` (`.o_wsale_product_page`), `ShopPage`, `CartLine` (`.o_cart_product`), `Checkout` (`#shop_checkout`), `AddToCart`, and the `cart` service (`website_sale/static/src/js/cart_service.js`); `VariantMixin` is gone |
+| `website_sale_options.website_sale` / product configurator widgets | the 20 product configurator dialog (`sale/static/src/js/product_configurator_dialog/`) |
+
+## Routes and Python
+
+| Old | Odoo 20 |
+|---|---|
+| `/shop/cart/update_json` | `/shop/cart/add` (`product_template_id`, `product_id`, `quantity`, …) jsonrpc |
+| `/shop/cart/update` form POST (≤18) | jsonrpc `update_cart(line_id, quantity)` (19+) |
+| `/shop/cart/clear`, `/shop/cart/quantity` | removed |
+| `request.website.sale_get_order(force_create=True)` | `request.cart` (create with the cart helpers; grep `def _get_cart\|request.cart` in `website_sale/`) |
+| `order._cart_update(product_id, line_id, add_qty, set_qty)` | `order._cart_add(...)` / `order._cart_update_line_quantity(line_id, quantity)` |
+| controller `_get_mandatory_billing/shipping_address_fields`, `_check_delivery_address` | moved to `res.partner` (`portal/models/res_partner.py`) |
+| `sale.order.shop_warning` | `_add_warning_alert` |
+| `request.website` | `request.env.website` |
+
+## Portal
+
+| Old | Odoo 20 |
+|---|---|
+| `_prepare_home_portal_values(self, counters)` override adding `x_count` | `_prepare_portal_counter_values(self, counter)` returning `(model, domain, access)` (see `sale/controllers/portal.py`) |
+| xpath into `portal.portal_my_home` `#portal_client_category` / `#portal_service_category` / `#portal_vendor_category` / `#portal_common_category` + `<t t-call="portal.portal_docs_entry"><t t-set="title" …/>` | the category divs are **gone** (xpath blocks install). Home cards are `portal.entry` records, below |
+| `portal.portal_docs_entry` params `title`, `url`, `placeholder_count`, `icon`, `text`, `config_card`, `show_count`, `bg_color` | reads `entry.url`, `entry.name`, `entry.placeholder_count` |
+| `portal.portal_layout`, `portal.portal_table`, `pager()` | unchanged |
+
+```xml
+<record id="portal_my_rfqs" model="portal.entry">
+    <field name="name">My RFQs</field>
+    <field name="url">/my/rfqs</field>
+    <field name="placeholder_count">rfq_count</field>
+    <field name="category">client_category</field>
+    <field name="image" type="bytes" file="my_module/static/img/rfq.svg"/>
+</record>
+```
+
+Confirm the `portal.entry` fields first: `grep -n "fields\." $ODOO20_SERVER/addons/portal/models/portal_entry.py`.
+For a sample, see `$ODOO20_SERVER/addons/sale/data/portal_entry_data.xml`.
+
+### Who sees which card
+
+`portal.entry._filter_visible_portal_cards()` only decides which **configuration** cards are
+shown; the others are shown by the counters (`/my/counters`) as soon as their count is positive.
+To hide cards from some users (an old `t-if` on the card templates), filter `portal_cards`,
+`portal_hidden_cards` and `portal_entries` in an override of
+`CustomerPortal._prepare_portal_layout_values()`. Map rules to entry XML IDs in Python rather than
+writing fields on core entries (they are `noupdate` and skipped on module update).
+
+### `/my/account`, `/my/address` and the old form hooks
+
+- Odoo 20 replaced the `/my/account` form by the address form (`portal.address_form_fields`, saved
+  by JavaScript to `/my/address/submit`, fields filtered by `res.partner._get_frontend_writable_fields()`).
+  `details_form_validate`, `_get_mandatory_fields` / `_get_optional_fields`, `on_account_update`,
+  website_sale `checkout_form_validate`, `_get_mandatory_fields_billing/shipping`,
+  `values_postprocess`, `_checkout_form_save` and `country.get_website_sale_states/countries` are
+  gone (scan `portal-removed-hooks`). A large custom profile is easier to keep as its own template
+  posted to its own handler (re-implementing the old rules) than to fold into the address form.
+- Core owns `/my/address` (GET form) and `/my/addresses`: a custom route with that path collides;
+  give it another path and update the links.
+- Templates read `user_id` without sudo (`env.user.with_env(env)`): records reached from it
+  (`user_id.partner_id.some_m2o.field`) need portal read access, or sudo in the controller.
+- A domain through a model the portal user cannot read (`('product_id.categ_id.name', ...)`)
+  returns nothing instead of failing; search with sudo on an explicitly own-records domain.
+
+## Website pages and forms
+
+- `website.page` records: `date_publish` is removed. `url`, `view_id`, `is_published` and
+  `website_indexed` are unchanged.
+- `website.menu` records: unchanged (`name`, `url`, `parent_id`, `sequence`).
+- `website.layout`, `website.homepage`, `website.footer_custom`, `website.navbar`,
+  `website.navbar_nav` and `website.submenu` are stable ids.
+- Website forms (`s_website_form`, `/website/form/<model>`, `data-model_name`) are stable.
+  - Model hook: `_get_form_writable_fields(self, property_origins=None)` (18+).
+  - Editor-side form actions: `registry.category("website.form_editor_actions")` in a `*.edit.js`
+    file.
+
+
+### XPath class helper and model-changing portal IDs
+
+Odoo's ir_ui_view._hasclass reads only @class, not t-att-class or t-attf-class.
+For a dynamic checkout wrapper, anchor through a stable named descendant (for
+example //table[@name='cart_total_table']/parent::div), after checking core. A
+static XPath evaluator must use the same helper semantics as the server.
+
+If replacing an inherited home view with portal.entry under the same XML ID,
+a clean install cannot prove the old binding upgrades. Retire/remap the legacy
+ir.ui.view XML ID in a pre-migration before creating the new model's record.
+Preserve useful legacy records inactive and test repeatability.
+
+## Checkout, cart and configurator behaviour in 20
+
+Each point was hit while comparing flows with the old version; check overrides and custom JS for them.
+
+- **`/shop/checkout?express=1` is ignored.** The parameter is `try_skip_step=true`
+  (`website_sale/controllers/main.py`, `shop_checkout`). Even when the step is skipped, the checkout
+  values are prepared and the delivery method is set first, so override side effects still run
+  (scan `checkout-express`).
+- **The cart follows the logged-in user.** On every non-readonly request, 20 gives the cart back to
+  the user's partner when the two differ (`website.py`, cart partner check). To hand a cart to another
+  partner (staff ordering for a customer), call `order._update_address(partner_id, ['partner_id'])`.
+- **The anonymous cart's customer is the public partner, which is archived.** A guard that drops
+  carts or orders with an archived customer must skip `order._is_anonymous_cart()`, or no visitor can
+  check out.
+- **With `sale_subscription`, the product configurator prices a recurring product at its default
+  plan** and shows the plan label. When the quotation line is one-time, override
+  `_get_configurator_price` (drop `plan_id`) and `_get_additional_configurator_data` (drop
+  `price_info`, `subscription_plans`) on `product.template`.
+- **Configurator routes** are `/sale/product_configurator/get_values|create_product|update_combination`
+  (`type='jsonrpc'`) and take `ptav_ids`, not `combination`.
+- **`sale.order.line.technical_price_unit` (18+):** the price compute resets `price_unit` unless it
+  differs from `technical_price_unit` (a manual price). Set custom prices after the native compute,
+  and test them on stored values after `flush_all()` + `invalidate_all()`.
+- **The terms checkbox on the payment page is rendered twice** (desktop and mobile), so ids repeat.
+  Custom JS must work inside its own copy and act on the visible one (`el.offsetParent`).
+- **Cart service (`website_sale/static/src/js/cart_service.js`):** `isBuyNow: true` redirects to the
+  cart, `isConfigured: true` stays on the page; RPC errors from add are already shown as a warning
+  notification, so raise a `UserError` on the server instead of a custom toast.
+- **The preferred delivery method is chosen on the server** when checkout renders; browser-side
+  carrier pre-selection is redundant.
+- **The checkout Interaction binds a click on every `.card` in `#shop_checkout`** (it treats them as
+  address cards): custom cards there post `/shop/update_address` without a partner. Use another class.
+- **The product page reads `product_id` from `#add_to_cart_wrap button[name=add_to_cart]`.** Hide that
+  button if needed; removing it breaks the combination RPC.
+- **Delivery addresses need an email**: old addresses without one are sent back to the address form.
+- **`website_sale_subscription` clears `plan_id`** after a cart update when no line is recurring:
+  routes that set a plan must keep a recurring product in the cart.
+- **Shop grid markup:** products are `div.oe_product` columns, not `td.oe_product`; SCSS on the table
+  stops matching. The visitor's grid/list toggle is gone (an editor option now): not a lost feature.

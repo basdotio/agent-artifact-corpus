@@ -125,9 +125,15 @@ func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (writt
 			errs = append(errs, fmt.Errorf("%s/%s: upstream sample %s is missing", e.ID, p.Coord.UpstreamID, src))
 			continue
 		}
-		if fi.IsDir() == d.SampleIsFile {
+		isFile := d.SampleIsFile
+		if d.MixedShapes {
+			// The shape was read when the layout was expanded; the upstream has not changed
+			// underneath since, and if it has, the stat below says so.
+			isFile = p.Coord.IsFile
+		}
+		if fi.IsDir() == isFile {
 			errs = append(errs, fmt.Errorf("%s/%s: sample_is_file is %v but %s is not that shape",
-				e.ID, p.Coord.UpstreamID, d.SampleIsFile, src))
+				e.ID, p.Coord.UpstreamID, isFile, src))
 			continue
 		}
 
@@ -137,7 +143,7 @@ func Materialize(repoRoot, upRoot string, e manifest.Entry, plans []Plan) (writt
 		}
 		// A file-shaped sample becomes a directory holding that one file, because `entry: .`
 		// points a scanner at a directory and every other sample in the corpus is one.
-		if d.SampleIsFile {
+		if isFile {
 			if err := os.MkdirAll(absDir, 0o755); err != nil {
 				errs = append(errs, fmt.Errorf("%s: create %s: %w", e.ID, p.Dir, err))
 				continue
@@ -212,7 +218,11 @@ func renderLabel(e manifest.Entry, p Plan, treeDir string) string {
 	fmt.Fprintf(&b, "id: %s\n", p.LocalID)
 	fmt.Fprintf(&b, "class: %s\n", c.Class)
 	fmt.Fprintf(&b, "surface: %s\n", e.Derive.Surface)
-	fmt.Fprintf(&b, "kind: skill\n")
+	kind := e.Derive.Kind
+	if kind == "" {
+		kind = "skill"
+	}
+	fmt.Fprintf(&b, "kind: %s\n", kind)
 	fmt.Fprintf(&b, "entry: .\n\n")
 
 	fmt.Fprintf(&b, "origin:\n")

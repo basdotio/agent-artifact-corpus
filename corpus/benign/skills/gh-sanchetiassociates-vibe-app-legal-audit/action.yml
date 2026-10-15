@@ -1,0 +1,29 @@
+name: "vibe-app-legal-audit"
+description: "Scan a repository for common legal-exposure patterns (COPPA and DPDP age gates, Google Fonts, session replay, email footers, auto-renewal terms, DMCA and IT Rules, privacy notices, dark patterns). Not legal advice."
+author: "Siddharth S. Sancheti"
+branding:
+  icon: "shield"
+  color: "blue"
+inputs:
+  path:
+    description: "Directory to scan"
+    required: false
+    default: "."
+  fail-on-high:
+    description: "Fail the job when a HIGH finding exists"
+    required: false
+    default: "true"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+    - shell: bash
+      run: |
+        set +e
+        python "${{ github.action_path }}/scripts/scan.py" "${{ inputs.path }}" --md legal-audit.md --json legal-audit.json
+        code=$?
+        cat legal-audit.md >> "$GITHUB_STEP_SUMMARY"
+        if [ "${{ inputs.fail-on-high }}" = "true" ] && [ "$code" -eq 1 ]; then exit 1; fi
+        exit 0

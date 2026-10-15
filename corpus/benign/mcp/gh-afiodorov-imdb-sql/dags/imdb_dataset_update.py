@@ -1,0 +1,106 @@
+"""Daily IMDb dataset refresh, as granular tasks.
+
+prepare -> fetch_tsv -> build_parquet -> upload_parquet -> generate_cache
+        -> publish -> cleanup_s3 -> cleanup
+
+Split so a late failure (e.g. an S3/CloudFront hiccup) retries only that step
+instead of redoing the multi-GB download + join. `prepare` wipes stale inputs at
+the start (fresh data every run); `fetch_tsv` skips files already present
+(cheap within-run retries); `cleanup` frees disk afterwards regardless of outcome.
+A `watcher` (ONE_FAILED) turns the run red if any step fails, since the ALL_DONE
+`cleanup` leaf would otherwise report the run green even after a failed build.
+
+Because the app discovers the parquet filename at runtime from version.json, this
+needs no frontend rebuild/deploy.
+
+Prereqs on the box:
+  - repo rsync'd to /root/imdb-sql
+  - uv at /root/.local/bin/uv (deps installed on first `uv run`)
+  - AWS credentials for boto3 (~/.aws, region eu-west-2) with s3:ListBucket +
+    s3:GetObject/PutObject on `imdb-sql` and cloudfront:CreateInvalidation on
+    E2EYWSVOZPFWUP
+"""
+
+from datetime import datetime, timedelta
+
+from airflow import DAG
+from airflow.providers.standard.operators.bash import BashOperator
+from airflow.task.trigger_rule import TriggerRule
+
+REPO = "/root/imdb-sql"
+UV = "/root/.local/bin/uv"
+RUN = f"cd {REPO} && PYTHONUNBUFFERED=1 {UV} run python -u"
+WIPE = f"rm -rf ~/data/imdb {REPO}/public/imdb*.parquet"
+
+default_args = {
+    "owner": "imdb-sql",
+    "retries": 1,
+    "retry_delay": timedelta(minutes=10),
+}
+
+with DAG(
+    dag_id="imdb_dataset_update",
+    description="Daily IMDb parquet rebuild + S3/CloudFront publish",
+    schedule="0 4 * * *",            # 04:00 UTC daily (IMDb publishes dumps daily)
+    start_date=datetime(2026, 6, 28),
+    catchup=False,
+    max_active_runs=1,
+    default_args=default_args,
+    tags=["imdb-sql"],
+) as dag:
+    # Clean slate so each run pulls fresh dumps even if a prior cleanup
+    # didn't run. Separate from fetch so retrying a later task never re-wipes.
+    prepare = BashOperator(task_id="prepare", bash_command=WIPE)
+
+    fetch = BashOperator(
+        task_id="fetch_tsv",
+        bash_command=f"{RUN} fetch_tsv.py",
+        execution_timeout=timedelta(hours=1),
+    )
+    build = BashOperator(
+        task_id="build_parquet",
+        bash_command=f"{RUN} build_parquet.py",
+        execution_timeout=timedelta(hours=1),
+    )
+    upload = BashOperator(
+        task_id="upload_parquet",
+        bash_command=f"{RUN} upload_parquet.py",
+        execution_timeout=timedelta(minutes=30),
+    )
+    generate_cache = BashOperator(
+        task_id="generate_cache",
+        bash_command=f"{RUN} generate_cache.py",
+        execution_timeout=timedelta(minutes=30),
+    )
+    publish = BashOperator(
+        task_id="publish",
+        bash_command=f"{RUN} deploy_data.py",
+        execution_timeout=timedelta(minutes=15),
+    )
+    # Only after the new parquet is live (publish ok) do we delete superseded ones
+    # from S3, keeping a small grace buffer of prior versions.
+    cleanup_s3 = BashOperator(
+        task_id="cleanup_s3",
+        bash_command=f"{RUN} cleanup_s3.py",
+        execution_timeout=timedelta(minutes=15),
+    )
+    # Free the multi-GB TSVs + local parquet (already on S3) no matter what.
+    cleanup = BashOperator(
+        task_id="cleanup",
+        bash_command=WIPE,
+        trigger_rule=TriggerRule.ALL_DONE,
+    )
+    # Make the run honestly red on failure. The pipeline's only natural leaf is
+    # `cleanup` (ALL_DONE), which succeeds even when an upstream task failed — so
+    # a failed build_parquet was reported as a *green* run and went unnoticed
+    # (bit us 2026-06-30). This watcher fires only when something upstream failed
+    # (ONE_FAILED) and exits non-zero, so the DAG run state reflects the failure.
+    watcher = BashOperator(
+        task_id="watcher",
+        bash_command="echo 'A pipeline task failed; failing the run.' >&2; exit 1",
+        trigger_rule=TriggerRule.ONE_FAILED,
+        retries=0,
+    )
+
+    prepare >> fetch >> build >> upload >> generate_cache >> publish >> cleanup_s3 >> cleanup
+    [prepare, fetch, build, upload, generate_cache, publish, cleanup_s3] >> watcher

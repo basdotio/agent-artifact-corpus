@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgentVault</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;550;650;700&family=Fraunces:opsz,wght@9..144,550;9..144,700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='8' width='24' height='20' rx='3' fill='%231a2420' stroke='%232a9d8f' stroke-width='2'/%3E%3Cpath d='M16 14v6M13 17h6' stroke='%23c4784a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <style>
+    :root {
+      --bg: #141210;
+      --bg2: #1c1916;
+      --panel: rgba(28, 25, 22, 0.92);
+      --line: #3a342e;
+      --text: #f0ebe3;
+      --muted: #9a9084;
+      --accent: #2a9d8f;
+      --accent2: #c4784a;
+      --accent-soft: rgba(42, 157, 143, 0.18);
+      --danger: #c45c4a;
+      --font: "Figtree", ui-sans-serif, system-ui, sans-serif;
+      --display: "Fraunces", Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background:
+        radial-gradient(1200px 600px at 80% -10%, rgba(42,157,143,.12), transparent 55%),
+        radial-gradient(900px 500px at -10% 110%, rgba(196,120,74,.10), transparent 50%),
+        var(--bg);
+      color: var(--text); font-family: var(--font); overflow: hidden;
+    }
+    #graph { width: 100vw; height: 100vh; }
+    #brandbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 15; height: 44px;
+      display: flex; align-items: center; gap: 12px; padding: 0 16px;
+      background: linear-gradient(180deg, rgba(20,18,16,.96), rgba(20,18,16,.75));
+      border-bottom: 1px solid var(--line); backdrop-filter: blur(10px);
+    }
+    #brandbar .mark {
+      width: 22px; height: 22px; border: 1.5px solid var(--accent); border-radius: 6px;
+      display: grid; place-items: center; color: var(--accent2); font-size: 12px; font-weight: 700;
+    }
+    #brandbar .name { font-family: var(--display); font-size: 17px; font-weight: 700; letter-spacing: .01em; }
+    #brandbar .tag { color: var(--muted); font-size: 12px; margin-left: 4px; }
+    #panel {
+      position: fixed; top: 56px; left: 12px; z-index: 10; width: 280px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 4px 16px 16px 4px;
+      padding: 14px; font-size: 13px; backdrop-filter: blur(10px);
+      box-shadow: 8px 12px 40px rgba(0,0,0,.35);
+    }
+    #panel h1 { display: none; }
+    .searchbox { position: relative; }
+    #search {
+      width: 100%; margin: 0 0 8px; padding: 8px 28px 8px 10px;
+      background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+      color: var(--text); font-size: 13px; font-family: var(--font);
+    }
+    #search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    #search-clear { position: absolute; right: 8px; top: 10px; color: var(--muted); cursor: pointer; font-size: 17px; line-height: 1; display: none; }
+    #search-clear:hover { color: var(--text); }
+    #search::placeholder { color: var(--muted); }
+    #results { max-height: 34vh; overflow-y: auto; margin-bottom: 6px; }
+    #results .res { padding: 6px 8px; font-size: 12px; color: #ddd6cb; cursor: pointer; border-radius: 6px; }
+    #results .restag { color: var(--accent2); }
+    #results .rescat { color: var(--accent); font-weight: 650; }
+    #note .catsec { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 14px 0 6px; font-family: var(--display); }
+    #note .catlist .res { padding: 4px 7px; font-size: 12px; color: #ddd6cb; cursor: pointer; border-radius: 6px; }
+    #note .catlist .res:hover { background: rgba(255,255,255,.04); }
+    #note .catlist .restag { color: var(--accent2); }
+    #note .catlist .restag-node { color: #f0d2b8; font-weight: 700; }
+    #note .catlist .restype { color: var(--muted); }
+    #note .notelist .nl { display: block; padding: 5px 7px; color: #ddd6cb; cursor: pointer; border-radius: 6px; font-size: 12px; }
+    #note .notelist .nl:hover { background: rgba(255,255,255,.04); }
+    #results .res:hover { background: rgba(255,255,255,.04); }
+    #results .res.dim { color: var(--muted); cursor: default; }
+    #results .restype { color: var(--muted); }
+    #results .restag-node { color: #f0d2b8; font-weight: 700; }
+    #results .restag-node b { font-weight: 700; }
+    .leg { display: flex; align-items: center; gap: 6px; margin-top: 4px; cursor: pointer; user-select: none; }
+    .leg:hover { opacity: .85; } .leg.off { opacity: .4; }
+    .leg .box { width: 13px; display: inline-block; text-align: center; }
+    .leg .x { margin-left: auto; color: var(--danger); font-size: 15px; cursor: pointer; padding: 0 4px; }
+    .leg .x:hover { color: #e08a7a; }
+    #legend .ctl { font-size: 11px; color: var(--muted); margin: 8px 0 2px; }
+    #legend .ctl-link { cursor: pointer; color: var(--accent); } #legend .ctl-link:hover { text-decoration: underline; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .addcat { display: flex; gap: 5px; margin-top: 8px; }
+    .addcat input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 5px 8px; font-size: 12px; }
+    .btn { background: var(--bg2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 11px; cursor: pointer; font-size: 12px; font-family: var(--font); }
+    .btn:hover { border-color: var(--accent); }
+    .btn.blue { background: var(--accent); border-color: var(--accent); color: #06221e; font-weight: 650; }
+    .btn.blue:hover { filter: brightness(1.08); }
+    #newnote { width: 100%; margin-top: 10px; }
+    #stats { color: var(--muted); margin-top: 10px; font-size: 12px; } #fps { color: #6b635a; }
+    #stats .ctl-link { cursor: pointer; color: var(--accent); }
+    #stats .ctl-link:hover { text-decoration: underline; }
+    #statsmodal { position: fixed; inset: 0; z-index: 70; background: rgba(10,8,6,.78); display: none; align-items: center; justify-content: center; }
+    #statsmodal.show { display: flex; }
+    #statsmodal .box2 { position: relative; background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 22px 26px; min-width: 320px; box-shadow: 0 24px 60px rgba(0,0,0,.55); }
+    #statsmodal h3 { margin: 0 0 14px; font-size: 18px; color: var(--text); font-family: var(--display); }
+    #statsmodal .close { position: absolute; top: 12px; right: 14px; cursor: pointer; color: var(--muted); font-size: 20px; border: none; background: none; }
+    #statsmodal .grid { display: grid; grid-template-columns: auto auto; gap: 8px 22px; font-size: 13px; }
+    #statsmodal .grid .sv { color: var(--text); font-weight: 700; }
+    #statsmodal .grid .sl { color: var(--muted); }
+    #statsmodal .grid .full { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; color: var(--muted); }
+    #lblToggle { display: flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 12px; color: #ddd6cb; cursor: pointer; user-select: none; }
+    #lblToggle input { accent-color: var(--accent); cursor: pointer; }
+    #maplabels { position: fixed; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
+    #bootscreen { position: fixed; inset: 0; z-index: 50;
+      background: radial-gradient(800px 400px at 50% 40%, rgba(42,157,143,.15), transparent 60%), var(--bg);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+      transition: opacity .45s ease; }
+    #bootscreen.hide { opacity: 0; pointer-events: none; }
+    #bootscreen .logo { font-family: var(--display); font-size: 28px; font-weight: 700; color: var(--text); letter-spacing: .02em; }
+    #bootscreen .sub { font-size: 13px; color: var(--muted); }
+    #boot-track { width: 240px; height: 4px; background: var(--line); border-radius: 99px; overflow: hidden; position: relative; }
+    #boot-fill { position: absolute; top: 0; left: 0; height: 100%; width: 38%; border-radius: 99px;
+                 background: linear-gradient(90deg, var(--accent), var(--accent2)); will-change: transform;
+                 animation: boot-indet 1.05s ease-in-out infinite; }
+    @keyframes boot-indet { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+    #boot-txt { font-size: 12px; color: var(--muted); min-height: 14px; }
+    #topbar { position: fixed; top: 0; left: 0; height: 2px; width: 0; z-index: 60;
+              background: linear-gradient(90deg, var(--accent), var(--accent2)); opacity: 0; }
+    .leg .drag { cursor: grab; color: #6b635a; margin-right: 4px; font-size: 12px; }
+    .leg.dragging { opacity: .4; }
+    .leg.dragover { box-shadow: inset 0 2px 0 var(--accent); }
+    .leg input.cocol { width: 14px; height: 14px; border: none; background: none; padding: 0; margin-right: 7px; cursor: pointer; border-radius: 3px; }
+    #confirm { position: fixed; inset: 0; z-index: 70; background: rgba(10,8,6,.78); display: none; align-items: center; justify-content: center; }
+    #confirm.show { display: flex; }
+    #confirm .box2 { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 26px 28px; max-width: 400px; text-align: center; box-shadow: 0 24px 60px rgba(0,0,0,.55); }
+    #confirm h3 { margin: 0 0 10px; color: var(--danger); font-size: 17px; font-family: var(--display); }
+    #confirm p { color: #ddd6cb; font-size: 13px; line-height: 1.5; margin: 0 0 20px; }
+    #confirm .btns { display: flex; gap: 10px; justify-content: center; }
+    #confirm .btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); font-weight: 650; }
+    #confirm .btn.cancel { background: var(--bg); color: var(--text); }
+    .map-label { position: absolute; transform: translate(-50%, -165%); white-space: nowrap; font-size: 11px; font-weight: 650; color: #f7f1e8; text-shadow: 0 1px 3px #000, 0 0 6px #000; pointer-events: none; }
+    #note {
+      position: fixed; top: 44px; right: 0; z-index: 20; width: 400px; max-width: 92vw; height: calc(100vh - 44px);
+      background: rgba(28, 25, 22, .97); border-left: 1px solid var(--line); padding: 18px 20px; overflow-y: auto;
+      transform: translateX(100%); transition: transform .22s ease; backdrop-filter: blur(10px);
+    }
+    #note.open { transform: translateX(0); }
+    #note .close { position: absolute; top: 12px; right: 16px; cursor: pointer; color: var(--muted); font-size: 20px; border: none; background: none; }
+    #note .edit { position: absolute; top: 13px; right: 44px; cursor: pointer; color: var(--muted); font-size: 16px; border: none; background: none; }
+    #note .edit:hover { color: var(--text); }
+    #note h2 { font-size: 18px; margin: 4px 40px 4px 0; font-family: var(--display); font-weight: 700; }
+    #note .meta { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+    #note .meta .metacat { color: var(--accent); cursor: pointer; }
+    #note .meta .metacat:hover { text-decoration: underline; }
+    #note .meta .makenode { color: var(--accent2); cursor: pointer; }
+    #note .meta .makenode:hover { text-decoration: underline; }
+    #note-tags { margin: 4px 0 2px; }
+    #note-tags .tag { display: inline-block; font-size: 11px; color: #ddd6cb; background: rgba(255,255,255,.05); border-radius: 6px; padding: 1px 7px; margin: 2px 4px 2px 0; cursor: pointer; }
+    #note-tags .tag:hover { background: rgba(255,255,255,.09); }
+    #note-tags .tag-node { font-weight: 700; color: #f0d2b8; background: rgba(196,120,74,.22); }
+    #note-tags .catchip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; margin: 2px 6px 2px 0; cursor: pointer; }
+    #note-tags .catchip:hover { border-color: var(--accent); }
+    #note-tags .catchip .dot { width: 8px; height: 8px; }
+    #note .nbody { word-break: break-word; font-size: 13px; line-height: 1.6; color: #ebe4da; }
+    #note .nbody h1,#note .nbody h2,#note .nbody h3 { color: var(--text); line-height: 1.3; margin: 12px 0 4px; font-family: var(--display); }
+    #note .nbody h1 { font-size: 17px; } #note .nbody h2 { font-size: 15px; } #note .nbody h3 { font-size: 14px; }
+    #note .nbody p { margin: 6px 0; } #note .nbody ul,#note .nbody ol { margin: 4px 0; padding-left: 20px; }
+    #note .nbody code { background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+    #note .nbody blockquote { border-left: 3px solid var(--accent2); margin: 8px 0; padding-left: 10px; color: #ddd6cb; }
+    #note .nbody mark { background: #e6c27a; color: #1c1916; padding: 0 2px; border-radius: 3px; }
+    #note a { color: var(--accent); } #note .wl { color: var(--accent2); cursor: pointer; text-decoration: underline; }
+    #note .field { margin: 8px 0; } #note .field label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+    #note input.f, #note select.f { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; font-size: 13px; font-family: var(--font); }
+    #note textarea#edit-area { width: 100%; min-height: 46vh; background: var(--bg); color: #ebe4da; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 13px/1.55 ui-monospace, SFMono-Regular, monospace; resize: vertical; }
+    #note .edit-actions { margin-top: 8px; display: flex; align-items: center; gap: 10px; }
+    #note .edit-actions #edit-status { color: var(--muted); font-size: 12px; }
+    #note .edit-actions .btn.del { margin-left: auto; background: #3a221c; color: #e6a090; border-color: #6b3a30; }
+    #note .edit-actions .btn.del:hover { background: var(--danger); color: #fff; }
+    #note .tagedit { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 7px; }
+    #note .tagedit .chip { display: inline-flex; align-items: center; gap: 5px; background: rgba(196,120,74,.22); color: #f0d2b8; border-radius: 6px; padding: 2px 7px; font-size: 12px; }
+    #note .tagedit .chip .rm { cursor: pointer; color: #d4b08a; font-weight: 700; }
+    #note .tagedit .chip .rm:hover { color: #fff; }
+    #note .taginput { flex: 1; min-width: 80px; background: none; border: none; color: var(--text); font-size: 12px; outline: none; padding: 2px; }
+    #note .tagsuggest { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; margin-top: 3px; max-height: 180px; overflow-y: auto; display: none; }
+    #note .tagsuggest .tsug { padding: 5px 9px; font-size: 12px; color: #ddd6cb; cursor: pointer; }
+    #note .tagsuggest .tsug:hover { background: rgba(255,255,255,.04); }
+    #note .tagsuggest .tsug.new { color: var(--accent); border-top: 1px solid var(--line); }
+    #note-backlinks { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+    #note-backlinks h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 8px; font-family: var(--display); }
+    #note-backlinks .bl { display: block; color: var(--accent2); cursor: pointer; font-size: 13px; padding: 2px 0; }
+    #note-backlinks .bl:hover { text-decoration: underline; }
+    #ac { position: fixed; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; max-height: 160px; overflow: auto; display: none; z-index: 30; font-size: 13px; }
+
+    #langToggle { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+    #langToggle button {
+      background: transparent; border: 1px solid var(--line); color: var(--muted);
+      border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-family: var(--font);
+    }
+    #langToggle button.on { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+    #ac div { padding: 6px 10px; cursor: pointer; } #ac div.sel,#ac div:hover { background: rgba(255,255,255,.05); }
+  </style>
+</head>
+<body>
+  <div id="topbar"></div>
+  <div id="brandbar">
+    <div class="mark">AV</div>
+    <div class="name">AgentVault</div>
+    <div class="tag" data-i18n="tagline">portable memory for agents</div>
+    <div id="langToggle">
+      <button type="button" id="lang-cs" onclick="setLang('cs')">CZ</button>
+      <button type="button" id="lang-en" onclick="setLang('en')">EN</button>
+    </div>
+  </div>
+  <div id="confirm">
+    <div class="box2">
+      <h3></h3>
+      <p></p>
+      <div class="btns"><button class="btn cancel" data-i18n="cancel">Zrušit</button><button class="btn danger" data-i18n="delete">Smazat</button></div>
+    </div>
+  </div>
+  <div id="statsmodal">
+    <div class="box2">
+      <button class="close" onclick="closeStatsModal()">×</button>
+      <h3 data-i18n="stats_title">Přehled vaultu</h3>
+      <div class="grid"></div>
+    </div>
+  </div>
+  <div id="bootscreen">
+    <div class="logo">AgentVault</div>
+    <div class="sub" data-i18n="boot_sub">otevírám tvé poznámky…</div>
+    <div id="boot-track"><div id="boot-fill"></div></div>
+    <div id="boot-txt" data-i18n="loading">Načítám…</div>
+  </div>
+  <div id="panel">
+    <h1>AgentVault</h1>
+    <div class="searchbox">
+      <input id="search" type="text" placeholder="Hledat ve vaultu…" data-i18n-placeholder="search_ph" oninput="runSearch()" autocomplete="off" />
+      <span id="search-clear" title="Vymazat" onclick="clearSearch()">×</span>
+    </div>
+    <div id="results"></div>
+    <div id="legend"></div>
+    <button class="btn blue" id="newnote" onclick="newNote()" data-i18n="new_note">+ Nová poznámka</button>
+    <label id="lblToggle"><input type="checkbox" id="showLabels" checked /> <span data-i18n="labels">Popisky v grafu</span></label>
+    <div id="stats">načítám…</div>
+  </div>
+  <div id="maplabels"></div>
+  <div id="graph"></div>
+  <div id="note">
+    <button class="close" onclick="closeNote()">×</button>
+    <button class="edit" id="note-edit" title="Upravit" onclick="editCurrent()">✎</button>
+    <h2 id="note-title"></h2>
+    <div id="note-tags"></div>
+    <div class="meta" id="note-meta"></div>
+    <div class="nbody" id="note-body"></div>
+    <div id="note-backlinks"></div>
+  </div>
+  <div id="ac"></div>
+
+  <script src="/static/3d-force-graph.min.js"></script>
+  <script src="/static/marked.min.js"></script>
+  <script>
+    const PALETTE = ["#2a9d8f","#c4784a","#4a7c6f","#d4a574","#3d8b80","#a65d3f","#6b9e8f","#e0b080","#1f7a6e","#b86b45","#88b5a8","#c9966a","#457a6d","#9c5a3c"];
+    const groupColor = {}; let categories = [], categoryColors = {}, categoryOrder = [], graphExcludedSet = new Set();
+    function assignColors(groups){
+      // pinned colours first (CATEGORY_COLORS), then palette for the rest, skipping used hues —
+      // so a category's colour is stable no matter what else exists.
+      for(const g in categoryColors){ if(categoryColors[g]) groupColor[g] = categoryColors[g]; }
+      const used = new Set(Object.values(groupColor)); let pi = 0;
+      groups.forEach(g => { if(!(g in groupColor)){
+        while(pi < PALETTE.length && used.has(PALETTE[pi])) pi++;
+        const c = PALETTE[pi % PALETTE.length]; groupColor[g] = c; used.add(c); pi++;
+      }});
+    }
+    const baseColor = n => groupColor[n.group] || "#94a3b8";
+
+    let Graph, fullData = null, curNote = null, curTag = null, curCat = null, allTags = [], nodeTagCat = {}, editTags = [];
+    let mapLabels = [], labelLayerEl = null, labelsOn = true;
+    // Rebuild the HTML label overlay from the graph's CURRENT node objects. Must run
+    // after every Graph.graphData() swap — otherwise labels keep referencing stale
+    // (frozen) node objects and stick to the wrong screen positions.
+    function rebuildMapLabels(){
+      if(!labelLayerEl || !Graph) return;
+      labelLayerEl.innerHTML = "";
+      const ns = (Graph.graphData().nodes) || [];
+      mapLabels = ns.map(n => {
+        const el = document.createElement("div"); el.className = "map-label";
+        const full = n.label || "";
+        el.textContent = full.length > 28 ? full.slice(0, 28).trimEnd() + "…" : full;
+        el.style.display = "none";
+        labelLayerEl.appendChild(el); return {n, el};
+      });
+    }
+    // --- loading progress (full-screen overlay, used both on boot and on filter change) ---
+    let booted = false, overlayTimer = null, hideTimer = null, overlayStartedAt = 0;
+    function progSet(pct, txt){                  // bar is indeterminate (CSS); just update the status text
+      if(txt){ const t = document.getElementById("boot-txt"); if(t) t.textContent = txt; }
+    }
+    function overlayShow(txt){                    // re-show the full-screen loader (filter changes)
+      if(!booted) return;                         // initial boot shows it via markup
+      const b = document.getElementById("bootscreen"); if(!b) return;
+      clearTimeout(hideTimer); clearTimeout(overlayTimer);   // cancel any pending hide from a previous cycle
+      overlayStartedAt = performance.now();
+      b.style.display = "flex"; b.classList.remove("hide");
+      const t = document.getElementById("boot-txt"); if(t && txt) t.textContent = txt;
+    }
+    function overlayHide(){                        // hide loader; also ends the initial boot
+      const b = document.getElementById("bootscreen"); if(!b){ booted = true; return; }
+      const elapsed = performance.now() - overlayStartedAt, MIN = 500;
+      if(booted && elapsed < MIN){ clearTimeout(overlayTimer); overlayTimer = setTimeout(overlayHide, MIN - elapsed); return; }
+      clearTimeout(overlayTimer);
+      b.classList.add("hide"); hideTimer = setTimeout(()=>{ b.style.display = "none"; }, 550);
+      booted = true;
+    }
+    const active = new Set(), nodeById = {}, nodeByTitle = {}, nodeBySlug = {};
+    const slugify = s => String(s).toLowerCase().replace(/[^a-z0-9-]/g, "");
+    const adj = {}, inc = {};
+    let hlNodes = new Set(), hlLinks = new Set(), pinnedId = null, dragReheated = false, searchSet = new Set();
+
+    const LS_KEY = "agentvault-state-v1";
+    const loadState = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch(e){ return {}; } };
+    const saveState = p => { try { localStorage.setItem(LS_KEY, JSON.stringify(Object.assign(loadState(), p))); } catch(e){} };
+
+    // --- i18n CZ / EN ---
+    const I18N = {
+      cs: {
+        tagline: "přenosná paměť pro agenty",
+        search_ph: "Hledat ve vaultu…",
+        new_note: "+ Nová poznámka",
+        labels: "Popisky v grafu",
+        loading: "Načítám…",
+        boot_sub: "otevírám tvé poznámky…",
+        stats_title: "Přehled vaultu",
+        cancel: "Zrušit",
+        delete: "Smazat",
+        new_cat: "Nová kategorie…",
+        stats: "Přehled",
+        loading_cats: "Načítám kategorie…",
+        loading_tags: "Načítám tagy…",
+        loading_graph: "Stavím graf…",
+        new_note_title: "Nová poznámka",
+        edit_note_title: "Upravit poznámku",
+        all: "vše", none: "nic", edit: "upravit", done: "hotovo",
+      },
+      en: {
+        tagline: "portable memory for agents",
+        search_ph: "Search the vault…",
+        new_note: "+ New note",
+        labels: "Show graph labels",
+        loading: "Loading…",
+        boot_sub: "opening your notes…",
+        stats_title: "Vault overview",
+        cancel: "Cancel",
+        delete: "Delete",
+        new_cat: "New category…",
+        stats: "Stats",
+        loading_cats: "Loading categories…",
+        loading_tags: "Loading tags…",
+        loading_graph: "Building graph…",
+        new_note_title: "New note",
+        edit_note_title: "Edit note",
+        all: "all", none: "none", edit: "edit", done: "done",
+      }
+    };
+    let LANG = (loadState().lang === "en" || loadState().lang === "cs")
+      ? loadState().lang
+      : ((navigator.language || "cs").toLowerCase().startsWith("cs") ? "cs" : "en");
+    function t(key){ return (I18N[LANG] && I18N[LANG][key]) || (I18N.en[key] || key); }
+    function applyI18n(){
+      document.querySelectorAll("[data-i18n]").forEach(el => {
+        const k = el.getAttribute("data-i18n");
+        if (k && I18N[LANG][k] != null) el.textContent = I18N[LANG][k];
+      });
+      document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
+        const k = el.getAttribute("data-i18n-placeholder");
+        if (k && I18N[LANG][k] != null) el.setAttribute("placeholder", I18N[LANG][k]);
+      });
+      const cs = document.getElementById("lang-cs"), en = document.getElementById("lang-en");
+      if (cs && en){ cs.classList.toggle("on", LANG==="cs"); en.classList.toggle("on", LANG==="en"); }
+      document.documentElement.lang = LANG;
+    }
+    function setLang(code){
+      if (code !== "cs" && code !== "en") return;
+      LANG = code; saveState({lang: LANG}); applyI18n();
+      if (typeof buildLegend === "function" && fullData) buildLegend(legendGroups());
+    }
+    applyI18n();
+
+
+    const RGBA = {};
+    function dim(hex, a){ let c = RGBA[hex]; if(!c){ const m = hex.replace("#",""); c = RGBA[hex] = { r:parseInt(m.slice(0,2),16), g:parseInt(m.slice(2,4),16), b:parseInt(m.slice(4,6),16) }; } return `rgba(${c.r},${c.g},${c.b},${a})`; }
+    function nodeColor(n){ if(hlNodes.size) return hlNodes.has(n.id)?baseColor(n):dim(baseColor(n),0.13); if(searchSet.size) return searchSet.has(n.id)?baseColor(n):dim(baseColor(n),0.10); return baseColor(n); }
+    const LINK_BASE="rgba(154,144,132,0.75)", LINK_FAINT="rgba(154,144,132,0.18)", LINK_HL="rgba(42,157,143,0.95)";
+    function linkColor(l){ if(hlLinks.size) return hlLinks.has(l)?LINK_HL:LINK_BASE; if(searchSet.size) return LINK_FAINT; return LINK_BASE; }
+    function refreshStyles(){ if(!Graph) return; Graph.nodeColor(Graph.nodeColor()).linkColor(Graph.linkColor()).linkDirectionalParticles(Graph.linkDirectionalParticles()); }
+    function setHighlight(n){ hlNodes = new Set(); hlLinks = new Set(); if(n){ hlNodes.add(n.id); (adj[n.id]||[]).forEach(id=>hlNodes.add(id)); (inc[n.id]||[]).forEach(l=>hlLinks.add(l)); } refreshStyles(); }
+
+    let editingCats = false;
+    function buildLegend(groups){
+      const el = document.getElementById("legend");
+      const ed = editingCats;
+      el.innerHTML = groups.map(g => {
+        const on = active.has(g), real = g !== "(unresolved)";
+        const handle = (ed && real) ? `<span class="drag" title="Drag to reorder">⠿</span>` : (ed ? `<span class="drag" style="visibility:hidden">⠿</span>` : "");
+        const swatch = (ed && real)
+          ? `<input type="color" class="cocol" value="${groupColor[g]||"#94a3b8"}" data-color="${g}" title="Change colour">`
+          : `<span class="dot" style="background:${groupColor[g]||"#94a3b8"}"></span>`;
+        const del = (ed && real) ? `<span class="x" data-del="${g}" title="Remove category">−</span>` : "";
+        const gtog = (ed && real) ? `<span class="gtog" data-gtog="${g}" style="cursor:pointer;margin:0 4px" title="${graphExcludedSet.has(g)?'Hidden from the graph – click to show it in the graph':'In the graph – click to hide from the graph (stays in search)'}">${graphExcludedSet.has(g)?"🚫":"🌐"}</span>` : "";
+        return `<div class="leg${on?"":" off"}" data-g="${g}" ${ed&&real?'draggable="true"':''}>${handle}<span class="box">${on?"☑":"☐"}</span>${swatch}<span class="lname">${g}</span>${gtog}${del}</div>`;
+      }).join("")
+      + `<div class="ctl"><span class="ctl-link" id="leg-all">${t("all")}</span> · <span class="ctl-link" id="leg-none">${t("none")}</span> · <span class="ctl-link" id="leg-edit">${ed?t("done"):t("edit")}</span></div>`
+      + (ed ? `<div class="addcat"><input id="newcat" placeholder="${t("new_cat")}" onkeydown="if(event.key==='Enter')addCat()"><button class="btn" onclick="addCat()">+</button></div>` : "");
+
+      el.querySelectorAll(".cocol").forEach(inp => inp.onchange = e => { e.stopPropagation(); changeColor(inp.dataset.color, inp.value); });
+      el.querySelectorAll(".leg").forEach(d => {
+        d.onclick = e => {
+          if(e.target.dataset.del){ confirmDelCat(e.target.dataset.del); return; }
+          if(e.target.dataset.gtog){ e.stopPropagation(); toggleGraphCat(e.target.dataset.gtog); return; }
+          if(ed) return;                              // edit mode: row click doesn't toggle / colour input handles itself
+          const g = d.dataset.g; active.has(g)?active.delete(g):active.add(g); buildLegend(groups); applyFilter(); saveState({active:[...active], knownGroups: groups});
+        };
+        if(ed && d.getAttribute("draggable")==="true") wireDrag(d);
+      });
+      document.getElementById("leg-all").onclick = () => { groups.forEach(g=>active.add(g)); buildLegend(groups); applyFilter(); saveState({active:[...active], knownGroups: groups}); };
+      document.getElementById("leg-none").onclick = () => { active.clear(); buildLegend(groups); applyFilter(); saveState({active:[...active], knownGroups: groups}); };
+      document.getElementById("leg-edit").onclick = () => { editingCats = !editingCats; buildLegend(legendGroups()); };
+    }
+    // change a category colour: pin it, persist, recolour the graph
+    async function changeColor(g, color){
+      categoryColors[g] = color; groupColor[g] = color;
+      refreshStyles();
+      buildLegend(legendGroups());
+      await fetch("/api/category-meta", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({name:g, color})}).catch(()=>{});
+    }
+    // Toggle whether a category is drawn in the 3D graph. No effect on search or MCP — it only
+    // controls the visualisation, which keeps the graph fast when a folder is very large.
+    async function toggleGraphCat(g){
+      const excl = !graphExcludedSet.has(g);
+      if(excl) graphExcludedSet.add(g); else graphExcludedSet.delete(g);
+      buildLegend(legendGroups());
+      await fetch("/api/category-graph", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({name:g, excluded:excl})}).catch(()=>{});
+      await reloadGraph();
+    }
+    // drag-to-reorder categories in the legend
+    let dragSrc = null;
+    function wireDrag(d){
+      d.addEventListener("dragstart", e => { dragSrc = d.dataset.g; d.classList.add("dragging"); e.dataTransfer.effectAllowed="move"; });
+      d.addEventListener("dragend", () => { dragSrc = null; d.classList.remove("dragging"); document.querySelectorAll(".leg.dragover").forEach(x=>x.classList.remove("dragover")); });
+      d.addEventListener("dragover", e => { e.preventDefault(); d.classList.add("dragover"); });
+      d.addEventListener("dragleave", () => d.classList.remove("dragover"));
+      d.addEventListener("drop", e => { e.preventDefault(); d.classList.remove("dragover"); reorderCat(dragSrc, d.dataset.g); });
+    }
+    async function reorderCat(src, dst){
+      if(!src || src===dst) return;
+      const reals = legendGroups().filter(g => g !== "(unresolved)");
+      const from = reals.indexOf(src), to = reals.indexOf(dst);
+      if(from<0||to<0) return;
+      reals.splice(to, 0, reals.splice(from,1)[0]);
+      categoryOrder = reals;
+      buildLegend(legendGroups());
+      await fetch("/api/category-order", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({order: reals})}).catch(()=>{});
+    }
+    function confirmDelCat(n){
+      showConfirm("Delete category “" + n + "”?",
+        "The category is removed from the legend. The notes/files themselves are kept.",
+        () => delCat(n));
+    }
+    function doApplyFilter(){
+      const nodes = fullData.nodes.filter(n=>active.has(n.group));
+      const ids = new Set(nodes.map(n=>n.id));
+      const links = fullData.links.filter(l => { const s=(l.source&&l.source.id)||l.source, t=(l.target&&l.target.id)||l.target; return ids.has(s)&&ids.has(t); });
+      Graph.graphData({nodes, links});
+      rebuildMapLabels();
+      document.getElementById("stats").innerHTML = `${nodes.length} nodes · ${links.length} links · <span class="ctl-link" onclick="openStatsModal()">${t("stats")}</span><span id="fps"></span>`;
+    }
+    function applyFilter(){
+      if(!fullData||!Graph) return;
+      if(!booted){ doApplyFilter(); return; }          // initial boot: run synchronously
+      overlayShow("Updating view…");
+      // Let the overlay paint and its compositor animation start BEFORE the heavy relayout
+      // blocks the main thread (re-adding a big category) — otherwise the bar never renders.
+      requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        doApplyFilter();
+        // Nodes keep their positions across filters, so the view re-settles visually fast.
+        // Show the animated loader for a fixed, deterministic window rather than waiting for the
+        // simulation to fully cool (~5s) — the graph keeps settling behind once it fades.
+        clearTimeout(overlayTimer); overlayTimer = setTimeout(overlayHide, 1100);
+      }));
+    }
+
+    function focusNode(n){ if(!n||n.x==null) return; const dist=120, r=1+dist/Math.hypot(n.x,n.y,n.z||1); Graph.cameraPosition({x:n.x*r,y:n.y*r,z:(n.z||1)*r}, n, 800); }
+    function esc(s){ return (s||"").replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+    function renderBody(text){
+      let h = (window.marked ? marked.parse(text||"", {gfm:true, breaks:true}) : esc(text||""));
+      h = h.replace(/==([^=]+)==/g, "<mark>$1</mark>");
+      h = h.replace(/\[\[([^\]]+)\]\]/g, (m,t)=>{ const disp=t.split("|")[0].trim(); return `<span class="wl" onclick="openByTitle('${disp.replace(/'/g,"\\'")}')">${esc(disp)}</span>`; });
+      return h;
+    }
+    function closeNote(){ document.getElementById("note").classList.remove("open"); pinnedId=null; setHighlight(null); document.getElementById("ac").style.display="none"; }
+
+    function catOptions(sel){
+      const cats = legendGroups().filter(c => c !== "(unresolved)");
+      if(sel && !cats.includes(sel)) cats.unshift(sel);
+      return cats.map(c=>`<option${c===sel?" selected":""}>${esc(c)}</option>`).join("");
+    }
+    function newNote(title){
+      curNote = {id:null, title:title||"", category:categories[0]||"", body:"", backlinks:[]}; curTag = null;
+      document.getElementById("note-edit").style.display = "none";
+      document.getElementById("note-title").textContent = t("new_note_title");
+      document.getElementById("note-tags").innerHTML = "";
+      document.getElementById("note-meta").textContent = "";
+      document.getElementById("note-backlinks").innerHTML = "";
+      document.getElementById("note").classList.add("open");
+      enterEdit();
+    }
+    async function openByTitle(t){ const n = nodeByTitle[t] || nodeBySlug[slugify(t)]; if(n) openNote(n.id); else newNote(t); }
+    function openCategory(c){ const node = nodeById["cat:" + c]; if(node){ focusNode(node); pinnedId = node.id; setHighlight(node); } }
+    function openCategoryNode(c){
+      curNote = null; curTag = null; curCat = c;
+      const node = nodeById["cat:" + c];
+      const list = (fullData ? fullData.nodes : []).filter(n => n.group === c
+        && !String(n.id).startsWith("cat:") && !String(n.id).startsWith("tag:"))
+        .sort((a,b)=>String(a.label).localeCompare(String(b.label)));
+      // tags used by notes in this category (node-tags first, then by count)
+      const cnt = {};
+      list.forEach(n => (n.tags||[]).forEach(t => cnt[t] = (cnt[t]||0)+1));
+      const tags = Object.keys(cnt).map(t=>({tag:t, count:cnt[t]}))
+        .sort((a,b)=> ((b.tag in nodeTagCat)?1:0) - ((a.tag in nodeTagCat)?1:0) || b.count - a.count || a.tag.localeCompare(b.tag));
+      const q1 = s => String(s).replace(/'/g,"\\'");
+      document.getElementById("note-edit").style.display = "";
+      document.getElementById("note-title").textContent = "📂 " + c;
+      document.getElementById("note-tags").innerHTML = "";
+      document.getElementById("note-meta").innerHTML = `${list.length} notes &nbsp;·&nbsp; ${tags.length} tags`;
+      const tagsHtml = tags.map(t=>{ const nd = t.tag in nodeTagCat;
+        return `<div class="res restag${nd?' restag-node':''}" onclick="openTag('${q1(t.tag)}')">🏷 ${nd?'<b>'+esc(t.tag)+'</b>':esc(t.tag)} <span class="restype">(${t.count})</span></div>`;
+      }).join("");
+      const notesHtml = list.length
+        ? '<div class="notelist">' + list.map(b=>`<div class="nl" onclick="openNote('${q1(b.id)}')">${esc(b.label)}</div>`).join("") + "</div>"
+        : "No notes.";
+      document.getElementById("note-body").innerHTML =
+        (tags.length ? '<h3 class="catsec">Tags</h3><div class="catlist">' + tagsHtml + '</div>' : "")
+        + '<h3 class="catsec">Notes</h3>' + notesHtml;
+      document.getElementById("note-backlinks").innerHTML = "";
+      document.getElementById("note").classList.add("open");
+      if(node){ focusNode(node); pinnedId = node.id; setHighlight(node); }
+    }
+    function enterCatEdit(){
+      const c = curCat; if(!c) return;
+      document.getElementById("note-tags").innerHTML = "";
+      document.getElementById("note-meta").textContent = "";
+      document.getElementById("note-body").innerHTML =
+        '<div class="field"><label>Category name</label><input class="f" id="cat-name"></div>'
+        + '<div class="edit-actions"><button class="btn blue" id="cat-save">💾 Save</button><button class="btn" id="cat-cancel">Cancel</button><span id="edit-status"></span></div>';
+      document.getElementById("cat-name").value = c;
+      document.getElementById("cat-cancel").onclick = () => openCategoryNode(c);
+      document.getElementById("cat-save").onclick = () => saveCat(c);
+    }
+    async function saveCat(oldName){
+      const st = document.getElementById("edit-status");
+      const name = document.getElementById("cat-name").value.trim();
+      if(!name){ st.textContent = "name required"; return; }
+      if(name === oldName){ openCategoryNode(oldName); return; }
+      st.textContent = "saving...";
+      try {
+        const r = await fetch("/api/categories/rename", {method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({old: oldName, new: name})}).then(r=>r.json());
+        if(!r.ok){ st.textContent = "error: " + (r.detail||"not saved"); return; }
+        if(active.has(oldName)){ active.delete(oldName); active.add(name); }
+        await loadCats(); await reloadGraph();
+        buildLegend(legendGroups()); applyFilter(); saveState({active:[...active], knownGroups: legendGroups()});
+        openCategoryNode(name);
+      } catch(e){ st.textContent = "error: " + e.message; }
+    }
+    async function openTag(name){
+      const list = await fetch("/api/tag?name="+encodeURIComponent(name)).then(r=>r.json());
+      curNote = null; curTag = name; curCat = null;
+      document.getElementById("note-edit").style.display = "";
+      document.getElementById("note-title").textContent = "🏷 " + name;
+      document.getElementById("note-tags").innerHTML = "";
+      const _info = (name in nodeTagCat) ? ` &nbsp;·&nbsp; ● node in ${esc(nodeTagCat[name] || "?")}` : "";
+      document.getElementById("note-meta").innerHTML = `${list.length} notes${_info}`;
+      document.getElementById("note-body").innerHTML = list.length
+        ? '<div class="notelist">' + list.map(b=>`<div class="nl" onclick="openNote('${b.id.replace(/'/g,"\\'")}')">${esc(b.label)}</div>`).join("") + "</div>"
+        : "No notes.";
+      document.getElementById("note-backlinks").innerHTML = "";
+      document.getElementById("note").classList.add("open");
+      // highlight only the notes carrying this tag (dim the rest), like search
+      searchSet = new Set(list.map(b => b.id));
+      refreshStyles();
+      document.getElementById("search-clear").style.display = "inline";
+    }
+    async function refreshNodeTags(){
+      const nt = await fetch("/api/node-tags").then(r=>r.json()).catch(()=>[]);
+      nodeTagCat = {}; nt.forEach(x => nodeTagCat[x.tag] = x.category);
+    }
+    function editCurrent(){ if(curCat) enterCatEdit(); else if(curTag) enterTagEdit(); else enterEdit(); }
+    function enterTagEdit(){
+      const name = curTag; if(!name) return;
+      const isNode = name in nodeTagCat;
+      const cats = legendGroups().filter(c => c !== "(unresolved)" && !(c in nodeTagCat));
+      const curCat = nodeTagCat[name] || cats[0] || "";
+      document.getElementById("note-tags").innerHTML = "";
+      document.getElementById("note-meta").textContent = "";
+      document.getElementById("note-body").innerHTML =
+        '<div class="field"><label>Category</label><select class="f" id="tag-cat">'
+        + cats.map(c=>`<option${c===curCat?" selected":""}>${esc(c)}</option>`).join("") + '</select></div>'
+        + '<div class="field"><label style="cursor:pointer"><input type="checkbox" id="tag-isnode" '+(isNode?"checked":"")+'> Tag is also a node (links all its records)</label></div>'
+        + '<div class="edit-actions"><button class="btn blue" id="tag-save">💾 Save</button><button class="btn" id="tag-cancel">Cancel</button><button class="btn del" id="tag-delete">🗑 Delete tag</button><span id="edit-status"></span></div>';
+      document.getElementById("tag-cancel").onclick = () => openTag(name);
+      document.getElementById("tag-save").onclick = () => saveTag(name);
+      document.getElementById("tag-delete").onclick = () => showConfirm(
+        "Delete tag “" + name + "”?",
+        "The tag is removed from ALL notes that carry it. The notes themselves are kept. This can't be undone with one click.",
+        () => deleteTag(name));
+    }
+    async function deleteTag(name){
+      const st = document.getElementById("edit-status"); if(st) st.textContent = "deleting…";
+      try {
+        const r = await fetch("/api/tag?name=" + encodeURIComponent(name), {method:"DELETE"}).then(r=>r.json());
+        await refreshNodeTags(); await reloadGraph();
+        buildLegend(legendGroups()); applyFilter();
+        closeNote();
+      } catch(e){ if(st) st.textContent = "error: " + e.message; }
+    }
+    async function saveTag(name){
+      const isNode = document.getElementById("tag-isnode").checked;
+      const cat = document.getElementById("tag-cat").value;
+      if(isNode) await fetch("/api/node-tags", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({tag:name, category:cat})});
+      else await fetch("/api/node-tags/"+encodeURIComponent(name), {method:"DELETE"});
+      await refreshNodeTags(); await reloadGraph();
+      if(isNode && cat) active.add(cat);
+      buildLegend(legendGroups()); applyFilter(); saveState({active:[...active], knownGroups: legendGroups()});
+      openTag(name);
+    }
+    async function openNote(id, focus=true){
+      try {
+        if(String(id).startsWith("ext:")){ newNote(String(id).slice(4)); return; }
+        const n = await fetch("/api/note?file="+encodeURIComponent(id)).then(r=>r.json());
+        if(!n || n.error) return;
+        curNote = n; curTag = null; curCat = null;
+        document.getElementById("note-edit").style.display = "";
+        document.getElementById("note-title").textContent = n.title;
+        document.getElementById("note-tags").innerHTML = (n.tags||[]).slice()
+          .sort((a,b)=> ((String(b) in nodeTagCat)?1:0) - ((String(a) in nodeTagCat)?1:0))   // node-tags first
+          .map(t=>{ const nd = String(t) in nodeTagCat;
+            return `<span class="tag${nd?' tag-node':''}" onclick="openTag('${String(t).replace(/'/g,"\\'")}')">🏷 ${esc(t)}</span>`;
+          }).join("");
+        const _c = n.category || "";
+        document.getElementById("note-meta").innerHTML = (_c ? `<span class="metacat" onclick="openCategory('${_c.replace(/'/g,"\\'")}')">${esc(_c)}</span> - ` : "") + esc(n.id);
+        document.getElementById("note-body").innerHTML = renderBody(n.body);
+        const bl = n.backlinks || [];
+        document.getElementById("note-backlinks").innerHTML = bl.length
+          ? "<h3>↩ Linked from ("+bl.length+")</h3>" + bl.map(b=>`<span class="bl" onclick="openNote('${b.id.replace(/'/g,"\\'")}')">${esc(b.label)}</span>`).join("")
+          : "";
+        document.getElementById("note").classList.add("open");
+        if(nodeById[id]){ if(focus) focusNode(nodeById[id]); pinnedId=id; setHighlight(nodeById[id]); }
+      } catch(e){}
+    }
+    function enterEdit(){
+      if(!curNote) return;
+      document.getElementById("note-tags").innerHTML = "";
+      document.getElementById("note-backlinks").style.display = "none";
+      const nb = document.getElementById("note-body");
+      nb.innerHTML =
+        '<div class="field"><label>Title</label><input class="f" id="edit-title"></div>'
+      + '<div class="field"><label>Category</label><select class="f" id="edit-cat">'+catOptions(curNote.category)+'</select></div>'
+      + '<div class="field"><label>Tags</label><div class="tagedit" id="tagedit"><span id="tag-chips"></span><input id="tag-input" class="taginput" placeholder="add tag…" autocomplete="off"></div><div id="tag-suggest" class="tagsuggest"></div></div>'
+      + '<div class="field"><label>Text - type [[ to link other notes</label><textarea id="edit-area" spellcheck="false"></textarea></div>'
+      + '<div class="edit-actions"><button class="btn blue" id="edit-save">💾 Save</button><button class="btn" id="edit-cancel">Cancel</button>'
+      + (curNote.id ? '<button class="btn del" id="edit-delete">🗑 Delete</button>' : '')
+      + '<span id="edit-status"></span></div>';
+      document.getElementById("edit-title").value = curNote.title || "";
+      document.getElementById("edit-area").value = curNote.body || "";
+      document.getElementById("note-title").textContent = curNote.id ? t("edit_note_title") : t("new_note_title");
+      editTags = (curNote.tags || []).slice(); wireTagEditor();
+      const ta = document.getElementById("edit-area"); wireAutocomplete(ta);
+      document.getElementById("edit-cancel").onclick = () => curNote.id ? openNote(curNote.id, false) : closeNote();
+      document.getElementById("edit-save").onclick = saveEdit;
+      if(curNote.id){ document.getElementById("edit-delete").onclick = () => showConfirm(
+        "Delete note “" + (curNote.title||curNote.id) + "”?",
+        "The file is deleted from the wiki and from disk (git commit). This can't be undone with one click.",
+        () => deleteNote(curNote.id)); }
+      ta.onkeydown = e => { if((e.metaKey||e.ctrlKey)&&e.key==="Enter") saveEdit(); };
+    }
+    // ---- tags editor (chips + autocomplete + create new) ----
+    function renderTagChips(){
+      const c = document.getElementById("tag-chips"); if(!c) return;
+      c.innerHTML = editTags.map(t=>`<span class="chip">${esc(t)}<span class="rm" data-rm="${esc(t)}">×</span></span>`).join("");
+      c.querySelectorAll(".rm").forEach(x => x.onclick = () => removeEditTag(x.dataset.rm));
+    }
+    function addEditTag(t){ t=(t||"").trim(); if(t && !editTags.includes(t)) editTags.push(t);
+      renderTagChips(); const i=document.getElementById("tag-input"); if(i) i.value=""; showTagSuggest(""); }
+    function removeEditTag(t){ editTags = editTags.filter(x=>x!==t); renderTagChips(); }
+    function showTagSuggest(q){
+      const box = document.getElementById("tag-suggest"); if(!box) return;
+      q = (q||"").trim();
+      if(!q){ box.innerHTML=""; box.style.display="none"; return; }
+      const names = allTags.map(t=>t.tag).filter(t=>!editTags.includes(t));
+      const hits = names.filter(t=>t.toLowerCase().includes(q.toLowerCase())).slice(0,8);
+      const exact = names.some(t=>t.toLowerCase()===q.toLowerCase());
+      let html = hits.map(t=>`<div class="tsug" data-add="${esc(t)}">🏷 ${esc(t)}</div>`).join("");
+      if(!exact) html += `<div class="tsug new" data-add="${esc(q)}">+ Create “${esc(q)}”</div>`;
+      box.innerHTML = html; box.style.display = html ? "block" : "none";
+      box.querySelectorAll(".tsug").forEach(d => d.onmousedown = e => { e.preventDefault(); addEditTag(d.dataset.add); const i=document.getElementById("tag-input"); if(i) i.focus(); });
+    }
+    function wireTagEditor(){
+      renderTagChips();
+      const i = document.getElementById("tag-input"); if(!i) return;
+      i.oninput = () => showTagSuggest(i.value);
+      i.onkeydown = e => {
+        if(e.key==="Enter"){ e.preventDefault();
+          if(i.value.trim()) addEditTag(i.value);
+          else { const f = document.querySelector("#tag-suggest .tsug"); if(f) addEditTag(f.dataset.add); } }
+        else if(e.key==="Backspace" && !i.value && editTags.length){ removeEditTag(editTags[editTags.length-1]); }
+        else if(e.key==="Escape"){ showTagSuggest(""); }
+      };
+      i.onblur = () => setTimeout(()=>showTagSuggest(""), 150);
+    }
+    async function saveEdit(){
+      const st = document.getElementById("edit-status");
+      const title = document.getElementById("edit-title").value.trim();
+      if(!title){ st.textContent = "title required"; return; }
+      const pend = document.getElementById("tag-input"); if(pend && pend.value.trim()) addEditTag(pend.value);  // commit a half-typed tag
+      st.textContent = "saving...";
+      try {
+        const r = await fetch("/api/note", { method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ category: document.getElementById("edit-cat").value, title,
+            text: document.getElementById("edit-area").value, file: curNote.id || null, tags: editTags }) }).then(r=>r.json());
+        if(r.ok){ document.getElementById("note-backlinks").style.display=""; await reloadGraph(); await openNote(r.file, false); }
+        else st.textContent = "error: " + (r.detail||"not saved");
+      } catch(e){ st.textContent = "error: " + e.message; }
+    }
+    async function deleteNote(file){
+      const st = document.getElementById("edit-status"); if(st) st.textContent = "deleting…";
+      try {
+        await fetch("/api/note?file=" + encodeURIComponent(file), {method:"DELETE"});
+        document.getElementById("note-backlinks").style.display = "";
+        await reloadGraph(); applyFilter(); closeNote();
+      } catch(e){ if(st) st.textContent = "error: " + e.message; }
+    }
+
+    // categories
+    async function loadCats(){ categories = await fetch("/api/categories").then(r=>r.json()); }
+    async function addCat(){ const n = document.getElementById("newcat").value.trim(); if(!n) return;
+      await fetch("/api/categories",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:n})});
+      document.getElementById("newcat").value=""; await loadCats(); active.add(n); assignColors([...new Set([...legendGroups(),n])]); buildLegend(legendGroups()); applyFilter(); }
+    async function delCat(n){   // confirmation handled by confirmDelCat's modal
+      await fetch("/api/categories/"+encodeURIComponent(n),{method:"DELETE"}); await loadCats(); buildLegend(legendGroups()); }
+    // big, explicit confirmation modal
+    function showConfirm(title, msg, onYes){
+      let m = document.getElementById("confirm");
+      m.querySelector("h3").textContent = title;
+      m.querySelector("p").textContent = msg;
+      m.classList.add("show");
+      const yes = m.querySelector(".danger"), no = m.querySelector(".cancel");
+      const close = () => { m.classList.remove("show"); yes.onclick = no.onclick = null; };
+      yes.onclick = () => { close(); onYes(); };
+      no.onclick = close;
+    }
+    function legendGroups(){
+      const gs = new Set(categories); if(fullData) fullData.nodes.forEach(n=>gs.add(n.group));
+      graphExcludedSet.forEach(g=>gs.add(g));   // keep graph-hidden categories in the legend (with 🚫) so they can be brought back
+      // order: (unresolved) first, then CATEGORY_COLORS key order (fixed), then the rest alphabetically
+      const order = [];
+      if(gs.has("(unresolved)")) order.push("(unresolved)");
+      for(const k of categoryOrder){ if(gs.has(k) && !order.includes(k)) order.push(k); }
+      [...gs].filter(g => !order.includes(g)).sort().forEach(g => order.push(g));
+      return order;
+    }
+
+    // search (client-side over node labels)
+    function clearSearch(){
+      const s = document.getElementById("search"); s.value = ""; runSearch(); s.focus();
+    }
+    function runSearch(){
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      const box = document.getElementById("results");
+      document.getElementById("search-clear").style.display = q ? "inline" : "none";
+      searchSet = new Set();
+      if(q.length>=2) for(const n of Object.values(nodeById)) if((n.label||"").toLowerCase().includes(q) || (n.tags||[]).some(t=>String(t).toLowerCase().includes(q))) searchSet.add(n.id);
+      refreshStyles();
+      if(!q){ box.innerHTML=""; return; }
+      const q1 = s => String(s).replace(/'/g,"\\'");
+      // 📁 categories
+      const catHits = legendGroups().filter(c => c !== "(unresolved)" && c.toLowerCase().includes(q)).slice(0,6);
+      // tags split: node-tags (bold) then standard
+      const tagMatches = allTags.filter(t=>String(t.tag).toLowerCase().includes(q));
+      const nodeTags = tagMatches.filter(t=>String(t.tag) in nodeTagCat).slice(0,8);
+      const stdTags  = tagMatches.filter(t=>!(String(t.tag) in nodeTagCat)).slice(0,8);
+      // 📄 records (notes only — exclude category/tag nodes)
+      const hits = Object.values(nodeById).filter(n=>(n.label||"").toLowerCase().includes(q)
+        && !String(n.id).startsWith("cat:") && !String(n.id).startsWith("tag:"))
+        .sort((a,b)=>a.label.localeCompare(b.label)).slice(0,25);
+      let html = "";
+      html += catHits.map(c=>`<div class="res rescat" onclick="openCategoryNode('${q1(c)}')">📁 ${esc(c)}</div>`).join("");
+      html += nodeTags.map(t=>`<div class="res restag restag-node" onclick="openTag('${q1(t.tag)}')">🏷 <b>${esc(t.tag)}</b> <span class="restype">(${t.count})</span></div>`).join("");
+      html += stdTags.map(t=>`<div class="res restag" onclick="openTag('${q1(t.tag)}')">🏷 ${esc(t.tag)} <span class="restype">(${t.count})</span></div>`).join("");
+      html += hits.map(n=>`<div class="res" onclick="openNote('${q1(n.id)}')">📄 ${esc(n.label)}</div>`).join("");
+      box.innerHTML = html || '<div class="res dim">no results</div>';
+    }
+
+    // [[ autocomplete in the editor textarea
+    let acItems = [], acSel = 0, acTA = null;
+    function wireAutocomplete(ta){ acTA = ta; }
+    document.addEventListener("input", e => {
+      if(e.target.id!=="edit-area") return;
+      const ta = e.target, pos = ta.selectionStart, m = ta.value.slice(0,pos).match(/\[\[([^\]]*)$/), ac = document.getElementById("ac");
+      if(!m){ ac.style.display="none"; return; }
+      acItems = Object.values(nodeByTitle).map(n=>n.label).filter(x=>x.toLowerCase().includes(m[1].toLowerCase())).slice(0,8);
+      if(!acItems.length){ ac.style.display="none"; return; }
+      acSel = 0; ac.innerHTML = acItems.map((x,i)=>`<div class="${i===0?'sel':''}" onclick="acPick(${i})">${esc(x)}</div>`).join("");
+      const r = ta.getBoundingClientRect(); ac.style.left=r.left+"px"; ac.style.top=(r.top+24)+"px"; ac.style.width=Math.min(r.width,300)+"px"; ac.style.display="block";
+    });
+    document.addEventListener("keydown", e => {
+      const ac = document.getElementById("ac"); if(e.target.id!=="edit-area"||ac.style.display!=="block") return;
+      if(e.key==="ArrowDown"){e.preventDefault();acSel=(acSel+1)%acItems.length;}
+      else if(e.key==="ArrowUp"){e.preventDefault();acSel=(acSel-1+acItems.length)%acItems.length;}
+      else if(e.key==="Enter"||e.key==="Tab"){e.preventDefault();acPick(acSel);return;}
+      else if(e.key==="Escape"){ac.style.display="none";return;} else return;
+      [...ac.children].forEach((d,i)=>d.className=i===acSel?"sel":"");
+    });
+    function acPick(i){ const ta=acTA, pos=ta.selectionStart; ta.value = ta.value.slice(0,pos).replace(/\[\[([^\]]*)$/,"[["+acItems[i]+"]]")+ta.value.slice(pos); document.getElementById("ac").style.display="none"; ta.focus(); }
+
+    async function reloadGraph(){ const data = await fetch("/api/graph").then(r=>r.json()); ingest(data); Graph.graphData({nodes: data.nodes.filter(n=>active.has(n.group)), links: data.links.filter(l=>{const s=(l.source&&l.source.id)||l.source,t=(l.target&&l.target.id)||l.target; const ids=new Set(data.nodes.filter(n=>active.has(n.group)).map(n=>n.id)); return ids.has(s)&&ids.has(t);})}); rebuildMapLabels(); buildLegend(legendGroups()); }
+    async function openStatsModal(){
+      const m = document.getElementById("statsmodal"); if(!m) return;
+      const grid = m.querySelector(".grid"); grid.innerHTML = '<div class="full">Načítám…</div>';
+      m.classList.add("show");
+      const s = await fetch("/api/stats").then(r=>r.json()).catch(()=>null);
+      if(!s){ grid.innerHTML = '<div class="full">error</div>'; return; }
+      const nf = n => (n||0).toLocaleString("en-US");
+      const row = (icon,val,lbl) => `<div>${icon} <span class="sv">${nf(val)}</span></div><div class="sl">${lbl}</div>`;
+      grid.innerHTML =
+        row("📁", s.categories, "categories")
+      + row("🏷", s.node_tags, "node-tags")
+      + row("🏷", s.tags, "tags")
+      + row("📄", s.notes, "notes")
+      + row("🔗", s.wikilinks, "links")
+      + row("📝", s.words, "words")
+      + row("🔤", s.characters, "characters")
+      + `<div>📚 <span class="sv">≈ ${nf(s.pages)}</span></div><div class="sl">standard pages</div>`
+      + (s.biggest ? `<div class="full">🏆 top category: <span class="sv">${esc(s.biggest.name)}</span> <span class="sl">(${nf(s.biggest.count)})</span></div>` : "");
+    }
+    function closeStatsModal(){ const m=document.getElementById("statsmodal"); if(m) m.classList.remove("show"); }
+    function ingest(data){
+      fullData = data;
+      for(const k in nodeById) delete nodeById[k]; for(const k in nodeByTitle) delete nodeByTitle[k]; for(const k in nodeBySlug) delete nodeBySlug[k];
+      data.nodes.forEach(n=>{ nodeById[n.id]=n; nodeByTitle[n.label]=n;
+        if(!String(n.id).startsWith("cat:") && !String(n.id).startsWith("ext:")) nodeBySlug[slugify(String(n.id).split("/").pop().replace(/\.md$/,""))]=n; });
+      for(const k in adj) delete adj[k]; for(const k in inc) delete inc[k];
+      data.links.forEach(l=>{ const s=(l.source&&l.source.id)||l.source, t=(l.target&&l.target.id)||l.target;
+        (adj[s]=adj[s]||new Set()).add(t); (adj[t]=adj[t]||new Set()).add(s); (inc[s]=inc[s]||[]).push(l); (inc[t]=inc[t]||[]).push(l); });
+      assignColors(legendGroups());
+    }
+
+    (async () => {
+      progSet(8, t("loading_cats"));
+      { const cfg = await fetch("/api/config").then(r=>r.json()).catch(()=>({}));
+        categoryColors = cfg.categoryColors || {}; categoryOrder = cfg.categoryOrder || []; graphExcludedSet = new Set(cfg.graphExcluded || []); }
+      await loadCats();
+      progSet(24, t("loading_tags"));
+      allTags = await fetch("/api/tags").then(r=>r.json()).catch(()=>[]);
+      await refreshNodeTags();
+      progSet(45, t("loading_graph"));
+      const data = await fetch("/api/graph").then(r=>r.json());
+      progSet(62, t("loading_graph"));
+      ingest(data);
+      // Seed legend from graph groups when categories table is empty
+      data.nodes.forEach(n => { if (n.group && !categories.includes(n.group)) categories.push(n.group); });
+      const groups = legendGroups();
+      const saved = loadState();
+      const known = new Set(saved.knownGroups || []);
+      const sa = Array.isArray(saved.active) ? new Set(saved.active) : null;
+      groups.forEach(g => { if(!sa || sa.has(g) || !known.has(g)) active.add(g); });
+      saveState({active:[...active], knownGroups: groups});
+      buildLegend(groups);
+      // Reveal UI before heavy WebGL work so boot screen never sticks
+      overlayHide();
+
+      if (typeof ForceGraph3D !== "function") throw new Error("3D graph library failed to load");
+      Graph = ForceGraph3D()(document.getElementById("graph"))
+        .graphData(data)
+        .warmupTicks(0).d3AlphaDecay(0.03).d3AlphaMin(0.002)
+        .backgroundColor("#141210")
+        .nodeLabel(n => n.label)
+        .nodeColor(nodeColor).nodeVal(n=>n.val).nodeOpacity(0.95)
+        .linkColor(linkColor).linkWidth(0)
+        .linkDirectionalParticles(l => hlLinks.size ? (hlLinks.has(l) ? 3 : 0) : 1).linkDirectionalParticleWidth(1.4)
+        .onNodeHover(n=>{ document.getElementById("graph").style.cursor = n?"pointer":""; })
+        .onNodeClick(n=>{ const id=String(n.id); if(id.startsWith("cat:")) openCategoryNode(n.label); else if(id.startsWith("tag:")) openTag(n.label); else openNote(n.id, false); })
+        .onBackgroundClick(()=>{
+          pinnedId=null; curNote=null; curTag=null; curCat=null;
+          const s=document.getElementById("search"); s.value="";
+          searchSet=new Set();
+          document.getElementById("search-clear").style.display="none";
+          document.getElementById("results").innerHTML="";
+          closeNote(); refreshStyles();
+        })
+        .onNodeDrag(()=>{ if(!dragReheated){ dragReheated=true; Graph.d3ReheatSimulation(); } })
+        .onNodeDragEnd(n=>{ dragReheated=false; n.fx=n.fy=n.fz=undefined; });
+      Graph.d3Force("charge").strength(-60);
+      progSet(80, "Rendering…");
+      applyFilter();
+
+      // map labels for big nodes (hubs); every node gets a hidden label and by default
+      // only Level 2/3 (val>=16: categories and node-tags) show; while searching we show
+      // a label on every matched node. Built from current graph nodes, rebuilt on reload.
+      labelLayerEl = document.getElementById("maplabels");
+      rebuildMapLabels();
+      labelsOn = (saved.labels!==false);
+      let frames=0, lastFps=performance.now();
+      function updateLabels(){
+        if(!labelsOn) return; frames++;
+        const now=performance.now(); if(now-lastFps>1000){ const el=document.getElementById("fps"); if(el) el.textContent=" · "+Math.round(frames*1000/(now-lastFps))+" fps"; frames=0; lastFps=now; }
+        const cam=Graph.camera(), V3=cam.position.constructor, fwd=cam.getWorldDirection(new V3());
+        const searching = searchSet.size > 0;
+        for(const {n,el} of mapLabels){
+          const want = searching ? searchSet.has(n.id) : ((n.val || 0) >= 16);
+          if(!want || !active.has(n.group) || n.x==null){ el.style.display="none"; continue; }
+          const dx=n.x-cam.position.x, dy=n.y-cam.position.y, dz=(n.z||0)-cam.position.z;
+          if(dx*fwd.x+dy*fwd.y+dz*fwd.z<=0){ el.style.display="none"; continue; }   // behind camera
+          const dist=Math.hypot(dx,dy,dz);
+          if(!searching){ const maxDist=n.val>=54?4200:1700; if(dist>maxDist){ el.style.display="none"; continue; } }
+          const c=Graph.graph2ScreenCoords(n.x,n.y,n.z||0);
+          el.style.display=""; el.style.fontSize=Math.max(9,Math.min(13,15-dist/400))+"px"; el.style.left=c.x+"px"; el.style.top=c.y+"px";
+        }
+        requestAnimationFrame(updateLabels);
+      }
+      const cb=document.getElementById("showLabels");
+      cb.checked=labelsOn; cb.addEventListener("change", e=>{ labelsOn=e.target.checked; saveState({labels:labelsOn}); if(labelsOn) updateLabels(); else mapLabels.forEach(({el})=>el.style.display="none"); });
+      if(labelsOn) updateLabels();
+
+      // boot already hidden before ForceGraph3D
+      // After the initial (nicely warmed) layout, drop synchronous warmup so later filter
+      // re-layouts don't block the main thread — the loader animation then stays smooth and
+      // the graph settles over rendered frames instead of one big freeze.
+      // warmup disabled for snappy first paint
+
+      // camera persistence
+      if(saved.cam) setTimeout(()=>{ try{ Graph.cameraPosition({x:saved.cam.x,y:saved.cam.y,z:saved.cam.z},{x:saved.cam.tx,y:saved.cam.ty,z:saved.cam.tz},0);}catch(e){} }, 80);
+      setInterval(()=>{ if(!Graph) return; const p=Graph.cameraPosition(); const c=Graph.controls&&Graph.controls(); const t=(c&&c.target)||{x:0,y:0,z:0}; saveState({cam:{x:p.x,y:p.y,z:p.z,tx:t.x,ty:t.y,tz:t.z}}); }, 1500);
+    })().catch(e => {
+      document.getElementById("stats").textContent = "error: " + e.message;
+      progSet(100, "Error: " + e.message);
+      setTimeout(overlayHide, 1500);
+    });
+  </script>
+</body>
+</html>

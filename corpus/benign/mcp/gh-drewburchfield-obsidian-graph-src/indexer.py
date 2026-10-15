@@ -1,0 +1,273 @@
+"""
+Initial vault indexing for Obsidian Graph MCP Server.
+
+Scans Obsidian vault, generates embeddings, and populates PostgreSQL.
+"""
+
+import asyncio
+import os
+from datetime import UTC, datetime
+from pathlib import Path
+
+from loguru import logger
+
+from .embedder import VoyageEmbedder
+from .exceptions import EmbeddingError
+from .exclusion import ExclusionFilter, cleanup_excluded_notes, load_exclusion_filter
+from .vector_store import Note, PostgreSQLVectorStore, VectorStoreError
+
+
+def scan_vault(vault_path: str, exclusion_filter: ExclusionFilter | None = None) -> list[Path]:
+    """
+    Scan Obsidian vault for all markdown files.
+
+    Respects exclusion patterns from .obsidian-graph.conf.
+
+    Args:
+        vault_path: Path to Obsidian vault
+        exclusion_filter: Optional pre-loaded filter (avoids double-loading)
+
+    Returns:
+        List of markdown file paths (excluding filtered paths)
+    """
+    vault = Path(vault_path)
+    if not vault.exists():
+        raise FileNotFoundError(f"Vault not found: {vault_path}")
+
+    # Use provided filter or load one
+    if exclusion_filter is None:
+        exclusion_filter = load_exclusion_filter(vault_path)
+
+    # Find all markdown files
+    all_md_files = list(vault.rglob("*.md"))
+
+    # Filter out excluded paths
+    md_files = []
+    excluded_count = 0
+    for file_path in all_md_files:
+        rel_path = str(file_path.relative_to(vault))
+        if exclusion_filter.should_exclude(rel_path):
+            excluded_count += 1
+            continue
+        md_files.append(file_path)
+
+    logger.info(
+        f"Found {len(md_files)} markdown files in vault ({excluded_count} excluded by filters)"
+    )
+    return md_files
+
+
+def extract_title(file_path: Path) -> str:
+    """
+    Extract note title from filename or frontmatter.
+
+    Args:
+        file_path: Path to markdown file
+
+    Returns:
+        Note title
+    """
+    # Use filename without extension as title
+    # TODO: Could parse frontmatter for custom titles
+    return file_path.stem
+
+
+async def index_vault(vault_path: str, batch_size: int = 100) -> bool:
+    """
+    Index entire Obsidian vault.
+
+    Args:
+        vault_path: Path to Obsidian vault
+        batch_size: Number of notes to process per batch
+
+    Returns:
+        True if every file indexed successfully, False if any failed
+        (failed files keep their previous embeddings in the database)
+    """
+    logger.info(f"Starting vault indexing: {vault_path}")
+
+    # Initialize components
+    embedder = VoyageEmbedder(
+        cache_dir=os.getenv("CACHE_DIR", str(Path.home() / ".obsidian-graph" / "cache"))
+    )
+    store = PostgreSQLVectorStore()
+    await store.initialize()
+
+    try:
+        # Load exclusion filter once for both cleanup and scanning
+        exclusion_filter = load_exclusion_filter(vault_path)
+
+        # Clean up any previously indexed notes that are now excluded
+        await cleanup_excluded_notes(store, vault_path, exclusion_filter)
+
+        # Scan vault
+        md_files = scan_vault(vault_path, exclusion_filter)
+        vault_root = Path(vault_path)
+
+        # Track failures and successful upserts across all batches
+        all_failed_notes: list[dict[str, str]] = []
+        run_upserted = 0
+
+        # Process in batches
+        for i in range(0, len(md_files), batch_size):
+            batch_files = md_files[i : i + batch_size]
+            logger.info(
+                f"Processing batch {i // batch_size + 1}/{(len(md_files) + batch_size - 1) // batch_size}"
+            )
+
+            # Read files
+            notes_data = []
+            for file_path in batch_files:
+                try:
+                    with open(file_path, encoding="utf-8") as f:
+                        content = f.read().strip()
+
+                    # Skip empty files (Voyage API rejects empty strings)
+                    if not content:
+                        logger.warning(f"Skipping empty file: {file_path}")
+                        continue
+
+                    # Get file stats
+                    stat = file_path.stat()
+                    modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
+                    file_size = stat.st_size
+
+                    # Get vault-relative path
+                    rel_path = str(file_path.relative_to(vault_root))
+
+                    notes_data.append(
+                        {
+                            "path": rel_path,
+                            "title": extract_title(file_path),
+                            "content": content,
+                            "modified_at": modified_at,
+                            "file_size_bytes": file_size,
+                        }
+                    )
+
+                except Exception as e:
+                    logger.error(f"Error reading {file_path}: {e}")
+                    rel_path = str(file_path.relative_to(vault_root))
+                    all_failed_notes.append({"path": rel_path, "error": f"read failed: {e}"})
+
+            if not notes_data:
+                logger.warning(f"No valid notes in batch {i // batch_size + 1}")
+                continue
+
+            logger.info(f"Batch: {len(notes_data)} valid notes")
+
+            # Process each note with automatic chunking
+            notes = []
+            batch_failed_notes = []
+            for note_data in notes_data:
+                # embed_with_chunks handles both small (whole) and large (chunked) notes
+                try:
+                    embeddings_list, total_chunks = await embedder.embed_with_chunks(
+                        note_data["content"],
+                        chunk_size=2000,
+                        input_type="document",
+                    )
+                except EmbeddingError as e:
+                    logger.error(f"Failed to embed {note_data['path']}: {e}")
+                    batch_failed_notes.append({"path": str(note_data["path"]), "error": str(e)})
+                    all_failed_notes.append({"path": str(note_data["path"]), "error": str(e)})
+                    continue
+
+                # Create Note object(s)
+                if total_chunks == 1:
+                    # Whole note (not chunked)
+                    notes.append(
+                        Note(
+                            path=note_data["path"],
+                            title=note_data["title"],
+                            content=note_data["content"],
+                            embedding=embeddings_list[0],
+                            modified_at=note_data["modified_at"],
+                            file_size_bytes=note_data["file_size_bytes"],
+                            chunk_index=0,
+                            total_chunks=1,
+                        )
+                    )
+                else:
+                    # Chunked note - create one Note per chunk
+                    chunks = embedder.chunk_text(note_data["content"], chunk_size=2000, overlap=0)
+                    logger.info(f"Chunked {note_data['path']}: {total_chunks} chunks")
+
+                    for chunk_idx, (chunk_text, embedding) in enumerate(
+                        # strict: a count mismatch must raise, not silently
+                        # produce an incomplete chunk set (see upsert_batch)
+                        zip(chunks, embeddings_list, strict=True)
+                    ):
+                        notes.append(
+                            Note(
+                                path=note_data["path"],
+                                title=note_data["title"],
+                                content=chunk_text,
+                                embedding=embedding,
+                                modified_at=note_data["modified_at"],
+                                file_size_bytes=note_data["file_size_bytes"],
+                                chunk_index=chunk_idx,
+                                total_chunks=total_chunks,
+                            )
+                        )
+
+            # Insert into PostgreSQL (upsert_batch atomically replaces each
+            # path's full chunk set, deleting stale chunk rows)
+            if notes:
+                try:
+                    count = await store.upsert_batch(notes)
+                    run_upserted += count
+                    logger.info(f"Indexed {count} note chunks")
+                except VectorStoreError as e:
+                    # Batch-level DB failures flow through the same
+                    # incomplete-run accounting as per-file embedding failures
+                    logger.error(f"Batch upsert failed: {e}")
+                    for batch_note_path in {n.path for n in notes}:
+                        all_failed_notes.append(
+                            {"path": batch_note_path, "error": f"batch upsert failed: {e}"}
+                        )
+
+        # Final stats
+        total_notes = await store.get_note_count()
+        cache_stats = embedder.get_cache_stats()
+
+        # Report failures: failed files keep their previous embeddings, so a
+        # partial run must not claim success (or claim the corpus model changed)
+        if all_failed_notes:
+            logger.warning(
+                f"Indexing completed with {len(all_failed_notes)} failures "
+                f"(out of {len(md_files)} total files):\n"
+                + "\n".join(f"  - {n['path']}: {n['error']}" for n in all_failed_notes[:10])
+            )
+            if len(all_failed_notes) > 10:
+                logger.warning(f"  ... and {len(all_failed_notes) - 10} more failures")
+            logger.error(
+                f"Indexing incomplete: {run_upserted} note chunks re-indexed with "
+                f"{embedder.model}, but {len(all_failed_notes)} files failed and keep "
+                f"their previous embeddings. Run the indexer again to retry, or check "
+                f"Voyage API key/quota."
+            )
+            return False
+
+        await store.set_metadata("embedding_model", embedder.model)
+        logger.success(
+            f"Indexing complete! {run_upserted} note chunks indexed with {embedder.model} "
+            f"({total_notes} total in database). "
+            f"Cache: {cache_stats['total_cached']} embeddings, {cache_stats['cache_size_mb']} MB"
+        )
+        return True
+
+    finally:
+        await store.close()
+
+
+async def main():
+    """Run initial indexing."""
+    vault_path = os.getenv("OBSIDIAN_VAULT_PATH", "/vault")
+    ok = await index_vault(vault_path)
+    if not ok:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en" data-theme="dim">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hot-seat</title>
+<!-- Design source: Lavish's recommended DaisyUI v5 theme tokens (lavish-axi design, step 3). Only the prebuilt
+     component CSS is loaded, not the Tailwind runtime, so one bad class can never blank the page; every colour
+     below has a dark fallback so the page stays readable if the CDN is unreachable. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+<style>
+:root{
+  color-scheme: dark light;
+  --bg: var(--color-base-100,#14161b);
+  --bg2: var(--color-base-200,#1b1e25);
+  --bg3: var(--color-base-300,#262a33);
+  --fg: var(--color-base-content,#e7e7ea);
+  --muted: color-mix(in oklab, var(--fg) 66%, transparent);
+  --line: color-mix(in oklab, var(--fg) 16%, transparent);
+  --pri: var(--color-primary,#d7a94b);
+  --pri-fg: var(--color-primary-content,#14110a);
+  --ok: var(--color-success,#4fbf85);
+  --warn: var(--color-warning,#e2a63a);
+  --err: var(--color-error,#ea5f57);
+  --info: var(--color-info,#55a8e6);
+  --radius: 10px;
+  --mono: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg)}
+body{font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+:where(.grid,.flex,.hs-grid,.hs-choices,.hs-bar,.hs-top)>*{min-width:0}
+:where(p,h1,h2,h3,h4,li,dd,blockquote,label,summary,td,th,small,span,button){overflow-wrap:anywhere}
+:where(img,svg,video,canvas,iframe){max-width:100%;height:auto}
+h1,h2,h3,h4{margin:0;line-height:1.25}
+p{margin:0 0 .6em}
+code{font-family:var(--mono);font-size:.88em;background:var(--bg3);padding:.08em .35em;border-radius:5px}
+button{font:inherit}
+:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+[hidden]{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* top bar */
+.hs-top{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--bg2)}
+.hs-brand{font-weight:800;letter-spacing:.02em;display:flex;align-items:center;gap:8px}
+.hs-brand svg{width:22px;height:22px;flex:none}
+.hs-topic{flex:1 1 260px;color:var(--muted);font-size:.95em}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;border:1px solid var(--line);font-size:.8em;line-height:1.6;background:var(--bg);white-space:nowrap}
+.chip.pri{border-color:var(--pri);color:var(--pri)}
+.chip.ok{border-color:var(--ok);color:var(--ok)}
+.chip.warn{border-color:var(--warn);color:var(--warn)}
+.chip.err{border-color:var(--err);color:var(--err)}
+.chip.info{border-color:var(--info);color:var(--info)}
+.chip.mute{color:var(--muted)}
+button.chip{font:inherit;font-size:.8em;cursor:pointer;min-height:32px}
+.jump{display:none}
+@media (max-width:899px){.jump{display:inline-flex}}
+
+/* layout */
+.hs-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;padding:16px;max-width:1240px;margin:0 auto}
+@media (min-width:900px){.hs-grid{grid-template-columns:minmax(0,1fr) minmax(0,340px);align-items:start}.hs-side{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}}
+.hs-main{display:flex;flex-direction:column;gap:14px}
+.panel{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+.panel>summary{cursor:pointer;font-weight:650;min-height:32px;display:flex;align-items:center}
+.panel h2{font-size:1.1em;font-weight:700;margin-bottom:6px}
+.panel.note{border-left:4px solid var(--info)}
+.panel.warn{border-left:4px solid var(--warn)}
+.panel.trail{border-left:4px solid var(--ok)}
+.muted{color:var(--muted)}
+.small{font-size:.86em}
+
+/* cards */
+.hs-card{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.hs-card[data-state=draft]{border-color:color-mix(in oklab,var(--pri) 55%,var(--line))}
+.hs-card[data-state=sent]{opacity:.85}
+.hs-card>header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px}
+.hs-qn{font-family:var(--mono);font-weight:700;color:var(--pri)}
+.hs-card h3{flex:1 1 220px;font-size:1.05em}
+.hs-body p:last-child{margin-bottom:0}
+.hs-body ul,.panel ul{margin:.3em 0 .6em;padding-left:1.2em;list-style:disc}
+.panel li{margin:.2em 0}
+.hs-choices{display:grid;gap:8px;border:0;margin:0;padding:0;min-width:0}
+.hs-choice{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 12px;min-height:44px;border:1px solid var(--line);border-radius:8px;cursor:pointer;background:var(--bg)}
+.hs-choice:hover{border-color:color-mix(in oklab,var(--pri) 60%,var(--line))}
+.hs-choice:has(input:checked){border-color:var(--pri);background:color-mix(in oklab,var(--pri) 12%,var(--bg))}
+.hs-choice input{margin:3px 0 0;width:18px;height:18px;accent-color:var(--pri)}
+.hs-choice b{display:block;font-weight:650}
+.hs-choice small{display:block;color:var(--muted);margin-top:2px}
+.reco{border:1px dashed color-mix(in oklab,var(--ok) 70%,var(--line));border-radius:8px;padding:8px 12px;background:color-mix(in oklab,var(--ok) 8%,var(--bg));display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.reco>div{flex:1 1 240px}
+.reco strong{color:var(--ok)}
+textarea.hs-text{width:100%;min-height:64px;resize:vertical;padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit}
+.hs-flags{display:flex;flex-wrap:wrap;gap:8px}
+.flag{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:999px;cursor:pointer;background:var(--bg);user-select:none}
+.flag:has(input:checked){border-color:var(--warn);color:var(--warn);background:color-mix(in oklab,var(--warn) 10%,var(--bg))}
+.flag input{width:16px;height:16px;accent-color:var(--warn)}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:8px;border:1px solid var(--line);background:var(--bg3);color:var(--fg);cursor:pointer;font-weight:600;transition:transform .05s,background .15s,border-color .15s}
+.btn2:hover:not(:disabled){border-color:var(--pri)}
+.btn2:active:not(:disabled){transform:translateY(1px)}
+.btn2:disabled{opacity:.5;cursor:not-allowed}
+.btn2.primary{background:var(--pri);color:var(--pri-fg);border-color:var(--pri)}
+.btn2.sm{min-height:34px;padding:0 10px;font-weight:550;font-size:.9em}
+.err-msg{color:var(--err);font-size:.9em}
+figure{margin:0}
+figure svg,figure img{border-radius:8px;border:1px solid var(--line);background:var(--bg)}
+.hs-mock{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:12px;overflow:auto}
+.hs-frame{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
+figcaption{color:var(--muted);font-size:.85em;margin-top:4px}
+
+/* sticky bar */
+.hs-bar{position:sticky;bottom:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 -8px 18px -12px #000}
+.hs-bar .counts{flex:1 1 160px;display:flex;flex-wrap:wrap;gap:6px}
+.hs-bar .btn2{flex:0 0 auto}
+.hs-nudge{flex:1 1 100%;color:var(--warn);font-size:.9em}
+.hs-steer{display:flex;flex-direction:column;gap:6px}
+
+/* history */
+.hs-round>summary{cursor:pointer;min-height:36px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.hs-hist{display:grid;gap:10px;margin-top:8px}
+.hs-hq{border-top:1px solid var(--line);padding-top:8px}
+.hs-hq q{quotes:"\201C" "\201D";font-style:italic}
+blockquote{margin:.3em 0;padding:.2em .8em;border-left:3px solid var(--line);color:var(--muted)}
+
+/* sidebar */
+.hs-side{display:flex;flex-direction:column;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:10px}
+.tabs2{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:4px}
+.tab2{min-height:38px;padding:0 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;font-weight:600;white-space:nowrap}
+.tab2[aria-selected=true]{background:var(--bg);color:var(--fg);border-color:var(--line)}
+.tab2 .n{margin-left:5px;font-size:.8em;color:var(--pri)}
+.tabpane{display:none;min-width:0}
+.tabpane.on{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:.8em;color:var(--muted);margin-top:6px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+#tree{width:100%;display:block}
+#tree text{font:12px system-ui,sans-serif;fill:var(--fg)}
+#tree .dim{fill:var(--muted)}
+.dec{border-bottom:1px solid var(--line);padding:8px 0}
+.dec:last-child{border-bottom:0}
+.dec h4{font-size:.95em;margin-bottom:3px}
+.gates{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+pre{margin:0;font-family:var(--mono);font-size:.8em;line-height:1.45;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;overflow-x:auto;max-width:100%;white-space:pre}
+pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere}
+.diff .a{color:var(--ok)}
+.diff .d{color:var(--err)}
+.diff .h{color:var(--muted)}
+.rule{padding:6px 0;border-bottom:1px solid var(--line)}
+.rule:last-child{border-bottom:0}
+.rule b{font-family:var(--mono);color:var(--pri);margin-right:6px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warn)}
+@media (prefers-reduced-motion:no-preference){.pulse{animation:pulse 1.4s ease-in-out infinite}@keyframes pulse{50%{opacity:.35}}}
+.hs-empty{padding:28px 16px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<noscript><p class="hs-empty">This page needs JavaScript to render the session.</p></noscript>
+<script id="hs-state" type="application/json">null</script>
+<script>
+(() => {
+'use strict';
+const S = JSON.parse(document.getElementById('hs-state').textContent);
+const $app = document.getElementById('app');
+if (!S) { $app.innerHTML = '<p class="hs-empty">hot-seat template: no session state embedded. Run <code>hot-seat.mjs init</code>.</p>'; return; }
+
+// ---------------------------------------------------------------- utils
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const arr = (x) => (Array.isArray(x) ? x : x == null || x === '' ? [] : [x]);
+const inline = (t) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+function md(t) {
+  const blocks = String(t ?? '').trim().split(/\n{2,}/);
+  return blocks.map((b) => {
+    const ls = b.split('\n');
+    if (ls.every((l) => /^\s*[-*] /.test(l))) return '<ul>' + ls.map((l) => `<li>${inline(l.replace(/^\s*[-*] /, ''))}</li>`).join('') + '</ul>';
+    return `<p>${ls.map(inline).join('<br>')}</p>`;
+  }).join('');
+}
+const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage blocked */ } } };
+const round = S.rounds[S.rounds.length - 1];
+const prevRounds = S.rounds.slice(0, -1);
+const DRAFT_KEY = `hs:${S.session}:${round.n}`;
+const SENT_KEY = `hs:sent:${S.session}:${round.n}`;
+const interactive = S.status !== 'done' && round.questions.length > 0;
+let draft = store.get(DRAFT_KEY) || { answers: {}, steer: '' };
+let sentAt = store.get(SENT_KEY);
+const A = (id) => (draft.answers[id] ||= { choice: null, choices: [], text: (round.questions.find((x) => x.id === id) || {}).prefill || '', dontKnow: false, prototype: false, skip: false });
+const inLavish = () => typeof window.lavish !== 'undefined' && window.lavish && typeof window.lavish.queuePrompt === 'function';
+
+function stance(q, a) {
+  if (!a) return 'open';
+  if (a.skip) return 'skipped';
+  if (a.dontKnow) return 'unsure';
+  const chosen = a.choices && a.choices.length ? a.choices : arr(a.choice);
+  const text = (a.text || '').trim();
+  if (q.kind === 'confirm') return chosen.length ? 'answered' : 'open';
+  if (q.kind === 'free') return text ? (q.recommended && text === String(q.recommended).trim() ? 'agreed' : 'own-words') : a.prototype ? 'prototype' : 'open';
+  if (!chosen.length && !text) return a.prototype ? 'prototype' : 'open';
+  if (!chosen.length) return 'own-words';
+  const reco = arr(q.recommended);
+  return chosen.length === reco.length && chosen.every((c) => reco.includes(c)) ? 'agreed' : 'differed';
+}
+const STANCE = { agreed: ['ok', 'Agreed'], differed: ['pri', 'Chose differently'], 'own-words': ['pri', 'Own words'], unsure: ['warn', "Don't know"], prototype: ['warn', 'Needs prototype'], skipped: ['mute', 'Out of scope'], answered: ['ok', 'Answered'], open: ['mute', 'Open'] };
+const chip = (kind, text, title) => `<span class="chip ${kind}"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
+
+// ---------------------------------------------------------------- header
+const settledN = S.tree.filter((n) => n.state === 'settled').length;
+const parkedN = S.tree.filter((n) => n.state === 'parked').length;
+const modeLabel = S.mode.value === 'docs' ? 'Codebase: paper trail on' : 'Stateless: nothing written';
+function header() {
+  return `<header class="hs-top">
+    <div class="hs-brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20h14M7 20v-5a5 5 0 0 1 10 0v5M9 15V6h6v9"/></svg>hot-seat</div>
+    <div class="hs-topic">${S.title || S.topic ? esc(S.title || S.topic) : 'New session'}</div>
+    ${chip(S.mode.value === 'docs' ? 'ok' : 'info', modeLabel, S.mode.reason)}
+    ${chip('mute', S.status === 'done' ? 'Session complete' : `Round ${round.n}`)}
+    ${chip('mute', `${settledN} settled${parkedN ? `, ${parkedN} parked` : ''} of ${S.tree.length}`)}
+ <button type="button" class="chip pri jump" data-act="jump" aria-label="Jump to the tree, ledger and terms">Overview</button>
+    <select id="theme" aria-label="Page theme" class="chip mute" style="cursor:pointer">${['dim', 'luxury', 'night', 'business', 'nord', 'light'].map((t) => `<option value="${t}">${t}</option>`).join('')}</select>
+  </header>`;
+}
+
+// ---------------------------------------------------------------- cards
+function figure(q) {
+  const f = q.figure;
+  if (!f) return '';
+  const strip = (h) => String(h).replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, '');
+  const body = f.svg ? strip(f.svg) : f.html ? `<div class="hs-mock">${strip(f.html)}</div>` : f.frame ? `<iframe class="hs-frame" src="${esc(f.frame)}" title="${esc(f.alt || 'prototype')}" sandbox="allow-scripts" style="height:${+f.height || 360}px"></iframe>` : f.img ? `<img src="${esc(f.img)}" alt="${esc(f.alt || '')}">` : '';
+  return body ? `<figure>${body}${f.caption ? `<figcaption>${esc(f.caption)}</figcaption>` : ''}</figure>` : '';
+}
+function card(q) {
+  const a = A(q.id);
+  const st = sentAt ? 'sent' : stance(q, a) === 'open' ? 'open' : 'draft';
+  const [k, label] = STANCE[stance(q, a)];
+  const reco = arr(q.recommended);
+  const type = q.multi ? 'checkbox' : 'radio';
+  const locked = sentAt ? 'disabled' : '';
+  let choices = '';
+  if (q.kind !== 'free') {
+    choices = `<fieldset class="hs-choices" ${locked}><legend class="sr">Choices for ${esc(q.id)}</legend>` + arr(q.choices).map((c) => {
+      const on = q.multi ? (a.choices || []).includes(c.id) : a.choice === c.id;
+      return `<label class="hs-choice"><input type="${type}" name="${esc(q.id)}" value="${esc(c.id)}" data-q="${esc(q.id)}" data-role="choice" ${on ? 'checked' : ''}>
+        <span><b>${inline(c.label)}</b>${c.detail ? `<small>${inline(c.detail)}</small>` : ''}</span>
+        ${reco.includes(c.id) ? chip('ok', 'Recommended') : '<span></span>'}</label>`;
+    }).join('') + '</fieldset>';
+  }
+  let recoBox = '';
+  if (!q.noRecommendation && q.kind === 'choice') {
+    const names = reco.map((r) => `(${esc(r)}) ${inline((q.choices.find((c) => c.id === r) || {}).label || r)}`).join(' + ');
+    recoBox = `<div class="reco"><div><strong>Recommended:</strong> ${names}<br><span class="muted">${inline(q.why)}</span></div>
+      <button type="button" class="btn2 sm" data-act="use-reco" data-q="${esc(q.id)}" ${locked}>Agree with this</button></div>`;
+  } else if (!q.noRecommendation && q.kind === 'free') {
+    recoBox = `<div class="reco"><div><strong>Recommended answer:</strong> ${inline(q.recommended)}<br><span class="muted">${inline(q.why)}</span></div>
+      <button type="button" class="btn2 sm" data-act="use-reco-text" data-q="${esc(q.id)}" ${locked}>Use this text</button></div>`;
+  }
+  const ph = q.kind === 'free' ? 'Your answer' + (q.required ? ' (required)' : '') : q.kind === 'confirm' ? 'What is off? (needed if you say "Not yet")' : 'In your own words, or push back on the question itself (optional)';
+  const flags = q.kind === 'confirm' ? '' : `<div class="hs-flags">
+      <label class="flag"><input type="checkbox" data-q="${esc(q.id)}" data-role="dontKnow" ${a.dontKnow ? 'checked' : ''} ${locked}> I don't know</label>
+      <label class="flag" title="Some questions cannot be answered by talking. I will try to show you something cheap to react to."><input type="checkbox" data-q="${esc(q.id)}" data-role="prototype" ${a.prototype ? 'checked' : ''} ${locked}> Needs a prototype</label>
+      ${q.required ? '' : `<label class="flag" title="Not part of this session. I will park it and stop asking."><input type="checkbox" data-q="${esc(q.id)}" data-role="skip" ${a.skip ? 'checked' : ''} ${locked}> Out of scope</label>`}</div>`;
+  return `<article class="hs-card" id="${esc(q.id)}" data-state="${st}" data-q="${esc(q.id)}">
+    <header><span class="hs-qn">${esc(q.id)}</span><h3>${inline(q.title)}</h3>${q.stakes === 'low' ? chip('mute', 'low stakes', 'Safe to accept my recommendation') : ''}<span class="chip ${k}" data-role="stance">${sentAt ? 'Sent' : label}</span></header>
+    <div class="hs-body">${md(q.body)}</div>${q.basis ? `<div class="small muted">Based on: ${inline(q.basis)}</div>` : ''}${figure(q)}${choices}${recoBox}
+    <textarea class="hs-text" data-q="${esc(q.id)}" data-role="text" placeholder="${esc(ph)}" aria-label="${esc(ph)}" ${locked}>${esc(a.text)}</textarea>
+    ${flags}<div class="err-msg" data-err="${esc(q.id)}" role="alert"></div>
+  </article>`;
+}
+
+function historyRound(r) {
+  const rows = r.questions.map((q) => {
+    const a = q.answer, s = a ? a.stance : 'open';
+    const [k, label] = STANCE[s] || STANCE.open;
+    const chosen = a ? (a.choices && a.choices.length ? a.choices : arr(a.choice)) : [];
+    const labs = chosen.map((id) => `(${esc(id)}) ${inline((q.choices || []).find((c) => c.id === id)?.label || id)}`).join(' + ');
+    const reco = arr(q.recommended).map((id) => (q.choices || []).find((c) => c.id === id)?.label || id).join(' + ');
+    return `<div class="hs-hq"><div><span class="hs-qn">${esc(q.id)}</span> <strong>${inline(q.title)}</strong> ${chip(k, label)}</div>
+      ${labs ? `<div>You chose: ${labs}</div>` : ''}
+      ${a && a.text ? `<blockquote>${esc(a.text)}</blockquote>` : ''}
+      ${a && a.prototype ? '<div class="small muted">Flagged: needs a prototype.</div>' : ''}
+      ${q.kind === 'choice' && reco && s !== 'agreed' ? `<div class="small muted">I recommended: ${inline(reco)}</div>` : ''}</div>`;
+  }).join('');
+  const c = {};
+  r.questions.forEach((q) => { const s = q.answer ? q.answer.stance : 'open'; c[s] = (c[s] || 0) + 1; });
+  return `<details class="panel hs-round"><summary><strong>Round ${r.n}</strong><span class="muted small">${r.questions.length} question${r.questions.length === 1 ? '' : 's'}: ${Object.entries(c).map(([s, n]) => `${n} ${(STANCE[s] || [0, s])[1].toLowerCase()}`).join(', ')}</span></summary>
+    <div class="hs-hist">${r.note ? `<div class="small muted">${md(r.note)}</div>` : ''}${r.steer ? `<div><span class="small muted">Your steering:</span><blockquote>${esc(r.steer)}</blockquote></div>` : ''}${rows}${writesHtml(r, true)}</div></details>`;
+}
+
+function writesHtml(r, quiet) {
+  if (S.mode.value !== 'docs') return '';
+  if (!r.writes || !r.writes.length) return quiet ? '' : `<section class="panel trail"><h2>Paper trail</h2><p class="muted small">Nothing was written to the repository since your last answers. No term resolved and no decision cleared the three ADR gates.</p></section>`;
+  const items = r.writes.map((w) => `<details><summary><code>${esc(w.file)}</code> ${chip(w.status === 'added' ? 'ok' : 'info', w.status)} <span class="muted small">+${w.added} -${w.removed}, ${w.kind === 'adr' ? 'ADR' : 'glossary'}</span></summary>
+    <pre class="diff">${esc(w.diff).split('\n').map((l) => `<span class="${l[0] === '+' ? 'a' : l[0] === '-' ? 'd' : 'h'}">${l}</span>`).join('\n')}</pre></details>`).join('');
+  return `<section class="panel trail"><h2>Paper trail: written since your last answers</h2>${items}</section>`;
+}
+
+// ---------------------------------------------------------------- main column
+function steerPanel() {
+  return `<details class="panel" ${round.n === 1 ? 'open' : ''}><summary>How to steer this session</summary>
+    <ul class="small">
+      <li><strong>Push back.</strong> If a question is pitched too low, or my recommendation is wrong, say so in the box on that card. Agreeing with everything means you did not need a session.</li>
+      <li><strong>"I don't know" is an answer.</strong> Say it and mean it. I will ask a smaller question or look the fact up myself.</li>
+      <li><strong>Flag what talk cannot settle.</strong> "Needs a prototype" parks the question until you have something to react to.</li>
+      <li><strong>Correct the scope.</strong> Too big, drifting, wrong topic: use the steer box at the bottom. You can also select any text on the page and annotate it.</li>
+      <li>Facts are my job. If I ask you something I could have looked up, tell me.</li>
+    </ul></details>`;
+}
+function factsStrip() {
+  const running = S.facts.filter((f) => f.state === 'running');
+  const done = S.facts.filter((f) => f.state === 'done');
+  if (!running.length && !done.length) return '';
+  return `<section class="panel"><h2>Fact-finding</h2>
+    ${running.map((f) => `<div><span class="dot pulse"></span> <strong>Looking up:</strong> ${inline(f.title)} <span class="muted small">(questions that depend on it wait for a later round)</span></div>`).join('')}
+    ${done.length ? `<details><summary class="small">${done.length} fact${done.length === 1 ? '' : 's'} found (not asked of you)</summary>${done.map((f) => `<div class="small"><strong>${inline(f.title)}</strong><br><span class="muted">${inline(f.result || '')}</span></div>`).join('')}</details>` : ''}</section>`;
+}
+function bar() {
+  return `<div class="hs-bar" id="bar"><div class="counts" id="counts" aria-live="polite"></div><div class="hs-nudge" id="nudge"></div>
+    <button type="button" class="btn2 sm" id="nextopen" data-act="next-open">Next open</button>
+    <button type="button" class="btn2 sm" id="acceptlow" data-act="accept-low" title="Sets every still-open low-stakes card to my recommendation. Nothing is sent until you press send: you can review and change each one."></button>
+    <button type="button" class="btn2 primary" id="send" data-act="send"></button></div>`;
+}
+function mainCol() {
+  const p = [];
+  if (S.status === 'done') {
+    p.push(`<section class="panel note"><h2>Session complete</h2>${md(round.summary || 'Shared understanding confirmed.')}<p class="muted small">Nothing was acted on. Copy the ledger from the Ledger tab and hand it to whatever comes next, in this same conversation.</p></section>`);
+  } else {
+    if (round.note) p.push(`<section class="panel note"><h2>${round.n === 1 ? 'Before we start' : 'Since your last answers'}</h2>${md(round.note)}</section>`);
+    if (round.summary) p.push(`<section class="panel note"><h2>Shared understanding, in my words</h2>${md(round.summary)}${(S.assumptions || []).length ? `<h3 style="font-size:.95em;margin-top:8px">Inferred by me, not said by you: check these</h3><ul>${S.assumptions.map((a) => `<li>${inline(a.text)}</li>`).join('')}</ul>` : ''}</section>`);
+    if (round.warnings && round.warnings.length) p.push(`<details class="panel warn"><summary>${round.warnings.length} consistency check${round.warnings.length === 1 ? '' : 's'} flagged on this round</summary><ul class="small">${round.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>`);
+    if (round.n > 1) p.push(writesHtml(round, false));
+    if (round.n === 1 || !prevRounds.length) p.push(steerPanel());
+    p.push(factsStrip());
+    p.push(`<div class="small muted" role="status">${sentAt ? 'Round sent. I am working on it: this page will reload with the next round.' : 'Answer what you can. Anything left open comes back in the next round.'}</div>`);
+    p.push(...round.questions.map(card));
+    p.push(`<section class="panel hs-steer"><h2>Steer the session <span class="muted small">(optional)</span></h2>
+      <textarea class="hs-text" id="steer" placeholder="Push back on the interview itself: scope too big, wrong topic, questions too shallow, something to add or drop..." aria-label="Steer the session" ${sentAt ? 'disabled' : ''}>${esc(draft.steer)}</textarea></section>`);
+    p.push(bar());
+    if (round.n > 1) p.push(steerPanel());
+  }
+  if (prevRounds.length) p.push(`<h2 class="muted" style="font-size:.95em;margin-top:4px">History</h2>` + prevRounds.slice().reverse().map(historyRound).join(''));
+  return `<main class="hs-main">${p.join('')}</main>`;
+}
+
+// ---------------------------------------------------------------- sidebar
+const NODE = { settled: ['ok', 'Settled'], frontier: ['pri', 'Open: asked now'], blocked: ['mute', 'Waiting on another decision'], running: ['info', 'Waiting on a lookup'], parked: ['warn', 'Parked'] };
+function ledgerTab() {
+  const settled = S.tree.filter((n) => n.state === 'settled' && n.id !== 'dm');
+  const parked = S.tree.filter((n) => n.state === 'parked');
+  const qs = S.rounds.flatMap((r) => r.questions.map((q) => ({ ...q, round: r.n })));
+  const dec = settled.map((n, i) => {
+    const q = qs.filter((x) => x.node === n.id && x.answer && x.kind !== 'confirm');
+    const words = q.map((x) => x.answer.text).filter(Boolean);
+    return `<div class="dec"><h4>${esc(n.id)}. ${inline(n.title)}</h4><div>${inline(n.decision)}</div>${words.length ? `<blockquote class="small">${words.map(esc).join('<br>')}</blockquote>` : ''}<div class="small muted">${q.map((x) => `${x.id}, round ${x.round}`).join(' | ')}</div></div>`;
+  }).join('') || '<p class="muted small">No settled decisions yet. Every answer you send lands here.</p>';
+  const asm = (S.assumptions || []).length ? `<h4 style="margin-top:10px">Derived by me, not said by you</h4><p class="small muted">Check these: they are inferences.</p>${S.assumptions.map((a) => `<div class="dec small">${inline(a.text)}<div class="muted">round ${a.round}</div></div>`).join('')}` : '';
+  const pk = parked.length ? `<h4 style="margin-top:10px">Parked</h4>${parked.map((n) => `<div class="dec"><strong>${inline(n.title)}</strong><div class="small muted">${inline(n.parkedReason)}</div></div>`).join('')}` : '';
+  return `${dec}${pk}${asm}<h4 style="margin-top:12px">Export</h4><p class="small muted">The whole ledger as markdown. Hand it to whatever comes next (a spec, tickets, a plan): the answers survive there exactly as decided.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0"><button type="button" class="btn2 sm" data-act="copy-ledger">Copy ledger</button><button type="button" class="btn2 sm" data-act="dl-ledger">Download .md</button><span class="small muted" id="copied" role="status"></span></div>
+    <pre class="wrap" id="ledger-md" style="max-height:260px;overflow:auto">${esc(S.ledgerMd)}</pre>`;
+}
+function termChips(g, docs) {
+  if (g.status === 'existing') return chip('mute', 'already in CONTEXT.md, unchanged');
+  if (g.status === 'rejected') return chip('mute', 'considered, not added');
+  if (g.status === 'conflict') return chip('err', 'conflict: unresolved');
+  if (g.status === 'proposed') return chip('warn', 'proposed');
+  return chip('ok', 'resolved') + (docs ? (g.written ? chip('ok', 'written to ' + (g.file || 'CONTEXT.md')) : chip('warn', 'not written yet')) : chip('mute', 'session only'));
+}
+function termsTab() {
+  const docs = S.mode.value === 'docs';
+  if (!S.glossary.length) return `<p class="muted small">${docs ? 'No term has resolved yet. When one does it is written to CONTEXT.md right then, and shows here.' : 'No term has resolved yet. In stateless mode terms stay on this page and in the ledger; nothing is written to your workspace.'}</p>`;
+  return S.glossary.map((g) => `<div class="dec"><h4>${esc(g.term)}${g.fr ? ` <span class="muted small">(fr: ${esc(g.fr)})</span>` : ''}</h4><div class="small">${inline(g.definition)}</div>
+    ${g.avoid && g.avoid.length ? `<div class="small muted">Avoid: ${g.avoid.map(esc).join(', ')}</div>` : ''}
+    <div class="gates">${termChips(g, docs)}</div>
+    ${g.note ? `<div class="small muted">${inline(g.note)}</div>` : ''}${g.conflict ? `<div class="small" style="color:var(--err)">${inline(g.conflict)}</div>` : ''}</div>`).join('');
+}
+function adrsTab() {
+  const rule = `<p class="small muted">An ADR needs <strong>all three</strong>: hard to reverse, surprising without context, and a real trade-off. Miss one and there is no ADR. Most sessions write none.</p>`;
+  if (!S.adrs.length) return rule + '<p class="muted small">No ADR candidate yet.</p>';
+  const gate = (a, k, name) => { const g = (a.gates || {})[k]; return `<span class="chip ${g && g.met ? 'ok' : 'err'}" title="${esc(g && g.why || '')}">${g && g.met ? 'yes' : 'no'}: ${name}</span>`; };
+  return rule + S.adrs.map((a) => `<div class="dec"><h4>${inline(a.title)}</h4><div class="gates">${gate(a, 'hardToReverse', 'hard to reverse')}${gate(a, 'surprising', 'surprising')}${gate(a, 'tradeoff', 'real trade-off')}</div>
+    <div>${chip(a.status === 'written' ? 'ok' : a.status === 'skipped' ? 'mute' : 'warn', a.status)}${a.file ? ` <code>${esc(a.file)}</code>` : ''}</div>
+    ${a.skipReason ? `<div class="small muted">Skipped${a.skippedBy ? ' by ' + esc(a.skippedBy) : ''}: ${inline(a.skipReason)}</div>` : ''}
+    ${['hardToReverse', 'surprising', 'tradeoff'].map((k) => (a.gates && a.gates[k] && a.gates[k].why) ? `<div class="small muted">${esc(a.gates[k].why)}</div>` : '').join('')}</div>`).join('');
+}
+function contractTab() {
+  const src = (S.contract.upstream || []).length ? `Upstream skills also found: ${S.contract.upstream.map((u) => `<code>${esc(u.name)}</code>`).join(', ')} (optional; this inline contract is what runs).` : 'No upstream grilling / domain-modeling skill found. That is fine: this contract is inline in the skill and is the whole interview.';
+  let g = '';
+  return `<p class="small muted">These are the rules this session runs under. If a round ever breaks one (no recommendation, no paper trail in codebase mode), say so: the round builder refuses to render questions without a recommendation and cross-checks CONTEXT.md and ADR files against what was claimed.</p><p class="small">${src}</p>` +
+    S.contract.rules.filter((r) => S.mode.value === 'docs' || r.group.indexOf('Paper') !== 0).map((r) => { const head = r.group !== g ? `<h4 style="margin-top:10px">${esc(r.group)}</h4>` : ''; g = r.group; return `${head}<div class="rule"><b>${esc(r.id)}</b>${inline(r.text)} <span class="muted small">(${esc(r.src)})</span></div>`; }).join('') +
+    `<p class="small muted" style="margin-top:10px">Session ${esc(S.session)}, contract v${esc(S.contract.version)}, mode ${esc(S.mode.value)} (${esc(S.mode.reason)}).</p>`;
+}
+const TREE_PANE = () => '<svg id="tree" role="img" aria-label="Design tree of decisions"></svg><div class="legend"><span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="var(--ok)"/></svg>settled</span><span><svg width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="none" stroke="var(--pri)" stroke-width="2"/><circle cx="6" cy="6" r="1.8" fill="var(--pri)"/></svg>asked now</span><span><svg width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="2 2"/></svg>waiting</span><span><svg width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="none" stroke="var(--info)" stroke-width="2"/></svg>lookup</span><span><svg width="12" height="12"><path d="M6 1 11 6 6 11 1 6Z" fill="var(--warn)"/></svg>parked</span></div>';
+// Panes render lazily (first open): keeps the DOM small, which keeps the poll's DOM snapshot small.
+const PANES = { tree: TREE_PANE, ledger: ledgerTab, terms: termsTab, adrs: adrsTab, contract: contractTab };
+function fillPane(id) { const el = document.getElementById('pane-' + id); if (el && !el.dataset.filled) { el.innerHTML = PANES[id](); el.dataset.filled = '1'; } if (id === 'tree') drawTree(); }
+function sidebar() {
+  const docs = S.mode.value === 'docs';
+  const tabs = [
+    ['tree', 'Tree', S.tree.length], ['ledger', 'Ledger', S.tree.filter((n) => n.state === 'settled' && n.id !== 'dm').length],
+    ['terms', docs ? 'Glossary' : 'Terms', S.glossary.length], ['adrs', 'ADRs', S.adrs.length], ['contract', 'Contract', ''],
+  ];
+  const on = store.get(`hs:tab:${S.session}`) || 'tree';
+  return `<aside class="hs-side" aria-label="Session overview"><div class="tabs2" role="tablist">${tabs.map(([id, l, n]) => `<button type="button" role="tab" class="tab2" id="tab-${id}" data-act="tab" data-tab="${id}" aria-selected="${id === on}" aria-controls="pane-${id}">${l}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>
+    ${tabs.map(([id]) => `<div class="tabpane ${id === on ? 'on' : ''}" role="tabpanel" id="pane-${id}" aria-labelledby="tab-${id}"></div>`).join('')}</aside>`;
+}
+
+// ---------------------------------------------------------------- tree (inline SVG)
+function drawTree() {
+  const svg = document.getElementById('tree');
+  if (!svg) return;
+  const pane = svg.parentElement;
+  const W = Math.max(220, Math.floor(pane.clientWidth || svg.parentElement.getBoundingClientRect().width || 320));
+  const kids = {}; S.tree.forEach((n) => { const p = n.parent && S.tree.some((x) => x.id === n.parent) ? n.parent : '_'; (kids[p] ||= []).push(n); });
+  const rows = [];
+  (function walk(list, depth) { (list || []).forEach((n) => { rows.push({ n, depth }); walk(kids[n.id], depth + 1); }); })(kids._, 0);
+  const RH = 28, IND = 16, PAD = 12;
+  const H = rows.length * RH + 8;
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = '12px system-ui, sans-serif';
+  const idx = {}; rows.forEach((r, i) => (idx[r.n.id] = i));
+  let out = '';
+  rows.forEach((r, i) => {
+    const { n, depth } = r; const x = PAD + depth * IND, y = i * RH + RH / 2 + 4;
+    if (n.parent && idx[n.parent] !== undefined) {
+      const px = PAD + (rows[idx[n.parent]].depth) * IND, py = idx[n.parent] * RH + RH / 2 + 4;
+      out += `<path d="M${px} ${py + 6}V${y}H${x - 7}" fill="none" stroke="var(--line)" stroke-width="1.5"/>`;
+    }
+    let sh;
+    if (n.state === 'settled') sh = `<circle cx="${x}" cy="${y}" r="5.5" fill="var(--ok)"/>`;
+    else if (n.state === 'frontier') sh = `<circle cx="${x}" cy="${y}" r="5" fill="none" stroke="var(--pri)" stroke-width="2"/><circle cx="${x}" cy="${y}" r="2" fill="var(--pri)"/>`;
+    else if (n.state === 'running') sh = `<circle class="pulse" cx="${x}" cy="${y}" r="5" fill="none" stroke="var(--info)" stroke-width="2"/>`;
+    else if (n.state === 'parked') sh = `<path d="M${x} ${y - 6.5}L${x + 6.5} ${y}L${x} ${y + 6.5}L${x - 6.5} ${y}Z" fill="var(--warn)"/>`;
+    else sh = `<circle cx="${x}" cy="${y}" r="5" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="2.5 2.5"/>`;
+    const avail = W - x - 16; let label = n.title;
+    if (ctx.measureText(label).width > avail) { while (label.length > 1 && ctx.measureText(label + '...').width > avail) label = label.slice(0, -1); label += '...'; }
+    const tip = `${n.title} - ${(NODE[n.state] || [0, n.state])[1]}${n.decision ? ': ' + n.decision : ''}${n.parkedReason ? ': ' + n.parkedReason : ''}`;
+    out += `<g><title>${esc(tip)}</title>${sh}<text x="${x + 12}" y="${y + 4}" class="${n.state === 'settled' ? '' : n.state === 'blocked' ? 'dim' : ''}">${esc(label)}</text></g>`;
+  });
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('width', W); svg.setAttribute('height', H);
+  svg.innerHTML = out;
+}
+
+// ---------------------------------------------------------------- interactions
+function refresh() {
+  if (!interactive) return;
+  const c = {}; let anyAnswered = false;
+  round.questions.forEach((q) => {
+    const a = draft.answers[q.id], s = stance(q, a); c[s] = (c[s] || 0) + 1; if (s !== 'open') anyAnswered = true;
+    const el = document.getElementById(q.id); if (!el) return;
+    el.dataset.state = sentAt ? 'sent' : s === 'open' ? 'open' : 'draft';
+    const [k, l] = STANCE[s]; const ch = el.querySelector('[data-role=stance]'); ch.className = `chip ${k}`; ch.textContent = sentAt ? 'Sent' : l;
+  });
+  const counts = document.getElementById('counts');
+  counts.innerHTML = Object.entries(c).map(([s, n]) => chip(STANCE[s][0], `${n} ${STANCE[s][1].toLowerCase()}`)).join('');
+  const sendBtn = document.getElementById('send');
+  sendBtn.disabled = !!sentAt || (!anyAnswered && !(draft.steer || '').trim());
+  sendBtn.textContent = sentAt ? 'Sent, waiting for the agent' : `Send round ${round.n}`;
+  const low = round.questions.filter((x) => x.stakes === 'low' && !x.noRecommendation && x.kind !== 'confirm' && stance(x, draft.answers[x.id]) === 'open');
+  const al = document.getElementById('acceptlow'); if (al) { al.hidden = !!sentAt || low.length < 2; al.textContent = `Accept ${low.length} low-stakes`; }
+  const no = document.getElementById('nextopen'); if (no) no.hidden = !!sentAt || !round.questions.some((x) => stance(x, draft.answers[x.id]) === 'open');
+  const answered = round.questions.filter((q) => stance(q, draft.answers[q.id]) !== 'open');
+  const nudge = document.getElementById('nudge');
+  nudge.textContent = !sentAt && answered.length >= 3 && answered.every((q) => stance(q, draft.answers[q.id]) === 'agreed')
+    ? 'You agreed with every recommendation. Is any of them really a coin flip for you? Push back on one, or flag it, before sending.' : '';
+  store.set(DRAFT_KEY, draft);
+  scheduleDraftQueue();
+}
+// The latest draft is kept queued in Lavish (same queueKey = it REPLACES the previous draft), so anything the
+// user sends from the Lavish chrome ("Send to Agent", "Send & End") carries their current answers instead of
+// losing them. The explicit send button below is still the primary path: it queues the same key and sends now.
+let dqTimer = null, everQueued = false, lastQueued = '';
+function scheduleDraftQueue() {
+  if (!inLavish() || sentAt) return;
+  clearTimeout(dqTimer);
+  dqTimer = setTimeout(() => {
+    const pl = payload(false);
+    const n = pl.answers.filter((a, i) => stance(round.questions[i], a) !== 'open').length;
+    if (!n && !pl.steer && !everQueued) return;
+    const text = summary(pl);
+    if (text === lastQueued) return;
+    lastQueued = text; everQueued = true;
+    window.lavish.queuePrompt(text, { tag: 'hot-seat-round', text: `Round ${pl.round} draft: ${n} of ${pl.answers.length} answered${pl.steer ? ' + steering' : ''}`, queueKey: `hot-seat-round-${pl.round}`, data: { round: pl.round, answered: n, draft: true } });
+  }, 700);
+}
+function payload(final) {
+  const answers = round.questions.map((q) => { const a = draft.answers[q.id] || {}; return { id: q.id, choice: a.choice || null, choices: a.choices || [], text: (a.text || '').trim(), dontKnow: !!a.dontKnow, prototype: !!a.prototype, skip: !!a.skip }; });
+  return { v: 1, session: S.session, round: round.n, final: !!final, steer: (draft.steer || '').trim(), answers };
+}
+function summary(pl) {
+  const lines = [`hot-seat round ${pl.round}: answers from the page`];
+  round.questions.forEach((q, i) => {
+    const a = pl.answers[i]; const s = stance(q, a); const ch = a.choices && a.choices.length ? a.choices : arr(a.choice);
+    const labs = ch.map((id) => `(${id}) ${(q.choices || []).find((c) => c.id === id)?.label || id}`).join(' + ');
+    lines.push(`${q.id} [${s}] ${q.title}${labs ? ' -> ' + labs : ''}${a.text ? ` | words: ${JSON.stringify(a.text)}` : ''}${a.prototype ? ' | needs a prototype' : ''}${a.skip ? ' | OUT OF SCOPE' : ''}`);
+  });
+  if (pl.steer) lines.push(`steer: ${JSON.stringify(pl.steer)}`);
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(pl))));
+  return `${lines.join('\n')}\n\nHOTSEAT:v1:${b64}`;
+}
+function send() {
+  let bad = false;
+  round.questions.forEach((q) => {
+    const el = document.querySelector(`[data-err="${q.id}"]`); if (el) el.textContent = '';
+    const a = draft.answers[q.id] || {};
+    if (q.required && !(a.text || '').trim()) { bad = true; el.textContent = 'This one is required.'; }
+    if (q.kind === 'confirm' && a.choice === 'no' && !(a.text || '').trim()) { bad = true; el.textContent = 'Say what is off.'; }
+  });
+  if (bad) { const first = document.querySelector('.err-msg:not(:empty)'); if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+  const pl = payload(true); const text = summary(pl);
+  if (inLavish()) {
+    const n = pl.answers.filter((a) => stance(round.questions.find((q) => q.id === a.id), a) !== 'open').length;
+    window.lavish.queuePrompt(text, { tag: 'hot-seat-round', text: `Round ${pl.round}: ${n} of ${pl.answers.length} answered${pl.steer ? ' + steering' : ''}`, queueKey: `hot-seat-round-${pl.round}`, data: { round: pl.round, answered: n } });
+    if (typeof window.lavish.sendQueuedPrompts === 'function') window.lavish.sendQueuedPrompts();
+    sentAt = Date.now(); store.set(SENT_KEY, sentAt); rerenderMain();
+  } else {
+    navigator.clipboard && navigator.clipboard.writeText(text).catch(() => {});
+    alert('Not running under Lavish: the answers were copied to your clipboard. Paste them to the agent.');
+  }
+}
+function rerenderMain() { const m = document.querySelector('.hs-main'); const y = window.scrollY; m.outerHTML = mainCol(); window.scrollTo(0, y); refresh(); }
+
+document.addEventListener('input', (e) => {
+  const t = e.target; if (!(t instanceof HTMLElement)) return;
+  if (t.id === 'steer') { draft.steer = t.value; refresh(); return; }
+  const q = t.dataset.q; if (!q) return; const a = A(q); const role = t.dataset.role;
+  if (role === 'text') a.text = t.value;
+  else if (role === 'dontKnow') { a.dontKnow = t.checked; if (t.checked) { a.skip = false; const sk = document.querySelector(`input[data-role=skip][data-q="${q}"]`); if (sk) sk.checked = false; a.choice = null; a.choices = []; document.querySelectorAll(`input[name="${q}"]`).forEach((i) => (i.checked = false)); } }
+  else if (role === 'skip') { a.skip = t.checked; if (t.checked) { a.dontKnow = false; const dk = document.querySelector(`input[data-role=dontKnow][data-q="${q}"]`); if (dk) dk.checked = false; a.choice = null; a.choices = []; document.querySelectorAll(`input[name="${q}"]`).forEach((i) => (i.checked = false)); } }
+  else if (role === 'prototype') a.prototype = t.checked;
+  else if (role === 'choice') {
+    const qq = round.questions.find((x) => x.id === q);
+    if (qq.multi) a.choices = [...document.querySelectorAll(`input[name="${q}"]:checked`)].map((i) => i.value); else a.choice = t.value;
+    a.dontKnow = false; a.skip = false; for (const r of ['dontKnow', 'skip']) { const f = document.querySelector(`input[data-role=${r}][data-q="${q}"]`); if (f) f.checked = false; }
+  }
+  refresh();
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-act]'); if (!b || b.disabled) return;
+  const act = b.dataset.act, q = b.dataset.q;
+  if (act === 'send') send();
+  else if (act === 'accept-low') { round.questions.filter((x) => x.stakes === 'low' && !x.noRecommendation && x.kind !== 'confirm' && stance(x, draft.answers[x.id]) === 'open').forEach((x) => { const a = A(x.id); if (x.kind === 'free') a.text = String(x.recommended); else if (x.multi) a.choices = arr(x.recommended); else a.choice = arr(x.recommended)[0]; }); rerenderMain(); }
+  else if (act === 'next-open') { const q = round.questions.find((x) => stance(x, draft.answers[x.id]) === 'open'); if (q) { const el = document.getElementById(q.id); el.scrollIntoView({ behavior: 'smooth', block: 'start' }); const t = el.querySelector('textarea, input'); if (t) t.focus({ preventScroll: true }); } }
+  else if (act === 'jump') { const sd = document.querySelector('.hs-side'); if (sd) sd.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  else if (act === 'use-reco') { const qq = round.questions.find((x) => x.id === q); const a = A(q); const r = arr(qq.recommended); if (qq.multi) a.choices = r; else a.choice = r[0]; a.dontKnow = false; rerenderMain(); }
+  else if (act === 'use-reco-text') { const qq = round.questions.find((x) => x.id === q); A(q).text = String(qq.recommended); A(q).dontKnow = false; rerenderMain(); }
+  else if (act === 'tab') { document.querySelectorAll('.tab2').forEach((t) => t.setAttribute('aria-selected', t === b)); document.querySelectorAll('.tabpane').forEach((p) => p.classList.toggle('on', p.id === 'pane-' + b.dataset.tab)); store.set(`hs:tab:${S.session}`, b.dataset.tab); fillPane(b.dataset.tab); }
+  else if (act === 'copy-ledger') { const done = () => { const c = document.getElementById('copied'); if (c) c.textContent = 'Copied.'; }; if (navigator.clipboard) navigator.clipboard.writeText(S.ledgerMd).then(done, () => { selectLedger(); }); else selectLedger(); }
+  else if (act === 'dl-ledger') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([S.ledgerMd], { type: 'text/markdown' })); a.download = `decisions-ledger-${S.session}.md`; a.click(); }
+});
+function selectLedger() { const p = document.getElementById('ledger-md'); const r = document.createRange(); r.selectNodeContents(p); const s = getSelection(); s.removeAllRanges(); s.addRange(r); const c = document.getElementById('copied'); if (c) c.textContent = 'Selected: press Ctrl+C.'; }
+
+// ---------------------------------------------------------------- boot
+const themeSel = () => document.getElementById('theme');
+$app.innerHTML = header() + `<div class="hs-grid">${mainCol()}${sidebar()}</div>`;
+refresh();
+{ const t = store.get('hs:theme'); if (t) document.documentElement.setAttribute('data-theme', t); themeSel().value = document.documentElement.getAttribute('data-theme'); themeSel().addEventListener('change', (e) => { document.documentElement.setAttribute('data-theme', e.target.value); store.set('hs:theme', e.target.value); }); }
+fillPane(store.get(`hs:tab:${S.session}`) || 'tree');
+let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(drawTree, 80); }).observe(document.body);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-en="How Noise-Cancelling Headphones Work" data-zh="降噪耳机是怎么消掉声音的">How Noise-Cancelling Headphones Work</title>
+<meta name="description" content="An explorable explanation: drag, listen and watch sound cancel itself out.">
+<script>
+  // Pick the language before anything renders: ?lang= wins, then the last choice, then the browser.
+  (() => {
+    let l = new URLSearchParams(location.search).get('lang');
+    if (!l) { try { l = localStorage.getItem('explorable-lang'); } catch { /* storage may be blocked */ } }
+    if (!l) l = (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+    l = l === 'zh' ? 'zh' : 'en';
+    document.documentElement.dataset.lang = l;
+    document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1f1f22; --muted: #6d6b66; --rule: #e6e2d8; --panel: #ffffff;
+    --noise: #e0662f; --anti: #2f6fd6; --sum: #1f1f22; --good: #2e9a5e; --grid: #ece8de;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416; --fg: #ececef; --muted: #9a9892; --rule: #2a2a2e; --panel: #1b1b1f;
+      --noise: #f08a55; --anti: #6b9cf0; --sum: #f4f4f6; --good: #52c283; --grid: #25252a;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  [data-lang="en"] [lang="zh"], [data-lang="zh"] [lang="en"] { display: none !important; }
+  [data-lang="zh"] body { font: 17.5px/1.85 Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  [data-lang="zh"] h1, [data-lang="zh"] h2 { font-family: Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; letter-spacing: 0; }
+  .langbar { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 26px; }
+  .langbar button { padding: 3px 12px; font-size: 13px; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 19px/1.62 "Source Serif 4", Georgia, serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 20px 96px; }
+  h1 { font-size: 2.35em; line-height: 1.12; margin: 0 0 .3em; letter-spacing: -.01em; }
+  h2 { font: 600 1.28em/1.3 "Source Serif 4", Georgia, serif; margin: 2.2em 0 .6em; }
+  .lede { font-size: 1.12em; color: var(--muted); margin: 0 0 2em; }
+  p { margin: 0 0 1.05em; }
+  .n { color: var(--noise); font-weight: 600; }
+  .a { color: var(--anti); font-weight: 600; }
+  .s { font-weight: 600; }
+  figure { margin: 1.8em -12px 2em; padding: 14px 14px 10px; background: var(--panel);
+    border-radius: 14px; box-shadow: var(--shadow); }
+  canvas { display: block; width: 100%; touch-action: none; }
+  figcaption { font: 14px/1.5 Inter, system-ui, sans-serif; color: var(--muted); margin-top: 8px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center;
+    font: 14px/1.3 Inter, system-ui, sans-serif; margin-top: 10px; }
+  .controls label { display: flex; align-items: center; gap: 10px; flex: 1 1 220px; }
+  .controls label span.k { white-space: nowrap; color: var(--muted); min-width: 5.5em; }
+  .controls output { font-variant-numeric: tabular-nums; min-width: 4.8em; text-align: right; }
+  input[type=range] { flex: 1; accent-color: var(--fg); min-width: 90px; }
+  button { font: 500 14px Inter, system-ui, sans-serif; color: var(--fg); background: transparent;
+    border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .readout { font: 14px/1.4 Inter, system-ui, sans-serif; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .note { font-size: .9em; color: var(--muted); }
+  footer { margin-top: 4em; padding-top: 1.2em; border-top: 1px solid var(--rule);
+    font: 14px/1.6 Inter, system-ui, sans-serif; color: var(--muted); }
+  footer a { color: inherit; }
+  @media (max-width: 560px) { body { font-size: 17.5px; } figure { margin-left: -8px; margin-right: -8px; padding: 10px; } }
+</style>
+</head>
+<body>
+<main>
+<div class="langbar"><button data-setlang="en">English</button><button data-setlang="zh">中文</button></div>
+<h1><span lang="en">How Noise-Cancelling Headphones Work</span><span lang="zh">降噪耳机是怎么消掉声音的</span></h1>
+<p class="lede" lang="en">They erase a jet engine by adding more sound to it. Drag the sliders, press play, and watch (and hear) how that works.</p>
+<p class="lede" lang="zh">它们消除飞机引擎噪声的办法，是往耳朵里再加一段声音。拖动滑块、按下播放，亲眼看、亲耳听它是怎么做到的。</p>
+
+<h2><span lang="en">Sound is air being pushed around</span><span lang="zh">声音就是被推来推去的空气</span></h2>
+<p lang="en">Sound is a pressure ripple. A vibrating object shoves the air molecules next to it, they shove their neighbours, and the pattern travels outward at about 343 metres per second. The molecules themselves hardly go anywhere: each one only jiggles back and forth around its home position.</p>
+<p lang="zh">声音是一种压力的涟漪。振动的物体推挤旁边的空气分子，这些分子再推挤它们的邻居，这个图案就以每秒约 343 米的速度向外传播。分子本身几乎哪儿也没去，每一个只是在原位附近来回晃动。</p>
+
+<figure id="fig-air">
+  <canvas height="250"></canvas>
+  <div class="controls">
+    <label><span class="k"><span lang="en">Pitch</span><span lang="zh">音高</span></span><input type="range" min="0" max="1" step="0.001" value="0.35"><output></output></label>
+  </div>
+  <figcaption lang="en">Each dot is a parcel of air. Where the dots bunch up the pressure is high, where they spread out it is low. The curve below tracks that pressure. Raise the pitch and the ripples get closer together.</figcaption>
+  <figcaption lang="zh">每个点代表一团空气。点挤在一起的地方压强高，散开的地方压强低，下面的曲线记录的就是这个压强。把音高调高，涟漪之间的距离就变短。</figcaption>
+</figure>
+
+<p lang="en">Your eardrum only feels that curve: the pressure pressing on it, moment by moment. So if we could keep the pressure at your ear perfectly flat, you would hear nothing, even in a roaring cabin.</p>
+<p lang="zh">你的耳膜只感受得到这条曲线，也就是每一刻压在它上面的压强。所以，只要能让耳朵处的压强保持完全平直，哪怕身处轰鸣的机舱，你也什么都听不到。</p>
+
+<h2><span lang="en">Two sounds can add up to silence</span><span lang="zh">两个声音可以加成寂静</span></h2>
+<p lang="en">When two pressure waves meet, the air simply adds them. Push plus push is a bigger push. But push plus an equal pull is nothing at all. Below, the <span class="n">orange</span> wave is a noise, the <span class="a">blue</span> wave is a copy of it that we can slide in time, and the <span class="s">thick</span> curve is what actually reaches the ear.</p>
+<p lang="zh">两列压力波相遇时，空气只是把它们简单相加。推加推，是更大的推；推加上一个同样大小的拉，就什么都没有了。下图里，<span class="n">橙色</span>波是噪声，<span class="a">蓝色</span>波是它的一个副本，可以在时间上前后滑动，<span class="s">粗线</span>是真正到达耳朵的声音。</p>
+
+<figure id="fig-sum">
+  <canvas height="270"></canvas>
+  <div class="controls">
+    <label><span class="k"><span lang="en">Shift</span><span lang="zh">错开</span></span><input type="range" min="0" max="360" step="1" value="120"><output></output></label>
+    <label><span class="k"><span lang="en">Loudness</span><span lang="zh">响度</span></span><input type="range" min="0" max="100" step="1" value="100"><output></output></label>
+    <button data-role="play"></button>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">Slide the copy by half a cycle (180°) and the two cancel. Press Listen with headphones on and drag the Shift slider: the tone fades to nothing at 180°. It only vanishes completely when both waves are equally loud.</figcaption>
+  <figcaption lang="zh">把副本错开半个周期（180°），两者就互相抵消。戴上耳机按“试听”，再拖动“错开”滑块：到 180° 时声音会消失。只有两列波一样响时，才会消失得干干净净。</figcaption>
+</figure>
+
+<p lang="en">That is the whole idea of active noise cancelling: make an <em>anti-noise</em> that is the exact mirror image of the incoming sound, and play it into your ear at the same moment.</p>
+<p lang="zh">这就是主动降噪的全部思路：造出一段与外来声音完全镜像的<em>反噪声</em>，并在同一时刻把它播进你的耳朵。</p>
+
+<h2><span lang="en">Listen, flip, play</span><span lang="zh">听、翻转、播放</span></h2>
+<p lang="en">A noise-cancelling earcup has a small microphone on the outside. It hears the noise a split second before the noise gets in. A chip flips that signal upside down and sends it to the speaker, which is already sitting right next to your ear.</p>
+<p lang="zh">降噪耳罩的外侧有一个小麦克风，它比噪声钻进耳罩早那么一瞬间就听到了噪声。芯片把这个信号上下翻转，送给紧贴在你耳边的扬声器。</p>
+
+<figure id="fig-cup">
+  <canvas height="290"></canvas>
+  <div class="controls">
+    <button data-role="anc" class="on"></button>
+  </div>
+  <figcaption lang="en">The cushion already blocks part of the noise, so less of it leaks in. The speaker adds the flipped copy. What your eardrum feels is the sum, shown on the right.</figcaption>
+  <figcaption lang="zh">耳垫本身已经挡住了一部分噪声，漏进来的少一些；扬声器再加上翻转后的副本。耳膜感受到的是两者之和，显示在右边。</figcaption>
+</figure>
+
+<p lang="en">This is why the effect feels so strange the first time: the headphones are not blocking anything extra. They are <em>adding</em> sound, and the sum happens to be quieter.</p>
+<p lang="zh">这也是第一次戴降噪耳机时感觉如此奇怪的原因：耳机并没有额外挡住什么，它是在<em>添加</em>声音，而加起来恰好更安静。</p>
+
+<h2><span lang="en">Timing is everything</span><span lang="zh">时机决定一切</span></h2>
+<p lang="en">There is a catch. Listening, flipping and playing all take time. The anti-noise always arrives a tiny bit late, and "a tiny bit late" matters a lot more for some sounds than for others.</p>
+<p lang="zh">但有个问题：听、翻转、播放都要花时间。反噪声总会晚到一点点，而“晚一点点”对有些声音影响很大，对另一些几乎没影响。</p>
+
+<figure id="fig-delay">
+  <canvas height="170" data-part="time"></canvas>
+  <canvas height="200" data-part="freq"></canvas>
+  <div class="controls">
+    <label><span class="k"><span lang="en">Frequency</span><span lang="zh">频率</span></span><input type="range" min="0" max="1" step="0.001" value="0.35" data-role="f"><output></output></label>
+    <label><span class="k"><span lang="en">Delay</span><span lang="zh">延迟</span></span><input type="range" min="0" max="300" step="5" value="60" data-role="tau"><output></output></label>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">Top: the <span class="n">noise</span>, the late <span class="a">anti-noise</span>, and what is left over. Bottom: how much each frequency is reduced for this delay. Below the dashed line the headphones help; above it they would make things louder.</figcaption>
+  <figcaption lang="zh">上图：<span class="n">噪声</span>、迟到的<span class="a">反噪声</span>，以及剩下的部分。下图：在这个延迟下，每个频率被削弱了多少。虚线以下耳机有帮助，虚线以上反而会更吵。</figcaption>
+</figure>
+
+<p lang="en">A fixed delay is a small fraction of a slow wave's cycle but a big fraction of a fast one's. With 60 microseconds of delay, a 100 Hz hum is cancelled almost perfectly, while anything above about 2.8 kHz would be made <em>worse</em>. The crossover sits where the delay equals one sixth of a cycle. That is why the electronics are built to be extraordinarily quick, and why real headphones fade their anti-noise out at high frequencies instead of risking it.</p>
+<p lang="zh">同样一段延迟，对慢波来说只占周期的一小部分，对快波来说却占了一大截。延迟 60 微秒时，100 Hz 的嗡嗡声几乎被完全抵消，而 2.8 kHz 以上的声音反而会被<em>放大</em>。分界点就在延迟等于六分之一个周期的地方。所以降噪电路要做得极快，真实的耳机也会在高频处逐渐减弱反噪声，而不是去冒这个险。</p>
+
+<h2><span lang="en">What you actually hear</span><span lang="zh">你实际听到的</span></h2>
+<p lang="en">Real noise is not one tone. It is a mixture of many, from the deep drone of an engine to the hiss of air and the chatter of voices. Two different mechanisms split the work:</p>
+<p lang="zh">真实的噪声不是单一音调，而是许多声音的混合：从引擎低沉的轰鸣，到气流的嘶嘶声，再到人声的嘈杂。两种不同的机制分工合作：</p>
+
+<figure id="fig-bands">
+  <canvas height="260"></canvas>
+  <div class="controls">
+    <button data-scene="cabin" class="on"><span lang="en">Airplane cabin</span><span lang="zh">飞机机舱</span></button>
+    <button data-scene="cafe"><span lang="en">Café</span><span lang="zh">咖啡馆</span></button>
+    <button data-scene="street"><span lang="en">Street</span><span lang="zh">街道</span></button>
+    <span style="flex:1"></span>
+    <button data-layer="passive" class="on"><span lang="en">Cushions</span><span lang="zh">耳垫</span></button>
+    <button data-layer="active" class="on"><span lang="en">Active cancelling</span><span lang="zh">主动降噪</span></button>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">Loudness in each frequency band, from deep (left) to high (right); levels are illustrative. The outline is the room. The <span class="n">orange</span> part is stopped by the cushions, the <span class="a">blue</span> part is cancelled by the electronics, and the solid bar is what still reaches your ear.</figcaption>
+  <figcaption lang="zh">各频段的响度，从低音（左）到高音（右），数值为示意。外框是环境噪声，<span class="n">橙色</span>部分被耳垫挡住，<span class="a">蓝色</span>部分被电路抵消，实心部分是仍然到达耳朵的声音。</figcaption>
+</figure>
+
+<p lang="en">Cushions and a snug seal are good at stopping high frequencies, which is exactly where the electronics struggle. The electronics are good at deep, steady drones, which pass straight through foam. Together they cover the whole range. It is also why you can still hear someone talking to you on a plane: speech lives in the middle, where neither trick is at its best.</p>
+<p lang="zh">耳垫和贴合的密封擅长挡住高频，而这正是电路的短板；电路擅长对付低沉、稳定的轰鸣，而这种声音能直接穿透泡棉。两者合起来覆盖了整个频段。这也解释了为什么在飞机上你仍然听得见有人跟你说话：人声落在中间，两招都不是最强的地方。</p>
+
+<h2><span lang="en">Headphones that learn</span><span lang="zh">会学习的耳机</span></h2>
+<p lang="en">The outside microphone can't know exactly how the noise changes on its way into your ear: your head, the fit of the cups and even your hair all reshape it a little. So most headphones also have a second microphone <em>inside</em> the cup. It listens to whatever is left over and keeps nudging the anti-noise until the leftover is as small as possible.</p>
+<p lang="zh">外侧麦克风无法确切知道噪声进入耳朵的路上会怎么变：你的头型、耳罩的贴合度，甚至头发，都会让它稍有变化。所以大多数耳机在耳罩<em>内侧</em>还有第二个麦克风。它听的是剩下的声音，并不断微调反噪声，直到剩余部分尽可能小。</p>
+
+<figure id="fig-learn">
+  <canvas height="250"></canvas>
+  <div class="controls">
+    <button data-role="change"><span lang="en">Change the noise</span><span lang="zh">换一种噪声</span></button>
+    <button data-role="reset"><span lang="en">Reset</span><span lang="zh">重置</span></button>
+    <label><span class="k"><span lang="en">Learning rate</span><span lang="zh">学习率</span></span><input type="range" min="0" max="1" step="0.001" value="0.21"><output></output></label>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">The <span class="n">noise</span>, the <span class="a">anti-noise</span> the headphones are learning to make, and the <span class="s">leftover</span> the inside microphone hears. Change the noise and watch it re-learn. Turn the learning rate too high and it overreacts and blows up.</figcaption>
+  <figcaption lang="zh"><span class="n">噪声</span>、耳机正在学着生成的<span class="a">反噪声</span>，以及内侧麦克风听到的<span class="s">剩余</span>声音。换一种噪声，看它重新学习；学习率调得太高，它会反应过度，直接失控。</figcaption>
+</figure>
+
+<p lang="en">Each nudge follows a simple rule: if the leftover still looks like the noise, add a little more of the mirror image; if it looks like the anti-noise, back off. Small steps are slow but steady. Big steps adapt quickly, until they start overshooting. Engineers spend a lot of effort finding the sweet spot, because the noise around you keeps changing as you move.</p>
+<p lang="zh">每一次微调都遵循一条简单规则：如果剩余声音还像噪声，就多加一点镜像；如果它像反噪声，就退回一点。步子小，慢但稳；步子大，适应快，直到开始矫枉过正。工程师要花很大力气找到这个平衡点，因为你一移动，周围的噪声就在变。</p>
+
+<h2><span lang="en">Everything else is the same trick</span><span lang="zh">其他功能都是同一招</span></h2>
+<p lang="en">"Transparency" mode runs the same hardware the other way: instead of cancelling the outside microphone's signal, it plays it through, so you can hear the announcement. Cars use anti-noise to quiet engine drone in the cabin. All of it rests on the idea from the second figure: the air adds pressures, so the right sound, at the right moment, adds up to silence.</p>
+<p lang="zh">“通透模式”用的是同一套硬件，只是反过来用：不抵消外侧麦克风的信号，而是把它放进来，让你听得见广播。汽车也用反噪声来压低车厢里的发动机轰鸣。这一切都建立在第二张图的道理上：空气会把压强相加，所以在对的时刻加上对的声音，结果就是寂静。</p>
+
+<footer>
+  <p lang="en">An explorable explanation. Everything on this page is one HTML file: the figures are live simulations running in your browser, and the sounds are synthesized on the spot. Band levels in the café, cabin and street figure are illustrative, not measurements.</p>
+  <p lang="zh">一篇可交互讲解。整个页面是一个 HTML 文件：图形是在你浏览器里实时运行的模拟，声音也是现场合成的。咖啡馆、机舱、街道一图中的频段数值是示意，并非实测。</p>
+</footer>
+</main>
+
+<script>
+(() => {
+  // ---------- language ----------
+  const t = (en, zh) => (document.documentElement.dataset.lang === 'zh' ? zh : en);
+  const langHooks = [];
+  function setLang(l) {
+    const root = document.documentElement;
+    root.dataset.lang = l; root.lang = l === 'zh' ? 'zh-CN' : 'en';
+    document.title = document.querySelector('title').dataset[l];
+    document.querySelectorAll('[data-setlang]').forEach((b) => b.classList.toggle('on', b.dataset.setlang === l));
+    try { localStorage.setItem('explorable-lang', l); } catch { /* ignore */ }
+    const u = new URL(location.href); u.searchParams.set('lang', l); history.replaceState(null, '', u);
+    langHooks.forEach((f) => f());
+  }
+  document.querySelectorAll('[data-setlang]').forEach((b) => (b.onclick = () => setLang(b.dataset.setlang)));
+  document.querySelectorAll('[data-setlang]').forEach((b) => b.classList.toggle('on', b.dataset.setlang === document.documentElement.dataset.lang));
+  document.title = document.querySelector('title').dataset[document.documentElement.dataset.lang];
+
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const TAU = Math.PI * 2;
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+
+  // A canvas that stays sharp on any screen and redraws when its width changes.
+  function surface(canvas) {
+    const ctx = canvas.getContext('2d');
+    const h = +canvas.getAttribute('height');
+    const s = { canvas, ctx, w: 0, h };
+    const fit = () => {
+      const dpr = window.devicePixelRatio || 1;
+      s.w = canvas.clientWidth;
+      canvas.width = Math.round(s.w * dpr);
+      canvas.height = Math.round(h * dpr);
+      canvas.style.height = h + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    fit();
+    new ResizeObserver(() => { fit(); s.onresize && s.onresize(); }).observe(canvas);
+    return s;
+  }
+
+  // Only animate figures that are on screen.
+  const animated = new Set();
+  function animate(el, step) {
+    const entry = { step, visible: false };
+    new IntersectionObserver(([e]) => { entry.visible = e.isIntersecting; }).observe(el);
+    animated.add(entry);
+  }
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    for (const e of animated) if (e.visible) e.step(now / 1000, dt);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  function line(ctx, pts, color, width) {
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.stroke();
+  }
+  function label(ctx, text, x, y, color, align = 'left') {
+    ctx.font = '500 12px Inter, system-ui, sans-serif';
+    ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y);
+  }
+  function wave(x0, x1, yMid, amp, fn) {
+    const pts = [];
+    for (let x = x0; x <= x1; x += 2) pts.push([x, yMid - amp * fn(x)]);
+    return pts;
+  }
+
+  // One shared audio context, created on the first click (browsers require a gesture).
+  let audio = null;
+  const getAudio = () => (audio ||= new (window.AudioContext || window.webkitAudioContext)());
+
+  // ---------------- Figure 1: air parcels ----------------
+  {
+    const fig = document.getElementById('fig-air');
+    const s = surface(fig.querySelector('canvas'));
+    const slider = fig.querySelector('input'), out = fig.querySelector('output');
+    const speed = 110; // px per second, the on-screen speed of sound
+    let lambda = 200;
+    const sync = () => {
+      const v = +slider.value;
+      lambda = 360 * Math.pow(0.16, v); // long to short
+      out.textContent = v < 0.33 ? t('low', '低') : v < 0.66 ? t('middle', '中') : t('high', '高');
+    };
+    slider.oninput = sync; langHooks.push(sync); sync();
+    animate(fig, (time) => {
+      const { ctx, w, h } = s;
+      ctx.clearRect(0, 0, w, h);
+      const k = TAU / lambda, phase = k * speed * time;
+      const cols = Math.floor(w / 9), dx = w / cols, amp = Math.min(dx * 2.2, lambda / 7);
+      const rows = 9, top = 16, rowH = 13;
+      ctx.fillStyle = css('--fg');
+      for (let i = -2; i < cols + 2; i++) {
+        const x0 = i * dx + dx / 2;
+        const x = x0 + amp * Math.sin(k * x0 - phase);
+        for (let r = 0; r < rows; r++) {
+          const jitter = ((i * 7 + r * 13) % 5 - 2) * 0.6;
+          ctx.globalAlpha = 0.78;
+          ctx.beginPath(); ctx.arc(x + jitter, top + r * rowH + (r % 2) * 2, 2.1, 0, TAU); ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
+      const mid = 192, pAmp = 34;
+      ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
+      // Pressure is the compression of the parcels: minus the slope of their displacement.
+      line(ctx, wave(0, w, mid, pAmp, (x) => -Math.cos(k * x - phase)), css('--sum'), 2.2);
+      label(ctx, t('high pressure', '高压'), 6, mid - pAmp - 8, css('--muted'));
+      label(ctx, t('low pressure', '低压'), 6, mid + pAmp + 10, css('--muted'));
+    });
+  }
+
+  // ---------------- Figure 2: adding two waves ----------------
+  {
+    const fig = document.getElementById('fig-sum');
+    const s = surface(fig.querySelector('canvas'));
+    const [shift, loud] = fig.querySelectorAll('input');
+    const [outShift, outLoud] = fig.querySelectorAll('output');
+    const readout = fig.querySelector('.readout');
+    const playBtn = fig.querySelector('[data-role=play]');
+    const f = 220;
+    let nodes = null;
+
+    const params = () => ({ phi: (+shift.value / 360) * TAU, b: +loud.value / 100 });
+    const syncAudio = () => {
+      if (!nodes) return;
+      const { phi, b } = params();
+      nodes.delay.delayTime.setTargetAtTime(phi / (TAU * f), audio.currentTime, 0.02);
+      nodes.gainB.gain.setTargetAtTime(b, audio.currentTime, 0.02);
+    };
+    const sync = () => {
+      const { phi, b } = params();
+      outShift.textContent = shift.value + '°';
+      outLoud.textContent = loud.value + '%';
+      // Amplitude of sin(x) + b·sin(x − φ) is |1 + b·e^(−iφ)|.
+      const amp = Math.hypot(1 + b * Math.cos(phi), b * Math.sin(phi));
+      const db = amp < 1e-3 ? '−∞' : (20 * Math.log10(amp)).toFixed(1).replace('-', '−');
+      readout.innerHTML = t(`What reaches the ear: <b>${Math.round(amp * 100)}%</b> of the original wave's height (${db} dB)`, `到达耳朵的声音：原波高度的 <b>${Math.round(amp * 100)}%</b>（${db} dB）`);
+      playBtn.textContent = nodes ? t('■ Stop', '■ 停止') : t('▶ Listen', '▶ 试听');
+      syncAudio();
+    };
+    shift.oninput = loud.oninput = sync; langHooks.push(sync); sync();
+
+    playBtn.onclick = () => {
+      const ac = getAudio();
+      if (nodes) {
+        nodes.master.gain.setTargetAtTime(0, ac.currentTime, 0.03);
+        const n = nodes; nodes = null;
+        setTimeout(() => n.osc.stop(), 200);
+        playBtn.textContent = t('▶ Listen', '▶ 试听'); playBtn.classList.remove('on');
+        return;
+      }
+      ac.resume();
+      const osc = ac.createOscillator(); osc.frequency.value = f;
+      const master = ac.createGain(); master.gain.value = 0;
+      const gainA = ac.createGain(); gainA.gain.value = 1;
+      const delay = ac.createDelay(1 / f + 0.01);
+      const gainB = ac.createGain();
+      osc.connect(gainA).connect(master);
+      osc.connect(delay).connect(gainB).connect(master);
+      master.connect(ac.destination);
+      osc.start();
+      master.gain.setTargetAtTime(0.12, ac.currentTime, 0.05);
+      nodes = { osc, master, delay, gainB };
+      syncAudio();
+      playBtn.textContent = t('■ Stop', '■ 停止'); playBtn.classList.add('on');
+    };
+
+    animate(fig, (time) => {
+      const { ctx, w, h } = s;
+      const { phi, b } = params();
+      ctx.clearRect(0, 0, w, h);
+      const k = TAU / 150, drift = time * 2.2;
+      const rows = [
+        { y: 42, color: css('--noise'), name: t('noise', '噪声'), fn: (x) => Math.sin(k * x - drift) },
+        { y: 124, color: css('--anti'), name: t('shifted copy', '错开的副本'), fn: (x) => b * Math.sin(k * x - drift - phi) },
+        { y: 216, color: css('--sum'), name: t('sum', '相加'), sum: true, fn: (x) => Math.sin(k * x - drift) + b * Math.sin(k * x - drift - phi) },
+      ];
+      for (const r of rows) {
+        ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, r.y); ctx.lineTo(w, r.y); ctx.stroke();
+        line(ctx, wave(0, w, r.y, 24, r.fn), r.color, r.sum ? 2.6 : 2);
+        label(ctx, r.name, 4, r.y - 33, css('--muted'));
+      }
+      label(ctx, '+', w - 14, 83, css('--muted'), 'center');
+      label(ctx, '=', w - 14, 172, css('--muted'), 'center');
+    });
+  }
+
+  // ---------------- Figure 3: the earcup ----------------
+  {
+    const fig = document.getElementById('fig-cup');
+    const s = surface(fig.querySelector('canvas'));
+    const btn = fig.querySelector('[data-role=anc]');
+    let on = true, mix = 1;
+    const syncBtn = () => { btn.classList.toggle('on', on); btn.textContent = on ? t('Noise cancelling: on', '主动降噪：开') : t('Noise cancelling: off', '主动降噪：关'); };
+    btn.onclick = () => { on = !on; syncBtn(); };
+    langHooks.push(syncBtn); syncBtn();
+    animate(fig, (time, dt) => {
+      const { ctx, w, h } = s;
+      mix += ((on ? 1 : 0) - mix) * Math.min(1, dt * 6);
+      ctx.clearRect(0, 0, w, h);
+      const narrow = w < 520;
+      const cy = 150, top = cy - 92, bot = cy + 92;
+      const shellX = w * (narrow ? 0.24 : 0.28), cushionX = w * (narrow ? 0.66 : 0.6);
+      const skinX = cushionX + 18, earX = skinX + (narrow ? 34 : 46);
+      const k = TAU / 110, ph = time * 5;
+      const noise = (x) => Math.sin(k * x - ph);
+      const leak = 0.6, residual = leak * (1 - mix);
+      const muted = css('--muted'), grid = css('--grid');
+
+      // Outside: the noise travelling in.
+      line(ctx, wave(0, shellX - 4, cy, 26, noise), css('--noise'), 2.2);
+      label(ctx, t('noise', '噪声'), 4, cy - 42, css('--noise'));
+
+      // Shell: back wall plus top and bottom walls, open towards the head.
+      ctx.fillStyle = grid;
+      ctx.beginPath(); ctx.roundRect(shellX, top, 10, bot - top, 5); ctx.fill();
+      ctx.beginPath(); ctx.roundRect(shellX, top, cushionX - shellX, 10, 5); ctx.fill();
+      ctx.beginPath(); ctx.roundRect(shellX, bot - 10, cushionX - shellX, 10, 5); ctx.fill();
+      // Cushions press against the head and leave the ear canal open.
+      ctx.fillStyle = muted; ctx.globalAlpha = 0.35;
+      ctx.beginPath(); ctx.roundRect(cushionX, top - 4, 18, 62, 9); ctx.fill();
+      ctx.beginPath(); ctx.roundRect(cushionX, bot - 58, 18, 62, 9); ctx.fill();
+      ctx.globalAlpha = 1;
+      label(ctx, t('cushion', '耳垫'), cushionX + 9, top - 16, muted, 'center');
+      // Head and ear canal.
+      ctx.strokeStyle = css('--fg'); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(skinX, top - 10); ctx.lineTo(skinX, cy - 30); ctx.lineTo(earX, cy - 30); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(skinX, bot + 10); ctx.lineTo(skinX, cy + 30); ctx.lineTo(earX, cy + 30); ctx.stroke();
+      ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.moveTo(earX, cy - 30); ctx.quadraticCurveTo(earX + 9, cy, earX, cy + 30); ctx.stroke();
+      label(ctx, t('eardrum', '耳膜'), earX, cy + 46, muted, 'center');
+
+      // Microphone outside, chip and speaker inside.
+      const micX = shellX - 14, micY = top + 26;
+      const chipX = shellX + 26, chipY = top + 34;
+      const spkX = shellX + 12;
+      ctx.strokeStyle = muted; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(micX, micY); ctx.lineTo(chipX, micY); ctx.lineTo(chipX, chipY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(chipX + 22, chipY + 11); ctx.lineTo(chipX + 22, chipY + 26); ctx.lineTo(spkX + 8, chipY + 26); ctx.lineTo(spkX + 8, cy - 24); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = css('--fg');
+      ctx.beginPath(); ctx.arc(micX, micY, 5.5, 0, TAU); ctx.fill();
+      label(ctx, t('mic', '麦克风'), micX, micY - 15, muted, 'center');
+      ctx.fillStyle = mix > 0.5 ? css('--anti') : grid;
+      ctx.beginPath(); ctx.roundRect(chipX, chipY - 11, 44, 22, 5); ctx.fill();
+      label(ctx, t('flip', '翻转'), chipX + 22, chipY, mix > 0.5 ? '#fff' : muted, 'center');
+      // Speaker cone facing the ear.
+      ctx.fillStyle = css('--fg');
+      ctx.beginPath(); ctx.moveTo(spkX, cy - 10); ctx.lineTo(spkX + 8, cy - 10); ctx.lineTo(spkX + 20, cy - 24); ctx.lineTo(spkX + 20, cy + 24); ctx.lineTo(spkX + 8, cy + 10); ctx.lineTo(spkX, cy + 10); ctx.closePath(); ctx.fill();
+      label(ctx, t('speaker', '扬声器'), spkX + 10, cy + 38, muted, 'center');
+
+      // Inside the cup: the noise that leaked past the cushions, and the anti-noise.
+      const in0 = spkX + 26, in1 = skinX;
+      line(ctx, wave(in0, in1, cy, 24, (x) => leak * noise(x)), css('--noise'), 1.4);
+      if (mix > 0.01) line(ctx, wave(in0, in1, cy, 24, (x) => -leak * mix * noise(x)), css('--anti'), 1.4);
+      // In the ear canal only their sum exists.
+      line(ctx, wave(skinX + 2, earX - 4, cy, 24, (x) => residual * noise(x)), css('--sum'), 2.6);
+
+      const pct = t(Math.round(residual * 100) + '% of outside', '外界的 ' + Math.round(residual * 100) + '%');
+      if (narrow) {
+        label(ctx, t('you hear ', '听到 ') + pct, earX, cy + 64, css('--fg'), 'center');
+      } else {
+        const mx = earX + 34, mw = w - mx - 8;
+        ctx.strokeStyle = grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(mx, cy); ctx.lineTo(mx + mw, cy); ctx.stroke();
+        line(ctx, wave(mx, mx + mw, cy, 26, (x) => residual * noise(x * 1.4)), css('--sum'), 2.6);
+        label(ctx, t('what you hear', '你听到的'), mx, cy - 42, muted);
+        label(ctx, pct, mx, cy + 42, css('--fg'));
+      }
+    });
+  }
+
+  // ---------------- Figure 4: delay vs frequency ----------------
+  {
+    const fig = document.getElementById('fig-delay');
+    const time = surface(fig.querySelector('[data-part=time]'));
+    const freq = surface(fig.querySelector('[data-part=freq]'));
+    const fSlider = fig.querySelector('[data-role=f]'), tSlider = fig.querySelector('[data-role=tau]');
+    const [outF, outT] = fig.querySelectorAll('output');
+    const readout = fig.querySelector('.readout');
+    const F0 = 20, F1 = 20000, DB_TOP = 8, DB_BOT = -40;
+    const fOf = (v) => F0 * Math.pow(F1 / F0, v);
+    // Leftover after adding a copy flipped and delayed by tau: |1 − e^(−iωτ)| = 2|sin(πfτ)|.
+    const residual = (f, tau) => 2 * Math.abs(Math.sin(Math.PI * f * tau));
+    const toDb = (r) => (r < 1e-5 ? -Infinity : 20 * Math.log10(r));
+    const fmtF = (f) => (f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 0 : 1) + ' kHz' : Math.round(f) + ' Hz');
+
+    function draw() {
+      const f = fOf(+fSlider.value), tau = +tSlider.value * 1e-6;
+      outF.textContent = fmtF(f);
+      outT.textContent = tSlider.value + ' µs';
+      const r = residual(f, tau), db = toDb(r);
+      const cross = tau > 0 ? 1 / (6 * tau) : Infinity;
+      const dbText = Number.isFinite(db) ? db.toFixed(0).replace('-', '−') : '−∞';
+      readout.innerHTML = t(`At ${fmtF(f)}, the leftover is <b>${Math.round(r * 100)}%</b> of the noise (${dbText} dB). `
+        + (tau > 0 ? `With this delay, cancelling only helps below <b>${fmtF(cross)}</b>.` : 'With zero delay, every frequency cancels perfectly.'),
+        `在 ${fmtF(f)}，剩余声音是噪声的 <b>${Math.round(r * 100)}%</b>（${dbText} dB）。`
+        + (tau > 0 ? `在这个延迟下，只有低于 <b>${fmtF(cross)}</b> 的声音才会被削弱。` : '延迟为零时，所有频率都能完美抵消。'));
+
+      { // time plot: three periods of the chosen frequency
+        const { ctx, w, h } = time;
+        ctx.clearRect(0, 0, w, h);
+        const mid = h / 2, amp = 34, periods = 3;
+        const xToT = (x) => (x / w) * (periods / f);
+        const n = (x) => Math.sin(TAU * f * xToT(x));
+        const a = (x) => -Math.sin(TAU * f * (xToT(x) - tau));
+        ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
+        line(ctx, wave(0, w, mid, amp, n), css('--noise'), 1.6);
+        line(ctx, wave(0, w, mid, amp, a), css('--anti'), 1.6);
+        line(ctx, wave(0, w, mid, amp, (x) => n(x) + a(x)), css('--sum'), 2.6);
+        label(ctx, t(`three cycles of ${fmtF(f)}`, `${fmtF(f)} 的三个周期`), 4, 12, css('--muted'));
+      }
+      { // frequency response
+        const { ctx, w, h } = freq;
+        ctx.clearRect(0, 0, w, h);
+        const padL = 46, padB = 22, pw = w - padL - 16, ph = h - padB - 8;
+        const X = (fq) => padL + (Math.log(fq / F0) / Math.log(F1 / F0)) * pw;
+        const Y = (d) => 8 + ((DB_TOP - clamp(d, DB_BOT, DB_TOP)) / (DB_TOP - DB_BOT)) * ph;
+        ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+        ctx.font = '11px Inter, system-ui, sans-serif'; ctx.fillStyle = css('--muted');
+        for (const fq of [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]) {
+          ctx.beginPath(); ctx.moveTo(X(fq), 8); ctx.lineTo(X(fq), 8 + ph); ctx.stroke();
+          ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+          ctx.fillText(fq >= 1000 ? fq / 1000 + 'k' : fq, X(fq), 8 + ph + 5);
+        }
+        for (const d of [0, -20, -40]) {
+          ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+          ctx.fillText(String(d).replace('-', '−') + ' dB', padL - 4, Y(d));
+        }
+        ctx.setLineDash([4, 4]); ctx.strokeStyle = css('--muted');
+        ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(padL + pw, Y(0)); ctx.stroke();
+        ctx.setLineDash([]);
+        const pts = [];
+        for (let x = 0; x <= pw; x += 1) {
+          const fq = F0 * Math.pow(F1 / F0, x / pw);
+          pts.push([padL + x, Y(toDb(residual(fq, tau)))]);
+        }
+        // Shade the part of the curve where cancelling helps.
+        ctx.save();
+        ctx.beginPath(); ctx.rect(padL, Y(0), pw, ph); ctx.clip();
+        ctx.beginPath(); ctx.moveTo(padL, Y(0));
+        pts.forEach(([x, y]) => ctx.lineTo(x, y));
+        ctx.lineTo(padL + pw, Y(0)); ctx.closePath();
+        ctx.fillStyle = css('--good'); ctx.globalAlpha = 0.16; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.restore();
+        line(ctx, pts, css('--sum'), 2);
+        ctx.fillStyle = css('--noise');
+        ctx.beginPath(); ctx.arc(X(f), Y(toDb(r)), 5.5, 0, TAU); ctx.fill();
+        label(ctx, t('helps ↓', '有帮助 ↓'), padL + 6, Y(-7), css('--good'));
+        label(ctx, t('hurts ↑', '更吵 ↑'), padL + 6, Y(5.5), css('--muted'));
+      }
+    }
+    fSlider.oninput = tSlider.oninput = draw;
+    time.onresize = freq.onresize = draw;
+    langHooks.push(draw);
+    draw();
+  }
+
+  // ---------------- Figure 5: bands ----------------
+  {
+    const fig = document.getElementById('fig-bands');
+    const s = surface(fig.querySelector('canvas'));
+    const readout = fig.querySelector('.readout');
+    const bands = [63, 125, 250, 500, 1000, 2000, 4000, 8000];
+    // Illustrative room levels in dB for each band.
+    const scenes = {
+      cabin: [84, 82, 78, 72, 68, 63, 58, 52],
+      cafe: [58, 60, 64, 68, 67, 63, 57, 50],
+      street: [74, 72, 70, 67, 64, 61, 57, 52],
+    };
+    const passiveLoss = [2, 4, 7, 12, 18, 24, 28, 30]; // cushions: weak at low, strong at high
+    const tau = 40e-6;
+    // Anti-noise gain is faded out above ~1 kHz so it never makes things worse.
+    const activeFactor = (f) => {
+      const g = 1 / (1 + Math.pow(f / 900, 4));
+      const re = 1 - g * Math.cos(TAU * f * tau), im = g * Math.sin(TAU * f * tau);
+      return Math.hypot(re, im);
+    };
+    let scene = 'cabin';
+    const layers = { passive: true, active: true };
+    fig.querySelectorAll('[data-scene]').forEach((b) => (b.onclick = () => {
+      scene = b.dataset.scene;
+      fig.querySelectorAll('[data-scene]').forEach((x) => x.classList.toggle('on', x === b));
+      draw();
+    }));
+    fig.querySelectorAll('[data-layer]').forEach((b) => (b.onclick = () => {
+      layers[b.dataset.layer] = !layers[b.dataset.layer];
+      b.classList.toggle('on', layers[b.dataset.layer]);
+      draw();
+    }));
+    const total = (levels) => 10 * Math.log10(levels.reduce((sum, l) => sum + Math.pow(10, l / 10), 0));
+
+    function draw() {
+      const { ctx, w, h } = s;
+      ctx.clearRect(0, 0, w, h);
+      const room = scenes[scene];
+      const afterCushions = room.map((l, i) => (layers.passive ? l - passiveLoss[i] : l));
+      const ear = afterCushions.map((l, i) => (layers.active ? l + 20 * Math.log10(activeFactor(bands[i])) : l));
+      const padL = 34, padB = 26, top = 10, pw = w - padL - 4, ph = h - padB - top;
+      const LMIN = 20, LMAX = 90;
+      const Y = (l) => top + ((LMAX - clamp(l, LMIN, LMAX)) / (LMAX - LMIN)) * ph;
+      const slot = pw / bands.length, bw = slot * 0.62;
+      ctx.font = '11px Inter, system-ui, sans-serif';
+      for (const l of [30, 50, 70, 90]) {
+        ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(padL, Y(l)); ctx.lineTo(padL + pw, Y(l)); ctx.stroke();
+        ctx.fillStyle = css('--muted'); ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        ctx.fillText(l + ' dB', padL - 4, Y(l));
+      }
+      bands.forEach((f, i) => {
+        const x = padL + i * slot + (slot - bw) / 2;
+        // Removed by cushions, removed by electronics, and what is left, stacked from the top.
+        ctx.fillStyle = css('--noise'); ctx.globalAlpha = 0.45;
+        ctx.fillRect(x, Y(room[i]), bw, Y(afterCushions[i]) - Y(room[i]));
+        ctx.fillStyle = css('--anti'); ctx.globalAlpha = 0.6;
+        ctx.fillRect(x, Y(afterCushions[i]), bw, Y(ear[i]) - Y(afterCushions[i]));
+        ctx.fillStyle = css('--fg'); ctx.globalAlpha = 0.85;
+        ctx.fillRect(x, Y(ear[i]), bw, Y(LMIN) - Y(ear[i]));
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = css('--muted'); ctx.lineWidth = 1.2;
+        ctx.strokeRect(x, Y(room[i]), bw, Y(LMIN) - Y(room[i]));
+        ctx.fillStyle = css('--muted'); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(f >= 1000 ? f / 1000 + 'k' : f, x + bw / 2, top + ph + 7);
+      });
+      const drop = total(room) - total(ear);
+      readout.innerHTML = t(`Overall, about <b>${drop.toFixed(0)} dB</b> quieter at your ear` + (drop > 0 ? ` (roughly ${Math.pow(2, drop / 10).toFixed(1)}× quieter to the ear).` : '.'),
+        `整体上，到达耳朵的声音小了约 <b>${drop.toFixed(0)} dB</b>` + (drop > 0 ? `（听感上大约安静 ${Math.pow(2, drop / 10).toFixed(1)} 倍）。` : '。'));
+    }
+    s.onresize = draw;
+    langHooks.push(draw);
+    draw();
+  }
+
+  // ---------------- Figure 6: learning the anti-noise ----------------
+  {
+    const fig = document.getElementById('fig-learn');
+    const s = surface(fig.querySelector('canvas'));
+    const slider = fig.querySelector('input'), out = fig.querySelector('output');
+    const readout = fig.querySelector('.readout');
+    const perCycle = 36, dTheta = TAU / perCycle;
+    let A = 1, phi = 0.6, w1 = 0, w2 = 0, k = 0, mu = 0.1, blown = false;
+    const buf = [];
+    const sync = () => {
+      mu = 0.001 * Math.pow(6000, +slider.value); // 0.001 … 6; unstable above 4
+      out.textContent = mu < 0.1 ? mu.toFixed(3) : mu.toFixed(2);
+    };
+    slider.oninput = sync; sync();
+    fig.querySelector('[data-role=change]').onclick = () => {
+      A = 0.55 + Math.random() * 0.45;
+      phi = Math.random() * TAU;
+    };
+    fig.querySelector('[data-role=reset]').onclick = () => { w1 = w2 = 0; blown = false; buf.length = 0; };
+
+    animate(fig, () => {
+      const { ctx, w, h } = s;
+      // Least-mean-squares: nudge each weight in proportion to leftover × reference.
+      for (let i = 0; i < 3; i++) {
+        const x1 = Math.sin(k * dTheta), x2 = Math.cos(k * dTheta);
+        const noise = A * Math.sin(k * dTheta + phi);
+        const anti = w1 * x1 + w2 * x2;
+        const e = noise - anti;
+        if (!blown) { w1 += mu * e * x1; w2 += mu * e * x2; }
+        if (Math.abs(w1) + Math.abs(w2) > 50) blown = true;
+        buf.push([noise, anti, e]);
+        k++;
+      }
+      while (buf.length > w / 2) buf.shift();
+      ctx.clearRect(0, 0, w, h);
+      const rows = [{ y: 50, i: 0, c: css('--noise'), n: t('noise', '噪声') }, { y: 125, i: 1, c: css('--anti'), n: t('anti-noise', '反噪声') }, { y: 205, i: 2, c: css('--sum'), n: t('leftover (inside mic)', '剩余（内侧麦克风）') }];
+      for (const r of rows) {
+        ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, r.y); ctx.lineTo(w, r.y); ctx.stroke();
+        const pts = buf.map((v, j) => [j * 2, r.y - 26 * clamp(v[r.i], -1.5, 1.5)]);
+        line(ctx, pts, r.c, r.i === 2 ? 2.4 : 1.8);
+        label(ctx, r.n, 4, r.y - 36, css('--muted'));
+      }
+      const recent = buf.slice(-perCycle * 2);
+      const rms = Math.sqrt(recent.reduce((sum, v) => sum + v[2] * v[2], 0) / Math.max(1, recent.length));
+      const ref = A / Math.SQRT2;
+      const db = 20 * Math.log10(Math.max(rms, 1e-6) / ref);
+      const dbText = db < -60 ? t('below −60', '低于 −60') : db.toFixed(0).replace('-', '−');
+      readout.innerHTML = blown
+        ? t('<b>It blew up.</b> Each correction overshot the last one. Lower the learning rate and press Reset.', '<b>失控了。</b>每一次修正都比上一次矫枉过正。调低学习率，再按“重置”。')
+        : t(`Leftover: <b>${dbText} dB</b> relative to the noise.`, `剩余：相对噪声 <b>${dbText} dB</b>。`);
+    });
+  }
+})();
+</script>
+</body>
+</html>

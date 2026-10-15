@@ -57,6 +57,10 @@ type Coord struct {
 	// the entry itself is the source.
 	Source string
 
+	// IsFile says the upstream sample is a single file, to be wrapped in a directory of its own
+	// when vendored. Set from sample_is_file, or per match under mixed_shapes.
+	IsFile bool
+
 	// HandReadDimension is true when the dimension came from a dimension_overrides entry
 	// rather than the category map: a person read the sample because the upstream labelled it
 	// by technique and never said what it achieves. It is tracked so the two kinds of
@@ -164,19 +168,20 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		labelFile = *d.LabelFile
 	}
 
-	dirs, skipped, err := sampleDirs(root, d.Layout, labelFile, d.SampleIsFile)
+	matches, skipped, err := sampleDirs(root, d.Globs(), labelFile, d.SampleIsFile, d.MixedShapes)
 	if err != nil {
 		return nil, []error{fmt.Errorf("%s: %w", e.ID, err)}
 	}
 
 	res := &Result{CategorySeen: map[string]int{}, Skipped: skipped}
-	for _, dir := range dirs {
+	for _, m := range matches {
+		dir := m.path
 		up, err := readUpstream(dir, labelFile)
 		if err != nil {
 			bad("%s: %v", e.ID, err)
 			continue
 		}
-		if d.SampleIsFile {
+		if m.isFile {
 			base := filepath.Base(dir)
 			up.ID = strings.TrimSuffix(base, filepath.Ext(base))
 		}
@@ -192,7 +197,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			}
 		}
 		rel, _ := filepath.Rel(root, dir)
-		c := Coord{UpstreamID: up.ID, SamplePath: rel}
+		c := Coord{UpstreamID: up.ID, SamplePath: rel, IsFile: m.isFile}
 		if spec, ok := strings.CutPrefix(d.SourceFrom, "sidecar:"); ok {
 			file, field, found := strings.Cut(spec, ":")
 			if !found {
@@ -410,46 +415,68 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 	return res, errs
 }
 
-// sampleDirs expands the layout glob to the sample directories under root, and returns how
+// sampleMatch is one layout match: where it is, and whether it is a file to be wrapped or a
+// directory to be copied.
+type sampleMatch struct {
+	path   string
+	isFile bool
+}
+
+// sampleDirs expands the layout globs to the sample directories under root, and returns how
 // many matches were skipped for having no expected.yaml. A sample directory is defined as one
 // that carries an upstream label; a layout match without one is an intermediate directory
 // (skillsgoat's compound-chain nodes are the case) and is counted, not read.
-func sampleDirs(root, layout, labelFile string, isFile bool) (dirs []string, skipped int, err error) {
-	if layout == "" {
+//
+// With isFile each match is the sample itself and directories are passed over; with mixed each
+// match keeps the shape it has. Neither is the default, where a regular file under a layout is
+// passed over silently — the globs name directories and a stray file beside them is not one.
+func sampleDirs(root string, layouts []string, labelFile string, isFile, mixed bool) (out []sampleMatch, skipped int, err error) {
+	if len(layouts) == 0 {
 		return nil, 0, fmt.Errorf("derive.layout is empty")
 	}
-	matches, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(layout)))
-	if err != nil {
-		return nil, 0, fmt.Errorf("layout glob %q: %w", layout, err)
-	}
-	for _, m := range matches {
-		fi, err := os.Stat(m)
+	seen := map[string]bool{}
+	for _, layout := range layouts {
+		if layout == "" {
+			return nil, 0, fmt.Errorf("derive.layouts holds an empty glob")
+		}
+		matches, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(layout)))
 		if err != nil {
-			continue
+			return nil, 0, fmt.Errorf("layout glob %q: %w", layout, err)
 		}
-		if isFile {
-			// Each match is the sample itself; it gets wrapped in a directory when written.
-			if fi.Mode().IsRegular() {
-				dirs = append(dirs, m)
-			}
-			continue
-		}
-		if !fi.IsDir() {
-			continue
-		}
-		if labelFile != "" {
-			if _, err := os.Stat(filepath.Join(m, labelFile)); err != nil {
-				skipped++
+		for _, m := range matches {
+			if seen[m] {
+				// Two globs that overlap name one sample twice; it is one sample.
 				continue
 			}
+			fi, err := os.Stat(m)
+			if err != nil {
+				continue
+			}
+			if fi.Mode().IsRegular() {
+				if isFile || mixed {
+					seen[m] = true
+					out = append(out, sampleMatch{path: m, isFile: true})
+				}
+				continue
+			}
+			if !fi.IsDir() || isFile {
+				continue
+			}
+			if labelFile != "" {
+				if _, err := os.Stat(filepath.Join(m, labelFile)); err != nil {
+					skipped++
+					continue
+				}
+			}
+			seen[m] = true
+			out = append(out, sampleMatch{path: m})
 		}
-		dirs = append(dirs, m)
 	}
-	sort.Strings(dirs)
-	if len(dirs) == 0 {
-		return nil, skipped, fmt.Errorf("layout %q matched no sample directories under %s — is the corpus fetched?", layout, root)
+	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
+	if len(out) == 0 {
+		return nil, skipped, fmt.Errorf("layout %q matched no sample directories under %s — is the corpus fetched?", strings.Join(layouts, ", "), root)
 	}
-	return dirs, skipped, nil
+	return out, skipped, nil
 }
 
 func readUpstream(dir, labelFile string) (*upstreamLabel, error) {

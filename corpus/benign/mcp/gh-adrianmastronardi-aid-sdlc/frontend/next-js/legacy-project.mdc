@@ -1,0 +1,836 @@
+---
+title: Legacy Project Migration Guide
+description: A comprehensive guide for migrating a Next.js project from Pages Router to App Router, while preserving existing functionality and adopting modern practices.
+---
+
+## 🔧 1. Compatibility Matrix
+
+### Technology Constraints
+
+- **Node.js**: Match the project's engine (e.g., 16.x/18.x). Don't mix versions
+- **Next.js**: **Pages Router** (`pages/`, ≤13 or ≤12). Do not drop App Router into the same package without an interop plan
+- **React**: Respect current major version (17/18). Don't introduce features that force a React upgrade without an RFC
+- **Browsers**: Honor the existing support policy (e.g., "last 2 versions" + Chrome ESR). Add polyfills **only** with evidence
+
+### Version Lock Strategy
+
+```json
+// package.json
+{
+  "engines": {
+    "node": "18.x",
+    "npm": "9.x"
+  },
+  "resolutions": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  }
+}
+```
+
+---
+
+## 🗂️ 2. Legacy Folder Structure
+
+### Current Structure (Preserve)
+
+```
+src/
+├── pages/                          # Next.js Pages Router
+│   ├── _app.(js|tsx)              # App wrapper
+│   ├── _document.(js|tsx)         # Document wrapper
+│   └── some-page.(js|tsx)         # Page components
+├── components/                     # Reusable components
+│   └── LegacyWidget/
+│       ├── LegacyWidget.(js|tsx)  # Component file
+│       ├── useLegacyWidget.(ts)   # Custom hook
+│       ├── LegacyWidget.module.css # Legacy styles (don't create new)
+│       └── index.ts               # Export file
+├── lib/                           # Utilities and configurations
+├── hooks/                         # Global hooks
+├── public/                        # Static files
+├── styles/                        # Global styles (don't grow)
+├── types/                         # Type definitions
+└── utils/                         # Utility functions
+```
+
+### Migration Rules
+
+- **New components** → **Tailwind** (no new `.styles.ts`, no new CSS Modules)
+- **Only touch legacy styles** when you edit that component for another reason
+- **Preserve existing structure** unless there's a compelling reason to change
+
+---
+
+## 📝 3. Naming Conventions
+
+### File and Folder Naming
+
+- **Components**: PascalCase → `LegacyWidget`, `NewComponent`
+- **Hooks**: camelCase with `use` prefix → `useLegacyWidget.ts`
+- **Pages**: lowercase in `pages/` with `default export`
+- **Types**: in `types/` or colocated by feature
+- **Utilities**: camelCase → `formatDate.ts`, `apiClient.ts`
+
+### Import Order
+
+```typescript
+// 1. External libraries
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+
+// 2. Internal modules (with @ alias)
+import { Button } from '@/components/Button';
+import { useAuth } from '@/hooks/useAuth';
+
+// 3. Relative imports
+import './LegacyWidget.module.css';
+import { helper } from '../utils/helper';
+```
+
+---
+
+## 🎨 4. Styling Strategy (Coexistence)
+
+### ✅ New Code (Tailwind Only)
+
+- **Tailwind utilities** directly in JSX
+- **Extract repeated class sets** into reusable components, not CSS files
+- **No new CSS-in-JS** or `.styles.ts` files
+
+### ♻️ Existing Code (Preserve)
+
+- **Keep CSS Modules/styled-components** where they already exist
+- **If you modify UI**: migrate the touched block to Tailwind (not the entire file)
+- **Do not create new** CSS-in-JS systems
+
+### Example: New Component with Tailwind
+
+```tsx
+// components/NewBanner/NewBanner.tsx
+interface BannerProps {
+  title: string;
+  message: string;
+  variant?: 'info' | 'warning' | 'error';
+}
+
+export default function NewBanner({
+  title,
+  message,
+  variant = 'info',
+}: BannerProps) {
+  const variantStyles = {
+    info: 'bg-blue-50 border-blue-200 text-blue-800',
+    warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+    error: 'bg-red-50 border-red-200 text-red-800',
+  };
+
+  return (
+    <div className={`rounded-xl p-4 border ${variantStyles[variant]}`}>
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <p className="text-sm mt-1">{message}</p>
+    </div>
+  );
+}
+```
+
+### Example: Migrating Existing Component
+
+```tsx
+// Before: CSS Module approach
+import styles from './LegacyWidget.module.css';
+
+export function LegacyWidget({ title }) {
+  return (
+    <div className={styles.container}>
+      <h2 className={styles.title}>{title}</h2>
+    </div>
+  );
+}
+
+// After: Partial Tailwind migration (only touched parts)
+import styles from './LegacyWidget.module.css';
+
+export function LegacyWidget({ title }) {
+  return (
+    <div className={styles.container}>
+      <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+    </div>
+  );
+}
+```
+
+---
+
+## 📊 5. State and Data Management
+
+### Legacy State (Preserve)
+
+- **Respect the legacy stack** (Redux/old Context) **without expanding its footprint**
+- **Don't refactor** existing state management unless you're already touching it
+- **Document** the current state architecture for future reference
+
+### New Features (Modern Approach)
+
+- **Prefer Zustand** or local `useState`/`useReducer` for new features
+- **Avoid expanding** legacy state patterns
+
+### Data Fetching Strategy
+
+- **Pages Router**: Keep existing `getStaticProps/getServerSideProps`
+- **New client calls**: **SWR** with `fetch`/axios
+- **Don't introduce new SSR/ISR** if the project is **frontend-only** unless there's a validated need
+
+### Example: SWR Hook (Coexists with Legacy)
+
+```typescript
+// hooks/useUser.ts
+import useSWR from 'swr';
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+export function useUser(id: string) {
+  const { data, error, isLoading, mutate } = useSWR(
+    `/api/users/${id}`,
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+    }
+  );
+
+  return {
+    user: data,
+    error,
+    isLoading,
+    refresh: mutate,
+  };
+}
+```
+
+---
+
+## ⚠️ 6. Error Handling and Observability
+
+### Error Handling Strategy
+
+- **Wrap all I/O/async** in `try/catch`
+- **UI errors**: Error Boundaries (or `_error` page when applicable)
+- **Sentry** (or the repo's chosen tool) for exception capture
+- **Before refactors**: **instrument** with basic metrics (latency, error rate per route)
+
+### Error Boundary Example
+
+```tsx
+// components/ErrorBoundary.tsx
+import React from 'react';
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+export class ErrorBoundary extends React.Component<
+  React.PropsWithChildren<{}>,
+  ErrorBoundaryState
+> {
+  constructor(props: React.PropsWithChildren<{}>) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Log to Sentry or monitoring service
+    console.error('Error caught by boundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-4 bg-red-50 border border-red-200 rounded">
+          <h2 className="text-red-800 font-semibold">Something went wrong</h2>
+          <button
+            onClick={() => this.setState({ hasError: false })}
+            className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-sm"
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+```
+
+---
+
+## ⚡ 7. Performance in Legacy Contexts
+
+### Optimization Strategy
+
+- **Keep `next/image`** where feasible; if there's plain `<img>`, don't mass-replace
+- **Use `next/dynamic`** for new heavy components
+- **Avoid main-thread blocking**; add `useMemo`/`useCallback` where safe
+- **Avoid large new packages** if lighter alternatives exist
+
+### Performance Monitoring
+
+```typescript
+// utils/performance.ts
+export function measurePerformance<T>(name: string, fn: () => T): T {
+  const start = performance.now();
+  const result = fn();
+  const end = performance.now();
+
+  console.log(`${name} took ${end - start}ms`);
+  return result;
+}
+
+// Usage in components
+const expensiveValue = measurePerformance('Expensive calculation', () => {
+  return heavyComputation(data);
+});
+```
+
+---
+
+## 🔒 8. Security Rules
+
+### Security Principles
+
+- **Never expose secrets**; only `NEXT_PUBLIC_` for non-sensitive values
+- **Avoid `dangerouslySetInnerHTML`** unless fully **sanitized**
+- **Client-side validation** with `zod`/`yup` (don't rip out what already works unless you're touching it)
+- **Enforce HTTPS** and validate request/response parameters
+
+### Environment Variables Management
+
+```bash
+# ✅ Safe to expose
+NEXT_PUBLIC_API_URL=https://api.example.com
+NEXT_PUBLIC_APP_VERSION=1.0.0
+
+# ❌ Never expose
+DATABASE_PASSWORD=secret123
+JWT_SECRET=mysecret
+API_KEY=sk-123456789
+```
+
+### Input Validation Example
+
+```typescript
+// utils/validation.ts
+import { z } from 'zod';
+
+export const userSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(2).max(50),
+  age: z.number().min(18).max(120),
+});
+
+export function validateUserInput(data: unknown) {
+  try {
+    return userSchema.parse(data);
+  } catch (error) {
+    throw new Error(`Invalid user data: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 🧪 9. Testing Strategy (Pragmatic)
+
+### Testing Approach
+
+- **If the project uses Enzyme/old Jest setup**: **keep it** for existing tests
+- **New tests**: **Jest + React Testing Library**
+- **Minimum**: tests for hooks/pure functions and critical components
+- **Don't enforce high coverage upfront**; **raise the bar** when touching modules
+
+### Test Examples
+
+```typescript
+// Legacy test (keep existing)
+import { shallow } from 'enzyme';
+import LegacyWidget from './LegacyWidget';
+
+describe('LegacyWidget', () => {
+  it('renders correctly', () => {
+    const wrapper = shallow(<LegacyWidget title="Test" />);
+    expect(wrapper.find('.title').text()).toBe('Test');
+  });
+});
+
+// New test (modern approach)
+import { render, screen } from '@testing-library/react';
+import NewBanner from './NewBanner';
+
+describe('NewBanner', () => {
+  it('renders with correct content', () => {
+    render(<NewBanner title="Test" message="Message" />);
+    expect(screen.getByText('Test')).toBeInTheDocument();
+    expect(screen.getByText('Message')).toBeInTheDocument();
+  });
+
+  it('applies correct variant styles', () => {
+    render(<NewBanner title="Test" message="Message" variant="warning" />);
+    const banner = screen.getByRole('banner');
+    expect(banner).toHaveClass('bg-yellow-50');
+  });
+});
+```
+
+---
+
+## 🔧 10. Dual Lint/TypeScript Configuration
+
+### Configuration Strategy
+
+- **Maintain two lint modes**:
+  - `eslint.legacy.js` (tolerant: allows `any`, default exports, etc.)
+  - `eslint.modern.js` (strict for new modules)
+- **`tsconfig.json`** can keep `skipLibCheck: true`
+- **For new folders**: enable stricter rules (folder-level overrides)
+
+### ESLint Configuration
+
+```javascript
+// eslint.legacy.js
+module.exports = {
+  extends: ['next/core-web-vitals'],
+  rules: {
+    '@typescript-eslint/no-explicit-any': 'off',
+    '@typescript-eslint/explicit-module-boundary-types': 'off',
+    'import/prefer-default-export': 'off',
+  },
+  overrides: [
+    {
+      files: ['src/components/new/**/*.tsx'],
+      extends: ['eslint.modern.js'],
+    },
+  ],
+};
+
+// eslint.modern.js
+module.exports = {
+  extends: ['next/core-web-vitals'],
+  rules: {
+    '@typescript-eslint/no-explicit-any': 'error',
+    '@typescript-eslint/explicit-module-boundary-types': 'error',
+    'import/prefer-default-export': 'error',
+  },
+};
+```
+
+---
+
+## 📦 11. Dependency Management
+
+### Dependency Strategy
+
+- **Freeze obsolete libs** (don't expand usage)
+- **For core upgrades**: create an **RFC**, test with a canary build
+- **Avoid stacking multiple minor upgrades** at once
+- **Add scripts**: `pnpm diagnose:legacy`, `pnpm analyze:bundle`
+
+### Package.json Scripts
+
+```json
+{
+  "scripts": {
+    "diagnose:legacy": "npm audit && npm outdated",
+    "analyze:bundle": "ANALYZE=true next build",
+    "check:compatibility": "node scripts/check-compatibility.js",
+    "migrate:styles": "node scripts/migrate-styles.js"
+  }
+}
+```
+
+---
+
+## 🔄 12. Git and Release Management
+
+### Branch Strategy
+
+- **Branches**: `fix/...`, `chore/...`, `refactor/...`, `feat/...`
+- **Conventional Commits** for all changes
+- **Hotfix flow**: branch → PR → tag `hotfix-x.y.z`
+- **Use SemVer tags**; keep a minimal changelog (auto-generated if possible)
+
+### Commit Message Examples
+
+```bash
+# Feature commits
+feat: add new user dashboard component
+feat(api): implement user search endpoint
+
+# Bug fixes
+fix: resolve memory leak in legacy widget
+fix(styles): correct mobile layout issues
+
+# Refactoring
+refactor: migrate legacy form to Tailwind
+refactor(types): improve TypeScript definitions
+
+# Documentation
+docs: update migration guide
+docs: add component usage examples
+
+# Chores
+chore: update dependencies
+chore: configure new linting rules
+```
+
+---
+
+## 🗑️ 13. Deprecation Strategy
+
+### Deprecation Process
+
+- **Annotate APIs/Components** with `@deprecated` and a **removal date/plan**
+- **Add development-only console warnings**
+- **Document the replacement** and provide usage examples
+
+### Deprecation Example
+
+```typescript
+/**
+ * @deprecated Use <NewBanner /> with Tailwind instead.
+ * Removal date: 2025-12-31
+ * Migration guide: /docs/migration/banner-component
+ */
+export function OldNotice({ title, message }: NoticeProps) {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn(
+      'OldNotice is deprecated. Use NewBanner component instead. ' +
+        'See: /docs/migration/banner-component'
+    );
+  }
+
+  return (
+    <div className="old-notice">
+      <h2>{title}</h2>
+      <p>{message}</p>
+    </div>
+  );
+}
+
+// New replacement component
+export function NewBanner({ title, message }: BannerProps) {
+  return (
+    <div className="rounded-xl p-4 bg-blue-50 border border-blue-200">
+      <h2 className="text-lg font-semibold text-blue-800">{title}</h2>
+      <p className="text-sm text-blue-700 mt-1">{message}</p>
+    </div>
+  );
+}
+```
+
+---
+
+## 🚀 14. Migration Strategy (Staged)
+
+### Migration Phases
+
+1. **Catalog**: Inventory routes, critical components, styles, state
+2. **Encapsulate**: Create adapters (e.g., a single API client, unified state selectors)
+3. **Converge styles**: Whenever a UI is touched, migrate that slice to Tailwind
+4. **Extract features**: New screens/flows → Tailwind + SWR + clean hooks
+5. **Reduce surface**: Remove dead code/components and unused deps
+6. **(Optional)** Introduce App Router in a **separate package/subapp**, not mixed
+
+### Migration Checklist
+
+```markdown
+## Phase 1: Assessment
+
+- [ ] Audit all routes and components
+- [ ] Identify critical vs non-critical components
+- [ ] Document current state management
+- [ ] List all dependencies and their usage
+
+## Phase 2: Preparation
+
+- [ ] Set up Tailwind CSS
+- [ ] Configure dual linting setup
+- [ ] Create migration documentation
+- [ ] Set up monitoring and error tracking
+
+## Phase 3: Incremental Migration
+
+- [ ] Start with new features (Tailwind only)
+- [ ] Migrate components when touched for other reasons
+- [ ] Update tests for migrated components
+- [ ] Document migration patterns
+
+## Phase 4: Cleanup
+
+- [ ] Remove unused dependencies
+- [ ] Delete deprecated components
+- [ ] Optimize bundle size
+- [ ] Update documentation
+```
+
+---
+
+## ✅ 15. DO / DON'T Guidelines
+
+### ✅ DO
+
+- **Use Tailwind for new code**
+- **Add basic tests when touching logic**
+- **Measure before optimizing**
+- **Record trade-offs in the PR description**
+- **Document migration decisions**
+- **Preserve existing functionality**
+
+### ❌ DON'T
+
+- **Rewrite everything "for style"** without a ticket/clear benefit
+- **Introduce another styling system** (no new CSS-in-JS)
+- **Change API contracts** without versioning
+- **Mix App Router and Pages Router** in the same package without a plan
+- **Remove working code** without replacement
+- **Ignore existing patterns** when adding new features
+
+---
+
+## 📋 16. Useful Templates
+
+### New Component (Legacy Repo → Modern Style with Tailwind)
+
+```tsx
+// components/ProfileCard/ProfileCard.tsx
+interface ProfileCardProps {
+  name: string;
+  email: string;
+  avatar?: string;
+  role?: string;
+}
+
+export default function ProfileCard({
+  name,
+  email,
+  avatar,
+  role,
+}: ProfileCardProps) {
+  return (
+    <article className="rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex items-center space-x-3">
+        {avatar && (
+          <img
+            src={avatar}
+            alt={`${name}'s avatar`}
+            className="w-10 h-10 rounded-full object-cover"
+          />
+        )}
+        <div className="flex-1 min-w-0">
+          <h3 className="text-base font-semibold text-gray-900 truncate">
+            {name}
+          </h3>
+          <p className="text-sm text-gray-500 truncate">{email}</p>
+          {role && <p className="text-xs text-gray-400 mt-1">{role}</p>}
+        </div>
+      </div>
+    </article>
+  );
+}
+```
+
+### SWR Hook (Coexists with Legacy Data Fetching)
+
+```typescript
+// hooks/useUser.ts
+import useSWR from 'swr';
+
+const fetcher = (url: string) =>
+  fetch(url).then((r) => {
+    if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
+    return r.json();
+  });
+
+export function useUser(id: string) {
+  const { data, error, isLoading, mutate } = useSWR(
+    id ? `/api/users/${id}` : null,
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      errorRetryCount: 1,
+    }
+  );
+
+  return {
+    user: data,
+    error,
+    isLoading,
+    refresh: mutate,
+    isError: !!error,
+  };
+}
+```
+
+### Error Boundary for Legacy Components
+
+```tsx
+// components/LegacyErrorBoundary.tsx
+import React from 'react';
+
+interface Props {
+  children: React.ReactNode;
+  fallback?: React.ComponentType<{ error: Error; reset: () => void }>;
+}
+
+interface State {
+  hasError: boolean;
+  error?: Error;
+}
+
+export class LegacyErrorBoundary extends React.Component<Props, State> {
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Log to monitoring service
+    console.error('Legacy component error:', error, errorInfo);
+  }
+
+  reset = () => {
+    this.setState({ hasError: false, error: undefined });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      const Fallback = this.props.fallback || DefaultFallback;
+      return <Fallback error={this.state.error!} reset={this.reset} />;
+    }
+
+    return this.props.children;
+  }
+}
+
+function DefaultFallback({
+  error,
+  reset,
+}: {
+  error: Error;
+  reset: () => void;
+}) {
+  return (
+    <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+      <h3 className="text-red-800 font-medium">Component Error</h3>
+      <p className="text-red-600 text-sm mt-1">{error.message}</p>
+      <button
+        onClick={reset}
+        className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## 📊 17. Monitoring and Metrics
+
+### Key Metrics to Track
+
+- **Performance**: Page load times, bundle sizes
+- **Errors**: Error rates by component/route
+- **Usage**: Component usage statistics
+- **Migration progress**: Percentage of components migrated
+
+### Monitoring Setup
+
+```typescript
+// utils/monitoring.ts
+export function trackComponentUsage(componentName: string) {
+  if (process.env.NODE_ENV === 'production') {
+    // Send to analytics service
+    analytics.track('component_used', { component: componentName });
+  }
+}
+
+export function trackMigrationProgress() {
+  const totalComponents = getTotalComponentCount();
+  const migratedComponents = getMigratedComponentCount();
+
+  const progress = (migratedComponents / totalComponents) * 100;
+
+  console.log(`Migration progress: ${progress.toFixed(1)}%`);
+  return progress;
+}
+```
+
+---
+
+## 📋 18. Final Checklist
+
+### Before Making Changes
+
+- [ ] Understand the existing architecture
+- [ ] Document current behavior
+- [ ] Set up monitoring/observability
+- [ ] Create migration plan
+- [ ] Test changes in isolation
+
+### During Migration
+
+- [ ] Use Tailwind for new components
+- [ ] Preserve existing functionality
+- [ ] Add tests for changed components
+- [ ] Document migration decisions
+- [ ] Monitor for regressions
+
+### After Migration
+
+- [ ] Verify all functionality works
+- [ ] Update documentation
+- [ ] Remove deprecated code
+- [ ] Optimize bundle size
+- [ ] Share learnings with team
+
+---
+
+✅ **With these rules, your legacy project will be**:
+
+- **Stable** (existing functionality preserved)
+- **Gradually modernized** (incremental improvements)
+- **Maintainable** (clear migration path)
+- **Secure** (security best practices maintained)
+- **Performant** (optimized without breaking changes)
+
+```ts
+import useSWR from 'swr';
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+export function useUser(id: string) {
+  const { data, error, isLoading, mutate } = useSWR(
+    `/api/users/${id}`,
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+    }
+  );
+  return { user: data, error, isLoading, refresh: mutate };
+}
+```
+
+---
