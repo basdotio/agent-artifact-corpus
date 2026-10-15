@@ -1,0 +1,615 @@
+---
+title: Next.js 15 Project Setup
+description: A comprehensive guide for setting up a new Next.js 15 project with App Router, TypeScript, Tailwind CSS, and more.
+---
+
+## 📁 1. Project Setup
+
+### Base Technologies
+
+- **Next.js v15** with App Router
+- **TypeScript** with `strict: true` configuration
+- **Tailwind CSS** for styling (no CSS-in-JS or external frameworks)
+- **pnpm** as default package manager
+- **ESLint + Prettier** for code formatting
+
+### Minimum Configuration Files
+
+```
+.eslintrc.js
+prettier.config.js
+tsconfig.json
+tailwind.config.js
+next.config.ts
+```
+
+---
+
+## 🗂️ 2. Folder Structure
+
+Keep the structure **simple and flat** to facilitate learning:
+
+```
+project/
+├── app/                          # Next.js 15 App Router
+│   ├── page.tsx                  # Main page
+│   ├── layout.tsx                # Root layout
+│   ├── error.tsx                 # Error handling
+│   └── loading.tsx               # Loading states
+├── components/                   # Reusable components
+│   └── ComponentName/
+│       ├── ComponentName.tsx     # Main component
+│       ├── useComponentName.ts   # Custom hook
+│       ├── ComponentName.test.tsx # Tests (optional)
+│       └── index.ts              # Export
+├── lib/                          # Utilities and configurations
+├── hooks/                        # Global hooks
+├── types/                        # Type definitions
+├── utils/                        # Utility functions
+├── public/                       # Static files
+└── README.md                     # Project documentation
+```
+
+---
+
+## 📝 3. Naming Conventions
+
+### Folders and Files
+
+- **Components**: PascalCase → `LoginForm`, `UserCard`
+- **Hooks**: camelCase with `use` prefix → `useLogin.ts`
+- **Pages**: always lowercase → `page.tsx`, `layout.tsx`
+- **Tests**: same name + `.test.tsx`
+- **Types/Interfaces**: in `types/` or colocated by feature
+
+### Examples
+
+```
+✅ Correct:
+- components/LoginForm/LoginForm.tsx
+- hooks/useAuth.ts
+- types/user.ts
+- utils/formatDate.ts
+
+❌ Incorrect:
+- components/login-form/login-form.tsx
+- hooks/auth.ts
+- types/User.ts
+```
+
+---
+
+## 🧩 4. Component Rules
+
+### Structure
+
+- **UI with Tailwind classes only**
+- **Separate logic from UI**: use a hook (`useX`) per component
+- Keep components small (<100 lines)
+- Prefer **composition** over inheritance
+- All components must be **Client Components** (`"use client"`)
+
+### Recommended Pattern
+
+```typescript
+// ComponentName.tsx
+'use client';
+
+import { useComponentName } from './useComponentName';
+
+interface ComponentNameProps {
+  title: string;
+  onAction?: () => void;
+}
+
+export function ComponentName({ title, onAction }: ComponentNameProps) {
+  const { state, handlers } = useComponentName({ onAction });
+
+  return (
+    <div className="p-4 bg-white rounded-lg shadow">
+      <h2 className="text-xl font-semibold">{title}</h2>
+      {/* Component UI */}
+    </div>
+  );
+}
+```
+
+---
+
+## 📊 5. Data and State Management
+
+### State Strategy
+
+- **Data fetching**: only from client with `SWR` or `fetch`
+- **Global state**: Zustand for simple cases
+- **Local state**: `useState` and `useContext` when possible
+- **Avoid**: Redux and complex state libraries
+
+### Example with SWR
+
+```typescript
+// hooks/useUsers.ts
+import useSWR from 'swr';
+
+export function useUsers() {
+  const { data, error, isLoading } = useSWR('/api/users', fetcher);
+
+  return {
+    users: data,
+    isLoading,
+    error,
+  };
+}
+```
+
+---
+
+## 📋 6. Forms and Validation
+
+### Required Libraries
+
+- **react-hook-form** for form handling
+- **zod** for validation schemas
+- **Client-side validation** for immediate feedback
+
+### Form Pattern
+
+```typescript
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+
+const formSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+});
+
+export function LoginForm() {
+  const form = useForm({
+    resolver: zodResolver(formSchema),
+  });
+
+  // Form implementation
+}
+```
+
+---
+
+## ⚠️ 7. Error Handling
+
+### Strategies
+
+- Wrap async calls in `try...catch`
+- Use `error.tsx` in `app/` segments
+- Show user-friendly messages (not raw errors)
+- **No console errors left** in final project
+
+### Error Boundary Example
+
+```typescript
+// app/error.tsx
+'use client';
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen">
+      <h2 className="text-2xl font-bold text-red-600">Something went wrong</h2>
+      <button
+        onClick={reset}
+        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## ⚡ 8. Performance Rules
+
+### Required Optimizations
+
+- Use `next/image` for optimized images
+- Use `next/font` for optimized fonts
+- Lazy load heavy components with `next/dynamic`
+- Optimize lists with `React.memo`
+- **Always clean up** timers/listeners in `useEffect`
+
+### Optimization Example
+
+```typescript
+import dynamic from 'next/dynamic';
+import { memo } from 'react';
+
+const HeavyComponent = dynamic(() => import('./HeavyComponent'), {
+  loading: () => <div>Loading...</div>,
+});
+
+const UserList = memo(function UserList({ users }) {
+  return (
+    <div>
+      {users.map((user) => (
+        <UserCard key={user.id} user={user} />
+      ))}
+    </div>
+  );
+});
+```
+
+---
+
+## 🔒 9. Security Rules
+
+### Basic Principles
+
+- **Never expose secrets** (only `NEXT_PUBLIC_` for safe values)
+- Avoid `dangerouslySetInnerHTML` unless sanitized
+- **Always validate input** with `zod`
+- API calls must be via HTTPS
+- Sanitize input and output data
+
+### Environment Variables
+
+```bash
+# ✅ Safe to expose
+NEXT_PUBLIC_API_URL=https://api.example.com
+
+# ❌ Never expose
+DATABASE_PASSWORD=secret123
+JWT_SECRET=mysecret
+```
+
+---
+
+## 🧪 10. Testing Rules
+
+### Configuration
+
+- **Unit testing**: Jest + React Testing Library
+- **E2E**: Playwright (optional for advanced modules)
+- **Minimum coverage**: not required for students, but examples must include tests
+
+### Test Example
+
+```typescript
+// ComponentName.test.tsx
+import { render, screen } from '@testing-library/react';
+import { ComponentName } from './ComponentName';
+
+describe('ComponentName', () => {
+  it('should render correctly', () => {
+    render(<ComponentName title="Test" />);
+    expect(screen.getByText('Test')).toBeInTheDocument();
+  });
+});
+```
+
+---
+
+## 🎓 11. Course-Specific Rules
+
+### Version Management
+
+- Each **lesson/module** must have its own branch
+- **Commits** must be meaningful using conventional commits:
+
+```
+feat: add login form
+fix: correct input validation
+docs: improve README
+refactor: simplify navbar component
+```
+
+### Course Project Structure
+
+- Provide **starter code** with scaffolding
+- Include **solution branch** for each exercise
+- Each project must include a **README** with:
+  - Learning objectives
+  - Steps to run (`pnpm dev`)
+  - Exercises or challenges
+
+---
+
+## 🎨 12. Code Style Rules
+
+### TypeScript
+
+- **Always use TypeScript types** (`interface` or `type`) for props
+- Use **functional components** only (no class components)
+- Prefer **arrow functions** for handlers and utilities
+- All files must **end with a newline**
+
+### Import Order
+
+```typescript
+// 1. External libraries
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+// 2. Internal modules
+import { Button } from '@/components/Button';
+import { useAuth } from '@/hooks/useAuth';
+
+// 3. Relative imports
+import './ComponentName.css';
+import { helper } from '../utils/helper';
+```
+
+---
+
+## 🎨 13. Tailwind Rules
+
+### Class Usage
+
+- Use **utility classes directly** in JSX
+- Extract repetitive class sets into **reusable components**
+- Use **Tailwind config tokens** (e.g., `text-primary`)
+- **No inline styles** except for rare dynamic values
+
+### Tailwind Component Example
+
+```typescript
+export function Card({ children, className = '' }) {
+  return (
+    <div
+      className={`
+      p-6 
+      bg-white 
+      rounded-lg 
+      shadow-md 
+      border 
+      border-gray-200
+      hover:shadow-lg 
+      transition-shadow 
+      duration-200
+      ${className}
+    `}
+    >
+      {children}
+    </div>
+  );
+}
+```
+
+---
+
+## ♿ 14. Accessibility Rules (A11y)
+
+### Minimum Requirements
+
+- All images must use `alt`
+- Use semantic tags (`<header>`, `<main>`, `<footer>`)
+- Use `aria-*` attributes for interactive components
+- Ensure accessible color contrast
+- Keyboard navigation must work (`tabIndex`, `onKeyDown`)
+
+### Accessible Component Example
+
+```typescript
+export function Modal({ isOpen, onClose, children }) {
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+    >
+      <div className="bg-white p-6 rounded-lg">
+        <h2 id="modal-title" className="text-xl font-bold">
+          Modal Title
+        </h2>
+        {children}
+        <button
+          onClick={onClose}
+          className="mt-4 px-4 py-2 bg-blue-500 text-white rounded"
+          aria-label="Close modal"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 🔄 15. Git Rules for Courses
+
+### Branch Strategy
+
+- One **branch per lesson/module**
+- Commit messages in **English** using conventional commits
+- Each branch must end with a **tag** for reference (e.g., `lesson-03-solution`)
+- Students must **open Pull Requests** for exercises
+
+### Workflow Example
+
+```bash
+# Create branch for lesson
+git checkout -b lesson-03-forms
+
+# Make meaningful commits
+git commit -m "feat: add registration form with validation"
+git commit -m "fix: correct email validation regex"
+git commit -m "docs: add form usage examples"
+
+# Create solution tag
+git tag lesson-03-solution
+git push origin lesson-03-solution
+```
+
+---
+
+## 📖 16. Documentation Rules
+
+### Required README
+
+Each project/module must have a **README.md** with:
+
+- **Lesson objective**
+- **Installation steps**
+- **Explanation of important files/folders**
+- **Exercises/challenges section**
+
+### README Structure
+
+````markdown
+# Project Name
+
+## 🎯 Objective
+
+Clear description of what will be learned in this lesson.
+
+## 🚀 Installation
+
+```bash
+pnpm install
+pnpm dev
+```
+````
+
+## 📁 Project Structure
+
+Explanation of main folders and files.
+
+## 💡 Exercises
+
+List of practical exercises for students.
+
+## 🏆 Additional Challenges
+
+Optional exercises for advanced students.
+
+````
+
+---
+
+## ✅ 17. Evaluation Rules
+
+### Approval Criteria
+- Code must run with `pnpm dev` without extra configuration
+- Linting must pass (`pnpm lint`)
+- **No TypeScript errors allowed** (`pnpm tsc --noEmit`)
+- Projects must run in latest **Chrome, Edge, Safari**
+- Unit tests (if included) must pass (`pnpm test`)
+
+### Evaluation Checklist
+- [ ] Project runs without errors
+- [ ] Code passes linting
+- [ ] No TypeScript errors
+- [ ] Components follow conventions
+- [ ] README is complete and clear
+- [ ] Tests pass (if applicable)
+
+---
+
+## 🚀 18. Deployment Rules
+
+### Deployment Platform
+- Deploy final projects to **Vercel** (free tier)
+- Provide deployment link in README
+- Configure `basePath` and `trailingSlash` if required
+- Optimize images/fonts for production build (`pnpm build`)
+
+### Vercel Configuration
+```json
+// vercel.json
+{
+  "buildCommand": "pnpm build",
+  "outputDirectory": ".next",
+  "installCommand": "pnpm install"
+}
+````
+
+---
+
+## 🎯 19. Practice and Learning Rules
+
+### Required Exercises
+
+Each lesson must include at least **1 practical exercise** covering:
+
+- **Components** - Create reusable components
+- **Hooks** - Implement custom hooks
+- **Forms** - Handle forms with validation
+- **Data Fetching** - Consume APIs with SWR
+- **Tailwind UI** - Build responsive interfaces
+
+### Exercise Structure
+
+```markdown
+## Exercise 1: Create User Component
+
+**Objective**: Create a component that displays user information
+
+**Requirements**:
+
+- Use TypeScript for props
+- Implement design with Tailwind
+- Include basic tests
+
+**Bonus**: Add editing functionality
+```
+
+---
+
+## 🔧 20. Advanced Rules (Optional)
+
+### Additional Tools
+
+- **Storybook** for UI documentation (optional)
+- **Playwright** for E2E testing in advanced courses
+- **CI/CD** (GitHub Actions) for automatic linting and testing
+- **Feature flags** or environment configs for realistic scenarios
+
+### Storybook Configuration
+
+```javascript
+// .storybook/main.js
+module.exports = {
+  stories: ['../src/**/*.stories.@(js|jsx|ts|tsx)'],
+  addons: ['@storybook/addon-essentials'],
+  framework: '@storybook/react',
+  core: {
+    builder: '@storybook/builder-webpack5',
+  },
+};
+```
+
+---
+
+## 📋 Final Checklist
+
+### Before Delivering a Project
+
+- [ ] Folder structure follows conventions
+- [ ] All components use TypeScript
+- [ ] Styling with Tailwind CSS only
+- [ ] Error handling implemented
+- [ ] Tests included (if applicable)
+- [ ] README complete and clear
+- [ ] Project deployed on Vercel
+- [ ] Code passes linting and TypeScript
+- [ ] Basic accessibility implemented
+- [ ] Commits follow conventional commits
+
+---
+
+✅ **With these rules, your course projects will be**:
+
+- **Consistent** (all modules with same structure)
+- **Simple** (focus on learning, not boilerplate)
+- **Professional** (students apply industry best practices)
+- **Scalable** (solid foundation to expand knowledge)

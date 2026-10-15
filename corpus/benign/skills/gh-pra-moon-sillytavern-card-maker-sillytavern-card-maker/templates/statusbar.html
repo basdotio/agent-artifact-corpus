@@ -1,0 +1,98 @@
+<head>
+  <style>
+    /* 状态栏样式：宽度自适应、深浅主题通用、避免 vh/min-height */
+    .sb-wrap { font-size: 13px; line-height: 1.5; border: 1px solid rgba(128, 128, 128, 0.35); border-radius: 10px; padding: 8px 12px; }
+    .sb-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+    .sb-title { font-weight: 600; }
+    .sb-arrow { opacity: 0.6; }
+    .sb-body { margin-top: 6px; }
+    .sb-body.collapsed { display: none; }
+    .sb-row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+    .sb-row .k { opacity: 0.75; flex-shrink: 0; }
+    .sb-row .v { text-align: right; word-break: break-all; }
+    .sb-bar { height: 8px; border-radius: 4px; background: rgba(128, 128, 128, 0.25); overflow: hidden; margin: 4px 0; }
+    .sb-bar > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #ff9ec7, #ff5c8a); transition: width .4s; }
+    .sb-tag { display: inline-block; font-size: 12px; padding: 1px 8px; margin: 2px 4px 2px 0; border: 1px solid rgba(128, 128, 128, 0.4); border-radius: 999px; }
+    .sb-btn { font-size: 12px; padding: 2px 10px; border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+    .sb-btn:hover { background: rgba(128, 128, 128, 0.15); }
+    .sb-hint { font-size: 11px; opacity: 0.55; margin-top: 4px; }
+  </style>
+  <script>
+    // 用经典脚本 + 异步 IIFE：内联/远程载入两种分发方式下都能可靠执行
+    (async () => {
+      // 1. 等 MVU 与楼层变量就绪
+      await waitGlobalInitialized('Mvu');
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      for (let i = 0; i < 100; i++) {
+        if (_.has(getVariables({ type: 'message' }), 'stat_data')) break;
+        await sleep(100);
+      }
+
+      const mid = () => getCurrentMessageId();
+      const read = () => _.get(Mvu.getMvuData({ type: 'message', message_id: mid() }), 'stat_data', {});
+      async function mutate(fn) {
+        const variables = Mvu.getMvuData({ type: 'message', message_id: mid() });
+        fn(variables);
+        await Mvu.replaceMvuData(variables, { type: 'message', message_id: mid() });
+      }
+      // 玩家操作日志：随变量发给 AI，让 AI 知道"变量因玩家操作而变"（见 references/frontend.md §4）
+      async function log(text) {
+        await mutate(v => {
+          const logs = _.get(v, 'stat_data.系统日志', []);
+          _.set(v, 'stat_data.系统日志', [...logs, text]);
+        });
+      }
+
+      const $bar = $('<div class="sb-wrap"></div>');
+      $bar.html(`
+        <div class="sb-head"><span class="sb-title">🌸 白娅</span><span class="sb-arrow">▼</span></div>
+        <div class="sb-body">
+          <div class="sb-row"><span class="k">依存度</span><span class="v" id="sb-depend">--</span></div>
+          <div class="sb-bar"><i id="sb-depend-bar"></i></div>
+          <div class="sb-row"><span class="k">称号</span><span class="v" id="sb-titles">--</span></div>
+          <div class="sb-row"><span class="k">物品栏</span><span class="v" id="sb-items">--</span></div>
+          <div class="sb-row"><button class="sb-btn" id="sb-gift">送小礼物 (+5 依存度)</button><span></span></div>
+          <div class="sb-hint">按钮操作会计入系统日志，AI 会注意到你的举动</div>
+        </div>`);
+      $('body').append($bar);
+
+      // 折叠
+      $bar.find('.sb-head').on('click', () => {
+        const $b = $bar.find('.sb-body');
+        $b.toggleClass('collapsed');
+        $bar.find('.sb-arrow').text($b.hasClass('collapsed') ? '►' : '▼');
+      });
+
+      // 交互：修改变量 + 记日志
+      $bar.find('#sb-gift').on('click', async () => {
+        await mutate(v => _.update(v, 'stat_data.白娅.依存度', x => _.clamp((x ?? 0) + 5, 0, 100)));
+        await log('<user> 送给白娅一件小礼物');
+        toastr.success('依存度 +5');
+        render();
+      });
+
+      function render() {
+        const d = read();
+        const depend = _.get(d, '白娅.依存度', '--');
+        $bar.find('#sb-depend').text(depend);
+        $bar.find('#sb-depend-bar').css('width', `${_.clamp(Number(depend) || 0, 0, 100)}%`);
+        const titles = _(_.get(d, '白娅.称号', {}))
+          .keys()
+          .map(t => `<span class="sb-tag">${t}</span>`)
+          .join('');
+        $bar.find('#sb-titles').html(titles || '--');
+        const items = _(_.get(d, '主角.物品栏', {}))
+          .entries()
+          .map(([n, x]) => `${n}×${x.数量 ?? 1}`)
+          .join('、');
+        $bar.find('#sb-items').text(items || '--');
+      }
+
+      render();
+      setInterval(render, 1000); // 简单可靠的刷新；变量更新/变量管理器改动都会跟上
+    })();
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+</body>

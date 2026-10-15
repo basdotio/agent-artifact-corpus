@@ -76,7 +76,7 @@ popularity or vendor curation, none of them a security review.
 
 ---
 
-## Pinned and fetchable (14)
+## Pinned and fetchable (18)
 
 Each is pinned to a commit in the manifest and fetched with
 `make fetch E="<id>"`.
@@ -166,6 +166,40 @@ that is the taxonomy most agent-artifact scanners derive their rules from. Label
 silver-standard (model-judged), not human review.
 *Required prep*: never use as the headline false-positive figure; report it beside a
 non-circular source.
+
+**`mcp-reference-servers`**, **`mcp-archived-servers`** — real MCP server source, the benign
+side the `mcp` surface never had.
+`https://github.com/modelcontextprotocol/servers` @ `bbb701e7ac1e` (subset `src`, **Apache-2.0**
+with MIT remaining on unrelicensed contributions) and
+`https://github.com/modelcontextprotocol/servers-archived` @ `9be4674d1ddf` (subset `src`,
+**MIT**), both vendorable. 7 + 14 server trees, vendored whole, lockfiles included.
+Until these, every *source* tree on the mcp surface was labelled malicious (cisco) and the only
+benign samples there were tool catalogues (automatelab); a scanner that reads server code was
+measurable for recall and not for over-alerting.
+*Hazards*: 14 of 21 are TypeScript, so a Python-only reader scores 7 and reads nothing on the
+rest — a declared boundary, not a miss, and never a benign verdict. Several (`everything`,
+`filesystem`, `puppeteer`, `postgres`) read, write, execute or hold credentials by design; a
+flag there is a flag on a benign sample, not yet a false positive.
+*Required prep*: none. The population is "every directory under `src/`", declared in the
+manifest.
+
+**`fastmcp-examples`**, **`python-sdk-examples`** — the frameworks' own example servers.
+`https://github.com/jlowin/fastmcp` @ `e2fcc412001f` (subset `examples`, **Apache-2.0**) and
+`https://github.com/modelcontextprotocol/python-sdk` @ `c9356a2a8fb8` (subset `examples`,
+**MIT**), both vendorable. 36 + 32 runnable servers, directories and single files alike.
+*Hazards*: **fixture, not wild** — demonstration code, authored to show an API and deployed by
+nobody, so `corpus score` reports its rate apart from the two entries above. It is the densest
+public collection of idiomatic FastMCP and SDK servers, which is why it is here. Three
+`.fastmcp.json` companions and two non-server snippet files are excluded by name, with the
+reason beside each in the manifest.
+
+The three Python-only, GitHub-harvested populations that sit beside these four —
+third-party server source found by code search, server source from repositories created on
+or after 2026-09-20, and skills from repositories created on or after that date — are not
+manifest entries, for the same reason the config harvest is not: they are hundreds of
+repositories, not one. Their complete inventory is `manifest/pins/mcp-servers.json`, written by
+`scripts/harvest-mcp-servers.py`, whose docstring states what `benign` means there and how a
+tree is bounded.
 
 ### Hard negatives — benign that looks like an attack
 

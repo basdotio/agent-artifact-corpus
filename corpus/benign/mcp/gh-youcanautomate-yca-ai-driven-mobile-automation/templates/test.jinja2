@@ -1,0 +1,63 @@
+"""
+Pytest test auto-generated from workflow execution.
+Uses Page Object Model (POM) for clean, maintainable test code.
+"""
+import pytest
+from appium import webdriver
+from appium.webdriver.common.appiumby import AppiumBy
+{% if platform|lower == 'ios' %}
+from appium.options.ios import XCUITestOptions
+{% else %}
+from appium.options.android import UiAutomator2Options
+{% endif %}
+
+# Import Page Objects
+{% for page_name in pages %}
+from page_objects.{{ page_name }} import {{ page_name|pascal_case }}
+{% endfor %}
+
+
+@pytest.fixture
+def driver():
+    """Initialize Appium driver with capabilities."""
+{% if platform|lower == 'ios' %}
+    options = XCUITestOptions()
+    options.device_name = "iPhone Simulator"
+    options.bundle_id = "com.example.app"
+    options.use_simulator = True
+{% else %}
+    options = UiAutomator2Options()
+    options.device_name = "emulator-5554"
+    options.app = "/path/to/app.apk"
+{% endif %}
+    
+    driver_instance = webdriver.Remote(
+        "http://localhost:4723",
+        options=options
+    )
+    yield driver_instance
+    driver_instance.quit()
+
+
+def test_{{ test_name }}(driver):
+    """Test {{ test_name }} workflow."""
+{% for page_name in pages %}
+    {{ page_name }} = {{ page_name|pascal_case }}(driver)
+{% endfor %}
+
+{% for action in actions %}
+    # Step {{ action.step }}: {{ action.description }}
+{% if action.action == 'screenshot' %}
+    driver.save_screenshot("screenshot_step_{{ action.step }}.png")
+{% elif action.action == 'find_element' %}
+    element = driver.find_element(AppiumBy.{{ action.strategy }}, "{{ action.selector }}")
+    assert element is not None
+{% elif action.action == 'click' %}
+    # Click element
+{% elif action.action == 'input' %}
+    # Input text
+{% endif %}
+
+{% endfor %}
+    # Verify workflow completion
+    assert driver.current_activity is not None

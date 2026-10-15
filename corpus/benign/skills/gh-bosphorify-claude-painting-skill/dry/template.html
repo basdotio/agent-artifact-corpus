@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>dry media sketch</title>
+<!-- Render: node <kit>/dry/render.mjs sketch.html out.png   (render.mjs serves /dry/ locally; no CDN) -->
+<script src="/dry/node_modules/p5/lib/p5.min.js"></script>
+<script src="/dry/node_modules/p5.brush/dist/p5.brush.js"></script>
+<script src="/dry/paper.js"></script>
+<script src="/dry/lettering.js"></script>
+<script src="/dry/print.js"></script>
+<style>
+  body { margin: 0; background: #777; }
+  #stage { position: relative; width: max-content; }
+  #stage canvas { display: block; }
+  #stage canvas + canvas { position: absolute; left: 0; top: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+// Fixed size and seed: the same file always renders the same pixels.
+const W = 1200, H = 900, SEED = 7;
+const PAPER = '#f4efe4';
+const PAPER_KIND = 'cold'; // paper.js: 'cold' | 'rough' | 'hot' | 'laid' (charcoal paper)
+
+let labels; // 2D overlay for text: WEBGL text() would need a loaded font file
+
+// Text on the overlay, in the same top-left coordinates as the brush calls
+function label(text, x, y, size = 16, color = '#3a352e') {
+  labels.font = `${size}px Helvetica, Arial, sans-serif`;
+  labels.fillStyle = color;
+  labels.textBaseline = 'top';
+  labels.fillText(text, x, y);
+}
+
+function setup() {
+  randomSeed(SEED); // p5.brush hooks randomSeed/noiseSeed, so this also seeds its own generators
+  noiseSeed(SEED);
+  pixelDensity(1);
+  createCanvas(W, H, WEBGL).parent('stage');
+  const overlay = document.createElement('canvas');
+  overlay.width = W; overlay.height = H;
+  document.getElementById('stage').append(overlay);
+  labels = overlay.getContext('2d');
+
+  angleMode(DEGREES);
+  brush.scaleBrushes(W / 200); // README: 600 px -> 3; confirm visually
+  background(PAPER);
+  Paper.init(W, H, SEED, { kind: PAPER_KIND }); // the sheet's grain: tooth, dry brush, granulation
+}
+
+// One layer per frame: p5.brush flushes its strokes after every draw(), and a single frame
+// with a lot of work silently drops the strokes that come late in it.
+// With `render.mjs --progress <dir>` each finished layer is also kept as a progress frame.
+// A layer with a `tooth` property (see paper.js) only keeps its marks where they caught on the grain.
+window.__frames = [];
+let layer = 0, beforeTooth = null;
+function draw() {
+  if (beforeTooth) { Paper.tooth(beforeTooth, LAYERS[layer - 1].tooth); beforeTooth = null; }
+  if (window.__progress && layer > 0) window.__frames.push([LAYERS[layer - 1].name, snapshot()]);
+  if (layer === LAYERS.length) { noLoop(); window.__done = true; return; }
+  translate(-W / 2, -H / 2); // WEBGL origin is the centre; draw in top-left coordinates
+  const fn = LAYERS[layer++];
+  if (fn.tooth) beforeTooth = Paper.read();
+  fn();
+}
+
+// The #stage canvases composited at 800 px wide, as a PNG data URL
+function snapshot() {
+  const c = document.createElement('canvas');
+  c.width = 800; c.height = Math.round(H * 800 / W);
+  const g = c.getContext('2d');
+  for (const cnv of document.querySelectorAll('#stage canvas')) g.drawImage(cnv, 0, 0, c.width, c.height);
+  return c.toDataURL('image/png');
+}
+
+// ---- the picture: replace these layers ----
+const LAYERS = [
+function wash() {
+  brush.noStroke();
+  brush.fill('#6d8fb5', 160);
+  brush.fillBleed(0.25, 'out');
+  brush.fillTexture(0.5, 0.4);
+  brush.rect(160, 140, 520, 360);
+  brush.noFill();
+},
+function drawing() {
+  brush.set('2B', '#2b2622', 1);
+  brush.rect(160, 140, 520, 360);
+
+  brush.noStroke();
+  brush.hatch(10, 45, { rand: 0.1 });
+  brush.hatchStyle('HB', '#3a332c', 1);
+  brush.circle(860, 560, 170);
+  brush.noHatch();
+
+  brush.field('curved');
+  brush.set('charcoal', '#1d1a17', 1);
+  for (let i = 0; i < 5; i++) brush.flowLine(140, 620 + i * 36, 700, 0);
+  brush.noField();
+
+  label('template.html: replace LAYERS with the picture', 24, 24, 18);
+},
+// pixel marks from paper.js: a loaded brush stroke, a dry brush that skips over the grain, a lifted light
+function brushwork() {
+  Paper.paint(buf => {
+    Paper.stroke(buf, [[760, 180, 0.4], [860, 240, 1], [1000, 250, 0.7], [1100, 200, 0.2]], 46, '#7a3b22', { strength: 0.9 });
+    Paper.dryBrush(buf, [[760, 330], [950, 345], [1120, 320]], 50, '#26303c', { load: 0.6 });
+    Paper.dryBrush(buf, [[220, 300], [420, 310], [640, 296]], 26, null, { mode: 'lift', load: 0.55 });
+  });
+},
+function paper() { Paper.finish({ granulation: 0.12, relief: 0.02 }); }, // last: granulation and the sheet's relief
+];
+</script>
+</body>
+</html>

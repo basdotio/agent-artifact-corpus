@@ -1,0 +1,267 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Daily Uplift SMS - Serverless application to send daily motivational messages via SMS
+
+Parameters:
+  ScheduleExpression:
+    Type: String
+    Default: 'cron(0 8 * * ? *)'
+    Description: Schedule expression for when to send messages (default is 8:00 AM UTC daily)
+
+Resources:
+  # SNS Topic for sending SMS messages
+  UpliftSMSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: DailyUplift
+      TopicName: daily-uplift-sms-topic
+
+  # DynamoDB table for subscribers
+  SubscribersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: daily-uplift-subscribers
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: phone_number
+          AttributeType: S
+      KeySchema:
+        - AttributeName: phone_number
+          KeyType: HASH
+
+  # DynamoDB table for analytics
+  AnalyticsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: daily-uplift-analytics
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: message_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: message_id
+          KeyType: HASH
+
+  # Lambda function to select and send messages
+  UpliftLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../src/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref UpliftSMSTopic
+          SUBSCRIBERS_TABLE: !Ref SubscribersTable
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt UpliftSMSTopic.TopicName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SubscribersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AnalyticsTable
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleExpression
+            Name: DailyUpliftSchedule
+            Description: Triggers the Lambda function to send daily uplift messages
+
+  # API Gateway for admin dashboard and subscriber management
+  UpliftApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Auth:
+        ApiKeyRequired: true
+
+  # Lambda function for API endpoints
+  UpliftApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../src/
+      Handler: api_handler.lambda_handler
+      Runtime: python3.9
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref UpliftSMSTopic
+          SUBSCRIBERS_TABLE: !Ref SubscribersTable
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt UpliftSMSTopic.TopicName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SubscribersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AnalyticsTable
+      Events:
+        GetSubscribers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref UpliftApi
+            Path: /subscribers
+            Method: GET
+        ManageSubscriber:
+          Type: Api
+          Properties:
+            RestApiId: !Ref UpliftApi
+            Path: /subscribers
+            Method: POST
+        GetAnalytics:
+          Type: Api
+          Properties:
+            RestApiId: !Ref UpliftApi
+            Path: /analytics
+            Method: GET
+        SendMessage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref UpliftApi
+            Path: /send
+            Method: POST
+
+  # API Key for securing the API
+  UpliftApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: UpliftApiKey
+      Description: API Key for Daily Uplift SMS Admin Dashboard
+      Enabled: true
+    DependsOn: UpliftApiProdStage
+
+  # Usage Plan for API Key
+  UpliftUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: UpliftUsagePlan
+      ApiStages:
+        - ApiId: !Ref UpliftApi
+          Stage: prod
+    DependsOn: UpliftApiProdStage
+
+  # Associate API Key with Usage Plan
+  UpliftUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref UpliftApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UpliftUsagePlan
+
+  # API Gateway Stage
+  UpliftApiProdStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: prod
+      RestApiId: !Ref UpliftApi
+      DeploymentId: !Ref UpliftApiDeployment
+
+  # API Gateway Deployment
+  UpliftApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref UpliftApi
+    DependsOn:
+      - UpliftApiGetSubscribers
+      - UpliftApiManageSubscriber
+      - UpliftApiGetAnalytics
+      - UpliftApiSendMessage
+
+  # API Gateway Resources and Methods
+  UpliftApiSubscribersResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UpliftApi
+      ParentId: !GetAtt UpliftApi.RootResourceId
+      PathPart: subscribers
+
+  UpliftApiGetSubscribers:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UpliftApi
+      ResourceId: !Ref UpliftApiSubscribersResource
+      HttpMethod: GET
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpliftApiFunction.Arn}/invocations
+
+  UpliftApiManageSubscriber:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UpliftApi
+      ResourceId: !Ref UpliftApiSubscribersResource
+      HttpMethod: POST
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpliftApiFunction.Arn}/invocations
+
+  UpliftApiAnalyticsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UpliftApi
+      ParentId: !GetAtt UpliftApi.RootResourceId
+      PathPart: analytics
+
+  UpliftApiGetAnalytics:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UpliftApi
+      ResourceId: !Ref UpliftApiAnalyticsResource
+      HttpMethod: GET
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpliftApiFunction.Arn}/invocations
+
+  UpliftApiSendResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UpliftApi
+      ParentId: !GetAtt UpliftApi.RootResourceId
+      PathPart: send
+
+  UpliftApiSendMessage:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UpliftApi
+      ResourceId: !Ref UpliftApiSendResource
+      HttpMethod: POST
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpliftApiFunction.Arn}/invocations
+
+Outputs:
+  UpliftSMSTopicARN:
+    Description: ARN of the SNS topic for SMS messages
+    Value: !Ref UpliftSMSTopic
+  UpliftLambdaFunctionARN:
+    Description: ARN of the Lambda function
+    Value: !GetAtt UpliftLambdaFunction.Arn
+  SubscribersTableName:
+    Description: Name of the DynamoDB table for subscribers
+    Value: !Ref SubscribersTable
+  AnalyticsTableName:
+    Description: Name of the DynamoDB table for analytics
+    Value: !Ref AnalyticsTable
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${UpliftApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
+  ApiKey:
+    Description: API Key for accessing the admin dashboard
+    Value: !Ref UpliftApiKey

@@ -1,0 +1,43 @@
+name: Build & Release Package Distribution
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    name: Build & Attach Assets to Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 Install packaging tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: 🛠️ Build distribution packages (wheel & sdist)
+        run: |
+          python -m build
+
+      - name: ✅ Check package validity with Twine
+        run: |
+          twine check dist/*
+
+      - name: 🚀 Attach Precompiled Binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        with:
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

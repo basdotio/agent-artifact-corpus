@@ -1,0 +1,212 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>dry media sheet</title>
+<!-- Render: node render.mjs sheets/dry_sheet.html out/dry_sheet.png   (from painting-kit/dry) -->
+<script src="/dry/node_modules/p5/lib/p5.min.js"></script>
+<script src="/dry/node_modules/p5.brush/dist/p5.brush.js"></script>
+<script src="/dry/paper.js"></script>
+<style>
+  body { margin: 0; background: #777; }
+  #stage { position: relative; width: max-content; }
+  #stage canvas { display: block; }
+  #stage canvas + canvas { position: absolute; left: 0; top: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+// Fixed size and seed: the same file always renders the same pixels.
+const W = 1800, H = 3280, SEED = 7;
+const PAPER = '#f4efe4';
+const SCALE = 4;
+
+let labels; // 2D overlay for text: WEBGL text() would need a loaded font file
+
+// Text on the overlay, in the same top-left coordinates as the brush calls
+function label(text, x, y, size = 16, color = '#3a352e') {
+  labels.font = `${size}px Helvetica, Arial, sans-serif`;
+  labels.fillStyle = color;
+  labels.textBaseline = 'top';
+  labels.fillText(text, x, y);
+}
+
+function setup() {
+  randomSeed(SEED); // p5.brush hooks randomSeed/noiseSeed, so this also seeds its own generators
+  noiseSeed(SEED);
+  pixelDensity(1);
+  createCanvas(W, H, WEBGL).parent('stage');
+  const overlay = document.createElement('canvas');
+  overlay.width = W; overlay.height = H;
+  document.getElementById('stage').append(overlay);
+  labels = overlay.getContext('2d');
+
+  angleMode(DEGREES);
+  brush.scaleBrushes(SCALE);
+  background(PAPER);
+  Paper.init(W, H, SEED, { kind: 'cold' });
+}
+
+// One layer per frame: p5.brush flushes its strokes after every draw(), and a single frame
+// with a lot of work silently drops the strokes that come late in it.
+let layer = 0, beforeTooth = null;
+function draw() {
+  if (beforeTooth) { Paper.tooth(beforeTooth, LAYERS[layer - 1].tooth); beforeTooth = null; }
+  if (layer === LAYERS.length) { noLoop(); window.__done = true; return; }
+  translate(-W / 2, -H / 2); // WEBGL origin is the centre; draw in top-left coordinates
+  const fn = LAYERS[layer++];
+  if (fn.tooth) beforeTooth = Paper.read();
+  fn();
+}
+
+// ---- the sheet ----
+const M = 60, INK = '#2b2622';
+const HUES = ['#2b2622', '#7a2e1f', '#1f3f6e', '#3d5a2a', '#6b4a8a'];
+let y = 100; // layout cursor; each layer draws its section below the previous one
+
+function heading(text) {
+  label(text, M, y, 24, '#1f1b17');
+  labels.fillStyle = '#b9ae9c';
+  labels.fillRect(M, y + 32, W - 2 * M, 1);
+}
+
+// n equal cells across the sheet: their x positions and width
+function cells(n, gap) {
+  const w = (W - 2 * M - gap * (n - 1)) / n;
+  return { w, xs: Array.from({ length: n }, (_, i) => M + i * (w + gap)) };
+}
+
+const LAYERS = [
+// 1. every built-in brush: a straight line at weight 1, then a pressured spline at weight 1.6
+function brushes() {
+  label(`Dry media sheet  ·  p5.brush (p5 build)  ·  seed ${SEED}  ·  brush.scaleBrushes(${SCALE})`, M, 30, 30, '#1f1b17');
+  const names = brush.box();
+  heading(`Built-in brushes (${names.length}): brush.set(name, color, weight)   left: line, weight 1   right: spline with pressure, weight 1.6`);
+  y += 60;
+  names.forEach((name, i) => {
+    const cy = y + i * 60 + 22;
+    label(name, M, cy - 10, 20, '#1f1b17');
+    brush.set(name, INK, 1);
+    brush.line(260, cy, 920, cy);
+    brush.set(name, HUES[i % HUES.length], 1.6);
+    brush.spline([[980, cy + 12], [1180, cy - 14, 1.4], [1420, cy + 12, 0.8], [1720, cy - 8, 0.4]], 0.6);
+  });
+  y += names.length * 60 + 20;
+},
+
+// 2. watercolor fill at rising bleed
+function watercolor() {
+  heading('Watercolor fill: brush.fill(color, 150) + brush.fillBleed(strength, "out") + brush.fillTexture(0.4, 0.4)');
+  const bleeds = [0, 0.1, 0.2, 0.35, 0.5, 0.75];
+  const g = cells(bleeds.length, 48);
+  brush.noStroke();
+  bleeds.forEach((b, i) => {
+    label(`bleed ${b}`, g.xs[i], y + 48, 18);
+    brush.fill('#3f6fa3', 150);
+    brush.fillBleed(b, 'out');
+    brush.fillTexture(0.4, 0.4);
+    brush.rect(g.xs[i] + 20, y + 130, g.w - 40, 130);
+  });
+  brush.noFill();
+  y += 330;
+},
+
+// 3. hatching: spacing, angle, options and hatch brush; the last cell is mass()
+function hatching() {
+  heading('Hatching: brush.hatch(dist, angle, options) + brush.hatchStyle(brush, color, weight)');
+  const hatches = [
+    ['hatch(8, 45)', 'HB', () => brush.hatch(8, 45)],
+    ['hatch(6, -30, {rand: 0.3})', '2B', () => brush.hatch(6, -30, { rand: 0.3 })],
+    ['hatch(10, 45) + hatch(10, -45)', 'pen', () => brush.hatch(10, 45), () => brush.hatch(10, -45)],
+    ['hatch(7, 0, {gradient: 0.7})', 'rotring', () => brush.hatch(7, 0, { gradient: 0.7 })],
+    ['hatch(5, 60, {continuous: true})', 'cpencil', () => brush.hatch(5, 60, { continuous: true })],
+  ];
+  const g = cells(hatches.length + 1, 48);
+  hatches.forEach(([call, name, ...passes], i) => {
+    label(call, g.xs[i], y + 48, 15);
+    label(`hatchStyle("${name}")`, g.xs[i], y + 68, 15, '#7a705f');
+    brush.noStroke();
+    brush.hatchStyle(name, HUES[i % HUES.length], 1);
+    for (const pass of passes) { pass(); brush.circle(g.xs[i] + g.w / 2, y + 200, 90); }
+    brush.noHatch();
+  });
+  const x = g.xs[hatches.length];
+  label('mass("charcoal", color,', x, y + 48, 15);
+  label('{strength: 0.8})', x, y + 68, 15, '#7a705f');
+  brush.mass('charcoal', INK, { strength: 0.8 });
+  brush.circle(x + g.w / 2, y + 200, 90);
+  brush.noMass();
+  y += 320;
+},
+
+// 4. vector fields: short flow lines under each built-in field (brush.clip is a no-op in 2.2.3)
+function fields() {
+  const names = [...brush.listFields().filter(f => f !== 'spiral'), 'spiral']; // spiral last: its lines run long
+  heading(`Vector fields (${names.length}): brush.field(name) + brush.flowLine(x, y, 100, 0), HB`);
+  const g = cells(4, 40), PH = 280;
+  names.forEach((name, i) => {
+    const x = g.xs[i % 4], top = y + 48 + Math.floor(i / 4) * (PH + 70), py = top + 32;
+    label(name, x, top, 20, '#1f1b17');
+    labels.strokeStyle = '#d8cfbf';
+    labels.strokeRect(x + 0.5, py + 0.5, g.w - 1, PH - 1);
+    brush.field(name);
+    brush.set('HB', INK, 0.8);
+    for (let r = 0; r < 11; r++)
+      for (let c = 0; c < 3; c++)
+        brush.flowLine(x + 16 + c * ((g.w - 140) / 2) + random(-10, 10), py + 18 + r * ((PH - 36) / 10) + random(-6, 6), 100, 0);
+    brush.noField();
+  });
+},
+
+// 5. paper.js: washes, strokes and dry brush computed on the pixels, on a cold-pressed sheet
+function paperMarks() {
+  y = 2250;
+  heading('paper.js (Paper.paint): shape / stroke / dryBrush on the pixels, grain from Paper.init(W, H, SEED, { kind: "cold" })');
+  const g = cells(5, 40), top = y + 90, h = 170, blue = '#3f6fa3', umber = '#6b4a2a', violet = Paper.mix(['#3d5fae', 2], ['#c4506e', 1.2]);
+  const box = (x, yy, w, hh) => [[x, yy], [x + w, yy], [x + w, yy + hh], [x, yy + hh]];
+  const notes = [
+    ['shape, soft 1, edge 0.5', 'a wash dried on dry paper'],
+    ['shape, soft 18, edge 0', 'wet-in-wet, feathered'],
+    ['shape + charge', 'a second color dropped in'],
+    ['stroke, tail 0 / 0.35', 'a loaded brush; running dry'],
+    ['holes / lift / opaque', 'reserved and recovered lights'],
+  ];
+  notes.forEach(([a, b], i) => { label(a, g.xs[i], y + 44, 15); label(b, g.xs[i], y + 64, 15, '#7a705f'); });
+  Paper.paint(buf => {
+    Paper.shape(buf, box(g.xs[0] + 10, top, g.w - 20, h), blue, { strength: 0.7, soft: 1, edge: 0.5 });
+    Paper.shape(buf, box(g.xs[1] + 30, top + 20, g.w - 60, h - 40), blue, { strength: 0.7, soft: 18, edge: 0, rough: 2 });
+    Paper.shape(buf, box(g.xs[2] + 10, top, g.w - 20, h), '#c8962f', { strength: 0.6, soft: 1.5, edge: 0.4, charge: ['#c4506e', 0.8, 50] });
+    const sx = g.xs[3] + 20;
+    Paper.stroke(buf, [[sx, top + 40, 0.4], [sx + 90, top + 20, 1], [sx + 230, top + 50, 0.6]], 38, umber, { strength: 0.9 });
+    Paper.stroke(buf, [[sx, top + 130, 0.4], [sx + 90, top + 110, 1], [sx + 230, top + 140, 0.6]], 38, umber, { strength: 0.9, tail: 0.35 });
+    const hx = g.xs[4] + 10;
+    Paper.shape(buf, box(hx, top, g.w - 20, h), violet, { strength: 0.9, soft: 1, edge: 0.4, holes: [Paper.outline([[hx + 30, top + 40], [hx + 120, top + 60], [hx + 200, top + 35]], 18)] });
+    Paper.dryBrush(buf, [[hx + 30, top + 105], [hx + 120, top + 112], [hx + 250, top + 100]], 26, null, { mode: 'lift', load: 0.6 });
+    Paper.stroke(buf, [[hx + 60, top + 145, 0.6], [hx + 200, top + 150, 1]], 12, '#f6f3ea', { mode: 'opaque', strength: 0.9 });
+  });
+  y = top + h + 50;
+  const g2 = cells(5, 40), t2 = y + 70;
+  [['dryBrush load 0.9', 0.9], ['load 0.7', 0.7], ['load 0.55', 0.55], ['load 0.4', 0.4]].forEach(([t, ld], i) => {
+    label(t, g2.xs[i], y, 15);
+    Paper.paint(buf => Paper.dryBrush(buf, [[g2.xs[i] + 10, t2 + 20, 0.9], [g2.xs[i] + g2.w * 0.5, t2 + 30, 1], [g2.xs[i] + g2.w - 10, t2 + 10, 0.8]], 60, '#26303c', { load: ld }));
+  });
+  label('charcoal mass, layer.tooth = 0.6', g2.xs[4], y, 15);
+  label('(next layer)', g2.xs[4], y + 20, 15, '#7a705f');
+},
+function toothDemo() {
+  const g2 = cells(5, 40), t2 = y + 70;
+  brush.mass('charcoal', '#1d1a17', { strength: 0.6 });
+  brush.rect(g2.xs[4] + 10, t2 - 10, g2.w - 20, 110);
+  brush.noMass();
+},
+function finish() {
+  y += 200;
+  label('Paper.finish({ granulation, relief }) runs last: pigment settles into the pits of the heavier washes; Paper.margin stops the washes short of the edge', M, y, 15);
+  Paper.finish({ granulation: 0.12, relief: 0.02 });
+},
+];
+LAYERS.find(f => f.name === 'toothDemo').tooth = 0.6;
+</script>
+</body>
+</html>

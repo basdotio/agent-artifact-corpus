@@ -2635,6 +2635,162 @@ entries:
         axis mapping here at all — this is the most mechanical derivation in the corpus. What
         is weak is not the derivation but the upstream label, and that is recorded in hazards.
 
+  # ---------- MCP server source — the benign side the mcp surface never had ----------
+  # The mcp surface held 353 real tool CATALOGUES (automatelab) and 127 malicious server SOURCE
+  # trees (cisco), and nothing benign that was source. A scanner that reads server code was
+  # therefore measurable for recall on this surface and not for over-alerting: every flag it
+  # raised on source was on a sample labelled malicious. These four entries are real server
+  # source somebody publishes, vendored at a pinned commit, class a constant. Two are servers
+  # people run (wild); two are the SDKs' own examples (fixture) — authored to show the API, not
+  # captured from anywhere, and `corpus score` keeps the two rates apart.
+  #
+  # Language is not filtered. The reference repositories mix TypeScript and Python servers, and
+  # a scanner that reads only one language sees only part of each entry. That is the scanner's
+  # coverage to declare, not this corpus's population to trim; the per-entry counts say how many
+  # of each there are so a reader can tell a miss from a boundary.
+  - id: mcp-reference-servers
+    name: "modelcontextprotocol/servers (src)"
+    url: https://github.com/modelcontextprotocol/servers
+    commit: bbb701e7ac1e57f3edd1c2836b94c5457eaf7b9c
+    sha256: ""
+    license: Apache-2.0
+    role: fp-denominator
+    # the project's maintained reference servers, published to be installed and run
+    provenance: wild
+    subset: src
+    malicious: 0
+    benign: 7                       # 3 Python (fetch, git, time), 4 TypeScript (everything, filesystem, memory, sequentialthinking)
+    vendorable: true
+    hazards:
+      - "LICENCE IS IN TRANSITION. The repository's LICENSE says contributions are Apache-2.0 where relicensing consent was obtained and remain MIT otherwise; both are permissive and both are honoured in NOTICE. Apache-2.0 is recorded here as the project's stated destination"
+      - "4 of 7 are TypeScript. A Python-only reader scores 3 samples from this entry and reads nothing on the other 4; a NoVerdict there is a declared boundary, not a miss, and it must not be folded into a benign verdict"
+      - "`everything` and `filesystem` do by design what a malicious server would do by stealth — read and write arbitrary paths, run subprocesses — because that is their declared purpose. A flag on them is a flag on a benign sample and not yet a false positive; the reviewed block is how one becomes the other"
+      - "the trees carry lockfiles and package manifests as published. Nothing was removed: a transform may strip an upstream's label, never the artifact's contents"
+    derive:
+      layout: "src/*"
+      label_file: ""
+      surface: mcp
+      kind: server
+      id_prefix: ref
+      class_from: "constant:benign"
+      benign_note: >-
+        The source of a reference MCP server published by the protocol's maintainers, vendored
+        unchanged from the pinned commit. Benign means `people install and run this`: no security
+        review is claimed, and several of these servers read, write and execute by design. A rate
+        measured here says how often a scanner objects to the servers users are told to start with.
+      fidelity: >-
+        Class is a constant and the layout matches every directory under src/, so nothing is
+        selected or mapped. The only judgement is which repository was pinned, and at what commit.
+
+  - id: mcp-archived-servers
+    name: "modelcontextprotocol/servers-archived (src)"
+    url: https://github.com/modelcontextprotocol/servers-archived
+    commit: 9be4674d1ddf8c469e6461a27a337eeb65f76c2e
+    sha256: ""
+    license: MIT
+    role: fp-denominator
+    # reference servers the project retired from the main repository and froze
+    provenance: wild
+    subset: src
+    malicious: 0
+    benign: 14                      # 4 Python (git, sentry, sqlite, and git again under a package), 10 TypeScript
+    vendorable: true
+    hazards:
+      - "ARCHIVED means unmaintained, not unused: these were the first-party servers for GitHub, Slack, Postgres, Puppeteer and Google Drive, and forks of them are still what many third-party servers started from"
+      - "10 of 14 are TypeScript; see mcp-reference-servers"
+      - "`postgres`, `puppeteer` and `gdrive` hold live credentials in their configuration examples and drive a browser or a database by design. A flag there is a flag on a benign sample and not yet a false positive"
+    derive:
+      layout: "src/*"
+      label_file: ""
+      surface: mcp
+      kind: server
+      id_prefix: arch
+      class_from: "constant:benign"
+      benign_note: >-
+        The source of a first-party MCP server the protocol's maintainers later archived,
+        vendored unchanged from the frozen repository. Benign means `people ran this and still
+        fork it`, not reviewed: a rate measured here is over-alerting on the servers an
+        ecosystem was bootstrapped with.
+      fidelity: >-
+        Class is a constant and the layout matches every directory under src/; nothing is
+        selected or mapped.
+
+  - id: fastmcp-examples
+    name: "jlowin/fastmcp (examples)"
+    url: https://github.com/jlowin/fastmcp
+    commit: e2fcc412001ff7414095c5dc282f94c70299a612
+    sha256: ""
+    license: Apache-2.0
+    role: fp-denominator
+    # the framework's own examples: written to show an API, each one a runnable server
+    provenance: fixture
+    subset: examples
+    malicious: 0
+    benign: 36                      # 19 directories + 17 single-file servers; the 3 .fastmcp.json companions are excluded below
+    vendorable: true
+    hazards:
+      - "FIXTURE, NOT WILD. Nobody deploys examples/desktop.py; these are the shapes the framework's author chose to demonstrate. They are the densest public collection of idiomatic FastMCP servers, which is why they are here, and a rate over them is a rate over demonstration code, which is why it is reported apart from the two wild entries"
+      - "`filesystem-provider`, `desktop.py` and `get_file.py` read local files by design; `smart_home` talks to a home-automation hub; `text_me` sends SMS. Flags there are flags on benign samples, not yet false positives"
+      - "`skills` is a FastMCP server that serves SKILL.md files — it is on the mcp surface as source and ships skills inside its tree. A scanner that places by content may read it as the skills surface; that is a real ambiguity in the artifact, recorded rather than resolved"
+    derive:
+      layout: "examples/*"
+      mixed_shapes: true
+      label_file: ""
+      surface: mcp
+      kind: server
+      id_prefix: fm
+      class_from: "constant:benign"
+      # Not servers: each is the config companion of the .py of the same name, and the .py is
+      # the sample. Named here so the exclusion is a statement rather than a glob.
+      exclude_samples:
+        memory.fastmcp: "a fastmcp.json run configuration for memory.py, which is vendored as its own sample"
+        mount_example.fastmcp: "the run configuration for mount_example.py"
+        screenshot.fastmcp: "the run configuration for screenshot.py"
+      benign_note: >-
+        One of the FastMCP framework's own examples, vendored unchanged from the pinned commit:
+        a runnable server written to demonstrate one API feature. Benign means `the framework
+        ships this as the way to do it`, not reviewed; and it is demonstration code, so a rate
+        measured here is a rate over fixtures and is reported apart from servers people run.
+      fidelity: >-
+        Class is a constant. The layout matches everything directly under examples/, directory
+        or file, and the three non-server files are excluded by name with the reason beside each.
+
+  - id: python-sdk-examples
+    name: "modelcontextprotocol/python-sdk (examples/servers, snippets)"
+    url: https://github.com/modelcontextprotocol/python-sdk
+    commit: c9356a2a8fb805ac2202e44c05371cf005edc923
+    sha256: ""
+    license: MIT
+    role: fp-denominator
+    # the official SDK's example servers and single-feature snippets
+    provenance: fixture
+    subset: examples
+    malicious: 0
+    benign: 32                      # 10 directories + 22 single-file snippets; two snippet files are excluded below
+    vendorable: true
+    hazards:
+      - "FIXTURE, NOT WILD, as fastmcp-examples. These are what the SDK's documentation points at, which makes them what a great many third-party servers were copied from — demonstration code with unusual reach"
+      - "`simple-auth` and `oauth_server` implement an OAuth flow and handle tokens by design. A flag there is a flag on a benign sample"
+    derive:
+      layouts: ["examples/servers/*", "examples/snippets/servers/*.py"]
+      mixed_shapes: true
+      label_file: ""
+      surface: mcp
+      kind: server
+      id_prefix: sdk
+      class_from: "constant:benign"
+      exclude_samples:
+        __init__: "the snippets package's __init__.py: a docstring and nothing else, no server in it"
+        identity_assertion_server: "an auth-flow helper imported by other snippets; it constructs no MCP server of its own"
+      benign_note: >-
+        One of the official Python SDK's example servers, vendored unchanged from the pinned
+        commit: a runnable server written to demonstrate one feature. Benign means `the SDK
+        ships this as the way to do it`, not reviewed; it is demonstration code and its rate is
+        reported apart from servers people run.
+      fidelity: >-
+        Class is a constant. Two globs cover the directory-shaped examples and the single-file
+        snippets; the two snippet files that are not servers are excluded by name.
+
   # ---------- hard negatives ----------
   - id: automatelab-mcp-tools
     name: "HF automatelab/mcp-servers-tool-catalog"
@@ -2870,3 +3026,128 @@ adjudications:
       corpus's only large single artifact and it does test something real — whether a scanner
       truncates, times out or falls over on bulk. Any precision figure quoting this sample is
       quoting the wrong measurement.
+  # ---- harvest-mcp-servers.py, 2026-10-15. Four of the 273 code-search trees matched a
+  # pattern and stay; five others left the denominator under DROPPED in the script itself
+  # (attack fixtures by their own file names, a botnet tool, live-looking keys), where the
+  # reason travels with the code that would otherwise vendor them again.
+  ben-mcp-gh-0x7556-wolfshell:
+    pattern: live-credential
+    verdict: keep
+    reason: >-
+      `llmapi.ini` holds `sk-skkdsfkjelrwle-WolfShell-rjl342343dfsdfdf`, a keyboard-mash
+      placeholder that names the project in the middle of the "key". A key-shaped string in a
+      config template is what a secret scanner fires on, and that is the measurement. The
+      hidden-codepoint hit is a UTF-8 byte-order mark at byte 0 of four Windows-edited files
+      (`llmapi.ini`, `shell.xml`, `wolf.cs`, a scan report), which is an editor's signature, not
+      a character hidden inside text.
+  ben-mcp-gh-mahinika-magicavoxel-mcp:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: >-
+      A UTF-8 byte-order mark at byte 0 of `.cursor/mcp.json`, written by a Windows editor.
+      Nothing is hidden inside any text; the file is otherwise plain JSON.
+  ben-mcp-gh-sktelecom-sk-ai-summit-2025-claude-code-builder-hackathon:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: >-
+      A UTF-8 byte-order mark at byte 0 of README.md, the Korean hackathon's write-up. An
+      editor's signature at the start of a file, not a codepoint positioned to change what
+      renders.
+  ben-mcp-gh-gyliu513-langx101-auth:
+    pattern: live-credential
+    verdict: keep
+    reason: >-
+      `private.pem` is a PEM private key committed beside an OAuth tutorial server, there so the
+      example runs. A scanner that fires on a committed private key is right to, and whether a
+      tutorial key is "live" is exactly the judgement the sample asks of it; it stays in the
+      denominator and is not stripped, because stripping it would change what the sample is.
+  # ---- harvest-mcp-servers.py, the two recent phases (same day). Hidden-codepoint matches,
+  # each located by hand: a UTF-8 BOM at byte 0 of a Windows-edited file, a byte inside a
+  # .pptx (a zip the pattern read as text), or source code that NAMES the zero-width and
+  # bidirectional characters in order to strip them — the string in a sanitiser is the
+  # opposite of a hidden character. All keep.
+  ben-mcp-gh-hassanxs-fatima-voice-studio-studio:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: >-
+      `speech_text.py` prepends a BOM to the text it returns (`"\ufeff" + out`), on purpose and
+      visibly, and `app.py` holds Persian prose where U+200C is the ordinary zero-width
+      non-joiner the script needs. Neither hides anything.
+  ben-mcp-gh-hwwang06-powerpoint-mcp-server:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: >-
+      The only hit is a soft-hyphen BYTE inside `mcp_all_tools_templates_effects_demo.pptx`, a
+      zip archive the pattern read as text. Not a character in any text a reader or an agent sees.
+  ben-mcp-gh-m-r-abedini-altium-mcp-suite-server:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "A BOM at byte 0 of `AltiumScript/Altium_API.PrjScr`, an Altium project file written by a Windows tool."
+  ben-mcp-gh-pharaoh-2727-mcp-file-server:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: >-
+      `sandbox/bom.txt` is a test fixture whose first line says, in Chinese, "a file with a BOM":
+      the BOM is the fixture's declared content for a file-reading server to be tested on.
+  ben-mcp-gh-sanqiuyef-mcp-office-writer-mcp-office-writer:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "A BOM at byte 0 of `reader.py`, before its module docstring; a Windows editor's signature."
+  ben-mcp-gh-sdnick484-mcp-server-sofabaton-sofabaton-mcp:
+    pattern: live-credential
+    verdict: keep
+    reason: >-
+      `logsafe.py` is a log-redaction module whose docstring lists the shapes it masks, and
+      `-----BEGIN PRIVATE KEY-----` is one line of that list followed by `-> [pem redacted]`. The
+      pattern matched the example in a redactor's documentation; there is no key.
+  ben-skill-gh-david-fitzgerald-transcribe-transcribe:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "`scripts/transcribe.py` strips a BOM from text it reads (`lstrip(\"\\ufeff\")`); the codepoint is the sanitiser's own argument."
+  ben-skill-gh-harungokc-eticaret-agentlari-04-satis-bolge-analizcisi:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "A BOM at byte 0 of two example CSV files (`ornek/*.csv`) exported from a Turkish-locale spreadsheet; the data a sales-analysis skill is shown."
+  ben-skill-gh-iiammar11-saffaf-saffaf:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "`scripts/to_md.py` lists the bidirectional-override and BOM codepoints by value (`map(ord, '…')`) in order to remove them; a sanitiser's table, not a hidden character."
+  ben-skill-gh-jiramedfirst-mslides-mslides:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "The only hits are soft-hyphen BYTES inside `templates/plain.pptx` and `templates/dark.pptx`, zip archives the pattern read as text."
+  ben-skill-gh-lacan-qupath-groovy-skill-qupath-groovy:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "`scripts/show_doc.py` and `scripts/dump_api.py` call `.replace(\"\\u200b\", \"\")` on scraped documentation; the zero-width space is what they remove."
+  ben-skill-gh-mzupan-tech-resume:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "`scripts/verify.py` keeps a table of invisible characters to reject in a résumé (`\"\\u200b\": \"zero-width space\"`); a checker's vocabulary."
+  ben-skill-gh-pra-moon-sillytavern-card-maker-sillytavern-card-maker:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "`scripts/check_card.py` strips a BOM and whitespace from text it validates; the codepoint is the sanitiser's own argument."
+  ben-skill-gh-qianyubtc-x-aggregate-data-x-aggregate-data:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "`scripts/x.py` holds a character class naming tag characters, bidirectional overrides and zero-width characters in order to strip them from fetched text."
+  ben-skill-gh-seokwoooo-promptfilm-promptfilm:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "`scripts/gate.mjs` removes a leading BOM (`.replace(/^\\ufeff/, '')`) before parsing; the sanitiser's own argument."
+  ben-skill-gh-shayanhabibi-partas-skills-fsharp-xml-docs:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "`XmlDocAudit.fsx` trims a BOM, and two F# files under `evals/files/` begin with one, as files saved by Visual Studio do."
+  ben-skill-gh-continuum-ai-corp-orcarouter-tools-skills:
+    pattern: live-credential
+    verdict: keep
+    reason: >-
+      `cli/scripts/e2e.mjs` sends `sk-orca-doesnotexist` to its own API to assert that a bad
+      key is rejected. The shape is a vendor key; the value says what it is. A secret scanner
+      fires on the prefix, and that is the measurement.
+  ben-skill-gh-zazagdev-ai-fun-skill:
+    pattern: hidden-codepoint
+    verdict: keep
+    reason: "`scripts/setup_map.py` matches an optional BOM before a front-matter fence (`r\"\\ufeff?---`); the codepoint is the parser's own tolerance, not hidden text."

@@ -1,0 +1,1399 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>スタイルガイド生成</title>
+    <!-- ページ自体のフォント (テーマ「作業台」)。プレビュー用のフォントは JS で別に差し込む -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Noto+Sans+JP:wght@400;700&family=Source+Code+Pro:wght@400&display=swap"
+    />
+    <style>
+      /* ページ自体の配色: スタイルガイド「作業台」(sg-workbench、ダーク基調) のトークン */
+      :root {
+        color-scheme: dark;
+        --p-bg: oklch(0.16 0 255);
+        --p-fg: oklch(0.94 0 255);
+        --p-muted: oklch(0.66 0 255);
+        --p-card: oklch(0.2 0 255);
+        --p-border: oklch(0.3 0 255);
+        --p-primary: oklch(0.7 0.063 255);
+        --p-primary-fg: oklch(0.18 0 255);
+        --p-ring: oklch(0.62 0.066 255);
+        --p-danger: oklch(0.78 0.12 25);
+        --p-danger-bg: oklch(0.24 0.045 25);
+        --p-ok: oklch(0.65 0.148 150);
+        --p-radius: 4px;
+        --p-shadow: 0 4px 16px -4px oklch(0 0 0 / 0.14);
+        --p-font-heading: "Montserrat", "Noto Sans JP", sans-serif;
+        --p-font-body: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+        --p-font-mono: "Source Code Pro", ui-monospace, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--p-bg);
+        color: var(--p-fg);
+        font: 14px/1.6 var(--p-font-body);
+        overflow-x: hidden;
+      }
+      h1,
+      h2 {
+        font-family: var(--p-font-heading);
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 8px;
+      }
+      h2 {
+        font-size: 14px;
+        margin: 0 0 8px;
+      }
+      :focus-visible {
+        outline: 2px solid var(--p-ring);
+        outline-offset: 1px;
+      }
+      textarea#brief-json {
+        font-family: var(--p-font-mono);
+        font-size: 12px;
+      }
+      header.page {
+        padding: 12px 16px 0;
+      }
+      #file-warning {
+        display: none;
+        background: var(--p-danger-bg);
+        color: var(--p-danger);
+        padding: 8px 16px;
+        font-weight: bold;
+      }
+      #status {
+        color: var(--p-muted);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      #error {
+        display: none;
+        margin: 8px 16px 0;
+        padding: 8px 12px;
+        border: 1px solid var(--p-danger);
+        background: var(--p-danger-bg);
+        color: var(--p-danger);
+        border-radius: var(--p-radius);
+        overflow-wrap: anywhere;
+      }
+      #busy {
+        color: var(--p-muted);
+        font-size: 12px;
+        min-height: 18px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 380px minmax(0, 1fr);
+        gap: 16px;
+        padding: 12px 16px 24px;
+      }
+      .side,
+      .main {
+        min-width: 0;
+      }
+      @media (max-width: 899px) {
+        .layout {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      .box {
+        background: var(--p-card);
+        border: 1px solid var(--p-border);
+        border-radius: var(--p-radius);
+        padding: 12px;
+        margin-bottom: 12px;
+        box-shadow: var(--p-shadow);
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: var(--p-muted);
+        margin: 8px 0 2px;
+      }
+      textarea,
+      input[type="text"],
+      select {
+        width: 100%;
+        max-width: 100%;
+        font: inherit;
+        color: var(--p-fg);
+        background: var(--p-bg);
+        border: 1px solid var(--p-border);
+        border-radius: var(--p-radius);
+        padding: 6px 8px;
+      }
+      textarea {
+        resize: vertical;
+        min-height: 90px;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .row > input[type="text"] {
+        flex: 1 1 100px;
+        width: auto;
+      }
+      button {
+        font: inherit;
+        color: var(--p-primary-fg);
+        background: var(--p-primary);
+        border: 1px solid var(--p-primary);
+        border-radius: var(--p-radius);
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      button.sub {
+        color: var(--p-fg);
+        background: transparent;
+        border-color: var(--p-border);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      details > summary {
+        cursor: pointer;
+        font-weight: bold;
+      }
+      .adj-row {
+        display: grid;
+        grid-template-columns: 90px minmax(0, 1fr) 40px;
+        gap: 6px;
+        align-items: center;
+        margin: 6px 0;
+      }
+      .adj-row input[type="range"] {
+        width: 100%;
+        min-width: 0;
+      }
+      .adj-note {
+        grid-column: 1 / -1;
+        font-size: 11px;
+        color: var(--p-muted);
+      }
+      .adj-sel {
+        margin: 6px 0;
+      }
+      .low-confidence {
+        font-size: 11px;
+        color: var(--p-danger);
+      }
+      .alt-btn {
+        margin: 2px 4px 2px 0;
+        padding: 3px 8px;
+        font-size: 12px;
+      }
+      #sources {
+        font-size: 12px;
+        color: var(--p-muted);
+        overflow-wrap: anywhere;
+      }
+      .scroll {
+        overflow-x: auto;
+        max-width: 100%;
+      }
+      #checks table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 12px;
+      }
+      #checks th,
+      #checks td {
+        border-bottom: 1px solid var(--p-border);
+        padding: 3px 6px;
+        text-align: left;
+        white-space: nowrap;
+      }
+      #checks .fail {
+        background: var(--p-danger-bg);
+        color: var(--p-danger);
+        font-weight: bold;
+      }
+      #save-result {
+        color: var(--p-ok);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+
+      /* プレビュー: 色・角・余白・影・文字はテーマの CSS 変数 */
+      #preview {
+        background: var(--background);
+        color: var(--foreground);
+        font-family: var(--theme-font-body);
+        border: 1px solid var(--p-border);
+        border-radius: var(--p-radius);
+        padding: calc(16px * var(--theme-spacing-scale));
+        overflow: hidden;
+      }
+      #preview * {
+        max-width: 100%;
+      }
+      #preview .pv-stack > * + * {
+        margin-top: calc(16px * var(--theme-spacing-scale));
+      }
+      #preview h3,
+      #preview h4 {
+        font-family: var(--theme-font-heading);
+        margin: 0 0 calc(6px * var(--theme-spacing-scale));
+      }
+      #preview h3 {
+        font-size: 22px;
+      }
+      #preview h4 {
+        font-size: 16px;
+      }
+      #preview p {
+        margin: 0 0 calc(8px * var(--theme-spacing-scale));
+      }
+      #preview .pv-btns {
+        display: flex;
+        flex-wrap: wrap;
+        gap: calc(8px * var(--theme-spacing-scale));
+      }
+      #preview .pv-btn {
+        font-family: var(--theme-font-body);
+        font-size: 14px;
+        border-radius: var(--theme-radius);
+        padding: calc(8px * var(--theme-spacing-scale)) calc(14px * var(--theme-spacing-scale));
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+      #preview .pv-primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+      #preview .pv-secondary {
+        background: var(--secondary);
+        color: var(--foreground);
+      }
+      #preview .pv-outline {
+        background: transparent;
+        color: var(--foreground);
+        border-color: var(--border);
+      }
+      #preview .pv-destructive {
+        background: var(--destructive);
+        color: var(--destructive-foreground);
+      }
+      #preview .pv-brand {
+        background: var(--brand-accent);
+        color: var(--brand-accent-foreground);
+      }
+      #preview .pv-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--theme-radius);
+        box-shadow: var(--theme-shadow);
+        padding: calc(16px * var(--theme-spacing-scale));
+      }
+      #preview .pv-form {
+        display: grid;
+        gap: calc(8px * var(--theme-spacing-scale));
+      }
+      #preview .pv-input,
+      #preview .pv-select {
+        width: 100%;
+        font-family: var(--theme-font-body);
+        font-size: 14px;
+        color: var(--foreground);
+        background: var(--background);
+        border: 1px solid var(--border);
+        border-radius: var(--theme-radius);
+        padding: calc(8px * var(--theme-spacing-scale)) calc(10px * var(--theme-spacing-scale));
+      }
+      #preview .pv-input:focus,
+      #preview .pv-select:focus {
+        outline: 2px solid var(--ring);
+        outline-offset: 1px;
+      }
+      #preview .pv-check {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--foreground);
+        font-size: 14px;
+        margin: 0;
+      }
+      #preview .pv-check input {
+        accent-color: var(--primary);
+      }
+      #preview .pv-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      #preview .pv-badge {
+        font-size: 12px;
+        padding: 2px calc(10px * var(--theme-spacing-scale));
+        border-radius: var(--theme-radius);
+      }
+      #preview .pv-b-primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+      #preview .pv-b-success {
+        background: var(--success);
+        color: var(--background);
+      }
+      #preview .pv-b-warning {
+        background: var(--warning);
+        color: var(--background);
+      }
+      #preview .pv-b-destructive {
+        background: var(--destructive);
+        color: var(--destructive-foreground);
+      }
+      #preview .pv-alert {
+        background: var(--muted);
+        color: var(--foreground);
+        border: 1px solid var(--border);
+        border-radius: var(--theme-radius);
+        padding: calc(10px * var(--theme-spacing-scale)) calc(14px * var(--theme-spacing-scale));
+      }
+      #preview table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      #preview th,
+      #preview td {
+        border-bottom: 1px solid var(--border);
+        padding: calc(6px * var(--theme-spacing-scale)) calc(8px * var(--theme-spacing-scale));
+        text-align: left;
+      }
+      #preview td {
+        color: var(--muted-foreground);
+      }
+      #preview code,
+      #preview pre {
+        font-family: var(--theme-font-mono);
+        font-size: 13px;
+        background: var(--muted);
+        color: var(--foreground);
+        border-radius: var(--theme-radius);
+        padding: calc(8px * var(--theme-spacing-scale));
+        display: block;
+        overflow-x: auto;
+        margin: 0;
+      }
+      #preview .pv-swatches {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: 6px;
+      }
+      #preview .pv-sw {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        min-width: 0;
+      }
+      #preview .pv-sw i {
+        flex: none;
+        width: 22px;
+        height: 22px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        display: block;
+      }
+      #preview .pv-sw span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        color: var(--foreground);
+      }
+      #preview .pv-empty {
+        color: var(--muted-foreground);
+      }
+    </style>
+    <style id="theme-style"></style>
+  </head>
+  <body>
+    <div id="file-warning">このページは <code>node app/server.ts</code> で開いてください</div>
+    <header class="page">
+      <h1>スタイルガイド生成</h1>
+      <div id="status">読み込み中…</div>
+    </header>
+    <div id="error" role="alert"></div>
+
+    <div class="layout">
+      <div class="side">
+        <div class="box">
+          <h2>入力</h2>
+          <label for="prompt">自由記述</label>
+          <textarea id="prompt" maxlength="2000" placeholder="落ち着いた和風の請求書 SaaS。藍色が基調"></textarea>
+          <label for="brand-color">ブランド色 (任意・#RRGGBB)</label>
+          <div class="row">
+            <input type="text" id="brand-color" placeholder="#2F4FA8" maxlength="7" />
+            <input type="color" id="brand-color-picker" value="#2f4fa8" title="ブランド色を選ぶ" />
+            <button type="button" class="sub" id="brand-color-clear">空にする</button>
+          </div>
+          <label for="base-mode">基調モード</label>
+          <select id="base-mode">
+            <option value="">自動</option>
+            <option value="light">ライト</option>
+            <option value="dark">ダーク</option>
+          </select>
+          <label for="font-heading">見出しフォント</label>
+          <select id="font-heading">
+            <option value="">自動</option>
+          </select>
+          <label for="font-body">本文フォント</label>
+          <select id="font-body">
+            <option value="">自動</option>
+          </select>
+          <label for="font-mono">等幅フォント</label>
+          <select id="font-mono">
+            <option value="">自動</option>
+          </select>
+          <div class="row" style="margin-top: 10px">
+            <button type="button" id="generate">生成</button>
+            <span id="busy"></span>
+          </div>
+        </div>
+
+        <details id="brief-panel" class="box">
+          <summary>ブリーフ</summary>
+          <div>名前: <span id="brief-name"></span></div>
+          <div>トーン: <span id="brief-tone"></span></div>
+          <div id="brief-hint" style="color: var(--p-muted); font-size: 12px"></div>
+          <label for="brief-json">ブリーフ (JSON・編集可)</label>
+          <textarea id="brief-json" spellcheck="false" style="font-family: ui-monospace, Consolas, monospace; font-size: 12px"></textarea>
+          <div class="row" style="margin-top: 6px">
+            <button type="button" class="sub" id="brief-apply">この JSON で推定からやり直す</button>
+          </div>
+        </details>
+
+        <div class="box" id="adjust">
+          <h2>調整</h2>
+          <div class="adj-row">
+            <label for="adj-chroma">鮮やかさ</label><input type="range" id="adj-chroma" min="0" max="4" step="0.05" value="2" /><span
+              id="adj-chroma-val"
+              >2</span
+            ><span class="adj-note" id="adj-chroma-note"></span>
+          </div>
+          <div class="adj-row">
+            <label for="adj-contrast">コントラスト</label
+            ><input type="range" id="adj-contrast" min="0" max="4" step="0.05" value="2" /><span id="adj-contrast-val">2</span
+            ><span class="adj-note" id="adj-contrast-note"></span>
+          </div>
+          <div class="adj-row">
+            <label for="adj-radius">角の丸さ</label><input type="range" id="adj-radius" min="0" max="4" step="0.05" value="2" /><span
+              id="adj-radius-val"
+              >2</span
+            ><span class="adj-note" id="adj-radius-note"></span>
+          </div>
+          <div class="adj-row">
+            <label for="adj-density">余白</label><input type="range" id="adj-density" min="0" max="4" step="0.05" value="2" /><span
+              id="adj-density-val"
+              >2</span
+            ><span class="adj-note" id="adj-density-note"></span>
+          </div>
+          <div class="adj-row">
+            <label for="adj-formality">フォーマルさ</label
+            ><input type="range" id="adj-formality" min="0" max="4" step="0.05" value="2" /><span id="adj-formality-val">2</span
+            ><span class="adj-note" id="adj-formality-note"></span>
+          </div>
+          <div class="adj-sel">
+            <label for="adj-brand_hue">色相</label
+            ><select id="adj-brand_hue"></select>
+          </div>
+          <div class="adj-sel">
+            <label for="adj-neutral_tint">無彩色の色味</label>
+            <select id="adj-neutral_tint">
+              <option value="pure">pure</option>
+              <option value="warm">warm</option>
+              <option value="cool">cool</option>
+              <option value="brand">brand</option>
+            </select>
+          </div>
+          <div class="adj-sel">
+            <label for="adj-accent_scheme">アクセントの関係</label>
+            <select id="adj-accent_scheme">
+              <option value="analogous">analogous</option>
+              <option value="complementary">complementary</option>
+              <option value="triadic">triadic</option>
+            </select>
+          </div>
+          <div class="adj-sel">
+            <label for="adj-base_mode">基調モード</label>
+            <select id="adj-base_mode">
+              <option value="light">light</option>
+              <option value="dark">dark</option>
+            </select>
+          </div>
+          <div class="adj-sel">
+            <label for="adj-font_mood">書体の性格</label>
+            <select id="adj-font_mood">
+              <option value="geometric">geometric</option>
+              <option value="humanist">humanist</option>
+              <option value="rounded">rounded</option>
+              <option value="serif">serif</option>
+              <option value="mincho">mincho</option>
+              <option value="tech">tech</option>
+            </select>
+          </div>
+          <div class="adj-sel">
+            <label for="adj-shadow">影</label>
+            <select id="adj-shadow">
+              <option value="none">none</option>
+              <option value="soft">soft</option>
+              <option value="hard">hard</option>
+            </select>
+          </div>
+          <div class="adj-sel">
+            <label for="adj-font_pair">フォントの組</label
+            ><select id="adj-font_pair"></select>
+          </div>
+          <div class="adj-sel">
+            <label style="display: flex; align-items: center; gap: 6px; margin: 0"
+              ><input type="checkbox" id="adj-use_accent" /> 第 2 アクセント色を使う</label
+            >
+          </div>
+          <div class="row" style="margin-top: 8px"><button type="button" class="sub" id="adj-reset">調整をリセット</button></div>
+        </div>
+
+        <div class="box">
+          <h2>別案</h2>
+          <div id="alternatives"></div>
+          <h2 style="margin-top: 10px">推定の出どころ</h2>
+          <div id="sources"></div>
+        </div>
+
+        <div class="box">
+          <h2>保存済みテーマ</h2>
+          <select id="saved-themes">
+            <option value="">(選んでください)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="main">
+        <div class="box">
+          <div class="row" style="margin-bottom: 8px">
+            <h2 style="margin: 0; flex: 1">プレビュー</h2>
+            <button type="button" class="sub" id="mode-toggle">ライト/ダーク切替</button>
+          </div>
+          <div id="preview"></div>
+        </div>
+
+        <div class="box">
+          <h2>コントラスト</h2>
+          <div id="checks" class="scroll"></div>
+        </div>
+
+        <div class="box">
+          <h2>保存と書き出し</h2>
+          <div class="row">
+            <button type="button" id="save" disabled>保存</button>
+            <button
+              type="button"
+              class="sub"
+              id="download-css"
+              disabled
+              title="プレビュー用 CSS (theme.preview.css)。完全な theme.css は「保存」でストアに出ます"
+            >
+              theme.preview.css
+            </button>
+            <button type="button" class="sub" id="download-json" disabled>theme.json</button>
+            <button type="button" class="sub" id="download-seed" disabled>seed.json</button>
+            <button type="button" class="sub" id="download-md" disabled>style-guide.md</button>
+          </div>
+          <div id="save-result"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      "use strict";
+      var SLIDERS = ["chroma", "contrast", "radius", "density", "formality"];
+      var SELECTS = ["brand_hue", "neutral_tint", "accent_scheme", "base_mode", "font_mood", "shadow"];
+      var ALT_LABEL = {
+        brand_hue: "色相",
+        neutral_tint: "無彩色",
+        accent_scheme: "アクセント",
+        base_mode: "基調",
+        font_mood: "書体",
+        shadow: "影",
+        font_pair: "フォント",
+        use_accent: "アクセント色",
+      };
+      var TOKEN_NAMES = [
+        "background",
+        "foreground",
+        "primary",
+        "primary-foreground",
+        "secondary",
+        "muted",
+        "muted-foreground",
+        "border",
+        "card",
+        "accent",
+        "accent-foreground",
+        "brand-accent",
+        "brand-accent-foreground",
+        "destructive",
+        "destructive-foreground",
+        "success",
+        "warning",
+        "ring",
+      ];
+
+      var state = {
+        meta: null,
+        request: null,
+        brief: null,
+        estimate: null,
+        estimateSource: null,
+        overrides: {},
+        result: null,
+        viewMode: "base",
+      };
+      var renderSeq = 0;
+      var debounceTimer = null;
+      var suppress = false;
+
+      function $(id) {
+        return document.getElementById(id);
+      }
+      function mk(tag, text, cls) {
+        var e = document.createElement(tag);
+        if (text !== undefined && text !== null) e.textContent = String(text);
+        if (cls) e.className = cls;
+        return e;
+      }
+
+      /* ---------- 通信・表示の補助 ---------- */
+      function showError(msg) {
+        var box = $("error");
+        box.textContent = msg || "";
+        box.style.display = msg ? "block" : "none";
+      }
+      function setBusy(text) {
+        $("busy").textContent = text || "";
+        $("generate").disabled = !!text;
+        $("brief-apply").disabled = !!text;
+      }
+      async function api(path, body) {
+        var opt =
+          body === undefined
+            ? {}
+            : {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+              };
+        var res = await fetch(path, opt);
+        var data = null;
+        try {
+          data = await res.json();
+        } catch (e) {
+          data = null;
+        }
+        return { ok: res.ok, status: res.status, data: data };
+      }
+      function errText(r) {
+        var d = r.data || {};
+        var t = d.error ? String(d.error) : "HTTP " + r.status;
+        return d.message ? t + ": " + d.message : t;
+      }
+      function answerOf(key) {
+        var est = state.estimate;
+        if (!est) return null;
+        var a = est.answers && typeof est.answers === "object" ? est.answers : est;
+        return a[key] || null;
+      }
+      function isExplicit(key) {
+        var r = state.result;
+        if (r && r.seedResult && r.seedResult.sources && r.seedResult.sources[key] === "explicit") return true;
+        return false;
+      }
+
+      /* ---------- 入力 ---------- */
+      function collectRequest() {
+        var req = { prompt: $("prompt").value.trim() };
+        var bc = $("brand-color").value.trim();
+        if (bc) req.brandColor = bc;
+        var bm = $("base-mode").value;
+        if (bm) req.baseMode = bm;
+        var fonts = {};
+        ["heading", "body", "mono"].forEach(function (r) {
+          var v = $("font-" + r).value;
+          if (v) fonts[r] = v;
+        });
+        if (Object.keys(fonts).length) req.fonts = fonts;
+        return req;
+      }
+      function fillRequest(req) {
+        req = req || {};
+        $("prompt").value = req.prompt || "";
+        $("brand-color").value = req.brandColor || "";
+        syncPickerFromText();
+        $("base-mode").value = req.baseMode || "";
+        ["heading", "body", "mono"].forEach(function (r) {
+          $("font-" + r).value = (req.fonts && req.fonts[r]) || "";
+        });
+      }
+      function syncPickerFromText() {
+        var v = $("brand-color").value.trim();
+        if (/^#[0-9a-fA-F]{6}$/.test(v)) $("brand-color-picker").value = v.toLowerCase();
+      }
+
+      /* ---------- メタ ---------- */
+      async function loadMeta() {
+        var r = await api("/api/meta");
+        if (!r.ok) {
+          showError("メタ情報を読めません: " + errText(r));
+          return;
+        }
+        var m = r.data;
+        state.meta = m;
+        $("status").textContent =
+          "LLM: " + (m.llm ? "使える" : "使えない") + " / Jev: " + (m.jev ? "使える" : "キーなし") + " / 保存先: " + (m.storeHome || "");
+        ["heading", "body", "mono"].forEach(function (role) {
+          var sel = $("font-" + role);
+          ((m.families && m.families[role]) || []).forEach(function (n) {
+            var o = mk("option", n);
+            o.value = n;
+            sel.appendChild(o);
+          });
+        });
+        var hue = $("adj-brand_hue");
+        Object.keys(m.hues || {}).forEach(function (k) {
+          var o = mk("option", k);
+          o.value = k;
+          hue.appendChild(o);
+        });
+        applyCriteriaTitles();
+        if (!m.llm) {
+          $("brief-hint").textContent = "Claude Code の /style-guide で作ったブリーフを貼ってください";
+          $("brief-panel").open = true;
+        }
+      }
+      function applyCriteriaTitles() {
+        var qs = (state.meta && state.meta.questions) || {};
+        SELECTS.concat(["use_accent"]).forEach(function (key) {
+          var q = qs[key];
+          var sel = $("adj-" + key);
+          if (!q || !sel) return;
+          var crit = q.criteria || {};
+          if (q.instructions) sel.title = q.instructions;
+          Array.prototype.forEach.call(sel.options || [], function (o) {
+            if (typeof crit[o.value] === "string") o.title = crit[o.value];
+          });
+          if (key === "use_accent") {
+            var c = crit["true"];
+            if (typeof c === "string") sel.title = c;
+          }
+        });
+        SLIDERS.forEach(function (key) {
+          var q = qs[key];
+          if (!q) return;
+          var tip = q.instructions || "";
+          if (Array.isArray(q.criteria))
+            tip +=
+              "\n" +
+              q.criteria
+                .map(function (c, i) {
+                  return i + ": " + c;
+                })
+                .join("\n");
+          $("adj-" + key).title = tip;
+        });
+      }
+      async function loadThemesList() {
+        var r = await api("/api/themes");
+        if (!r.ok || !Array.isArray(r.data)) return;
+        var sel = $("saved-themes");
+        sel.replaceChildren();
+        var first = mk("option", "(選んでください)");
+        first.value = "";
+        sel.appendChild(first);
+        r.data.forEach(function (t) {
+          var o = mk("option", t.name + (t.tone ? " - " + t.tone : ""));
+          o.value = t.id;
+          sel.appendChild(o);
+        });
+      }
+
+      /* ---------- 生成の流れ ---------- */
+      async function generate() {
+        showError("");
+        var req = collectRequest();
+        if (!req.prompt) {
+          showError("自由記述を入力してください");
+          return;
+        }
+        state.request = req;
+        setBusy("生成中… ブリーフ作成中");
+        try {
+          var b = await api("/api/brief", { request: req });
+          if (b.status === 503 || b.status === 502) {
+            $("brief-panel").open = true;
+            $("brief-hint").textContent = "Claude Code の /style-guide で作ったブリーフを貼ってください";
+            showError("ブリーフを作れません (" + errText(b) + ")。ブリーフの JSON を貼って「推定からやり直す」を押してください");
+            return;
+          }
+          if (!b.ok) {
+            showError(errText(b));
+            return;
+          }
+          setBrief(b.data.brief);
+          await estimateAndRender();
+        } catch (e) {
+          showError(String(e && e.message ? e.message : e));
+        } finally {
+          setBusy("");
+        }
+      }
+      function setBrief(brief) {
+        state.brief = brief;
+        $("brief-name").textContent = brief && brief.name ? brief.name : "";
+        $("brief-tone").textContent = brief && brief.tone ? brief.tone : "";
+        $("brief-json").value = brief ? JSON.stringify(brief, null, 2) : "";
+        $("brief-panel").open = true;
+      }
+      async function estimateAndRender() {
+        setBusy("生成中… 推定中");
+        var ok = await estimate();
+        if (!ok) return;
+        state.overrides = {};
+        setBusy("生成中… 計算中");
+        await render();
+      }
+      async function estimate() {
+        var r = await api("/api/estimate", { request: state.request, brief: state.brief });
+        if (r.status === 503) {
+          showError("推定できません (Jev のキーも LLM もありません)");
+          return false;
+        }
+        if (!r.ok) {
+          showError(errText(r));
+          return false;
+        }
+        state.estimate = r.data.estimate;
+        state.estimateSource = r.data.estimateSource;
+        state.skip = r.data.skip || [];
+        state.fallbackReason = r.data.fallbackReason || null;
+        return true;
+      }
+      async function briefApply() {
+        showError("");
+        var brief;
+        try {
+          brief = JSON.parse($("brief-json").value);
+        } catch (e) {
+          showError("ブリーフの JSON を読めません: " + e.message);
+          return;
+        }
+        if (!brief || typeof brief !== "object") {
+          showError("ブリーフは JSON のオブジェクトにしてください");
+          return;
+        }
+        state.request = collectRequest();
+        if (!state.request.prompt) {
+          showError("自由記述を入力してください");
+          return;
+        }
+        setBusy("生成中… 推定中");
+        try {
+          setBrief(brief);
+          await estimateAndRender();
+        } catch (e) {
+          showError(String(e && e.message ? e.message : e));
+        } finally {
+          setBusy("");
+        }
+      }
+
+      /* ---------- 計算 ---------- */
+      function renderBody() {
+        return {
+          request: state.request,
+          brief: state.brief,
+          estimate: state.estimate,
+          estimateSource: state.estimateSource,
+          overrides: state.overrides,
+        };
+      }
+      async function render() {
+        var seq = ++renderSeq;
+        var r = await api("/api/render", renderBody());
+        if (seq !== renderSeq) return;
+        if (!r.ok) {
+          showError(errText(r));
+          return;
+        }
+        showError("");
+        state.result = r.data;
+        renderAdjust();
+        renderAlternatives();
+        renderSources();
+        renderPreview();
+        renderChecks();
+        ["save", "download-css", "download-json", "download-seed", "download-md"].forEach(function (id) {
+          $(id).disabled = false;
+        });
+      }
+      function scheduleRender() {
+        if (!state.estimate) return;
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(function () {
+          render().catch(function (e) {
+            showError(String(e && e.message ? e.message : e));
+          });
+        }, 250);
+      }
+
+      /* ---------- 調整 ---------- */
+      function fmt(n) {
+        return (Math.round(Number(n) * 100) / 100).toString();
+      }
+      function renderAdjust() {
+        suppress = true;
+        var res = state.result || {};
+        var low = (res.seedResult && res.seedResult.lowConfidence) || [];
+        SLIDERS.forEach(function (key) {
+          var inp = $("adj-" + key),
+            note = $("adj-" + key + "-note");
+          var a = answerOf(key);
+          var v = state.overrides[key] !== undefined ? state.overrides[key] : a && typeof a.score === "number" ? a.score : 2;
+          inp.value = v;
+          $("adj-" + key + "-val").textContent = fmt(v);
+          var skipped = isExplicit(key) || (state.skip || []).indexOf(key) >= 0;
+          inp.disabled = skipped;
+          note.textContent = "";
+          note.className = "adj-note";
+          if (skipped) note.textContent = "指定済み";
+          else if (low.indexOf(key) >= 0) {
+            note.textContent = "推定の確度が低い";
+            note.className = "adj-note low-confidence";
+          }
+        });
+        SELECTS.forEach(function (key) {
+          var sel = $("adj-" + key);
+          var a = answerOf(key);
+          var v = state.overrides[key] !== undefined ? state.overrides[key] : a && a.choice;
+          if (v !== undefined && v !== null) sel.value = v;
+          sel.disabled = isExplicit(key) || (state.skip || []).indexOf(key) >= 0;
+        });
+        var ua = answerOf("use_accent");
+        var cb = $("adj-use_accent");
+        if (state.overrides.use_accent !== undefined) cb.checked = Number(state.overrides.use_accent) >= 0.5;
+        else cb.checked = !!(ua && typeof ua.noul === "number" && ua.noul >= 0.5);
+        renderFontPair(res);
+        suppress = false;
+      }
+      function renderFontPair(res) {
+        var sel = $("adj-font_pair");
+        var cur = state.overrides.font_pair;
+        if (cur === undefined) {
+          var a = answerOf("font_pair");
+          cur = a && a.choice ? a.choice : null;
+        }
+        sel.replaceChildren();
+        var cands = res.candidates || [];
+        cands.forEach(function (p) {
+          var o = mk("option", p.id);
+          o.value = p.id;
+          sel.appendChild(o);
+        });
+        var grp = document.createElement("optgroup");
+        grp.label = "すべて";
+        ((state.meta && state.meta.catalog) || []).forEach(function (p) {
+          var o = mk("option", p.id);
+          o.value = p.id;
+          grp.appendChild(o);
+        });
+        sel.appendChild(grp);
+        if (cur) sel.value = cur;
+        else if (cands.length) sel.value = cands[0].id;
+      }
+      function onSliderInput(key) {
+        var v = Number($("adj-" + key).value);
+        $("adj-" + key + "-val").textContent = fmt(v);
+        if (suppress) return;
+        state.overrides[key] = v;
+        scheduleRender();
+      }
+      function onSelectChange(key) {
+        if (suppress) return;
+        state.overrides[key] = $("adj-" + key).value;
+        scheduleRender();
+      }
+      function onAccentChange() {
+        if (suppress) return;
+        state.overrides.use_accent = $("adj-use_accent").checked ? 1 : 0;
+        scheduleRender();
+      }
+      function resetAdjust() {
+        state.overrides = {};
+        if (state.estimate)
+          render().catch(function (e) {
+            showError(String(e && e.message ? e.message : e));
+          });
+      }
+
+      /* ---------- 別案・出どころ ---------- */
+      function renderAlternatives() {
+        var box = $("alternatives");
+        box.replaceChildren();
+        var alts = (state.result && state.result.seedResult && state.result.seedResult.alternatives) || [];
+        if (!alts.length) {
+          box.appendChild(mk("span", "別案はありません"));
+          return;
+        }
+        alts.forEach(function (a) {
+          var label = (ALT_LABEL[a.field] || a.field) + ": " + a.value + " (" + Math.round(a.probability * 100) + "%)";
+          var b = mk("button", label, "sub alt-btn");
+          b.type = "button";
+          b.addEventListener("click", function () {
+            var v = a.value;
+            if (a.field === "use_accent") v = v === "true" || v === true || v === "1" || v === 1 ? 1 : 0;
+            state.overrides[a.field] = v;
+            render().catch(function (e) {
+              showError(String(e && e.message ? e.message : e));
+            });
+          });
+          box.appendChild(b);
+        });
+      }
+      function renderSources() {
+        var box = $("sources");
+        box.replaceChildren();
+        var parts = [];
+        if (state.estimateSource)
+          parts.push("推定: " + (typeof state.estimateSource === "string" ? state.estimateSource : JSON.stringify(state.estimateSource)));
+        if (state.fallbackReason) parts.push("フォールバック理由: " + state.fallbackReason);
+        var src = state.result && state.result.seedResult && state.result.seedResult.sources;
+        if (src) {
+          parts.push(
+            Object.keys(src)
+              .map(function (k) {
+                return k + "=" + src[k];
+              })
+              .join(", "),
+          );
+        }
+        parts.forEach(function (t) {
+          box.appendChild(mk("div", t));
+        });
+      }
+
+      /* ---------- プレビュー ---------- */
+      function baseModeOf() {
+        var s = state.result && state.result.seedResult && state.result.seedResult.seed;
+        var m = s && (s.baseMode || s.base_mode);
+        return m === "dark" ? "dark" : "light";
+      }
+      function shownMode() {
+        var b = baseModeOf();
+        if (state.viewMode === "inverse") return b === "dark" ? "light" : "dark";
+        return b;
+      }
+      function pv(parent, tag, text, cls) {
+        var e = mk(tag, text, cls);
+        parent.appendChild(e);
+        return e;
+      }
+      function renderPreview() {
+        var res = state.result;
+        var host = $("preview");
+        if (!res) return;
+        $("theme-style").textContent = res.previewCss || "";
+        var old = $("theme-fonts");
+        if (old) old.remove();
+        if (res.fontsUrl) {
+          var lk = document.createElement("link");
+          lk.rel = "stylesheet";
+          lk.id = "theme-fonts";
+          lk.href = res.fontsUrl;
+          document.head.appendChild(lk);
+        }
+        var seed = (res.seedResult && res.seedResult.seed) || res.theme.seed || {};
+        host.setAttribute("data-theme", seed.id || "");
+        if (state.viewMode === "inverse") host.setAttribute("data-mode", shownMode());
+        else host.removeAttribute("data-mode");
+        host.replaceChildren();
+
+        var root = pv(host, "div", null, "pv-stack");
+        var head = pv(root, "div");
+        pv(head, "h3", (state.brief && state.brief.name) || seed.name || "テーマ");
+        pv(head, "p", (state.brief && state.brief.tone) || seed.tone || "");
+
+        var btns = pv(root, "div", null, "pv-btns");
+        [
+          ["primary", "Primary"],
+          ["secondary", "Secondary"],
+          ["outline", "Outline"],
+          ["destructive", "Destructive"],
+          ["brand", "Brand accent"],
+        ].forEach(function (x) {
+          var b = pv(btns, "button", x[1], "pv-btn pv-" + x[0]);
+          b.type = "button";
+        });
+
+        var card = pv(root, "div", null, "pv-card");
+        pv(card, "h4", "カードの見出し");
+        pv(card, "p", "カードの本文です。影と角の丸みがテーマに従います。");
+        var cb = pv(card, "button", "詳細", "pv-btn pv-primary");
+        cb.type = "button";
+
+        var form = pv(root, "div", null, "pv-form");
+        var inp = pv(form, "input", null, "pv-input");
+        inp.type = "text";
+        inp.placeholder = "テキスト入力 (focus で ring)";
+        var sel = pv(form, "select", null, "pv-select");
+        ["選択肢 A", "選択肢 B"].forEach(function (t) {
+          pv(sel, "option", t);
+        });
+        var lab = pv(form, "label", null, "pv-check");
+        var chk = document.createElement("input");
+        chk.type = "checkbox";
+        chk.checked = true;
+        lab.appendChild(chk);
+        lab.appendChild(mk("span", "チェックボックス"));
+
+        var badges = pv(root, "div", null, "pv-badges");
+        [
+          ["primary", "Primary"],
+          ["success", "Success"],
+          ["warning", "Warning"],
+          ["destructive", "Destructive"],
+        ].forEach(function (x) {
+          pv(badges, "span", x[1], "pv-badge pv-b-" + x[0]);
+        });
+
+        pv(root, "div", "アラート: muted 背景の通知です。", "pv-alert");
+
+        var tbl = pv(root, "table");
+        var thr = pv(pv(tbl, "thead"), "tr");
+        ["項目", "状態", "更新"].forEach(function (t) {
+          pv(thr, "th", t);
+        });
+        var tb = pv(tbl, "tbody");
+        [
+          ["請求書 001", "支払済", "10/01"],
+          ["請求書 002", "未払い", "10/05"],
+          ["請求書 003", "下書き", "10/09"],
+        ].forEach(function (row) {
+          var tr = pv(tb, "tr");
+          row.forEach(function (t) {
+            pv(tr, "td", t);
+          });
+        });
+
+        var code = pv(root, "pre");
+        code.appendChild(mk("code", 'const theme = "' + (seed.id || "theme") + '"; // mono'));
+
+        renderSwatches(pv(root, "div", null, "pv-swatches"));
+      }
+      function renderSwatches(box) {
+        var modes = (state.result.theme && state.result.theme.modes) || {};
+        var m = modes[shownMode()] || {};
+        var tokens = m.tokens || {};
+        var names = Object.keys(tokens);
+        if (!names.length) names = TOKEN_NAMES;
+        names.forEach(function (n) {
+          var key = n.replace(/^--/, "");
+          var val = tokens[n] !== undefined ? tokens[n] : "";
+          var item = pv(box, "div", null, "pv-sw");
+          var chip = document.createElement("i");
+          chip.style.background = "var(--" + key + ")";
+          item.appendChild(chip);
+          item.appendChild(mk("span", key + (val !== "" ? " " + (typeof val === "string" ? val : JSON.stringify(val)) : "")));
+        });
+      }
+      function toggleMode() {
+        state.viewMode = state.viewMode === "base" ? "inverse" : "base";
+        if (state.result) {
+          renderPreview();
+          renderChecks();
+        }
+      }
+
+      /* ---------- コントラスト ---------- */
+      function renderChecks() {
+        var box = $("checks");
+        box.replaceChildren();
+        if (!state.result) return;
+        var modes = (state.result.theme && state.result.theme.modes) || {};
+        var m = modes[shownMode()];
+        var checks = (m && m.checks) || [];
+        box.appendChild(mk("div", "表示中: " + shownMode()));
+        if (!checks.length) return;
+        var tbl = mk("table");
+        var tr = mk("tr");
+        ["文字", "背景", "比", "基準", "結果"].forEach(function (t) {
+          tr.appendChild(mk("th", t));
+        });
+        tbl.appendChild(mk("thead")).appendChild(tr);
+        var tb = mk("tbody");
+        checks.forEach(function (c) {
+          var row = mk("tr");
+          if (!c.pass) row.className = "fail";
+          row.appendChild(mk("td", c.fg));
+          row.appendChild(mk("td", c.bg));
+          row.appendChild(mk("td", typeof c.ratio === "number" ? c.ratio.toFixed(2) : c.ratio));
+          row.appendChild(mk("td", c.min));
+          row.appendChild(mk("td", (c.pass ? "PASS" : "FAIL") + (c.adjusted ? " (補正)" : "")));
+          tb.appendChild(row);
+        });
+        tbl.appendChild(tb);
+        box.appendChild(tbl);
+      }
+
+      /* ---------- 保存・書き出し ---------- */
+      async function save() {
+        if (!state.estimate) return;
+        showError("");
+        var r = await api("/api/save", renderBody());
+        if (!r.ok) {
+          showError(errText(r));
+          return;
+        }
+        $("save-result").textContent = "保存しました: " + (r.data && r.data.dir);
+        loadThemesList();
+      }
+      function download(kind) {
+        var res = state.result;
+        if (!res) return;
+        var text,
+          name,
+          type = "application/json";
+        if (kind === "css") {
+          text = res.previewCss || "";
+          name = "theme.preview.css";
+          type = "text/css";
+        } else if (kind === "json") {
+          text = JSON.stringify(res.theme, null, 2) + "\n";
+          name = "theme.json";
+        } else if (kind === "seed") {
+          text = JSON.stringify(res.seedResult.seed, null, 2) + "\n";
+          name = "seed.json";
+        } else {
+          text = res.styleGuideMd || "";
+          name = "style-guide.md";
+          type = "text/markdown";
+        }
+        var url = URL.createObjectURL(new Blob([text], { type: type + ";charset=utf-8" }));
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () {
+          URL.revokeObjectURL(url);
+        }, 1000);
+      }
+      function sourceFromSaved(seedResult) {
+        var sources = (seedResult && seedResult.sources) || {};
+        var values = Object.keys(sources).map(function (k) {
+          return sources[k];
+        });
+        if (values.indexOf("jev") !== -1) return "jev";
+        if (values.indexOf("llm-fallback") !== -1) return "llm-fallback";
+        return "jev";
+      }
+      async function openSaved(id) {
+        if (!id) return;
+        showError("");
+        setBusy("読み込み中…");
+        try {
+          var r = await api("/api/themes/" + encodeURIComponent(id));
+          if (!r.ok) {
+            showError(r.status === 404 ? "保存済みテーマが見つかりません: " + id : errText(r));
+            return;
+          }
+          var d = r.data;
+          state.request = d.request;
+          fillRequest(d.request);
+          setBrief(d.brief);
+          state.estimate = d.estimate;
+          state.estimateSource = sourceFromSaved(d.seedResult);
+          state.skip = [];
+          state.overrides = {};
+          $("saved-themes").value = id;
+          await render();
+        } catch (e) {
+          showError(String(e && e.message ? e.message : e));
+        } finally {
+          setBusy("");
+        }
+      }
+
+      /* ---------- 起動 ---------- */
+      function bind() {
+        $("generate").addEventListener("click", generate);
+        $("brief-apply").addEventListener("click", briefApply);
+        $("adj-reset").addEventListener("click", resetAdjust);
+        $("mode-toggle").addEventListener("click", toggleMode);
+        $("save").addEventListener("click", function () {
+          save().catch(function (e) {
+            showError(String(e && e.message ? e.message : e));
+          });
+        });
+        ["css", "json", "seed", "md"].forEach(function (k) {
+          $("download-" + k).addEventListener("click", function () {
+            download(k);
+          });
+        });
+        $("saved-themes").addEventListener("change", function () {
+          openSaved($("saved-themes").value);
+        });
+        $("brand-color").addEventListener("input", syncPickerFromText);
+        $("brand-color-picker").addEventListener("input", function () {
+          $("brand-color").value = $("brand-color-picker").value.toUpperCase();
+        });
+        $("brand-color-clear").addEventListener("click", function () {
+          $("brand-color").value = "";
+        });
+        SLIDERS.forEach(function (k) {
+          $("adj-" + k).addEventListener("input", function () {
+            onSliderInput(k);
+          });
+        });
+        SELECTS.concat(["font_pair"]).forEach(function (k) {
+          $("adj-" + k).addEventListener("change", function () {
+            onSelectChange(k);
+          });
+        });
+        $("adj-use_accent").addEventListener("change", onAccentChange);
+      }
+      async function init() {
+        bind();
+        if (location.protocol === "file:") {
+          $("file-warning").style.display = "block";
+          $("status").textContent = "";
+          return;
+        }
+        try {
+          await loadMeta();
+          await loadThemesList();
+          var m = /^#theme=(.+)$/.exec(location.hash);
+          if (m) await openSaved(decodeURIComponent(m[1]));
+        } catch (e) {
+          showError(String(e && e.message ? e.message : e));
+        }
+      }
+      init();
+    </script>
+  </body>
+</html>

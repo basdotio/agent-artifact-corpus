@@ -80,7 +80,11 @@ func cmdRefute(root string, args []string) int {
 	return 0
 }
 
-var existingRefutation = regexp.MustCompile(`(?ms)\nrefutation_search:\n(?:  .*\n)*`)
+// The block is the key and the indented lines under it, and nothing after. With the `s` flag
+// `.` crossed newlines and the greedy `.*` ran to the end of the file, so a label with a
+// `reviewed:` block after its record lost that block on every `refute --write` — ten
+// confirmed-false-positive reviews, silently, with a green validate.
+var existingRefutation = regexp.MustCompile(`(?m)\nrefutation_search:\n(?:  [^\n]*\n)*`)
 
 // replaceRefutationBlock swaps an existing record or appends a new one.
 func replaceRefutationBlock(label, block string) string {

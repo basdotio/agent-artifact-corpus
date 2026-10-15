@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Before and after</title>
+<!-- Scene template: before-after. Filled by scripts/render.py from readme-scenes.json.
+     Runs once in about 12 s: the "before" pain cards pop in one by one, a wipe reveals the
+     "after" (a terminal on the left, numbered outcomes on the right), then it fades to paper. -->
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800;900&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --paper: #F1F3EE; --field: #0D453E; --ink: #072B27; --signal: #C8F751; --warn: #F2A65A;
+          --head: "Archivo", Arial, sans-serif; --body: "Inter", "Segoe UI", sans-serif;
+          --mono: "JetBrains Mono", Consolas, monospace; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1200px; height: 680px; overflow: hidden; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--body); position: relative; }
+  .a { animation-duration: .5s; animation-timing-function: cubic-bezier(.2,.8,.2,1);
+       animation-fill-mode: both; animation-iteration-count: 1; }
+  @keyframes pop { 0% { opacity: 0; transform: scale(.7) rotate(var(--r, 0deg)); }
+                   70% { opacity: 1; transform: scale(1.05) rotate(var(--r, 0deg)); }
+                   100% { opacity: 1; transform: scale(1) rotate(var(--r, 0deg)); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  @keyframes reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes bar { 0% { left: 40px; opacity: 0; } 3% { opacity: 1; } 95% { opacity: 1; } 100% { left: 1160px; opacity: 0; } }
+  @keyframes type { from { width: 0; } to { width: var(--chars); } }
+  @keyframes on { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes off { from { opacity: 1; } to { opacity: 0; } }
+
+  .top { position: absolute; left: 40px; right: 40px; top: 26px; height: 64px; display: flex; align-items: center; gap: 18px; }
+  .top h1 { font: 900 38px/1 var(--head); letter-spacing: -.03em; white-space: nowrap; }
+  .top .time { font: 700 22px var(--mono); color: var(--field); white-space: nowrap; }
+  .pill { margin-left: auto; position: relative; width: 190px; height: 48px; flex: none; }
+  .pill span { position: absolute; inset: 0; display: grid; place-items: center; border: 3px solid var(--ink);
+               border-radius: 12px; font: 800 22px var(--head); letter-spacing: .06em; box-shadow: 4px 4px 0 var(--ink); }
+  .pill .b { background: #fff; }
+  .pill .f { background: var(--signal); }
+
+  .stage { position: absolute; left: 40px; top: 108px; width: 1120px; height: 540px; border: 3px solid var(--ink);
+           border-radius: 18px; overflow: hidden; box-shadow: 6px 6px 0 var(--ink); }
+  .before { position: absolute; inset: 0; background: #E3E7DF; }
+  .card { position: absolute; width: 330px; background: #fff; border: 3px solid var(--ink); border-radius: 14px;
+          padding: 14px 18px 16px; box-shadow: 5px 5px 0 var(--ink); animation-name: pop; }
+  .card .k { font: 700 15px var(--mono); color: #8a4b12; text-transform: uppercase; letter-spacing: .06em;
+             display: flex; align-items: center; gap: 8px; }
+  .card .k i { width: 22px; height: 22px; border-radius: 50%; background: var(--warn); border: 2px solid var(--ink);
+               display: grid; place-items: center; font: 900 14px var(--head); font-style: normal; }
+  .card p { font-size: 21px; line-height: 1.32; margin-top: 8px; font-weight: 600; }
+  .caption { position: absolute; right: 26px; bottom: 18px; font: 700 18px var(--mono); color: #5b6f6a; }
+
+  .after { position: absolute; inset: 0; background: #fff; }
+  .wipe { position: absolute; top: 108px; height: 540px; width: 14px; background: var(--signal); border-left: 3px solid var(--ink);
+          border-right: 3px solid var(--ink); z-index: 5; opacity: 0; }
+  .term { position: absolute; left: 34px; top: 34px; width: 470px; height: 468px; background: var(--ink); border-radius: 14px;
+          border: 3px solid var(--ink); box-shadow: 5px 5px 0 var(--field); overflow: hidden; }
+  .term .chrome { height: 38px; background: #0A3833; display: flex; align-items: center; gap: 8px; padding: 0 14px; }
+  .term .chrome i { width: 12px; height: 12px; border-radius: 50%; background: #2C5C55; display: block; }
+  .term .chrome span { margin-left: 10px; color: #9DB7AF; font: 500 15px var(--mono); }
+  .term .s { padding: 18px 20px; color: #DDE7E2; font: 400 18px/1.55 var(--mono); }
+  .term .p { color: var(--signal); }
+  .term .typed { display: inline-block; vertical-align: bottom; overflow: hidden; white-space: nowrap; color: #fff; max-width: 380px; }
+  .term .line { animation-name: rise; }
+  .term .dim { color: #8FB0A7; }
+  .term .ok { color: var(--signal); }
+  .list { position: absolute; left: 540px; top: 34px; width: 548px; }
+  .row { display: flex; gap: 14px; align-items: flex-start; padding: 13px 0; border-bottom: 2px solid #E6EAE3; animation-name: rise; }
+  .row b.t { flex: none; width: 34px; height: 34px; border-radius: 9px; background: var(--signal); border: 3px solid var(--ink);
+             display: grid; place-items: center; font: 900 18px var(--head); }
+  .row p { font-size: 21px; line-height: 1.32; font-weight: 600; }
+  .row p em { font-style: normal; font-family: var(--mono); font-size: 19px; background: #EEF3E6; padding: 0 5px; border-radius: 4px; }
+  .cover { position: absolute; inset: 0; background: var(--paper); z-index: 9; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1 id="title"></h1><span class="time" id="time"></span>
+    <div class="pill"><span class="b" id="pb"></span><span class="f" id="pf"></span></div>
+  </div>
+  <div class="stage">
+    <div class="before" id="before"><div class="caption" id="caption"></div></div>
+    <div class="after" id="after">
+      <div class="term"><div class="chrome"><i></i><i></i><i></i><span id="app"></span></div><div class="s" id="s"></div></div>
+      <div class="list" id="list"></div>
+    </div>
+  </div>
+  <div class="wipe" id="wipe"></div>
+  <div class="cover" id="cover"></div>
+<script>
+const D = /*DATA*/null;
+(function () {
+  const $ = id => document.getElementById(id);
+  const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // `code` in an outcome becomes a monospace chip.
+  const chip = t => esc(t).replace(/`(.+?)`/g, '<em>$1</em>');
+  const ms = s => s * 1000;
+  const anim = (el, frames, dur, delay, easing) => el.animate(frames, { duration: ms(dur), delay: ms(delay), fill: 'both', easing: easing || 'cubic-bezier(.2,.8,.2,1)' });
+  if (D.theme) for (const [k, v] of Object.entries(D.theme)) document.documentElement.style.setProperty('--' + k, v);
+
+  $('title').textContent = D.title || '';
+  $('time').textContent = D.time || '';
+  $('pb').textContent = D.beforeLabel || 'BEFORE';
+  $('pf').textContent = D.afterLabel || 'AFTER';
+  $('caption').textContent = D.caption || '';
+  $('app').textContent = D.app || 'Claude Code';
+
+  // Before: up to six cards on a 3 x 2 grid, slightly tilted.
+  const spots = [[34, 34, -2], [394, 52, 1.5], [754, 30, -1], [50, 282, 1.5], [408, 300, -1.5], [764, 276, 2]];
+  let t = 0.3;
+  (D.before || []).slice(0, 6).forEach((c, i) => {
+    const [x, y, r] = spots[i];
+    const el = document.createElement('div');
+    el.className = 'card a';
+    el.style.cssText = `left:${x}px;top:${y}px;--r:${r}deg;animation-delay:${t.toFixed(2)}s`;
+    el.innerHTML = `<div class="k"><i>!</i>${esc(c.tag || '')}</div><p>${esc(c.text)}</p>`;
+    $('before').appendChild(el);
+    t += 0.5;
+  });
+  anim($('caption'), [{ opacity: 0 }, { opacity: 1 }], 0.3, t);
+
+  // The wipe.
+  const W = t + 0.9;
+  anim($('after'), [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0 0 0)' }], 0.9, W, 'cubic-bezier(.6,0,.3,1)');
+  anim($('wipe'), [{ left: '40px', opacity: 0 }, { opacity: 1, offset: .03 }, { opacity: 1, offset: .95 }, { left: '1160px', opacity: 0 }], 0.9, W, 'cubic-bezier(.6,0,.3,1)');
+  anim($('pb'), [{ opacity: 1 }, { opacity: 0 }], 0.2, W + 0.5, 'linear');
+  anim($('pf'), [{ opacity: 0 }, { opacity: 1 }], 0.2, W + 0.5, 'linear');
+
+  // After: the prompt types, the work lines and the outcomes appear side by side.
+  const prompt = D.prompt || '';
+  // Mono glyphs are about 0.6em wide. Shrink the typed line so a long prompt fits on one line.
+  const fitPx = Math.min(18, Math.floor(380 / (Math.max(prompt.length, 1) * 0.6)));
+  const T0 = W + 1.1, typeDur = Math.min(1.6, 0.04 * prompt.length + 0.2);
+  let html = `<div><span class="p">&gt; </span><span class="typed a" style="font-size:${fitPx}px;--chars:${prompt.length}ch;animation-name:type;animation-duration:${typeDur}s;animation-timing-function:steps(${Math.max(prompt.length, 1)},end);animation-delay:${T0}s">${esc(prompt)}</span></div>`;
+  let u = T0 + typeDur + 0.2;
+  (D.lines || []).forEach(l => {
+    const ok = typeof l === 'object' && l.ok;
+    const text = typeof l === 'object' ? l.text : l;
+    html += `<div class="line a ${ok ? '' : 'dim'}" style="animation-delay:${u.toFixed(2)}s">${ok ? '<br><span class="ok">' + esc(text) + '</span>' : esc(text)}</div>`;
+    u += 0.5;
+  });
+  $('s').innerHTML = html;
+  let v = T0 + typeDur + 0.2;
+  (D.after || []).slice(0, 5).forEach((o, i) => {
+    const el = document.createElement('div');
+    el.className = 'row a';
+    el.style.animationDelay = v.toFixed(2) + 's';
+    el.innerHTML = `<b class="t">${i + 1}</b><p>${chip(o)}</p>`;
+    $('list').appendChild(el);
+    v += 0.5;
+  });
+
+  const dur = (D._dur || 12) - 0.6;
+  anim($('cover'), [{ opacity: 0 }, { opacity: 1 }], 0.5, dur, 'linear');
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "name": "play_fishing",
+  "description": "一个文字钓鱼游戏，你（AI）是玩家：买饵→cast抛竿(核心)→按稀有度钓上各种鱼→卖鱼/卖宝(sell)换点数→解锁新水域→集图鉴。每个地点+季节出的鱼不同、季节随抛竿推进，想集齐图鉴就得 goto 换地点、留意季节；抛竿偶遇漂流瓶/宝箱/宝物，钓到鱼时偶有幸运时刻（分裂鱼钩/渔获热潮/河神祝福等）。买氧气瓶(buy oxygen)后可 dive 潜水「远征」，捕获只在水下出没、水面钓不到的鱼。dive 途中可能遇到「大遗迹」而暂停，让你 choose 抉择（每个选项耗不同氧气）；surface 主动上岸。action：status·shop(饵单)·buy·cast(抛竿;带 times 一次连钓N竿、stop_on 遇新种/稀有/事件就停)·dive(开潜水远征,带 times=带几瓶氧气)·choose(在大遗迹处选,带 choice 编号)·surface(结束远征上岸)·goto(不填=列出所有钓点+价格+本季还有几种没见过的鱼；填id=前往,未解锁则花点)·inventory(渔篓/物品/待开宝箱)·sell(卖鱼或物品)·open(开宝箱)·encyclopedia(图鉴)·look(细看,可中文名,没钓到的显示???)·batch(把多步排队一次跑,见 steps)。**远征暂停时只能 choose/surface（或只读指令）。**想连钓就用 times 一次抛多竿、想一口气买饵再钓/换地点再钓就用 batch，别一竿一条发。每次结果末尾有一行 📊 状态栏 JSON(点数/地点/季节/回合/图鉴/余饵/未卖渔获)，看它就够、不必再 call status。",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["status", "shop", "buy", "cast", "dive", "choose", "surface", "goto", "inventory", "sell", "open", "encyclopedia", "look", "batch"],
+        "description": "要做的动作。dive=开潜水远征（先 buy oxygen；times=带几瓶氧气当深度预算）；遇大遗迹会暂停，用 choose 抉择（choice=选项编号，每项耗不同氧气、不够选不了）；surface=主动上岸结算。"
+      },
+      "choice": { "type": "number", "description": "choose 用：大遗迹的选项编号（1 起）。不填=重看当前选项。" },
+      "bait_id": {
+        "type": "string",
+        "description": "buy/cast 用：鱼饵 id（如 basic_worm / glow_bait / golden_lure）。买氧气瓶用 bait_id=\"oxygen\"。cast 不填=用最便宜的可用饵；dive 不用饵。"
+      },
+      "times": {
+        "type": "number",
+        "description": "cast/dive 用：一次连钓/连潜几次（1~20，默认 1）。只回一个汇总，省来回——刷量/找鱼首选。"
+      },
+      "stop_on": {
+        "type": "array",
+        "items": { "type": "string", "enum": ["new", "rare", "event"] },
+        "description": "cast/dive 连做时的提前停止条件（可多选，stop_on=[\"new\",\"rare\",\"event\"] 遇到任一就停）：new=遇到没见过的新种就停、rare=稀有及以上就停、event=遇到漂流瓶/宝箱/宝物或水下奇遇（珊瑚宫/遗迹/海底宝库等）就停。资源用光总会停。"
+      },
+      "qty": { "type": "number", "description": "buy 用：数量，默认 1" },
+      "target": { "type": "string", "description": "sell 用：实例 id（如 c_007）/ all / species <鱼id> / item <物品id>" },
+      "location_id": { "type": "string", "description": "goto 用：地点 id（如 reed_river）。不填=列出所有钓点(已解锁/未解锁价格/本季还有几种没见过的鱼，含单列的传说级)" },
+      "chest_uid": { "type": "string", "description": "open 用：待开宝箱 uid（如 ch_001，在 inventory 里看）" },
+      "id": { "type": "string", "description": "look 用：对象 id 或中文名（鱼/地点/鱼饵/季节/物品，如 look 月鳞鲤）。没钓到的鱼只会显示 ？？？" },
+      "steps": {
+        "type": "array",
+        "items": { "type": "object" },
+        "description": "batch 用：把多个动作排成队列、一次按序执行（最多 8 步，每步是 {action, 以及该动作要的参数}）。例：买 10 个蚯蚓再连钓 10 竿=[{\"action\":\"buy\",\"bait_id\":\"basic_worm\",\"qty\":10},{\"action\":\"cast\",\"times\":10}]；换地点再钓到新种就停=[{\"action\":\"goto\",\"location_id\":\"reed_river\"},{\"action\":\"cast\",\"times\":8,\"stop_on\":[\"new\"]}]。最省来回 token。（纯文本 cmd() 接口下等价写法是用 ; 或换行串联，如 'buy basic_worm 10; cast 10'。）"
+      }
+    },
+    "required": ["action"]
+  }
+}

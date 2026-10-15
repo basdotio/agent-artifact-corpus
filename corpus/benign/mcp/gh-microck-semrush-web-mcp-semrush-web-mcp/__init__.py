@@ -1,0 +1,1 @@
+"""Authenticated Semrush web MCP."""

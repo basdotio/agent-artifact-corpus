@@ -1,0 +1,374 @@
+---
+description: Esta guía provee lineamientos para usar Zustand (gestión de estado simple y no opinada) en aplicaciones React. Cubre organización de código, performance, pruebas y errores comunes a evitar.
+globs: *.js,*.jsx,*.ts,*.tsx
+---
+
+# Buenas prácticas de Zustand
+
+Este documento resume buenas prácticas para usar Zustand en aplicaciones React. Zustand es una librería de estado simple y no opinada. Seguir estas pautas ayuda a escribir aplicaciones mantenibles, performantes y escalables.
+
+## 1. Code Organization and Structure
+
+### 1.1. Directory Structure
+
+Organize your store files in a dedicated directory, such as `store` or `state`, at the root of your project or within a specific feature directory. This enhances discoverability and maintainability.
+
+src/
+├── components/
+│ ├── ...
+├── store/
+│ ├── index.ts # Main store file (optional)
+│ ├── bearStore.ts # Example store
+│ ├── fishStore.ts # Example store
+│ └── utils.ts # Utility functions for stores
+├── App.tsx
+└── ...
+
+### 1.2. File Naming Conventions
+
+Use descriptive names for your store files, typically reflecting the domain or feature the store manages. For example, `userStore.ts`, `cartStore.js`, or `settingsStore.tsx`. Use PascalCase for the store name itself (e.g., `UserStore`).
+
+### 1.3. Module Organization
+
+- **Single Store per File:** Prefer defining one Zustand store per file. This improves readability and maintainability.
+- **Slices Pattern:** For complex stores, consider using the slices pattern to divide the store into smaller, more manageable pieces. Each slice manages a specific part of the state and its related actions.
+
+typescript
+// store/bearStore.ts
+import { StateCreator, create } from 'zustand';
+
+interface BearSlice {
+bears: number;
+addBear: () => void;
+}
+
+const createBearSlice: StateCreator<BearSlice> = (set) => ({
+bears: 0,
+addBear: () => set((state) => ({ bears: state.bears + 1 })),
+});
+
+export const useBearStore = create<BearSlice>()((...a) => ({
+...createBearSlice(...a),
+}));
+
+// Another slice could be in fishStore.ts, etc.
+
+### 1.4. Component Architecture
+
+- **Presentational and Container Components:** Separate presentational (UI) components from container components that interact with the Zustand store. Container components fetch data from the store and pass it down to presentational components.
+- **Hooks for Data Fetching:** Utilize Zustand's `useStore` hook within container components to subscribe to specific parts of the state.
+
+### 1.5. Code Splitting Strategies
+
+- **Lazy Loading Stores:** Load stores on demand using dynamic imports. This can reduce the initial bundle size, especially for larger applications.
+- **Feature-Based Splitting:** Split your application into feature modules and create separate stores for each feature. This allows for independent loading and reduces dependencies between different parts of the application.
+
+## 2. Patrones comunes y anti‑patrones
+
+### 2.1. Patrones de diseño específicos de Zustand
+
+- **Acciones y estado co‑localizados:** Mantén acciones y el estado que modifican en el mismo store para favorecer encapsulación.
+- **Selectores:** Usa selectores para valores derivados. Memoízalos para evitar renders innecesarios.
+
+typescript
+// store/userStore.ts
+import { create } from 'zustand';
+
+interface UserState {
+name: string;
+age: number;
+}
+
+interface UserActions {
+setName: (name: string) => void;
+isAdult: () => boolean; // Selector
+}
+
+export const useUserStore = create<UserState & UserActions>((set, get) => ({
+name: 'John Doe',
+age: 20,
+setName: (name) => set({ name }),
+isAdult: () => get().age >= 18, // Selector
+}));
+
+### 2.2. Enfoques recomendados para tareas comunes
+
+- **Acciones asíncronas:** Usa `async/await` en acciones para llamadas a APIs.
+
+typescript
+interface DataState {
+data: any | null;
+isLoading: boolean;
+fetchData: () => Promise<void>;
+}
+
+export const useDataStore = create<DataState>((set) => ({
+data: null,
+isLoading: false,
+fetchData: async () => {
+set({ isLoading: true });
+try {
+const response = await fetch('https://api.example.com/data');
+const data = await response.json();
+set({ data, isLoading: false });
+} catch (error) {
+console.error('Error fetching data:', error);
+set({ isLoading: false, data: null });
+}
+},
+}));
+
+- **Persistencia de estado:** Usa `persist` (middleware) y `partialize` para seleccionar qué guardar.
+
+typescript
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+
+interface AuthState {
+token: string | null;
+setToken: (token: string | null) => void;
+}
+
+export const useAuthStore = create<AuthState>()(
+persist(
+(set) => ({
+token: null,
+setToken: (token) => set({ token }),
+}),
+{
+name: 'auth-storage', // nombre único
+partialize: (state) => ({ token: state.token }), // Solo persistir token
+}
+)
+)
+
+### 2.3. Anti‑patrones y code smells a evitar
+
+- **Estado global excesivo:** Divide en stores por dominio/feature.
+- **Mutaciones directas:** Usa `set`; considera Immer si hace falta ergonomía.
+- **Selectores costosos sin memo:** Evítalos o memoízalos.
+- **Crear stores dentro de componentes:** Evítalo (recrea store y pierde datos).
+
+### 2.4. Buenas prácticas de estado
+
+- Fuente única de la verdad (store)
+- Minimiza el estado; usa valores derivados
+- Transiciones claras y predecibles
+
+### 2.5. Manejo de errores
+
+- `try/catch` en acciones async
+- Error boundaries en UI
+- Logging centralizado
+
+## 3. Consideraciones de performance
+
+### 3.1. Optimización
+
+- **Actualizaciones selectivas:** Suscríbete solo a porciones necesarias.
+- **Igualdad superficial:** Usa `shallow` si seleccionas objetos complejos.
+
+### 3.2. Memoria
+
+- Evita fugas (limpieza de subscripciones/listeners)
+- Stores pequeños
+
+### 3.3. Renderizado
+
+- Code splitting de stores grandes
+
+## 4. Enfoques de testing
+
+### 4.1. Unit testing
+
+- Testear la lógica del store
+- Mock de dependencias externas
+- Verificar transiciones de estado
+
+### 4.2. Integración
+
+- Interacciones de componentes con el store
+- Render y simulación de eventos
+
+### 4.3. E2E
+
+- Flujos reales del usuario
+- Escenarios de producción
+
+### 4.4. Organización de tests
+
+- Co‑locar con el código bajo test
+- Nombres descriptivos
+
+### 4.5. Mocking/Stubbing
+
+- Jest/Sinon para mocks y stubs
+
+## 5. Errores comunes y gotchas
+
+### 5.1. Errores frecuentes
+
+- No usar forma funcional de `set` cuando depende del estado previo
+- Ignorar errores async
+- Abusar de `shallow` cuando hace falta deep compare
+
+### 5.2. Casos borde
+
+- Condiciones de carrera en async
+- Pérdida de contexto del provider
+
+### 5.3. Versiones
+
+- Revisa release notes de Zustand
+
+### 5.4. Compatibilidad
+
+- Asegura compatibilidad de React y Zustand
+
+### 5.5. Depuración
+
+- Devtools de Zustand
+- Consola y breakpoints
+
+## 6. Zustand‑X (zustandx.udecode.dev)
+
+Zustand‑X extiende Zustand para reducir boilerplate y añadir selectores/acciones derivadas.
+
+### 6.1. Características
+
+- Menos boilerplate, estado modular, middlewares (`immer`, `devtools`, `persist`), TypeScript, react‑tracked
+
+### 6.2. Uso
+
+```javascript
+import { createStore } from 'zustand-x';
+
+const repoStore = createStore('repo')({
+  name: 'zustandX',
+  stars: 0,
+  owner: { name: 'someone', email: 'someone@xxx.com' },
+});
+// repoStore.useStore, repoStore.store, repoStore.use.name(), repoStore.set.name('new')
+```
+
+### 6.3. Store global
+
+Combina múltiples stores para acceso global.
+
+## 7. zustand-ards
+
+Utilidades opinadas para mejorar DX con Zustand.
+
+### 7.1 Instalación
+
+```bash
+pnpm i zustand-ards
+# o
+npm i zustand-ards
+```
+
+### 7.2 Uso básico
+
+```javascript
+import { withZustandards } from 'zustand-ards';
+const useWithZustandards = withZustandards(useStore);
+const { bears, increaseBears } = useWithZustandards(['bears', 'increaseBears']);
+```
+
+## 8. Guía TypeScript
+
+### 8.1. Uso básico
+
+```typescript
+import { create } from 'zustand';
+interface BearState {
+  bears: number;
+  increase: (by: number) => void;
+}
+const useBearStore = create<BearState>()((set) => ({
+  bears: 0,
+  increase: (by) => set((state) => ({ bears: state.bears + by })),
+}));
+```
+
+### 8.2. `combine`
+
+```typescript
+import { create } from 'zustand';
+import { combine } from 'zustand/middleware';
+const useBearStore = create(
+  combine({ bears: 0 }, (set) => ({
+    increase: (by: number) => set((state) => ({ bears: state.bears + by })),
+  }))
+);
+```
+
+### 8.3. Middlewares
+
+Usa middlewares dentro de `create`; `devtools` al final.
+
+### 8.4. Autoría de middlewares
+
+Explica cómo mutan el store y tipos avanzados.
+
+### 8.5. Ejemplos de middlewares
+
+- Logger que no cambia tipos
+
+### 8.6. Patrón de slices
+
+```typescript
+import { create, StateCreator } from 'zustand';
+interface BearSlice {
+  bears: number;
+  addBear: () => void;
+  eatFish: () => void;
+}
+interface FishSlice {
+  fishes: number;
+  addFish: () => void;
+}
+const createBearSlice: StateCreator<BearSlice> = (set) => ({
+  bears: 0,
+  addBear: () => set((state) => ({ bears: state.bears + 1 })),
+  eatFish: () => set((state) => ({ fishes: state.fishes - 1 })),
+});
+const createFishSlice: StateCreator<FishSlice> = (set) => ({
+  fishes: 0,
+  addFish: () => set((state) => ({ fishes: state.fishes + 1 })),
+});
+export const useBoundStore = create<BearSlice & FishSlice>()((...a) => ({
+  ...createBearSlice(...a),
+  ...createFishSlice(...a),
+}));
+```
+
+### 8.7. Hook `useStore` acotado para stores vanilla
+
+Provee seguridad de tipos al usar `useStore` con stores vanilla.
+
+## 9. Herramientas (zustand-tools)
+
+- `createSimple`, `createSimpleContext`, `useAllData`, middlewares
+
+## 10. Prácticas sin acciones en el store
+
+### 10.1. Acciones y estado co‑localizados
+
+```javascript
+export const useBoundStore = create((set) => ({
+  count: 0,
+  text: 'hello',
+  inc: () => set((state) => ({ count: state.count + 1 })),
+  setText: (text) => set({ text }),
+}));
+```
+
+### 10.2. Acciones externas
+
+```javascript
+export const useBoundStore = create(() => ({ count: 0, text: 'hello' }));
+export const inc = () =>
+  useBoundStore.setState((state) => ({ count: state.count + 1 }));
+export const setText = (text) => useBoundStore.setState({ text });
+```

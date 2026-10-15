@@ -1,0 +1,76 @@
+PUT _ingest/pipeline/bengaluru-sources-pipeline
+{
+  "description": "Process HTML and PDF documents from Bengaluru civic sources",
+  "processors": [
+    {
+      "attachment": {
+        "field": "data",
+        "target_field": "attachment",
+        "indexed_chars": -1,
+        "ignore_missing": true,
+        "if": "ctx.content_type != null && ctx.content_type.contains('pdf')"
+      }
+    },
+    {
+      "set": {
+        "field": "body",
+        "value": "{{attachment.content}}",
+        "if": "ctx.attachment?.content != null"
+      }
+    },
+    {
+      "remove": {
+        "field": ["data", "attachment"],
+        "ignore_missing": true
+      }
+    },
+    {
+      "remove": {
+        "description": "Remove blank published dates so the fallback can run",
+        "field": "published_date",
+        "ignore_missing": true,
+        "if": "ctx.published_date != null && ctx.published_date.toString().trim().length() == 0"
+      }
+    },
+    {
+      "set": {
+        "description": "Fall back to crawl timestamp if no published date exists",
+        "field": "published_date",
+        "value": "{{crawled_at}}",
+        "override": false
+      }
+    },
+    {
+      "trim": {
+        "field": "body",
+        "ignore_missing": true
+      }
+    },
+    {
+      "set": {
+        "field": "source_tier",
+        "value": "official",
+        "if": "['BMRCL','BBMP','BWSSB','BESCOM','BDA','PIB Karnataka'].contains(ctx.source_name)"
+      }
+    },
+    {
+      "set": {
+        "field": "source_tier",
+        "value": "news",
+        "if": "['The Hindu','Deccan Herald','Bangalore Mirror','Times of India'].contains(ctx.source_name)"
+      }
+    },
+    {
+      "inference": {
+        "model_id": ".elser-2-elasticsearch",
+        "input_output": [
+          {
+            "input_field": "body",
+            "output_field": "body_elser"
+          }
+        ],
+        "if": "ctx.body != null && ctx.body.length() > 0"
+      }
+    }
+  ]
+}

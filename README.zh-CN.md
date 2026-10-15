@@ -50,7 +50,7 @@
 
 | 工具 | 规则级期望 | 备注 |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | 有，覆盖 3,539 个第 1 层样本中的 6 个 | 目前唯一一个 —— 见*已知缺口* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | 有，覆盖 4,486 个第 1 层样本中的 6 个 | 目前唯一一个 —— 见*已知缺口* |
 
 还没有接入第二个扫描器。在接入之前，上面那些工具中立的说法是 schema 的性质，而不是已被证明的结果，把这个区别说出来正是这一节存在的理由。
 
@@ -114,16 +114,16 @@ make test        # harness 单元测试
 
 写明而不是略去，用的是这份语料要求被测扫描器遵守的同一条原则。
 
-- **`expect.<tool>` 里的规则 ID 不在这里校验，这是设计如此。** 3,539 个标签里只有 6 个带 expect 块，其余 3,533 个是纯 `truth`，不需要任何扫描器就能检查。一个扫描器的规则清单属于那个扫描器，所以 `taxonomy/tools.yaml` 只通过环境变量去找它，并且校验器现在会**拒绝**任何走出本仓库的 `rules_source.path`。这条规则的由来：aguard 的路径曾经是 `../agent-guard/docs/rules.md`，某台机器上的一个同级目录。没有任何东西坏掉——而这正是问题所在：`make validate` 在那台机器上报「73 ids, 56 carry a dimension」，在别处报「not checked」，于是这份语料自己的校验结果取决于作者的目录布局。真正剩下的缺口在别处：**还没有任何扫描器的仓库 clone 这份语料、用它自己的规则去检查它自己的 `expect` 块**，而那才是这项检查该待的地方。
-- **`sha256` 在第 1 层已被校验，在第 2 层仍然是空的。** 393 个采集来的样本各自带着采集时那份字节的哈希，`make validate` 会从 vendoring 的 artifact 重新算出全部 393 个并在不一致时失败。而每条 *manifest* 条目的 `sha256` 依然是空的、拉取器只核对钉住的 commit：一个引用在本地没有字节可供哈希，所以第 2 层的完整性仍然只靠 git。
+- **`expect.<tool>` 里的规则 ID 不在这里校验，这是设计如此。** 4,486 个标签里只有 6 个带 expect 块，其余 4,480 个是纯 `truth`，不需要任何扫描器就能检查。一个扫描器的规则清单属于那个扫描器，所以 `taxonomy/tools.yaml` 只通过环境变量去找它，并且校验器现在会**拒绝**任何走出本仓库的 `rules_source.path`。这条规则的由来：aguard 的路径曾经是 `../agent-guard/docs/rules.md`，某台机器上的一个同级目录。没有任何东西坏掉——而这正是问题所在：`make validate` 在那台机器上报「73 ids, 56 carry a dimension」，在别处报「not checked」，于是这份语料自己的校验结果取决于作者的目录布局。真正剩下的缺口在别处：**还没有任何扫描器的仓库 clone 这份语料、用它自己的规则去检查它自己的 `expect` 块**，而那才是这项检查该待的地方。
+- **`sha256` 在第 1 层已被校验，在第 2 层仍然是空的。** 393 个采集来的配置文件各自带着采集时那份字节的哈希，`make validate` 会从 vendoring 的 artifact 重新算出全部 393 个并在不一致时失败。852 个采集来的服务器和 skill **树**做不到这一点：标签的 `sha256` 指一个文件，放在树上会被拒绝，所以它们的完整性声明是 `manifest/pins/mcp-servers.json` 里的 `tree_sha256`，由 `scripts/harvest-mcp-servers.py --from-pins` 重算，不由 `make validate` 校验。而每条 *manifest* 条目的 `sha256` 依然是空的、拉取器只核对钉住的 commit：一个引用在本地没有字节可供哈希，所以第 2 层的完整性仍然只靠 git。
 - **表格形态的上游没法只靠 `make fetch` 复现。** `automatelab-mcp-tools` 和 `SkillMD-138K` 给的是 parquet 表格而不是样本树，所以在 fetch 和 derive 之间各自还要过一个 `scripts/` 下的脚本。脚本本身是钉住且带固定种子的，但 `make derive` 不会去调它们，所以一个干净的 clone 没法用一条命令重建这两条。
-- **良性侧是抽样，恶性侧是普查。** 3,220 个良性样本是按写明的方案从写明的总体里抽出来的，而 300 个恶性样本是上游手里的全部。因此这份语料给出的召回数字和假阳性数字，靠的是两种不同性质的分母，不能合成一个分数。
+- **良性侧是抽样，恶性侧是普查。** 4,167 个良性样本是按写明的方案从写明的总体里抽出来的，而 300 个恶性样本是上游手里的全部。因此这份语料给出的召回数字和假阳性数字，靠的是两种不同性质的分母，不能合成一个分数。
 - **只接入了一个工具。** `taxonomy/tools.yaml` 里只有一条 entry。
 - **`NOTICE` 没有被 `make validate` 与标签的许可证做交叉校验。**
 - **harness 里有一个包没有测试**：`fetch`。
 - **32 个「维度 × 层级」格子里有 7 个没有样本。** `make stats` 会把它们点名列出。
 - **三个作用面只有良性侧，没有恶性侧。** hooks、permission、connector 现在有 391 个真实采集来的配置和 2 个手工读出来的硬负样本，但恶性样本是零——因为没有任何公开语料把「被武器化的 hook 或权限授予」当作 artifact 收录过。所以在这三个作用面上，这份语料能量过度告警，**完全量不了召回**。那两个硬负样本配对的双胞胎也在 *skills* 作用面上（标签里写明了），这意味着一个从不解析设置文件的扫描器会安静下来，但那是因为它没有覆盖，不是因为它会分辨。
-- **配置采集无法只靠脚本复现。** GitHub 代码搜索按相关性排序，每天返回的那一百个都不一样，所以 `scripts/harvest-claude-config.py` 是往 `manifest/pins/claude-config.json` 里累加的，`--from-pins` 才能精确重建那份记录下来的集合。一个已发布的数字只能从 pins 文件复现，绝不能靠重新搜索。
+- **配置采集无法只靠脚本复现。** GitHub 代码搜索按相关性排序，每天返回的那一百个都不一样，所以 `scripts/harvest-claude-config.py` 是往 `manifest/pins/claude-config.json` 里累加的，`--from-pins` 才能精确重建那份记录下来的集合。一个已发布的数字只能从 pins 文件复现，绝不能靠重新搜索。 `scripts/harvest-mcp-servers.py` 和 `manifest/pins/mcp-servers.json`（服务器源码和新近的 skill）同理，它的 `--from-pins` 还会重算每棵树的哈希。
 
 ## 许可证
 

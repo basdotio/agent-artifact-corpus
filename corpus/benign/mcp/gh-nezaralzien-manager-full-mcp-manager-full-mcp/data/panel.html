@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manager.io MCP — Permissions</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --line: #e2e5ea; --text: #16181d;
+    --muted: #6b7280; --accent: #1d6fe0; --accent-soft: #e8f0fd;
+    --danger: #c0392b; --ok: #1e8e5a; --warn: #a96500; --warn-soft: #fdf3e0;
+    --risk: #b3261e; --risk-bg: #fdf1ef; --risk-line: #f0b7b0;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --panel: #1c1f25; --line: #2c313a; --text: #e8eaee;
+      --muted: #9aa3b2; --accent: #5b9bff; --accent-soft: #1b2b45;
+      --danger: #ff7b6b; --ok: #4ecb8d; --warn: #ffbe5c; --warn-soft: #362a12;
+      --risk: #ff8a7a; --risk-bg: #2b1a18; --risk-line: #5c2f2a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 20; background: var(--panel);
+    border-bottom: 1px solid var(--line); padding: 12px 20px; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0; font-weight: 650; }
+  .spacer { flex: 1; }
+  select, input[type=text], input[type=password], textarea {
+    background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 10px; font: inherit; min-width: 160px; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 12px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:disabled { opacity: .45; cursor: default; }
+  button.danger { color: var(--danger); }
+  .tabs { display: flex; gap: 4px; margin-top: 10px; }
+  .tab { padding: 6px 14px; border-radius: 8px 8px 0 0; border: 1px solid transparent;
+    cursor: pointer; color: var(--muted); }
+  .tab.on { background: var(--bg); border-color: var(--line); border-bottom-color: var(--bg);
+    color: var(--text); font-weight: 600; }
+  main { padding: 18px 20px 120px; max-width: 1180px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    margin-bottom: 14px; overflow: hidden; }
+  .card > h2 { font-size: 14px; margin: 0; padding: 11px 14px; display: flex; gap: 10px;
+    align-items: center; cursor: pointer; user-select: none; }
+  .count { color: var(--muted); font-weight: 400; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 10px; border-top: 1px solid var(--line); }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  td.op, th.op { text-align: center; width: 78px; }
+  .rname { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+  .rlabel { font-weight: 550; }
+  .desc { color: var(--muted); font-size: 12px; }
+  input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+  input[type=checkbox]:disabled { cursor: not-allowed; opacity: .3; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft);
+    color: var(--accent); font-weight: 600; }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .note { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--line);
+    padding: 10px 14px; border-radius: var(--radius); margin-bottom: 14px; }
+  .lock { font-size: 11px; color: var(--warn); }
+  .hidden { display: none !important; }
+  tr.risk { background: var(--risk-bg); }
+  tr.risk td:first-child { box-shadow: inset 3px 0 0 var(--risk); }
+  tr.risk .rlabel { color: var(--risk); }
+  tr.risk input[type=checkbox] { accent-color: var(--risk); }
+  .riskpill { font-size: 10px; font-weight: 700; letter-spacing: .03em;
+    color: var(--risk); border: 1px solid var(--risk-line); border-radius: 999px;
+    padding: 1px 7px; margin-left: 8px; white-space: nowrap; }
+  .card.riskcard { border-color: var(--risk-line); }
+  .card.riskcard > h2 { background: var(--risk-bg); }
+  .gnote { background: var(--risk-bg); color: var(--risk); font-size: 12px;
+    padding: 9px 14px; border-top: 1px solid var(--risk-line);
+    border-bottom: 1px solid var(--risk-line); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px;
+    overflow: hidden; background: var(--bg); }
+  .seg button { border: 0; border-radius: 0; padding: 3px 9px; font-size: 12px;
+    line-height: 1.4; color: var(--muted); background: transparent; cursor: pointer;
+    min-width: 30px; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button:hover { background: var(--accent-soft); }
+  .seg button.on[data-mode="deny"] { background: var(--line); color: var(--text); font-weight: 700; }
+  .seg button.on[data-mode="ask"] { background: var(--warn); color: #fff; font-weight: 700; }
+  .seg button.on[data-mode="allow"] { background: var(--accent); color: #fff; font-weight: 700; }
+  .seg.mixed { border-style: dashed; }
+  .hdrseg { display: flex; gap: 6px; align-items: center; font-size: 11px;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .legend { display: flex; gap: 14px; align-items: center; font-size: 12px;
+    color: var(--muted); padding: 0 14px 12px; flex-wrap: wrap; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+    background: var(--risk-bg); border: 1px solid var(--risk); margin-right: 5px;
+    vertical-align: -1px; }
+  .foot { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel);
+    border-top: 1px solid var(--line); padding: 10px 20px; display: flex; gap: 12px;
+    align-items: center; z-index: 30; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  label.f { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .bizrow { display: flex; gap: 12px; align-items: center; padding: 10px 14px;
+    border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .pill { font-size: 11px; color: var(--muted); border: 1px solid var(--line);
+    padding: 2px 8px; border-radius: 999px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>Manager.io MCP — Permissions</h1>
+    <select id="biz"></select>
+    <span id="src" class="badge"></span>
+    <span class="spacer"></span>
+    <span id="status" class="count"></span>
+  </div>
+  <div class="tabs">
+    <div class="tab on" data-tab="perm">Permissions</div>
+    <div class="tab" data-tab="biz">Businesses</div>
+  </div>
+</header>
+
+<main>
+  <section id="tab-perm">
+    <div id="msg"></div>
+    <div class="card"><div style="padding:12px 14px" class="row">
+      <input type="text" id="q" placeholder="Search resources (e.g. invoice, tax, payslip)" style="min-width:280px">
+      <button data-preset="read">Read only</button>
+      <button data-preset="safe">Safe writes</button>
+      <button data-preset="ask">Ask first for everything</button>
+      <button data-preset="full">Everything</button>
+      <button data-preset="none">Clear all</button>
+      <span class="spacer"></span>
+      <button id="expand">Expand all</button>
+      <button id="collapse">Collapse all</button>
+    </div>
+    <div class="row" style="padding:0 14px 12px">
+      <label><input type="checkbox" id="rawread"> Raw read of any API path</label>
+      <label><input type="checkbox" id="rawwrite"> Raw write to any API path (advanced)</label>
+    </div>
+    <div class="legend">
+      <span><strong>Each cell has three states:</strong>
+        <span class="seg" style="margin:0 4px"><button class="on" data-mode="deny" type="button">✕</button></span> blocked ·
+        <span class="seg" style="margin:0 4px"><button class="on" data-mode="ask" type="button">?</button></span>
+        <strong>Ask first</strong> — Claude stops and a confirmation box appears on your screen
+        (Deny / Allow once / Allow 15 min); no answer in 2 minutes means no ·
+        <span class="seg" style="margin:0 4px"><button class="on" data-mode="allow" type="button">✓</button></span> allowed without asking.</span>
+      <span><span class="swatch"></span><strong style="color:var(--risk)">Red rows = high risk.</strong>
+        These rewrite the structure of the books (accounts, tax codes, exchange
+        rates, opening balances, lock date, custom fields) instead of recording a
+        transaction — the old server blocked them outright. Reading them is safe;
+        setting one to ✓ asks you to confirm here, and <strong>?</strong> is the
+        recommended state for them.</span>
+      <span id="riskcount"></span>
+    </div></div>
+    <div id="groups"></div>
+  </section>
+
+  <section id="tab-biz" class="hidden">
+    <div class="card">
+      <h2 style="cursor:default">Connected businesses</h2>
+      <div id="bizlist"></div>
+    </div>
+    <div class="card">
+      <h2 style="cursor:default">Add / edit a business</h2>
+      <div style="padding: 4px 14px 16px">
+        <div class="grid">
+          <div><label class="f">Display name</label>
+            <input type="text" id="f-name" placeholder="Soprix" style="width:100%"></div>
+          <div><label class="f">API URL (ends with /api2)</label>
+            <input type="text" id="f-url" placeholder="https://xxx.manager.cloud/api2" style="width:100%"></div>
+          <div><label class="f">Access token</label>
+            <input type="password" id="f-key" placeholder="Manager → Settings → Access Tokens" style="width:100%"></div>
+          <div><label class="f">Note (optional)</label>
+            <input type="text" id="f-note" placeholder="production books" style="width:100%"></div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="primary" id="f-save">Test connection &amp; save</button>
+          <button id="f-clear">Clear form</button>
+          <span id="f-msg" class="count"></span>
+        </div>
+        <p class="desc" style="margin-bottom:0">Each business keeps its own token, its own
+          resource list, and its own tick boxes. Tokens are stored only on this Mac
+          (<span class="rname">~/.manager-full-mcp/businesses.json</span>, owner-read only)
+          and are never sent to Claude.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="foot">
+  <button class="primary" id="save" disabled>Save permissions</button>
+  <span id="dirty" class="count"></span>
+  <span class="spacer"></span>
+  <span id="tally" class="count"></span>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const OPS = ["read", "create", "update", "delete"];
+const SAFE_GROUPS = ["parties","sales","purchases","banking","inventory","payroll",
+  "ledger","assets","projects","recurring"];
+let STATE = null, MATRIX = {}, DIRTY = false, BIZ = null;
+
+const api = async (path, body) => {
+  const url = path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN);
+  const res = await fetch(url, body ? {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)
+  } : {});
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+const el = (tag, attrs = {}, kids = []) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== false) n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of [].concat(kids)) if (kid) n.append(kid);
+  return n;
+};
+const setDirty = (on) => {
+  DIRTY = on;
+  document.getElementById("save").disabled = !on;
+  document.getElementById("dirty").textContent = on ? "Unsaved changes" : "";
+};
+
+const isRisky = (r) => r.risk === "high";
+
+function confirmRisk(resource, op) {
+  return confirm(
+    "\u26a0\ufe0f HIGH-RISK PERMISSION\n\n" +
+    `Allow Claude to ${op.toUpperCase()} "${resource.label}" WITHOUT asking you first?\n\n` +
+    (resource.risk_note || "") +
+    "\n\nThis changes the structure of the books, not a single transaction, and " +
+    "Manager has no undo.\n\nTip: choose \u201c?\u201d instead — same access, but " +
+    "every single change waits for your approval."
+  );
+}
+
+function tally() {
+  const allow = {read:0, create:0, update:0, delete:0};
+  const ask = {read:0, create:0, update:0, delete:0};
+  let total = 0, riskyAllow = 0, riskyAsk = 0;
+  for (const g of (STATE.groups || [])) for (const r of g.resources) {
+    total++;
+    for (const op of OPS) {
+      const mode = MATRIX[r.name] ? MATRIX[r.name][op] : "deny";
+      if (mode === "allow") allow[op]++;
+      else if (mode === "ask") ask[op]++;
+      if (op !== "read" && isRisky(r)) {
+        if (mode === "allow") riskyAllow++;
+        else if (mode === "ask") riskyAsk++;
+      }
+    }
+  }
+  const cell = (op) => `${op} ${allow[op]}` + (ask[op] ? ` (+${ask[op]} ask)` : "");
+  document.getElementById("tally").textContent =
+    `${total} resources — ` + OPS.map(cell).join(", ");
+  const rc = document.getElementById("riskcount");
+  if (rc) {
+    rc.textContent = riskyAllow
+      ? `\u26a0\ufe0f ${riskyAllow} high-risk write${riskyAllow === 1 ? "" : "s"} allowed WITHOUT asking`
+      + (riskyAsk ? `, ${riskyAsk} set to ask first` : "")
+      : (riskyAsk
+          ? `${riskyAsk} high-risk write${riskyAsk === 1 ? "" : "s"} set to ask first — you will be prompted each time`
+          : "No high-risk writes enabled.");
+    rc.style.color = riskyAllow ? "var(--risk)" : (riskyAsk ? "var(--warn)" : "var(--ok)");
+    rc.style.fontWeight = "700";
+  }
+}
+
+const MODES = ["deny", "ask", "allow"];
+const MODE_GLYPH = {deny: "\u2715", ask: "?", allow: "\u2713"};
+const MODE_TITLE = {
+  deny: "Blocked — Claude cannot do this",
+  ask: "Ask first — Claude stops and you approve each time in a popup",
+  allow: "Allowed — Claude does this without asking",
+};
+
+function segment(current, onPick, disabled) {
+  const box = el("div", {class: "seg"});
+  for (const mode of MODES) {
+    const button = el("button", {
+      type: "button", "data-mode": mode, text: MODE_GLYPH[mode],
+      title: MODE_TITLE[mode], disabled: disabled === true,
+    });
+    if (mode === current) button.classList.add("on");
+    button.addEventListener("click", (ev) => { ev.stopPropagation(); onPick(mode, box); });
+    box.append(button);
+  }
+  return box;
+}
+
+function paint(box, mode) {
+  for (const button of box.querySelectorAll("button"))
+    button.classList.toggle("on", button.dataset.mode === mode);
+  box.classList.toggle("mixed", mode === null);
+}
+
+function usableFor(group, op) {
+  return group.resources.filter(r => r.ops[op] && !(r.locked && op !== "read"));
+}
+
+function groupBox(group) {
+  const body = el("div");
+  // Notes that apply to the whole group are shown once in the header banner.
+  const groupNote = group.resources.every(isRisky) && group.resources.length
+    ? (group.resources[0].risk_note || "") : "";
+  const head = el("h2", {}, [
+    el("span", {text: group.label}),
+    el("span", {class: "count", text: `${group.resources.length} resources`}),
+  ]);
+
+  const bulk = el("span", {class: "row", style: "gap:10px"});
+  const segs = {};
+  for (const op of OPS) {
+    const pick = (mode) => {
+      const usable = usableFor(group, op);
+      if (!usable.length) return;
+      const risky = usable.filter(isRisky);
+      if (mode === "allow" && op !== "read" && risky.length && !confirm(
+        "\u26a0\ufe0f HIGH-RISK PERMISSION\n\n" +
+        `This allows ${op.toUpperCase()} on ${risky.length} high-risk resource` +
+        `${risky.length === 1 ? "" : "s"} in "${group.label}" without asking you.\n\n` +
+        (risky[0].risk_note || "") +
+        "\n\nChoose \u201c?\u201d instead to approve each change as it happens. Continue?"
+      )) return;
+      for (const r of usable) MATRIX[r.name][op] = mode;
+      render(); setDirty(true);
+    };
+    segs[op] = segment(null, pick, usableFor(group, op).length === 0);
+    bulk.append(el("span", {class: "hdrseg"}, [el("span", {text: op}), segs[op]]));
+  }
+  head.append(el("span", {class: "spacer"}), bulk);
+  head.addEventListener("click", () => body.classList.toggle("hidden"));
+
+  const table = el("table");
+  table.append(el("thead", {}, el("tr", {}, [
+    el("th", {text: "Resource"}),
+    ...OPS.map(op => el("th", {class: "op", text: op})),
+  ])));
+  const tbody = el("tbody");
+  for (const r of group.resources) {
+    const title = el("div", {class: "row", style: "gap:0;align-items:center"}, [
+      el("span", {class: "rlabel", text: r.label}),
+      isRisky(r) && !r.locked
+        ? el("span", {class: "riskpill", text: "\u26a0 HIGH RISK", title: r.risk_note})
+        : null,
+    ]);
+    const cells = [el("td", {}, [
+      title,
+      el("div", {class: "rname", text: r.name}),
+      isRisky(r) && !r.locked && r.risk_note && r.risk_note !== groupNote
+        ? el("div", {class: "desc", text: r.risk_note}) : null,
+      r.locked ? el("div", {class: "lock", text: "locked — account security, read only"}) : null,
+    ])];
+    for (const op of OPS) {
+      const supported = !!r.ops[op] && !(r.locked && op !== "read");
+      if (!supported) {
+        cells.push(el("td", {class: "op"}, el("span", {class: "count", text: "—"})));
+        continue;
+      }
+      const pick = (mode, box) => {
+        if (mode === "allow" && op !== "read" && isRisky(r) && !confirmRisk(r, op)) return;
+        MATRIX[r.name][op] = mode;
+        paint(box, mode);
+        setDirty(true); tally(); syncGroupBoxes();
+      };
+      cells.push(el("td", {class: "op"}, segment(MATRIX[r.name][op], pick, false)));
+    }
+    const tr = el("tr", {class: isRisky(r) ? "risk" : ""}, cells);
+    tr.dataset.search = (r.name + " " + r.label + " " + (r.description || "")).toLowerCase();
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  const risky = group.resources.filter(isRisky);
+  if (risky.length === group.resources.length && risky.length) {
+    head.prepend(el("span", {text: "\u26a0\ufe0f", style: "margin-right:2px"}));
+    body.append(el("div", {class: "gnote", text:
+      "High risk — " + (risky[0].risk_note || "changes the structure of the books.")
+      + " \u201c?\u201d is the safe choice here: same access, but every change waits for you."}));
+  }
+  body.append(table);
+  const card = el("div", {
+    class: "card" + (risky.length === group.resources.length && risky.length ? " riskcard" : ""),
+  }, [head, body]);
+  card.dataset.group = group.id;
+  card._segs = segs; card._group = group;
+  return card;
+}
+
+function syncGroupBoxes() {
+  for (const card of document.querySelectorAll(".card[data-group]")) {
+    for (const op of OPS) {
+      const usable = usableFor(card._group, op);
+      const modes = new Set(usable.map(r => MATRIX[r.name][op]));
+      paint(card._segs[op], modes.size === 1 ? [...modes][0] : null);
+    }
+  }
+}
+
+function render() {
+  const host = document.getElementById("groups");
+  host.textContent = "";
+  for (const g of (STATE.groups || [])) host.append(groupBox(g));
+  syncGroupBoxes(); tally(); filter();
+}
+
+function filter() {
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  for (const card of document.querySelectorAll(".card[data-group]")) {
+    let shown = 0;
+    for (const tr of card.querySelectorAll("tbody tr")) {
+      const hit = !q || tr.dataset.search.includes(q);
+      tr.classList.toggle("hidden", !hit);
+      if (hit) shown++;
+    }
+    card.classList.toggle("hidden", shown === 0);
+    if (q) card.querySelector("div").classList.remove("hidden");
+  }
+}
+
+function preset(kind) {
+  if (kind === "full" && !confirm(
+    "\u26a0\ufe0f EVERYTHING\n\n" +
+    "Normal resources get full create, edit and delete without asking.\n" +
+    "High-risk ones (chart of accounts, tax codes, exchange rates, opening " +
+    "balances, lock date, settings) are set to \u201c?\u201d so every change " +
+    "waits for your approval.\n\nContinue?"
+  )) return;
+  for (const g of (STATE.groups || [])) for (const r of g.resources) {
+    const risky = isRisky(r);
+    const safe = SAFE_GROUPS.includes(g.id);
+    let write = "deny", remove = "deny";
+    if (kind === "full") { write = risky ? "ask" : "allow"; remove = risky ? "ask" : "allow"; }
+    else if (kind === "safe" && safe && !risky) { write = "allow"; }
+    else if (kind === "ask") { write = "ask"; remove = risky ? "deny" : "ask"; }
+    MATRIX[r.name] = {
+      read: kind === "none" ? "deny" : "allow",
+      create: write, update: write, delete: remove,
+    };
+    for (const op of OPS)
+      if (!r.ops[op] || (r.locked && op !== "read")) MATRIX[r.name][op] = "deny";
+  }
+  document.getElementById("rawread").checked = kind !== "none";
+  document.getElementById("rawwrite").checked = kind === "full";
+  render(); setDirty(true);
+}
+
+function renderBusinesses() {
+  const host = document.getElementById("bizlist");
+  host.textContent = "";
+  if (!STATE.businesses.length) {
+    host.append(el("div", {class: "bizrow desc",
+      text: "No business yet. Add one below — you can add as many as you like."}));
+  }
+  for (const b of STATE.businesses) {
+    host.append(el("div", {class: "bizrow"}, [
+      el("strong", {text: b.name}),
+      el("span", {class: "rname", text: b.api_url}),
+      el("span", {class: "pill", text: b.has_key ? "token saved" : "no token"}),
+      b.note ? el("span", {class: "desc", text: b.note}) : null,
+      el("span", {class: "spacer"}),
+      el("button", {text: "Edit", onclick: () => {
+        document.getElementById("f-name").value = b.name;
+        document.getElementById("f-url").value = b.api_url;
+        document.getElementById("f-key").value = "";
+        document.getElementById("f-note").value = b.note || "";
+        document.getElementById("f-msg").textContent =
+          "Editing " + b.name + " — leave the token blank to keep the saved one.";
+      }}),
+      el("button", {text: "Reload resources", onclick: async () => {
+        const out = await api("/api/business/refresh", {id: b.id});
+        alert(out.ok ? `Loaded ${out.resources} resources (Manager ${out.api_version}).`
+                     : out.error);
+        load(b.id);
+      }}),
+      el("button", {class: "danger", text: "Remove", onclick: async () => {
+        if (!confirm(`Remove ${b.name}? Its permissions file stays on disk.`)) return;
+        await api("/api/business/delete", {id: b.id});
+        load();
+      }}),
+    ]));
+  }
+}
+
+async function load(active) {
+  const url = "/api/state" + (active ? "?business=" + encodeURIComponent(active) : "");
+  STATE = await api(url);
+  MATRIX = {};
+  for (const g of (STATE.groups || [])) for (const r of g.resources) {
+    MATRIX[r.name] = Object.assign({read:"deny",create:"deny",update:"deny",delete:"deny"},
+      STATE.matrix[r.name] || {});
+  }
+  BIZ = STATE.active;
+  const sel = document.getElementById("biz");
+  sel.textContent = "";
+  for (const b of STATE.businesses) {
+    sel.append(el("option", {value: b.id, text: b.name, selected: b.id === BIZ}));
+  }
+  const src = document.getElementById("src");
+  const panelSource = STATE.policy && STATE.policy.source === "control-panel";
+  src.textContent = STATE.businesses.length
+    ? (panelSource ? "saved in this panel" : "extension defaults")
+    : "no business";
+  src.className = "badge" + (panelSource ? "" : " warn");
+  document.getElementById("rawread").checked = !!(STATE.policy && STATE.policy.raw_read);
+  document.getElementById("rawwrite").checked = !!(STATE.policy && STATE.policy.raw_write);
+  const msg = document.getElementById("msg");
+  msg.textContent = "";
+  if (STATE.error) msg.append(el("div", {class: "note", text: STATE.error}));
+  else if (!STATE.businesses.length) msg.append(el("div", {class: "note",
+    text: "Add a business on the Businesses tab to see its resources here."}));
+  else if (STATE.policy && STATE.policy.read_only_mode) msg.append(el("div", {class: "note",
+    text: "This connection runs in read-only mode (MANAGER_FULL_READ_ONLY), so writes stay off whatever you tick."}));
+  else if (!panelSource) msg.append(el("div", {class: "note",
+    text: "These boxes currently come from the extension settings. Save once here and this panel takes over."}));
+  document.getElementById("status").textContent = STATE.api_version
+    ? "Manager " + STATE.api_version : "";
+  render(); renderBusinesses(); setDirty(false);
+  // First run: land on the tab where a business gets added.
+  if (!STATE.businesses.length) {
+    document.querySelector('.tab[data-tab="biz"]').click();
+    document.getElementById("f-name").focus();
+  }
+}
+
+document.getElementById("save").addEventListener("click", async () => {
+  const out = await api("/api/permissions", {
+    business: BIZ, matrix: MATRIX,
+    raw_read: document.getElementById("rawread").checked,
+    raw_write: document.getElementById("rawwrite").checked,
+  });
+  if (!out.ok) { alert(out.error); return; }
+  setDirty(false);
+  document.getElementById("dirty").textContent = "Saved — Claude picks this up immediately.";
+  setTimeout(() => { if (!DIRTY) document.getElementById("dirty").textContent = ""; }, 4000);
+  load(BIZ);
+});
+document.getElementById("biz").addEventListener("change", (e) => load(e.target.value));
+document.getElementById("q").addEventListener("input", filter);
+document.getElementById("expand").addEventListener("click", () =>
+  document.querySelectorAll(".card[data-group] > div").forEach(d => d.classList.remove("hidden")));
+document.getElementById("collapse").addEventListener("click", () =>
+  document.querySelectorAll(".card[data-group] > div").forEach(d => d.classList.add("hidden")));
+for (const b of document.querySelectorAll("[data-preset]"))
+  b.addEventListener("click", () => preset(b.dataset.preset));
+for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
+  document.getElementById("tab-perm").classList.toggle("hidden", t.dataset.tab !== "perm");
+  document.getElementById("tab-biz").classList.toggle("hidden", t.dataset.tab !== "biz");
+});
+document.getElementById("rawread").addEventListener("change", () => setDirty(true));
+document.getElementById("rawwrite").addEventListener("change", () => setDirty(true));
+document.getElementById("f-clear").addEventListener("click", () => {
+  for (const id of ["f-name","f-url","f-key","f-note"]) document.getElementById(id).value = "";
+  document.getElementById("f-msg").textContent = "";
+});
+document.getElementById("f-save").addEventListener("click", async () => {
+  const msg = document.getElementById("f-msg");
+  msg.textContent = "Testing connection…";
+  const out = await api("/api/business", {
+    name: document.getElementById("f-name").value,
+    api_url: document.getElementById("f-url").value,
+    api_key: document.getElementById("f-key").value,
+    note: document.getElementById("f-note").value,
+  });
+  msg.textContent = out.ok
+    ? `Connected — ${out.resources} resources found (Manager ${out.api_version}).`
+    : out.error;
+  if (out.ok) {
+    document.getElementById("f-key").value = "";
+    await load(out.business.id);
+  }
+});
+window.addEventListener("beforeunload", (e) => { if (DIRTY) e.preventDefault(); });
+load();
+</script>
+</body>
+</html>

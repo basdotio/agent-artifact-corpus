@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>dry media: print look</title>
+<!-- Render: node render.mjs sheets/print_sheet.html out/print_sheet.png   (from painting-kit/dry) -->
+<script src="/dry/node_modules/p5/lib/p5.min.js"></script>
+<script src="/dry/node_modules/p5.brush/dist/p5.brush.js"></script>
+<script src="/dry/paper.js"></script>
+<script src="/dry/print.js"></script>
+<style>
+  body { margin: 0; background: #777; }
+  #stage { position: relative; width: max-content; }
+  #stage canvas { display: block; }
+  #stage canvas + canvas { position: absolute; left: 0; top: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+const W = 1800, H = 1080, SEED = 7;
+const PAPER = '#efe7d6';
+let labels;
+function label(text, x, y, size = 15, color = '#5a5246') {
+  labels.font = `${size}px Helvetica, Arial, sans-serif`;
+  labels.fillStyle = color;
+  labels.textBaseline = 'top';
+  labels.fillText(text, x, y);
+}
+function setup() {
+  randomSeed(SEED); noiseSeed(SEED); pixelDensity(1);
+  createCanvas(W, H, WEBGL).parent('stage');
+  const overlay = document.createElement('canvas');
+  overlay.width = W; overlay.height = H;
+  document.getElementById('stage').append(overlay);
+  labels = overlay.getContext('2d');
+  background(PAPER);
+  Paper.init(W, H, SEED, { kind: 'cold', grain: 1.1 });
+}
+let layer = 0;
+function draw() {
+  if (layer === LAYERS.length) { noLoop(); window.__done = true; return; }
+  translate(-W / 2, -H / 2);
+  LAYERS[layer++]();
+}
+
+// ---- relief: a black block and a red block (left panel) ----
+const SUN = [470, 430, 150];
+const sunDist = (x, y) => Math.hypot(x - SUN[0], y - SUN[1]);
+const inBoat = (x, y) => x > 350 && x < 620 && y > 430 && y < 700;   // the boat is a solid: no gouges
+function reliefBlack(g) {
+  g.lineWidth = 16; g.strokeRect(86, 136, 768, 768);                          // the frame
+  g.beginPath(); g.rect(94, 144, 752, 476); g.arc(SUN[0], SUN[1], SUN[2] + 12, 0, 7); g.fill('evenodd');   // the sky, the sun left out
+  g.fillRect(94, 620, 752, 276);                                              // the sea
+  g.beginPath(); g.moveTo(330, 640); g.lineTo(610, 640); g.lineTo(560, 690); g.lineTo(380, 690); g.closePath(); g.fill();   // hull
+  g.fillRect(468, 440, 7, 200);                                               // mast
+  g.beginPath(); g.moveTo(482, 452); g.lineTo(600, 620); g.lineTo(482, 620); g.closePath(); g.fill();        // sail
+  g.beginPath(); g.moveTo(460, 480); g.lineTo(460, 620); g.lineTo(370, 620); g.closePath(); g.fill();
+}
+function reliefRed(g) {
+  g.beginPath(); g.arc(SUN[0], SUN[1], SUN[2], 0, 7); g.fill();
+  g.lineWidth = 15;
+  for (let k = 0; k < 7; k++) { g.beginPath(); for (let x = 94; x <= 846; x += 6) { const y = 650 + k * 34 + 8 * Math.sin(x / 38 + k * 1.7); x === 94 ? g.moveTo(x, y) : g.lineTo(x, y); } g.stroke(); }
+}
+
+// ---- riso: a teal drum and a fluorescent orange drum (right panel) ----
+const MOON = [1230, 380, 165], SUN2 = [1420, 620, 200];
+const hill = x => 780 - 70 * Math.sin((x - 950) / 120) - 40 * Math.sin((x - 950) / 47);
+function risoTealMask(g) {
+  g.beginPath(); g.arc(MOON[0], MOON[1], MOON[2], 0, 7); g.fill();
+  g.beginPath(); g.moveTo(940, 910); for (let x = 940; x <= 1720; x += 6) g.lineTo(x, hill(x)); g.lineTo(1720, 910); g.closePath(); g.fill();
+}
+const risoTealTone = (x, y) => y > hill(x) - 2 ? 1 : clamp01(1.05 - (x - (MOON[0] - 165)) / 330 + (MOON[1] + 165 - y) * 0 - 0.15 * (y - MOON[1]) / 165);
+function risoOrangeMask(g) {
+  g.beginPath(); g.arc(SUN2[0], SUN2[1], SUN2[2], 0, 7); g.fill();
+}
+const risoOrangeTone = (x, y) => clamp01(1.0 - 0.7 * (y - (SUN2[1] - SUN2[2])) / (2 * SUN2[2]));
+const clamp01 = v => Math.min(1, Math.max(0, v));
+
+const LAYERS = [
+function relief() {
+  label('Print look  ·  relief: black block + red block, off register; overprints multiply', 60, 28, 20, '#2f2a24');
+  label('relief block 1, black: a radial gouge field in the sky (cut harder near the sun), horizontal gouges in the sea', 60, 70);
+  Paper.paint(buf => {
+    Print.init({ seed: 1, misregister: 5 });
+    Print.ink(buf, { color: 'black', kind: 'relief', mask: reliefBlack, gouge: { field: (x, y) => y < 620 ? Print.fields.radial([SUN[0], SUN[1]])(x, y) : 0, spacing: 10, length: [40, 120], width: 7,
+      tone: (x, y) => inBoat(x, y) ? 0 : y < 620 ? clamp01(1.15 - sunDist(x, y) / 300) : clamp01(0.75 - (y - 620) / 300) } });
+    Print.ink(buf, { color: 'red', kind: 'relief', mask: reliefRed, gouge: { field: 0, spacing: 13, length: [30, 70], width: 3, tone: () => 0.3 } });
+  });
+},
+function riso() {
+  label('riso: teal and fluorescent orange drums, grain and halftone; the overprint is where they cross', 940, 70);
+  Paper.paint(buf => {
+    Print.init({ seed: 2, misregister: 5 });   // a new press run: the teal is the first plate
+    Print.ink(buf, { color: 'teal', kind: 'riso', mask: risoTealMask, halftone: { tone: risoTealTone, cell: 11, angle: 15 } });
+    Print.ink(buf, { color: 'fluoOrange', kind: 'riso', mask: risoOrangeMask, halftone: { tone: risoOrangeTone, cell: 10, angle: 75 } });
+  });
+  label('relief: gouge marks follow the field; red shows through the black where it is cut', 60, 940);
+  label('riso: halftone dots at 15 and 75 degrees, grain, the paper showing through; the orange drum prints about 5 px off the teal', 940, 940);
+},
+];
+</script>
+</body>
+</html>

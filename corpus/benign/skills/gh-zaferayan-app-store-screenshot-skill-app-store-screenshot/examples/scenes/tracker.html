@@ -1,0 +1,42 @@
+<!-- Tracker (a nutrition app's Today screen): the week strip and the macro progress bars
+     from the screen, stood up in the gutters: day bubbles on the left, bars on the right.
+     Feed it the values the screenshot shows through scene_vars:
+       "scene_vars": {"days": "MTWTFSS", "selected": 5,
+                      "bars": [["#8fd3a8", 0.67], ["#e6c16a", 1], ["#ef8f6f", 0.76]]} -->
+<style>
+  #s6 { position: absolute; inset: 0;
+        background:
+          radial-gradient(55% 30% at 50% 58%, rgba(170, 255, 215, .45), transparent 70%),
+          radial-gradient(40% 22% at 4% 20%, rgba(200, 255, 170, .3), transparent 70%),
+          radial-gradient(45% 25% at 96% 88%, rgba(255, 230, 150, .35), transparent 70%); }
+  #s6 svg { position: absolute; inset: 0; }
+</style>
+<div id="s6"></div>
+<script>
+document.addEventListener('store:layout', ({ detail: L }) => {
+  const { w: W, h: H } = L.canvas, d = L.device, V = window.SCENE || {};
+  const FONT = '"SF Pro Display", system-ui, sans-serif';
+  let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>
+    <filter filterUnits="userSpaceOnUse" x="-400" y="-400" width="2400" height="3800" id="sh"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#053a30" flood-opacity=".4"/></filter></defs>`;
+
+  // Week bubbles, with the day the screen selects filled in
+  const days = [...(V.days || 'MTWTFSS')], selected = V.selected ?? 5, gl = d.left / 2, R = Math.min(62, d.left / 2 - 22);
+  const y0 = d.top + 120, y1 = d.bottom - 120, step = (y1 - y0) / (days.length - 1);
+  days.forEach((ch, i) => {
+    const y = y0 + i * step, on = i === selected;
+    s += `<g filter="url(#sh)"><circle cx="${gl}" cy="${y}" r="${R}" fill="${on ? '#1c2621' : 'rgba(255,255,255,.22)'}"/></g>
+          <text x="${gl}" y="${y + 17}" text-anchor="middle" font-family='${FONT}' font-weight="700" font-size="48" fill="#fff">${ch}</text>`;
+  });
+
+  // Progress bars, each filled to the fraction the screen shows
+  const gr = W - (W - d.right) / 2, bw = 40, gap = 20;
+  const bars = V.bars || [['#8fd3a8', .67], ['#e6c16a', 1], ['#ef8f6f', .76]];
+  const top = d.top + 90, bottom = d.bottom - 90, len = bottom - top;
+  bars.forEach(([color, f], i) => {
+    const x = gr + (i - 1) * (bw + gap) - bw / 2;
+    s += `<rect x="${x}" y="${top}" width="${bw}" height="${len}" rx="${bw/2}" fill="#10261f" opacity=".45"/>
+          <g filter="url(#sh)"><rect x="${x}" y="${bottom - len * f}" width="${bw}" height="${len * f}" rx="${bw/2}" fill="${color}"/></g>`;
+  });
+  document.getElementById('s6').innerHTML = s + '</svg>';
+});
+</script>

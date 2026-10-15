@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toast notifications</title>
+<!--
+  Toast notifications: short status messages that match the brand. If the
+  project already has a toast component (Sonner, Radix Toast, MUI Snackbar,
+  Bootstrap toasts), keep it and apply the same rules.
+
+  Rules this template enforces:
+  - Brand look:
+    - the same surface, border, radius, type and icon set as the rest of the UI;
+    - status shows as a small coloured icon, not a full red or green block.
+  - Position:
+    - bottom right on desktop, bottom centre on phones;
+    - above safe areas and above a sticky bottom bar (set --toast-offset to its
+      height), so a toast never covers the main action.
+  - Layers:
+    - toasts sit above the page (--layer-toast);
+    - while a modal dialog is open, the toast region moves into that dialog,
+      so it shows on top and stays clickable.
+  - Stacking: at most three toasts at once; the oldest leaves first.
+  - Timing:
+    - success and info leave by themselves after about 5 seconds;
+    - the timer pauses while the pointer or keyboard focus is on the toast;
+    - errors stay until the person closes them.
+  - Announcements: success and info use role="status"; errors use role="alert".
+  - Motion:
+    - a short fade and a small slide in, and a quicker fade out;
+    - nothing moves under reduced motion.
+  - Words: say what happened ("Changes saved"), plus one action when it helps
+    ("Undo"). Never report success before the real confirmation.
+
+  Use:
+    toast({ type: "success" | "info" | "warning" | "error",
+            title, message, action: { label, onClick } })
+
+  Copy the CSS and the script between the "copy" markers. Swap the SVG
+  paths for the project's own icon set.
+-->
+<style>
+/* ===== Toast: copy from here ===== */
+.toasts {
+  position: fixed;
+  inset-inline-end: var(--space-5, 24px);
+  inset-block-end: calc(var(--space-5, 24px) + var(--toast-offset, 0px) + env(safe-area-inset-bottom, 0px));
+  z-index: var(--layer-toast, 500);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  inline-size: min(380px, calc(100vw - 2 * var(--space-4, 16px)));
+  margin: 0;
+  padding: 0;
+  pointer-events: none;                 /* the empty region never blocks the page */
+}
+.toast {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: start;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px) var(--space-3, 12px) var(--space-3, 12px) var(--space-4, 16px);
+  border: 1px solid var(--color-border, #dcdce2);
+  border-radius: var(--radius-card, 12px);
+  background: var(--color-surface-raised, #ffffff);     /* opaque */
+  color: var(--color-text, #1b1b21);
+  box-shadow: var(--shadow-overlay, 0 12px 32px rgb(16 16 24 / 0.18));
+  pointer-events: auto;
+  animation: toast-in var(--duration-quick, 180ms) var(--ease-out, ease-out);
+}
+.toast.is-leaving {
+  opacity: 0;
+  transition: opacity var(--duration-instant, 100ms) var(--ease-exit, ease-in);
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+.toast__icon { inline-size: 20px; block-size: 20px; margin-block-start: 1px; }
+.toast--success .toast__icon { color: var(--color-success, #1a7f37); }
+.toast--info .toast__icon { color: var(--color-info, #0b63c4); }
+.toast--warning .toast__icon { color: var(--color-warning, #8a5d00); }
+.toast--error .toast__icon { color: var(--color-danger, #c4232e); }
+.toast__text { min-inline-size: 0; }
+.toast__title {
+  margin: 0;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: var(--weight-bold, 650);
+  line-height: var(--leading-small, 1.45);
+}
+.toast__message {
+  margin: 0;
+  color: var(--color-text-subtle, #595963);
+  font-size: var(--text-small, 0.875rem);
+  line-height: var(--leading-small, 1.45);
+}
+.toast__actions { display: flex; align-items: center; gap: var(--space-1, 4px); margin: -6px -4px -6px 0; }
+.toast__action,
+.toast__close {
+  display: inline-grid;
+  place-items: center;
+  min-block-size: 32px;
+  border: 0;
+  border-radius: var(--radius-control, 8px);
+  background: transparent;
+  color: var(--color-text, #1b1b21);
+  font: inherit;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: var(--weight-medium, 500);
+  cursor: pointer;
+  transition: background-color var(--duration-instant, 100ms) var(--ease-out, ease-out);
+}
+.toast__action { padding: 0 var(--space-2, 8px); color: var(--color-link, var(--color-brand, #3d4ed8)); }
+.toast__close { inline-size: 32px; color: var(--color-text-subtle, #595963); }
+.toast__action:hover,
+.toast__close:hover { background: var(--color-surface, #f6f6f8); }
+.toast__close svg { inline-size: 16px; block-size: 16px; }
+@media (max-width: 600px) {
+  .toasts { inset-inline: var(--space-4, 16px); inline-size: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+  .toast.is-leaving { transition: none; }
+}
+/* ===== Toast: copy until here ===== */
+
+/* Demo page only */
+:root {
+  color-scheme: light dark;
+  --color-canvas: #f4f1ea; --color-surface: #ece8df; --color-surface-raised: #fffdf8;
+  --color-text: #1f2320; --color-text-subtle: #5a5f5a; --color-border: #d9d4c9; --color-border-strong: #8b8c84;
+  --color-brand: #24473a; --color-on-brand: #ffffff; --color-focus: #1f6feb;
+  --color-success: #2e7d4f; --color-info: #2f5f9e; --color-warning: #8a5d00; --color-danger: #b42318;
+  --shadow-overlay: 0 12px 32px rgb(20 24 20 / 0.16);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: #131614; --color-surface: #1d211e; --color-surface-raised: #252a26;
+    --color-text: #ecefeb; --color-text-subtle: #a9b0aa; --color-border: #343a35; --color-border-strong: #7f877f;
+    --color-brand: #8fc7ae; --color-on-brand: #0f1a15; --color-focus: #6ea8ff;
+    --color-success: #6fd39a; --color-info: #8fb8f0; --color-warning: #e3b341; --color-danger: #ff8a80;
+    --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.5);
+  }
+}
+body { margin: 0; font: 1rem/1.55 system-ui, sans-serif; background: var(--color-canvas); color: var(--color-text); }
+header.demo-header { position: sticky; top: 0; z-index: 100; padding: 16px; background: var(--color-surface-raised); border-block-end: 1px solid var(--color-border); }
+main { max-inline-size: 760px; margin: 0 auto; padding: 24px 16px 400px; }
+:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.btn { display: inline-flex; align-items: center; min-block-size: 40px; padding: 0 16px; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-surface-raised); color: var(--color-text); font: inherit; font-weight: 500; cursor: pointer; }
+</style>
+</head>
+<body>
+<header class="demo-header">Sticky header</header>
+<main>
+  <h1>Toast notifications</h1>
+  <p>
+    <button type="button" class="btn" id="demo-success">Save changes</button>
+    <button type="button" class="btn" id="demo-error">Fail to save</button>
+    <button type="button" class="btn" id="demo-undo">Remove item</button>
+  </p>
+</main>
+
+<section class="toasts" id="toasts" aria-label="Notifications"></section>
+
+<script>
+/* ===== Toast: copy from here ===== */
+(() => {
+  const region = document.getElementById("toasts");
+  const MAX_VISIBLE = 3;
+  const DURATION = { success: 5000, info: 5000, warning: 8000, error: 0 };   // 0 = stays until closed
+  const ICONS = {
+    success: '<path d="M4 10.5l3.5 3.5L16 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+    info: '<circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 9v5M10 6.2v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+    warning: '<path d="M10 3.5l7 12.5H3z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8.5v3.5M10 14.2v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+    error: '<circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 7.5l5 5M12.5 7.5l-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+  };
+  const CLOSE = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+
+  function host() {
+    // Inside an open modal dialog the toast must live in that dialog to show on top and stay clickable.
+    const modal = [...document.querySelectorAll("dialog[open]")].reverse().find((d) => d.matches(":modal"));
+    return modal || document.body;
+  }
+
+  function dismiss(node) {
+    if (!node.isConnected || node.classList.contains("is-leaving")) return;
+    clearTimeout(node.timer);
+    node.classList.add("is-leaving");
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    setTimeout(() => node.remove(), reduce ? 0 : 160);
+  }
+
+  window.toast = function toast({ type = "info", title = "", message = "", action = null, duration } = {}) {
+    const place = host();
+    if (region.parentElement !== place) place.appendChild(region);
+
+    const node = document.createElement("div");
+    node.className = `toast toast--${type}`;
+    node.setAttribute("role", type === "error" ? "alert" : "status");
+    node.innerHTML = `<svg class="toast__icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">${ICONS[type] || ICONS.info}</svg>
+      <div class="toast__text"></div><div class="toast__actions"></div>`;
+    const text = node.querySelector(".toast__text");
+    if (title) { const t = document.createElement("p"); t.className = "toast__title"; t.textContent = title; text.append(t); }
+    if (message) { const m = document.createElement("p"); m.className = "toast__message"; m.textContent = message; text.append(m); }
+    const actions = node.querySelector(".toast__actions");
+    if (action) {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "toast__action"; button.textContent = action.label;
+      button.addEventListener("click", () => { action.onClick && action.onClick(); dismiss(node); });
+      actions.append(button);
+    }
+    const close = document.createElement("button");
+    close.type = "button"; close.className = "toast__close"; close.setAttribute("aria-label", "Dismiss notification");
+    close.innerHTML = CLOSE;
+    close.addEventListener("click", () => dismiss(node));
+    actions.append(close);
+
+    region.append(node);
+    const visible = [...region.querySelectorAll(".toast:not(.is-leaving)")];
+    visible.slice(0, Math.max(0, visible.length - MAX_VISIBLE)).forEach(dismiss);
+
+    const ms = duration !== undefined ? duration : DURATION[type];
+    if (ms > 0) {
+      let remaining = ms, started = Date.now();
+      const start = () => { started = Date.now(); node.timer = setTimeout(() => dismiss(node), remaining); };
+      const pause = () => { clearTimeout(node.timer); remaining -= Date.now() - started; };
+      node.addEventListener("pointerenter", pause);
+      node.addEventListener("pointerleave", start);
+      node.addEventListener("focusin", pause);
+      node.addEventListener("focusout", (e) => { if (!node.contains(e.relatedTarget)) start(); });
+      start();
+    }
+    return { dismiss: () => dismiss(node) };
+  };
+
+  // When a dialog closes, bring the region back to the page.
+  document.addEventListener("close", () => {
+    if (!region.isConnected || region.parentElement.matches("dialog:not([open])")) document.body.appendChild(region);
+  }, true);
+})();
+/* ===== Toast: copy until here ===== */
+
+/* Demo buttons */
+document.getElementById("demo-success").addEventListener("click", () => toast({ type: "success", title: "Changes saved" }));
+document.getElementById("demo-error").addEventListener("click", () => toast({ type: "error", title: "Couldn't save your changes", message: "Check your connection and try again." }));
+document.getElementById("demo-undo").addEventListener("click", () => toast({ type: "info", title: "Item removed", action: { label: "Undo", onClick: () => {} } }));
+</script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+{
+  "skill_name": "innbucks-integration",
+  "evals": [
+    {
+      "id": 1,
+      "name": "laravel-checkout",
+      "prompt": "We run a Laravel 11 event ticketing app and just got InnBucks merchant test credentials (API key, username, password and a test base URL). Add InnBucks as a payment option: a service class, config, a checkout page that shows what the customer needs, and whatever is needed to find out when the ticket is paid. Save the files.",
+      "expected_output": "A Laravel service, config, checkout view and queued job that log in with X-Api-Key + bearer token, generate a PAYMENT code in integer cents, show code, QR, *569#, countdown and a deep link, and check the code every 30 s in a job, fulfilling only on Claimed or Paid.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "both-headers",
+          "text": "Every request sends X-Api-Key, and every request except POST /auth/third-party sends Authorization: Bearer <token>"
+        },
+        {
+          "id": "token-cache-refresh",
+          "text": "The access token is cached and refreshed before 15 minutes (or re-obtained on a 401 with a single retry), not fetched per request"
+        },
+        {
+          "id": "cents",
+          "text": "The amount is sent to POST /api/code/generate as integer cents (e.g. 450 for US$4.50), with type PAYMENT"
+        },
+        {
+          "id": "display",
+          "text": "The checkout shows the code, the QR image from qrCode, the *569# / app instruction and a 10-minute countdown"
+        },
+        {
+          "id": "deep-link",
+          "text": "A mobile deep link is built from config: zw.co.innbucksnova.test://purchase?paymentToken={code} in test, com.innbucks.customer://purchase?paymentToken={code} in production"
+        },
+        {
+          "id": "poll-30s-job",
+          "text": "Status is checked with POST /api/code/inquiry at most every 30 seconds, from a queued job or scheduler rather than a tight loop in the web request"
+        },
+        {
+          "id": "claimed-is-paid",
+          "text": "The order is marked paid on status Claimed (and Paid), and Expired / Timed Out are treated as final unpaid"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "amount-bug",
+      "prompt": "Customers paying with InnBucks see US$0.45 on their phone when the order total is US$45.00. Here's our Node code:\n\nconst res = await fetch(`${base}/api/code/generate`, { method: 'POST', headers, body: JSON.stringify({ reference: order.id, narration: 'Order', currency: 'USD', amount: order.total, type: 'PAYMENT' }) });\n\norder.total is a Number like 45 or 45.5. What's wrong and how do we fix it?",
+      "expected_output": "Explains that InnBucks amounts are integer cents, so 45 is 45 cents; convert with Math.round(total*100), prefer storing cents, and put the order reference in narration.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "cents-rule",
+          "text": "States that InnBucks amounts are integer cents / minor units"
+        },
+        {
+          "id": "fix",
+          "text": "Converts to cents with rounding (e.g. Math.round(order.total * 100)) or recommends storing totals in cents, and does not send decimals"
+        },
+        {
+          "id": "narration-ref",
+          "text": "Points out that narration should carry the unique order reference because it appears on the merchant statement"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "token-expiry",
+      "prompt": "Our Python service integrates the InnBucks Merchant API. It logs in once at startup and stores the token in a global. Everything works for a while, then every InnBucks call returns 401 until we restart the service. Why, and what's the right fix?",
+      "expected_output": "The bearer token expires after 15 minutes; cache it with its issue time, re-login after ~14 minutes and on a 401 re-login and retry once, sharing the token across workers.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "15-min",
+          "text": "Identifies that InnBucks access tokens expire after 15 minutes by default"
+        },
+        {
+          "id": "refresh",
+          "text": "Proposes proactive re-login before expiry (around 14 minutes) and re-login plus a single retry on 401"
+        },
+        {
+          "id": "api-key-still",
+          "text": "Keeps sending X-Api-Key on the login request and on every call"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "agent-deposit",
+      "prompt": "We're an InnBucks agent. Build the cash deposit flow for our Django back office: the teller enters the customer's phone number and the cash amount, and the customer's wallet gets credited. Our network is flaky, so handle the case where we don't get a response.",
+      "expected_output": "Linked account inquiry (000 = success) then manual national ID check then deposit with a saved unique reference; on timeout never resend, use deposit inquiry on /bank/api/transaction/inquiry with originalParticipantReference and a new participantReference.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "linked-account",
+          "text": "Uses GET /api/v1/account/msisdn/{msisdn}/details?currency=... first and treats responseCode 000 as success"
+        },
+        {
+          "id": "id-check",
+          "text": "Requires the teller to verify the returned name against the customer's national ID before depositing"
+        },
+        {
+          "id": "own-reference",
+          "text": "Generates and saves a unique reference before POST /api/transaction/deposit, with amount in integer cents"
+        },
+        {
+          "id": "no-resend",
+          "text": "On timeout/no response it does not resend the deposit but calls POST /bank/api/transaction/inquiry with originalParticipantReference = the deposit reference and a new participantReference"
+        },
+        {
+          "id": "details-code",
+          "text": "Reads the deposit outcome from details.responseCode of the inquiry response"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "review-before-uat",
+      "prompt": "Please review our InnBucks integration before we submit UAT. We poll /api/code/inquiry every 3 seconds from the browser via our API, mark orders paid when status == 'Paid', and if the customer asks for another code we just generate a new one and stop tracking the old one. Refunds: we call /api/transaction/reversal/v2 with the payment's reference.",
+      "expected_output": "Flags: poll at most every 30 s server-side; treat Claimed as paid too; keep checking the old code; reversal only works for deposits, code payments use InnBucks' manual reversal process; mentions UAT video and sign-off.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "30s",
+          "text": "Says code inquiries must be at most once every 30 seconds per code (InnBucks' explicit requirement)"
+        },
+        {
+          "id": "claimed",
+          "text": "Says status Claimed must also be treated as paid (not only Paid)"
+        },
+        {
+          "id": "old-code",
+          "text": "Says the old code must still be checked because the customer may pay it"
+        },
+        {
+          "id": "reversal-deposits-only",
+          "text": "Says the reversal endpoint is only for deposits and code payments go through InnBucks' manual reversal process"
+        },
+        {
+          "id": "uat",
+          "text": "Mentions the UAT sign-off form with InnBucks references and the 1-2 minute customer journey video"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,688 @@
+"""Synology Container Manager operations."""
+
+import json
+import re
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, Optional
+
+_IMAGE_ID_RE = re.compile(r"^(?:sha256:)?[0-9a-fA-F]{64}$")
+_DIGEST_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+._-]*:[0-9a-fA-F]{32,}$")
+
+
+def _canonical_image_reference(reference: str) -> tuple[str, Optional[str], Optional[str]]:
+    """Return Docker's normalized repository, tag, and digest components."""
+    if not isinstance(reference, str) or not reference or reference != reference.strip():
+        raise ValueError("invalid image reference")
+    if _IMAGE_ID_RE.fullmatch(reference):
+        raise ValueError("bare image ID is not an image reference")
+
+    name, separator, digest = reference.partition("@")
+    if separator and (not digest or not _DIGEST_RE.fullmatch(digest)):
+        raise ValueError("invalid image digest")
+    last = name.rsplit("/", 1)[-1]
+    tag: Optional[str] = None
+    if ":" in last:
+        repository, tag = name.rsplit(":", 1)
+        if not tag:
+            raise ValueError("invalid image tag")
+    else:
+        repository = name
+    if not repository or any(not component for component in repository.split("/")):
+        raise ValueError("invalid image repository")
+
+    components = repository.split("/")
+    has_registry = len(components) > 1 and (
+        "." in components[0] or ":" in components[0] or components[0] == "localhost"
+    )
+    if not has_registry:
+        components.insert(0, "docker.io")
+    registry = components[0].lower()
+    if registry == "index.docker.io":
+        # Docker treats index.docker.io as a legacy alias of docker.io.
+        components[0] = "docker.io"
+        registry = "docker.io"
+    if registry == "docker.io" and len(components) == 2:
+        components.insert(1, "library")
+    normalized_repository = "/".join(components).lower()
+    normalized_tag = None if separator else (tag or "latest")
+    return normalized_repository, normalized_tag, digest or None
+
+
+def _unsafe_prune_result(message: str) -> Dict[str, Any]:
+    return {"success": False, "error": {"code": "unsafe_prune", "message": message}}
+
+
+def _coerce_size(value: Any) -> int:
+    """Convert a DSM size value to a non-negative integer byte count."""
+    if isinstance(value, bool) or value is None:
+        return 0
+    try:
+        number = Decimal(str(value).strip()) if isinstance(value, str) else Decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return 0
+    if not number.is_finite() or number < 0:
+        return 0
+    return int(number)
+
+from utils.synology_api import SynologyAPIClient
+
+
+class SynologyContainer:
+    """Manage Container Manager containers on Synology DSM."""
+
+    def __init__(
+        self,
+        base_url: str,
+        session_id: str,
+        verify_ssl: bool = False,
+        syno_token: Optional[str] = None,
+    ):
+        # Docker's graceful stop/restart can legitimately take more than the
+        # shared 15-second default (measured at 15-22 seconds on DSM 7.3.2).
+        self._api = SynologyAPIClient(
+            base_url,
+            session_id,
+            verify_ssl,
+            syno_token=syno_token,
+            request_timeout=60,
+        )
+        self.container_api = "SYNO.Docker.Container"
+        self.container_version = 1
+        self.project_api = "SYNO.Docker.Project"
+        self.project_version = 1
+        self.image_api = "SYNO.Docker.Image"
+        self.image_version = 1
+        self.registry_api = "SYNO.Docker.Registry"
+        self.registry_version = 1
+        # The registry `tags` method is served by API v2, unlike the v1 list/search/get.
+        self.registry_tags_version = 2
+        self.network_api = "SYNO.Docker.Network"
+        self.network_version = 1
+        self.container_log_api = "SYNO.Docker.Container.Log"
+        self.container_resource_api = "SYNO.Docker.Container.Resource"
+
+    def _make_request(
+        self,
+        api: str,
+        version: int,
+        method: str,
+        **params: Any,
+    ) -> Dict[str, Any]:
+        """Make a request to a Container Manager API."""
+        return self._api.post(api, method, version, params or None)
+
+    def _container_name_request(self, method: str, name: str) -> Dict[str, Any]:
+        """Call a name-based container method."""
+        # DSM expects container names as JSON strings on SYNO.Docker.Container.
+        return self._make_request(
+            self.container_api,
+            self.container_version,
+            method,
+            name=json.dumps(name),
+        )
+
+    def list_containers(
+        self, offset: int = 0, limit: int = -1, container_type: str = "all"
+    ) -> Dict[str, Any]:
+        """List Container Manager containers."""
+        return self._make_request(
+            self.container_api,
+            self.container_version,
+            "list",
+            offset=str(offset),
+            limit=str(limit),
+            type=container_type,
+        )
+
+    def health_summary(self) -> Dict[str, Any]:
+        """Return a compact health summary for every container."""
+        result = self.list_containers(offset=0, limit=-1, container_type="all")
+        if not result.get("success"):
+            return result
+        data = result.get("data")
+        if not isinstance(data, dict):
+            return {"success": False, "error": {"code": "invalid_inventory", "message": "DSM returned an invalid Container Manager inventory"}}
+        items = data.get("containers")
+        if not isinstance(items, list):
+            return {"success": False, "error": {"code": "invalid_inventory", "message": "DSM returned an invalid Container Manager inventory"}}
+        summary = [{"name": i.get("name"), "status": i.get("status", i.get("state")), "health": i.get("health"), "restart_count": i.get("restartCount", i.get("restart_count", 0)), "image": i.get("image")} for i in items if isinstance(i, dict)]
+        return {"success": True, "data": {"containers": summary, "count": len(summary)}}
+
+    def disk_usage(self) -> Dict[str, Any]:
+        """Return a read-only disk-usage summary from DSM Container Manager APIs."""
+        images = self.list_images(offset=0, limit=-1, show_dsm=False)
+        if not images.get("success"):
+            return images
+        containers = self.list_containers(offset=0, limit=-1, container_type="all")
+        if not containers.get("success"):
+            return containers
+        image_data = images.get("data")
+        container_data = containers.get("data")
+        if not isinstance(image_data, dict) or not isinstance(container_data, dict):
+            return {"success": False, "error": {"code": "invalid_inventory", "message": "DSM returned an invalid Container Manager inventory"}}
+        image_items = image_data.get("images")
+        container_items = container_data.get("containers")
+        if not isinstance(image_items, list) or not isinstance(container_items, list):
+            return {"success": False, "error": {"code": "invalid_inventory", "message": "DSM returned an invalid Container Manager inventory"}}
+        image_bytes = sum(_coerce_size(item.get("size")) for item in image_items if isinstance(item, dict))
+        container_bytes = sum(_coerce_size(item.get("size")) for item in container_items if isinstance(item, dict))
+        return {"success": True, "data": {"mode": "api", "images": {"count": len(image_items), "size_bytes": image_bytes}, "containers": {"count": len(container_items), "size_bytes": container_bytes}, "volumes": {"supported": False}, "build_cache": {"supported": False}}}
+
+    def get_container(self, name: str) -> Dict[str, Any]:
+        """Get one Container Manager container by name."""
+        return self._container_name_request("get", name)
+
+    def start_container(self, name: str) -> Dict[str, Any]:
+        """Start a Container Manager container by name."""
+        return self._container_name_request("start", name)
+
+    def stop_container(self, name: str) -> Dict[str, Any]:
+        """Stop a Container Manager container by name."""
+        return self._container_name_request("stop", name)
+
+    def restart_container(self, name: str) -> Dict[str, Any]:
+        """Restart a Container Manager container by name."""
+        return self._container_name_request("restart", name)
+
+    def delete_container(
+        self,
+        name: str,
+        force: bool = False,
+        preserve_profile: bool = True,
+    ) -> Dict[str, Any]:
+        """Delete a Container Manager container by name."""
+        return self._make_request(
+            self.container_api,
+            self.container_version,
+            "delete",
+            name=json.dumps(name),
+            force="true" if force else "false",
+            preserve_profile="true" if preserve_profile else "false",
+        )
+
+    def list_projects(self) -> Dict[str, Any]:
+        """List Container Manager projects."""
+        return self._make_request(self.project_api, self.project_version, "list")
+
+    def _project_id(self, name: str) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Find DSM's internal project ID for a project name."""
+        projects = self.list_projects()
+        if not projects.get("success"):
+            return None, projects
+
+        data = projects.get("data", {})
+        if isinstance(data, dict):
+            candidates = list(data.values())
+        elif isinstance(data, list):
+            candidates = data
+        else:
+            candidates = []
+
+        for project in candidates:
+            if isinstance(project, dict) and project.get("name") == name:
+                return project["id"], None
+
+        return None, {
+            "success": False,
+            "error": {
+                "code": "not_found",
+                "message": f"Container Manager project '{name}' not found",
+            },
+        }
+
+    def _project_id_request(self, method: str, name: str) -> Dict[str, Any]:
+        """Call an ID-based project method by project name."""
+        project_id, error = self._project_id(name)
+        if error:
+            return error
+        # SYNO.Docker.Project expects IDs as JSON strings, matching DSM's web UI.
+        params = {"id": json.dumps(project_id)}
+        if method.endswith("_stream"):
+            return self._api.post_stream(
+                self.project_api,
+                method,
+                self.project_version,
+                params,
+            )
+        return self._make_request(self.project_api, self.project_version, method, **params)
+
+    def _ensure_project_folder(self, share_path: str) -> Dict[str, Any]:
+        """Create the project folder DSM requires before project creation."""
+        folder_path, _, name = share_path.rstrip("/").rpartition("/")
+        if not folder_path or not name:
+            return {
+                "success": False,
+                "error": {
+                    "code": "invalid_path",
+                    "message": "Project share_path must include a parent folder and project name",
+                },
+            }
+
+        return self._make_request(
+            "SYNO.FileStation.CreateFolder",
+            2,
+            "create",
+            folder_path=folder_path,
+            name=name,
+            force_parent="true",
+        )
+
+    def get_project(self, name: str) -> Dict[str, Any]:
+        """Get a project without exposing Compose, environment, or secret fields."""
+        result = self._project_id_request("get", name)
+        if not result.get("success"):
+            return result
+        return self._sanitize_project_details(result)
+
+    @classmethod
+    def _sanitize_project_details(cls, value: Any) -> Any:
+        """Recursively omit fields that can contain credentials or Compose source."""
+        sensitive_keys = {
+            "compose",
+            "content",
+            "credential",
+            "credentials",
+            "env",
+            "environment",
+            "passwd",
+            "password",
+            "secret",
+            "secrets",
+            "token",
+        }
+        if isinstance(value, dict):
+            return {
+                key: cls._sanitize_project_details(item)
+                for key, item in value.items()
+                if str(key).lower() not in sensitive_keys
+            }
+        if isinstance(value, list):
+            return [cls._sanitize_project_details(item) for item in value]
+        return value
+
+    def start_project(self, name: str) -> Dict[str, Any]:
+        """Start a Container Manager project by name."""
+        return self._project_id_request("start_stream", name)
+
+    def stop_project(self, name: str) -> Dict[str, Any]:
+        """Stop a Container Manager project by name."""
+        return self._project_id_request("stop_stream", name)
+
+    def restart_project(self, name: str) -> Dict[str, Any]:
+        """Restart a Container Manager project by name."""
+        return self._project_id_request("restart_stream", name)
+
+    def build_project(self, name: str) -> Dict[str, Any]:
+        """Build a Container Manager project by name."""
+        return self._project_id_request("build_stream", name)
+
+    def clean_project(self, name: str) -> Dict[str, Any]:
+        """Clean a Container Manager project by name."""
+        return self._project_id_request("clean", name)
+
+    def delete_project(self, name: str) -> Dict[str, Any]:
+        """Delete a Container Manager project by name."""
+        return self._project_id_request("delete", name)
+
+    def create_project(
+        self,
+        name: str,
+        share_path: str,
+        content: str,
+        enable_service_portal: bool = False,
+        service_portal_name: Optional[str] = None,
+        service_portal_port: Optional[int] = None,
+        service_portal_protocol: str = "http",
+    ) -> Dict[str, Any]:
+        """Create a Container Manager project from compose content."""
+        folder = self._ensure_project_folder(share_path)
+        if not folder.get("success"):
+            return folder
+
+        params = {
+            "name": json.dumps(name),
+            "share_path": json.dumps(share_path),
+            "content": json.dumps(""),
+            "enable_service_portal": "true" if enable_service_portal else "false",
+            "service_portal_name": json.dumps(service_portal_name or ""),
+            "service_portal_port": str(service_portal_port or 0),
+            "service_portal_protocol": json.dumps(
+                service_portal_protocol if enable_service_portal else ""
+            ),
+        }
+
+        result = self._make_request(self.project_api, self.project_version, "create", **params)
+        if not result.get("success") or not content:
+            return result
+
+        return self.update_project(name, content)
+
+    def update_project(
+        self,
+        name: str,
+        content: str,
+        enable_service_portal: Optional[bool] = None,
+        service_portal_name: Optional[str] = None,
+        service_portal_port: Optional[int] = None,
+        service_portal_protocol: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update a Container Manager project's compose content."""
+        project_id, error = self._project_id(name)
+        if error:
+            return error
+
+        params = {"id": json.dumps(project_id), "content": content}
+        if enable_service_portal is not None:
+            params["enable_service_portal"] = json.dumps(enable_service_portal)
+        if service_portal_name is not None:
+            params["service_portal_name"] = json.dumps(service_portal_name)
+        if service_portal_port is not None:
+            params["service_portal_port"] = str(service_portal_port)
+        if service_portal_protocol is not None:
+            params["service_portal_protocol"] = json.dumps(service_portal_protocol)
+
+        return self._make_request(self.project_api, self.project_version, "update", **params)
+
+    def list_images(
+        self, offset: int = 0, limit: int = -1, show_dsm: bool = False
+    ) -> Dict[str, Any]:
+        """List Container Manager images."""
+        return self._make_request(
+            self.image_api,
+            self.image_version,
+            "list",
+            offset=str(offset),
+            limit=str(limit),
+            show_dsm=json.dumps(show_dsm),
+        )
+
+    def get_image(self, name: str, tag: str = "latest") -> Dict[str, Any]:
+        """Get one Container Manager image."""
+        return self._make_request(self.image_api, self.image_version, "get", image=f"{name}:{tag}")
+
+    def _image_by_name_tag(
+        self, name: str, tag: str
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """Find a local image object for APIs that require full image payloads."""
+        images = self.list_images(limit=-1)
+        if not images.get("success"):
+            return None, images
+
+        for image in images.get("data", {}).get("images", []):
+            if not isinstance(image, dict):
+                continue
+            if image.get("repository") == name and tag in image.get("tags", []):
+                return image, None
+
+        return None, {
+            "success": False,
+            "error": {
+                "code": "not_found",
+                "message": f"Container Manager image '{name}:{tag}' not found",
+            },
+        }
+
+    def delete_image(self, name: str, tag: str = "latest") -> Dict[str, Any]:
+        """Delete one Container Manager image."""
+        image, error = self._image_by_name_tag(name, tag)
+        if error:
+            return error
+
+        return self._make_request(
+            self.image_api,
+            self.image_version,
+            "delete",
+            name=name,
+            tag=tag,
+        )
+
+    def prune_images(self) -> Dict[str, Any]:
+        """Delete images that are not referenced by any container.
+
+        Uses DSM list/delete APIs and fails closed if any container image
+        reference is unavailable.
+        """
+        return self._prune_images_from_inventory(dry_run=False)
+
+    def preview_image_prune(self) -> Dict[str, Any]:
+        """Preview removable images without mutating DSM."""
+        return self._prune_images_from_inventory(dry_run=True)
+
+    def _prune_images_from_inventory(self, dry_run: bool) -> Dict[str, Any]:
+        """Compute image-prune candidates from the DSM inventories."""
+
+        containers = self.list_containers(offset=0, limit=-1, container_type="all")
+        if not containers.get("success"):
+            return containers
+        container_data = containers.get("data")
+        if not isinstance(container_data, dict) or not isinstance(container_data.get("containers"), list):
+            return {"success": False, "error": {"code": "unsafe_prune", "message": "Unexpected container inventory; no images were deleted"}}
+        container_items = container_data["containers"]
+        references = set()
+        digest_repositories = set()
+        for item in container_items:
+            if not isinstance(item, dict) or not isinstance(item.get("image"), str) or not item["image"]:
+                return _unsafe_prune_result("Cannot determine every container image reference; no images were deleted")
+            try:
+                repository, tag, digest = _canonical_image_reference(item["image"])
+            except ValueError:
+                return _unsafe_prune_result("Cannot parse every container image reference; no images were deleted")
+            if digest:
+                # DSM image inventories do not reliably expose manifest digests.
+                # Protect the whole canonical repository unless an exact digest
+                # match can be established from a future inventory shape.
+                digest_repositories.add(repository)
+            else:
+                references.add((repository, tag))
+
+        images_result = self.list_images(offset=0, limit=-1)
+        if not images_result.get("success"):
+            return images_result
+        image_data = images_result.get("data")
+        if not isinstance(image_data, dict) or not isinstance(image_data.get("images"), list):
+            return _unsafe_prune_result("Unexpected image inventory; no images were deleted")
+        images = image_data["images"]
+
+        candidates = []
+        skipped = []
+        for image in images:
+            if not isinstance(image, dict) or not isinstance(image.get("repository"), str) or not image["repository"]:
+                return _unsafe_prune_result("Unexpected image inventory; no images were deleted")
+            tags = image.get("tags")
+            if not isinstance(tags, list) or any(not isinstance(tag, str) or not tag for tag in tags):
+                return _unsafe_prune_result("Unexpected image inventory; no images were deleted")
+            if not tags:
+                tags = ["<none>"]
+            for tag in tags:
+                full_name = f"{image['repository']}:{tag}"
+                if tag == "<none>":
+                    # DSM rejects literal <none> tags; report them separately.
+                    skipped.append(full_name)
+                    continue
+                try:
+                    repository, candidate_tag, _ = _canonical_image_reference(f"{image['repository']}:{tag}")
+                except ValueError:
+                    return _unsafe_prune_result("Unexpected image inventory; no images were deleted")
+                if (repository, candidate_tag) not in references and repository not in digest_repositories:
+                    candidates.append((full_name, image["repository"], tag))
+
+        if dry_run:
+            return {
+                "success": True,
+                "data": {
+                    "mode": "preview",
+                    "candidates": [name for name, _, _ in candidates],
+                    "skipped": skipped,
+                    "errors": [],
+                },
+            }
+
+        deleted = []
+        errors = []
+        for full_name, repository, tag in candidates:
+            result = self._make_request(
+                self.image_api,
+                self.image_version,
+                "delete",
+                name=repository,
+                tag=tag,
+            )
+            if result.get("success"):
+                deleted.append(full_name)
+            else:
+                errors.append({"image": full_name, "error": result.get("error", {})})
+
+        response = {
+            "success": not errors,
+            "data": {"mode": "api", "deleted": deleted, "skipped": skipped, "errors": errors},
+        }
+        if errors:
+            response["error"] = {"code": "partial_prune", "message": "Some unused images could not be deleted"}
+        return response
+
+
+    def pull_image(self, repository: str, tag: str = "latest") -> Dict[str, Any]:
+        """Pull a Container Manager image from a registry."""
+        return self._make_request(
+            self.image_api,
+            self.image_version,
+            "pull_start",
+            repository=repository,
+            tag=tag,
+        )
+
+    def list_registries(self) -> Dict[str, Any]:
+        """List Container Manager registries."""
+        return self._make_request(self.registry_api, self.registry_version, "get")
+
+    def search_registry(self, query: str, offset: int = 0, limit: int = 50) -> Dict[str, Any]:
+        """Search images in Container Manager registries."""
+        return self._make_request(
+            self.registry_api,
+            self.registry_version,
+            "search",
+            q=query,
+            offset=str(offset),
+            limit=str(limit),
+            page_size=str(limit),
+        )
+
+    def list_registry_tags(
+        self, repository: str, offset: int = 0, limit: int = 50
+    ) -> Dict[str, Any]:
+        """List tags for a registry image."""
+        return self._make_request(
+            self.registry_api,
+            self.registry_tags_version,
+            "tags",
+            repository=repository,
+            offset=str(offset),
+            limit=str(limit),
+        )
+
+    def list_networks(self) -> Dict[str, Any]:
+        """List Container Manager networks."""
+        return self._make_request(self.network_api, self.network_version, "list")
+
+    def get_network(self, name: str) -> Dict[str, Any]:
+        """Get one Container Manager network by name."""
+        networks = self.list_networks()
+        if not networks.get("success"):
+            return networks
+
+        for network in networks.get("data", {}).get("network", []):
+            if isinstance(network, dict) and network.get("name") == name:
+                return {"success": True, "data": {"network": network}}
+
+        return {
+            "success": False,
+            "error": {
+                "code": "not_found",
+                "message": f"Container Manager network '{name}' not found",
+            },
+        }
+
+    def create_network(
+        self,
+        name: str,
+        driver: str = "bridge",
+        subnet: Optional[str] = None,
+        gateway: Optional[str] = None,
+        ip_range: Optional[str] = None,
+        enable_ipv6: bool = False,
+    ) -> Dict[str, Any]:
+        """Create a Container Manager network."""
+        params = {
+            "name": name,
+            "driver": driver,
+            "enable_ipv6": json.dumps(enable_ipv6),
+        }
+        if subnet is not None:
+            params["subnet"] = subnet
+        if gateway is not None:
+            params["gateway"] = gateway
+        if ip_range is not None:
+            params["iprange"] = ip_range
+
+        return self._make_request(self.network_api, self.network_version, "create", **params)
+
+    def delete_network(self, name: str) -> Dict[str, Any]:
+        """Delete a Container Manager network by name."""
+        network = self.get_network(name)
+        if not network.get("success"):
+            return network
+
+        return self._make_request(
+            self.network_api,
+            self.network_version,
+            "remove",
+            networks=json.dumps([network["data"]["network"]]),
+        )
+
+    def get_container_logs(
+        self,
+        name: str,
+        since: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 1000,
+    ) -> Dict[str, Any]:
+        """Get Container Manager logs for a container."""
+        params = {
+            "name": json.dumps(name),
+            "from": json.dumps(since or ""),
+            "to": json.dumps(""),
+            "level": json.dumps(""),
+            "keyword": json.dumps(""),
+            "sort_dir": json.dumps("DESC"),
+            "offset": str(offset),
+            "limit": str(limit),
+        }
+        return self._make_request(self.container_log_api, self.container_version, "get", **params)
+
+    def get_container_resource(self, name: str) -> Dict[str, Any]:
+        """Get real-time resource usage for a container."""
+        result = self._make_request(
+            self.container_resource_api,
+            self.container_version,
+            "get",
+            name=json.dumps(name),
+        )
+        if not result.get("success"):
+            return result
+
+        data = result.get("data", {})
+        resources = data.get("resources")
+        if not isinstance(resources, list):
+            return result
+
+        matches = [resource for resource in resources if resource.get("name") == name]
+        if not matches:
+            return {
+                "success": False,
+                "error": {
+                    "code": "not_found",
+                    "message": f"Container Manager resource '{name}' not found",
+                },
+            }
+
+        return {"success": True, "data": {**data, "resources": matches}}

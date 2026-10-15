@@ -1,0 +1,57 @@
+{
+  "skill_name": "sillytavern-card-maker",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "帮我做一张 SillyTavern（酒馆）角色卡：都市校园恋爱题材，女主是害羞的转学生『夏织』。希望有连贯的变量系统（好感度 + 时间，再加一两个能驱动剧情的隐藏状态也行），要有一个好看的状态栏，玩家可以点击按钮送礼物加好感度，而且玩家的操作要让剧情 AI 能感知到。请给出能直接导入酒馆就能玩的成品卡文件，外加一份给玩家的安装说明。",
+      "expected_output": "一个完整的卡工程（card.json/worldbook.json/regex.json/scripts/）+ 打包好的成品卡（含 character_book、extensions.regex_scripts、extensions.tavern_helper.scripts）+ 玩家说明。世界书含四个变量条目；脚本含 MVU 引入与变量结构注册；正则含去除变量更新与界面正则；状态栏为可交互 HTML。",
+      "files": [],
+      "expectations": [
+        "输出目录包含卡工程结构：角色卡 JSON、世界书 JSON、正则 JSON、脚本 .js 文件均存在",
+        "产出可导入的成品卡文件（PNG 或含 chara_card_v2/extensions 的 JSON），且 name 与 first_mes 非空",
+        "世界书含 [initvar] 条目且 disable=true（禁用）",
+        "世界书含「变量列表」条目且 constant=true 且内容含 {{format_message_variable::stat_data}}",
+        "世界书含 [mvu_update]变量输出格式 条目且内容含 <UpdateVariable> 与 JSONPatch",
+        "脚本含变量结构注册（registerMvuSchema 或引用 mvu_zod）",
+        "脚本含 MVU 引入（MagVarUpdate bundle URL），或说明中明确指引引入 MVU",
+        "正则含 [不发送]去除变量更新（promptOnly=true、markdownOnly=false、深度设置正确：null/null 或 minDepth 保留最近几楼，不得只有 maxDepth）",
+        "正则含把 <StatusPlaceHolderImpl/> 替换为前端界面的界面正则（replaceString 是代码块且含 <body> 或 <head>）",
+        "状态栏 HTML 等待 MVU 就绪（waitGlobalInitialized('Mvu')）并使用 getCurrentMessageId() 读写本层变量",
+        "存在送礼物类交互按钮，通过 Mvu.replaceMvuData 或等效方式把变量写回楼层",
+        "玩家操作被记录进某个变量（系统日志类）或至少有明确的对应设计说明",
+        "说明.md 提到玩家需安装 酒馆助手 与 提示词模板，以及开启渲染"
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "这是我从网上找到的一张 MVU 变量卡的成品文件（示例卡.json，就在附件路径里）。别重做这张卡——请在这张卡的基础上改：给它加一个好看的状态栏（显示好感度和当前时间），并且让玩家可以点按钮『送小礼物』（+5 好感度）。玩家在界面上的操作要让剧情 AI 能感知到。改好后给我可以直接导入游戏的成品卡文件，附一小段改动说明。",
+      "expected_output": "保留原卡（晚萤）内容的改进版成品卡：新增界面正则与可交互状态栏、玩家操作日志变量、原世界书/脚本/正则完整保留；提供了拆包工程与重新打包的成品。",
+      "files": ["sillytavern-card-maker-workspace/fixtures/示例卡.json"],
+      "expectations": [
+        "没有重做卡：成品保留原卡 name=晚萤、原世界书变量条目（[initvar]、变量列表、[mvu_update]系列）",
+        "提供了可继续编辑的工程形态（拆包产物或新建工程）",
+        "新状态栏显示好感度与当前时间（读取 stat_data 对应字段）",
+        "状态栏等待 MVU 就绪（waitGlobalInitialized('Mvu')）并读取当前楼层变量（getCurrentMessageId）",
+        "存在『送小礼物』按钮且实现好感度 +5 类逻辑，并通过 Mvu.replaceMvuData 或等效方式写回",
+        "玩家操作被记录（系统日志类变量或等效机制），供 AI 感知",
+        "新的界面正则进入成品卡 extensions.regex_scripts，且原有正则保留",
+        "重新打包的成品卡 JSON 合法且 extensions/character_book 完整（可用 check_card.py 通过）"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "帮我写一套 SillyTavern（酒馆）正则，最终输出成一个可以直接在酒馆「扩展 → 正则」里导入的 JSON 文件。需求：1) 发给 AI 的提示词里剔除 <UpdateVariable> 变量更新块，只保留最近 3 楼的；2) 消息显示里把更新块折叠起来（折成可展开的 details；流式还没写完的时候显示『变量更新中…』的提示）；3) 把 <StatusPlaceHolderImpl/> 从发给 AI 的提示词里去掉（不占 token），并在显示时替换成一个最简单的状态栏界面——要能被酒馆助手渲染成 iframe 的那种。文件存好后告诉我每条的开关含义。",
+      "expected_output": "一个正则数组 JSON 文件：去除变量更新（promptOnly、深度配置正确——保留最近 3 楼应设 minDepth=3）、两个折叠正则（markdownOnly、details）、不发送界面占位符（promptOnly）、界面状态栏（markdownOnly、替换为 HTML 代码块）。",
+      "files": [],
+      "expectations": [
+        "输出为 JSON 数组文件（可被酒馆正则扩展导入）",
+        "去除更新正则：字段名英文齐全，findRegex 为 /…/flags 字面量字符串，promptOnly=true、markdownOnly=false，且『只保留最近 3 楼』通过 minDepth=3 实现（depth 从最新楼数起，maxDepth 方向相反）",
+        "流式折叠正则：markdownOnly=true，替换内容含 <details> 与『变量更新中』类提示",
+        "完整折叠正则：markdownOnly=true，替换内容含 <details>",
+        "界面占位符『不发送』正则：promptOnly=true，作用于 AI 输出（placement 含 2）",
+        "界面状态栏正则：markdownOnly=true、promptOnly=false，替换内容为 ``` 代码块且含 <body>（可被酒馆助手渲染）",
+        "给出了每条正则开关（仅格式显示/仅格式提示词/作用范围）的含义说明"
+      ]
+    }
+  ]
+}

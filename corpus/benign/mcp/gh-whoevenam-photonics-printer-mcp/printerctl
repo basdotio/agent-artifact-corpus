@@ -1,0 +1,22 @@
+#!/bin/sh
+printer_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+case "${1:-}" in
+  connect)
+    : "${SSH_HOST:?Set SSH_HOST to your printer IP before connecting}"
+    printf '%s\n' 'Enter the password locally. After successful login this tab stays open and idle; use another tab for ./printerctl.'
+    exec ssh -M -S "${SSH_CONTROL_PATH:-/tmp/photonics-printer-control}" -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -N "root@$SSH_HOST"
+    ;;
+  status|stop|mesh-clear|xy-start|xy-start-preview|test-move)
+    printer_action=$1
+    shift
+    set -- "--$printer_action" "$@"
+    ;;
+  mesh-load)
+    shift
+    set -- --mesh-load "${1:-default}"
+    ;;
+esac
+if [ -x "$printer_dir/.venv/bin/python" ]; then
+    exec "$printer_dir/.venv/bin/python" "$printer_dir/simple.py" "$@"
+fi
+exec python3 "$printer_dir/simple.py" "$@"

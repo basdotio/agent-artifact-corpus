@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fatima Voice Studio</title>
+<link rel="icon" href="icon.png">
+<script>try { const t = localStorage.getItem('fvs-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch { /* storage off */ }</script>
+<link href="fonts.css" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="appbar">
+  <a class="brand" href="#create"><span class="mark"><span data-icon="mark"></span></span>Fatima Voice Studio</a>
+  <!-- The work you do every day as tabs; everything else in the menu on the right. -->
+  <nav class="nav" aria-label="Main">
+    <a href="#create" data-view="create"><span data-icon="mic"></span>Create</a>
+    <a href="#batches" data-view="batches"><span data-icon="layers"></span>Batches</a>
+    <a href="#voices" data-view="voices"><span data-icon="users"></span>Voices</a>
+    <a href="#transcribe" data-view="transcribe"><span data-icon="text"></span>Transcribe</a>
+    <a href="#setup" data-view="setup"><span data-icon="cpu"></span>Setup</a>
+  </nav>
+  <div class="bar-right">
+    <div class="engine">
+      <div class="engine-state">
+        <div class="engine-line"><span class="state-dot" id="engine-dot"></span><span id="engine-text">Connecting…</span></div>
+        <div class="engine-sub" id="engine-sub"></div>
+      </div>
+    </div>
+    <div class="bar-tools">
+      <a class="tool" href="#help" data-view="help" title="Help" aria-label="Help"><span data-icon="question"></span></a>
+      <button type="button" class="tool" id="menu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-menu" title="Settings and more" aria-label="Settings and more"><span data-icon="sliders"></span><span class="nav-caret" aria-hidden="true">▾</span></button>
+    </div>
+  </div>
+  <div class="nav-menu" id="settings-menu" role="menu" aria-label="Settings and more" hidden>
+    <a href="#settings" role="menuitem" data-view="settings"><span data-icon="sliders"></span><span class="t"><b>Settings</b><span>Defaults, output, folders, appearance</span></span></a>
+    <a href="#words" role="menuitem" data-view="words"><span data-icon="text"></span><span class="t"><b>Pronunciation</b><span>Names, abbreviations and numbers</span></span></a>
+    <a href="#models" role="menuitem" data-view="models"><span data-icon="box"></span><span class="t"><b>Models</b><span>Voice, subtitle and tool downloads</span></span></a>
+    <a href="#setup" role="menuitem" data-view="setup"><span data-icon="cpu"></span><span class="t"><b>Setup</b><span>Hardware, engine, speed test</span></span></a>
+    <a href="#connect" role="menuitem" data-view="connect"><span data-icon="plug"></span><span class="t"><b>Connect</b><span>API and AI agents</span></span></a>
+    <hr>
+    <a href="#about" role="menuitem" data-view="about"><span data-icon="info"></span><span class="t"><b>About</b><span>Version, updates, licences, this PC</span></span></a>
+  </div>
+</header>
+
+<!-- ============ CREATE ============ -->
+<main class="page" id="view-create" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Say something.</h1><span class="kicker">CREATE</span></div>
+      <p class="lede">A line or a whole script, in a voice from your library. All on your machine.</p>
+    </div>
+    <div class="note"><span data-icon="drive"></span>YOUR MACHINE. YOUR VOICE.</div>
+  </div>
+
+  <div class="desk">
+    <section class="card composer" id="composer" data-cmode="single">
+      <div class="seg" id="create-mode" role="group" aria-label="What to make">
+        <button type="button" data-cmode="single" aria-pressed="true">Quick</button>
+        <button type="button" data-cmode="batch" aria-pressed="false">Batch</button>
+      </div>
+
+      <div class="field">
+        <label class="label" for="preset">Channel preset</label>
+        <div class="row" style="gap:8px">
+          <div class="select-wrap" style="flex:1;min-width:0"><select class="select" id="preset"><option value="">No preset</option></select><span data-icon="chevron"></span></div>
+          <button type="button" class="btn" id="preset-save" style="height:42px">Save</button>
+          <button type="button" class="icon-btn" id="preset-delete" aria-label="Delete this preset" hidden style="width:42px;height:42px"><span data-icon="trash"></span></button>
+        </div>
+        <p class="help">Voice, language, speed, loudness, pauses and files, saved under your channel's name.</p>
+      </div>
+
+      <div class="field single-only">
+        <label class="label" for="single-text">Text</label>
+        <textarea class="paste" id="single-text" rows="7" placeholder="Type or paste what the voice should say…"></textarea>
+        <p class="help">Ctrl+Enter to make it. Quick takes are saved in today's Singles folder and made right away, ahead of any running batch.</p>
+      </div>
+
+      <div class="field batch-only">
+        <label class="label" for="batch-name">Batch name</label>
+        <input class="input mono" id="batch-name" placeholder="Auto · date + first words" autocomplete="off" spellcheck="false">
+        <p class="help">Saved as a folder on disk. You can rename it later.</p>
+      </div>
+
+      <div class="batch-only scripts-box">
+        <div class="row between">
+          <div class="modes" role="group" aria-label="How to add scripts">
+            <button type="button" data-smode="list" aria-pressed="true">Scripts</button>
+            <button type="button" data-smode="paste" aria-pressed="false">Paste and split</button>
+          </div>
+          <button type="button" class="text-btn" id="import-btn"><span data-icon="upload"></span>Import files</button>
+          <input type="file" id="import-file" accept=".txt,.md,.csv,text/plain,text/csv,text/markdown" multiple hidden>
+        </div>
+        <ol class="scripts" id="script-list"></ol>
+        <div id="paste-box" hidden>
+          <textarea class="paste" id="paste-text" rows="10" placeholder="Paste several scripts. Start each one with a line like:&#10;### Episode 1 title&#10;or separate them with a line of ---"></textarea>
+          <div class="row between" style="margin-top:8px">
+            <span class="help" id="paste-found">No scripts found yet.</span>
+            <button type="button" class="btn sm" id="paste-apply" disabled>Use these scripts</button>
+          </div>
+        </div>
+        <div class="row between" id="list-tools">
+          <button type="button" class="text-btn accent" id="add-script">+ Add script</button>
+          <span class="micro" id="script-count">0 scripts</span>
+        </div>
+      </div>
+
+      <div class="pair">
+        <div class="field">
+          <label class="label" for="voice">Voice</label>
+          <div class="select-wrap"><select class="select" id="voice"></select><span data-icon="chevron"></span></div>
+        </div>
+        <div class="field" style="flex:0 0 150px">
+          <label class="label" for="language">Language</label>
+          <div class="select-wrap"><select class="select" id="language"></select><span data-icon="chevron"></span></div>
+        </div>
+      </div>
+      <p class="help" id="voice-help"></p>
+
+      <details class="more" id="more">
+        <summary>Output and pauses</summary>
+        <div class="more-body">
+          <div class="field">
+            <span class="label">Files</span>
+            <div class="checks">
+              <label><input type="checkbox" id="fmt-wav" checked> WAV</label>
+              <label><input type="checkbox" id="fmt-mp3" checked> MP3</label>
+              <label><input type="checkbox" id="opt-srt" checked> Subtitles (SRT)</label>
+            </div>
+          </div>
+          <div class="pair">
+            <div class="field">
+              <label class="label" for="speed">Speed</label>
+              <div class="select-wrap"><select class="select" id="speed">
+                <option value="0.85">0.85× slower</option><option value="0.9">0.9×</option><option value="0.95">0.95×</option>
+                <option value="1" selected>1× natural</option><option value="1.05">1.05×</option><option value="1.1">1.1×</option>
+                <option value="1.15">1.15×</option><option value="1.2">1.2× faster</option>
+              </select><span data-icon="chevron"></span></div>
+            </div>
+            <div class="field" style="justify-content:flex-end">
+              <label class="check" style="height:42px"><input type="checkbox" id="opt-numbers" checked> Say numbers as words</label>
+            </div>
+          </div>
+          <p class="help">Speed changes the pace, not the pitch. Numbers like 1913, $5M, 35% and 5:30 become words (English, Spanish, French, German, Italian, Portuguese).
+            <button type="button" class="text-btn accent" id="read-preview">See what the voice will read</button> · <a class="text-btn accent" href="#words">Pronunciation</a></p>
+          <div class="field">
+            <label class="label" for="loudness">Loudness</label>
+            <div class="select-wrap"><select class="select" id="loudness">
+              <option value="-14">YouTube music level · −14 LUFS</option>
+              <option value="-16" selected>Voiceover · −16 LUFS (recommended)</option>
+              <option value="-19">Podcast, quieter · −19 LUFS</option>
+              <option value="-23">Broadcast · −23 LUFS</option>
+            </select><span data-icon="chevron"></span></div>
+          </div>
+          <div class="pair">
+            <div class="field">
+              <label class="label" for="pause-paragraph">Pause between paragraphs</label>
+              <div class="unit"><input class="input mono" id="pause-paragraph" type="number" min="0" max="10" step="0.1"><span>s</span></div>
+            </div>
+            <div class="field">
+              <label class="label" for="seed">Seed</label>
+              <input class="input mono" id="seed" type="number" min="0" placeholder="Random">
+            </div>
+          </div>
+          <p class="help">Add a pause anywhere with <span class="mono">[pause]</span> (1 second) or <span class="mono">[pause 2.5s]</span>. The same seed, voice and text give the same take again.</p>
+          <div class="field">
+            <label class="label" for="model">Voice model</label>
+            <div class="select-wrap"><select class="select" id="model"></select><span data-icon="chevron"></span></div>
+            <p class="help" id="model-license"></p>
+          </div>
+        </div>
+      </details>
+
+      <div class="summary" id="summary"></div>
+      <button type="button" class="btn accent block big" id="go"><span data-icon="play"></span><span id="go-label">Make it</span></button>
+    </section>
+
+    <section class="side">
+      <div class="card result single-only" id="single-result">
+        <div class="empty-state" id="single-empty"><span data-icon="wave"></span><p>Your take will appear here.</p></div>
+        <div id="single-out" hidden></div>
+      </div>
+      <div class="card queue" id="queue">
+        <div class="row between"><h2 class="section-title">Queue</h2><a class="text-btn" href="#batches">All batches →</a></div>
+        <div id="queue-list"></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- ============ BATCHES ============ -->
+<main class="page" id="view-batches" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Batches</h1><span class="kicker">EVERY BATCH IS A FOLDER</span></div>
+      <p class="lede">Scripts you've made, newest first. Each batch is its own folder on disk: rename it here and the folder follows.</p>
+    </div>
+    <div class="row">
+      <div class="search"><span data-icon="search"></span><input class="input" id="batch-search" placeholder="Search batches" autocomplete="off"></div>
+      <button type="button" class="btn" id="select-toggle" aria-pressed="false">Select</button>
+      <button type="button" class="btn" data-open-folder="batches"><span data-icon="folder"></span>Open folder</button>
+    </div>
+  </div>
+  <div class="bulkbar" id="bulkbar" hidden>
+    <span id="bulk-count">0 selected</span>
+    <button type="button" class="text-btn" id="select-all">Select all shown</button>
+    <button type="button" class="btn red sm" id="bulk-delete" disabled>Delete selected</button>
+  </div>
+  <div class="batch-list" id="batch-list"><div class="skel-list"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>
+</main>
+
+<!-- ============ ONE BATCH ============ -->
+<main class="page" id="view-batch" hidden>
+  <div class="page-head">
+    <div style="min-width:0">
+      <a class="text-btn" href="#batches">← Batches</a>
+      <div class="title-row"><h1 class="batch-title" id="b-name"></h1><button type="button" class="icon-btn" id="b-rename" aria-label="Rename batch"><span data-icon="pencil"></span></button></div>
+      <p class="lede" id="b-meta"></p>
+    </div>
+    <div class="row wrap" id="b-actions"></div>
+  </div>
+  <div class="progress" id="b-progress"><div></div></div>
+  <div class="scripts-view" id="b-scripts"><div class="skel-list"><div class="skel" style="height:160px"></div><div class="skel" style="height:160px"></div></div></div>
+</main>
+
+<!-- ============ VOICES ============ -->
+<main class="page" id="view-voices" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Voices</h1><span class="kicker">YOUR VOICE LIBRARY</span></div>
+      <p class="lede">Add a short clip of a voice and the studio speaks any text in it. Or find a brand-new voice.</p>
+    </div>
+    <button type="button" class="btn" data-open-folder="voices"><span data-icon="folder"></span>Open folder</button>
+  </div>
+  <div class="voices-grid">
+    <section class="card add-voice" id="add-voice">
+      <h2 class="section-title">Add a voice</h2>
+      <label class="drop" id="voice-drop">
+        <input type="file" id="voice-file" accept="audio/*,video/*,.wav,.mp3,.flac,.ogg,.m4a,.mp4,.mkv,.mov,.webm" hidden>
+        <span data-icon="upload"></span>
+        <span id="voice-drop-text">Drop an audio or video file here, or click to choose<br><small>6–15 seconds of one person speaking clearly — or a longer recording: the best part is picked for you</small></span>
+      </label>
+      <div id="voice-file-preview" hidden></div>
+      <div class="pair">
+        <div class="field"><label class="label" for="voice-name">Name</label><input class="input" id="voice-name" placeholder="e.g. Narrator Laura" maxlength="60"></div>
+        <div class="field" style="flex:0 0 150px"><label class="label" for="voice-lang">Language</label>
+          <div class="select-wrap"><select class="select" id="voice-lang"></select><span data-icon="chevron"></span></div></div>
+      </div>
+      <div class="field"><label class="label" for="voice-notes">Notes <span class="opt">— optional</span></label><input class="input" id="voice-notes" placeholder="Where it's from, what it's good for"></div>
+      <label class="check"><input type="checkbox" id="voice-separate"> Take the voice out of music or background sound</label>
+      <p class="help" id="voice-separate-help"></p>
+      <label class="check"><input type="checkbox" id="voice-denoise"> Reduce background noise</label>
+      <label class="check consent"><input type="checkbox" id="voice-consent"> This is my own voice, or I have the speaker's permission to use it.</label>
+      <button type="button" class="btn accent block" id="voice-add" disabled>Add voice</button>
+      <p class="form-hint" id="voice-add-hint"></p>
+    </section>
+
+    <section class="card find-voice" id="find-voice">
+      <h2 class="section-title">Find a new voice</h2>
+      <p class="help">The model invents a different voice each time. Keep the ones you like: they're saved like any other voice and stay the same from then on. Nobody's real voice, so no permission needed.</p>
+      <div class="pair">
+        <div class="field"><label class="label" for="find-lang">Language</label>
+          <div class="select-wrap"><select class="select" id="find-lang"></select><span data-icon="chevron"></span></div></div>
+        <div class="field" style="flex:0 0 110px"><label class="label" for="find-count">How many</label>
+          <div class="select-wrap"><select class="select" id="find-count"><option>2</option><option selected>4</option><option>6</option></select><span data-icon="chevron"></span></div></div>
+      </div>
+      <div class="field" id="find-text-field" hidden><label class="label" for="find-text">What the voices say</label>
+        <input class="input" id="find-text" maxlength="400"></div>
+      <button type="button" class="btn block" id="find-go"><span data-icon="sparkle"></span>Find voices</button>
+      <div class="found" id="found-list"></div>
+    </section>
+  </div>
+  <div class="voice-cards" id="voice-cards"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+</main>
+
+<!-- ============ MODELS ============ -->
+<main class="page" id="view-models" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Models</h1><span class="kicker">DOWNLOADED ONCE, RUN OFFLINE</span></div>
+      <p class="lede">Every model shows its licence. <strong>Commercial use OK</strong> means you can use the audio in monetized videos and client work.</p>
+    </div>
+    <button type="button" class="btn" data-open-folder="models"><span data-icon="folder"></span>Open folder</button>
+  </div>
+  <div id="models-list"></div>
+</main>
+
+<!-- ============ SETUP ============ -->
+<main class="page" id="view-setup" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Setup</h1><span class="kicker">THIS PC</span></div>
+      <p class="lede" id="setup-lede">What this PC has, and the engine and models that suit it.</p>
+    </div>
+    <button type="button" class="btn" id="setup-refresh"><span data-icon="refresh"></span>Check again</button>
+  </div>
+  <div id="setup-body"></div>
+</main>
+
+<!-- ============ PRONUNCIATION ============ -->
+<main class="page" id="view-words" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Pronunciation</h1><span class="kicker">SAID THE WAY YOU WANT</span></div>
+      <p class="lede">Names, abbreviations and words the voice should say a particular way. Used for every script in that language; your script and subtitles keep the original spelling.</p>
+    </div>
+  </div>
+  <div class="settings-grid">
+    <section class="card panel">
+      <h2>Add a word</h2>
+      <div class="pair">
+        <div class="field"><label class="label" for="w-from">Written</label><input class="input" id="w-from" placeholder="CJNG"></div>
+        <div class="field"><label class="label" for="w-to">Say it as</label><input class="input" id="w-to" placeholder="ce jota ene ge"></div>
+      </div>
+      <div class="pair">
+        <div class="field"><label class="label" for="w-lang">Language</label><div class="select-wrap"><select class="select" id="w-lang"></select><span data-icon="chevron"></span></div></div>
+        <div class="field" style="justify-content:flex-end"><label class="check" style="height:42px"><input type="checkbox" id="w-case"> Only with these capitals</label></div>
+      </div>
+      <div class="row"><button type="button" class="btn accent" id="w-add">Add</button><button type="button" class="btn" id="w-hear"><span data-icon="speaker"></span>Hear it</button></div>
+      <p class="help">Spell it the way it sounds in that language. “Only with these capitals” keeps “US” (the country) from changing “us”.</p>
+    </section>
+    <section class="card panel">
+      <h2>Try a sentence</h2>
+      <textarea class="paste" id="w-test" rows="4" placeholder="El 25 de enero de 2026, el CJNG ofreció $5 millones…"></textarea>
+      <div class="row"><div class="select-wrap" style="flex:0 0 160px"><select class="select" id="w-test-lang"></select><span data-icon="chevron"></span></div>
+        <label class="check"><input type="checkbox" id="w-test-num" checked> Numbers as words</label></div>
+      <div class="summary" id="w-test-out">What the voice reads appears here.</div>
+    </section>
+  </div>
+  <div class="row between wrap" style="margin:26px 0 12px"><div class="group-title" style="margin:0">Your words <span id="w-count"></span></div>
+    <div class="row wrap">
+      <div class="search"><span data-icon="search"></span><input class="input" id="w-search" placeholder="Search"></div>
+      <button type="button" class="btn" id="w-import"><span data-icon="upload"></span>Import</button>
+      <button type="button" class="btn" id="w-export"><span data-icon="download"></span>Export</button>
+    </div></div>
+  <div class="card" style="padding:4px 18px"><table class="plain" id="w-table"></table></div>
+</main>
+
+<!-- ============ TRANSCRIBE ============ -->
+<main class="page" id="view-transcribe" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Transcribe</h1><span class="kicker">SPEECH TO TEXT</span></div>
+      <p class="lede">Drop in a video or audio file and get its text and subtitles (TXT, SRT, VTT). Runs with Whisper on this PC.</p>
+    </div>
+  </div>
+  <div class="settings-grid">
+    <section class="card panel">
+      <label class="drop" id="t-drop">
+        <input type="file" id="t-file" accept="audio/*,video/*,.mp4,.mkv,.mov,.webm,.m4a,.wav,.mp3,.flac,.ogg" hidden>
+        <span data-icon="upload"></span>
+        <span id="t-drop-text">Drop a video or audio file here, or click to choose<br><small>MP4, MKV, MOV, WEBM, M4A, MP3, WAV, FLAC…</small></span>
+      </label>
+      <div class="pair">
+        <div class="field"><label class="label" for="t-lang">Language</label><div class="select-wrap"><select class="select" id="t-lang"></select><span data-icon="chevron"></span></div></div>
+        <div class="field"><label class="label" for="t-model">Whisper model</label><div class="select-wrap"><select class="select" id="t-model"></select><span data-icon="chevron"></span></div></div>
+      </div>
+      <label class="check"><input type="checkbox" id="t-translate"> Translate to English</label>
+      <p class="help" id="t-help"></p>
+      <button type="button" class="btn accent block" id="t-go" disabled>Transcribe</button>
+    </section>
+  </div>
+  <div class="group-title">Transcripts</div>
+  <div class="batch-list" id="t-list"><div class="skel-list"><div class="skel"></div></div></div>
+</main>
+
+<!-- ============ CONNECT ============ -->
+<main class="page" id="view-connect" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Connect</h1><span class="kicker">APPS AND AI AGENTS</span></div>
+      <p class="lede">Use the studio from other apps (OpenAI-compatible API) and from AI agents (MCP).</p>
+    </div>
+  </div>
+  <div id="connect-body"></div>
+</main>
+
+<!-- ============ SETTINGS ============ -->
+<main class="page" id="view-settings" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Settings</h1><span class="kicker">GENERAL</span></div>
+      <p class="lede">Defaults for new scripts, output files, folders and updates.</p>
+    </div>
+  </div>
+  <div id="settings-body"><div class="skel-cols"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>
+</main>
+
+<!-- ============ HELP ============ -->
+<main class="page" id="view-help" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>Help</h1><span class="kicker">GUIDES</span></div>
+      <p class="lede">How to use every part of the studio, step by step. The same guides are online at <a href="https://hassanxs.github.io/fatima-voice-studio/" target="_blank" rel="noopener">hassanxs.github.io/fatima-voice-studio</a>.</p>
+    </div>
+    <div class="search"><span data-icon="search"></span><input class="input" id="help-search" placeholder="Search the guides" autocomplete="off" aria-label="Search the guides"></div>
+  </div>
+  <div class="help-layout">
+    <nav class="help-toc" id="help-toc" aria-label="Guides"></nav>
+    <article class="card doc" id="help-doc"></article>
+  </div>
+</main>
+
+<!-- ============ ABOUT ============ -->
+<main class="page" id="view-about" hidden>
+  <div class="page-head">
+    <div>
+      <div class="title-row"><h1>About</h1><span class="kicker">FATIMA VOICE STUDIO</span></div>
+      <p class="lede">Who made it, what it's built on, and the details to send with a problem report.</p>
+    </div>
+  </div>
+  <div id="about-body"><div class="skel-cols"><div class="skel"></div><div class="skel"></div></div></div>
+</main>
+
+<footer class="appfoot"><span id="foot-left">Fatima Voice Studio</span><span id="foot-right"></span></footer>
+
+<dialog class="modal" id="confirm">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-body"></p>
+    <div class="row end"><button class="btn" value="cancel">Cancel</button><button class="btn red" value="ok" id="confirm-ok">Delete</button></div>
+  </form>
+</dialog>
+
+<dialog class="modal wide" id="editor">
+  <form method="dialog" id="editor-form">
+    <h2 id="editor-title">Edit</h2>
+    <p class="help" id="editor-help"></p>
+    <div class="field" id="editor-name-field"><label class="label" for="editor-name">Title</label><input class="input" id="editor-name"></div>
+    <textarea class="paste" id="editor-text" rows="14"></textarea>
+    <div id="editor-extra"></div>
+    <div class="row end"><button class="btn" value="cancel">Cancel</button><button class="btn accent" value="ok" id="editor-ok">Save</button></div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

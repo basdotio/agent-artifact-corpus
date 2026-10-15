@@ -1,0 +1,46 @@
+name: CI - Build & Lint Verification
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Test & Build Package (${{ matrix.os }} - Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: 📦 Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install build twine
+
+      - name: 🔍 Syntax and AST Verification
+        run: |
+          python -m compileall -q .
+
+      - name: 🛠️ Build distribution packages (wheel & sdist)
+        run: |
+          python -m build
+
+      - name: ✅ Validate package metadata with Twine
+        run: |
+          twine check dist/*

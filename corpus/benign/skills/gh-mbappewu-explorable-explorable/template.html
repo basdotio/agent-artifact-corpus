@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-en="How TOPIC Works" data-zh="TOPIC 是怎么工作的">How TOPIC Works</title>
+<meta name="description" content="An explorable explanation of TOPIC.">
+<script>
+  // Pick the language before anything renders: ?lang= wins, then the last choice, then the browser.
+  (() => {
+    let l = new URLSearchParams(location.search).get('lang');
+    if (!l) { try { l = localStorage.getItem('explorable-lang'); } catch { /* storage may be blocked */ } }
+    if (!l) l = (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+    l = l === 'zh' ? 'zh' : 'en';
+    document.documentElement.dataset.lang = l;
+    document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Color tokens. c1–c4 are the page's concept colors: give each one a meaning
+     (e.g. c1 = the noise, c2 = the anti-noise) and use it the same way everywhere. */
+  :root {
+    --bg: #fbfaf7; --fg: #1f1f22; --muted: #6d6b66; --rule: #e6e2d8; --panel: #ffffff; --grid: #ece8de;
+    --c1: #e0662f; --c2: #2f6fd6; --c3: #c8961f; --c4: #7a5bd0;
+    --good: #2e9a5e; --bad: #d23c3c;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416; --fg: #ececef; --muted: #9a9892; --rule: #2a2a2e; --panel: #1b1b1f; --grid: #25252a;
+      --c1: #f08a55; --c2: #6b9cf0; --c3: #dcae40; --c4: #a58af0;
+      --good: #52c283; --bad: #f06060;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  [data-lang="en"] [lang="zh"], [data-lang="zh"] [lang="en"] { display: none !important; }
+  [data-lang="zh"] body { font: 17.5px/1.85 Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  [data-lang="zh"] h1, [data-lang="zh"] h2 { font-family: Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; letter-spacing: 0; }
+  .langbar { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 26px; }
+  .langbar button { padding: 3px 12px; font-size: 13px; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 19px/1.62 "Source Serif 4", Georgia, serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 20px 96px; }
+  h1 { font-size: 2.35em; line-height: 1.12; margin: 0 0 .3em; letter-spacing: -.01em; }
+  h2 { font: 600 1.28em/1.3 "Source Serif 4", Georgia, serif; margin: 2.2em 0 .6em; }
+  .lede { font-size: 1.12em; color: var(--muted); margin: 0 0 2em; }
+  p { margin: 0 0 1.05em; }
+  .c1 { color: var(--c1); font-weight: 600; } .c2 { color: var(--c2); font-weight: 600; }
+  .c3 { color: var(--c3); font-weight: 600; } .c4 { color: var(--c4); font-weight: 600; }
+  figure { margin: 1.8em -12px 2em; padding: 14px 14px 10px; background: var(--panel); border-radius: 14px; box-shadow: var(--shadow); }
+  canvas { display: block; width: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
+  figcaption { font: 14px/1.5 Inter, system-ui, sans-serif; color: var(--muted); margin-top: 8px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; font: 14px/1.3 Inter, system-ui, sans-serif; margin-top: 10px; }
+  .controls label { display: flex; align-items: center; gap: 10px; flex: 1 1 210px; }
+  .controls label span.k { white-space: nowrap; color: var(--muted); min-width: 5em; }
+  .controls output { font-variant-numeric: tabular-nums; min-width: 4.5em; text-align: right; }
+  input[type=range] { flex: 1; accent-color: var(--fg); min-width: 90px; }
+  button { font: 500 14px Inter, system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .readout { font: 14px/1.45 Inter, system-ui, sans-serif; margin-top: 8px; font-variant-numeric: tabular-nums; min-height: 1.45em; }
+  footer { margin-top: 4em; padding-top: 1.2em; border-top: 1px solid var(--rule); font: 14px/1.6 Inter, system-ui, sans-serif; color: var(--muted); }
+  @media (max-width: 560px) { body { font-size: 17.5px; } figure { margin-left: -8px; margin-right: -8px; padding: 10px; } }
+</style>
+</head>
+<body>
+<main>
+<!-- Bilingual pages keep this switcher and pair every text block with lang="en" / lang="zh".
+     Single-language pages delete the switcher and the lang attributes' twins; t(en, zh) then just returns en. -->
+<div class="langbar"><button data-setlang="en">English</button><button data-setlang="zh">中文</button></div>
+<h1><span lang="en">How TOPIC Works</span><span lang="zh">TOPIC 是怎么工作的</span></h1>
+<p class="lede" lang="en">One or two sentences: the surprising thing this page will make obvious, and an invitation to play.</p>
+<p class="lede" lang="zh">一两句话：这一页要讲明白的那个出人意料的点，外加一句邀请读者动手。</p>
+
+<h2><span lang="en">First idea</span><span lang="zh">第一个概念</span></h2>
+<p lang="en">Prose that sets up the figure.</p>
+<p lang="zh">引出这张图的正文。</p>
+
+<!-- One figure = one idea. data-aspect is height/width of the drawing area. -->
+<figure id="fig-example">
+  <canvas data-aspect="0.4"></canvas>
+  <div class="controls">
+    <label><span class="k"><span lang="en">Amount</span><span lang="zh">数量</span></span><input type="range" min="0" max="1" step="0.001" value="0.5"><output></output></label>
+    <button data-role="reset"><span lang="en">Reset</span><span lang="zh">重置</span></button>
+  </div>
+  <div class="readout"></div>
+  <figcaption lang="en">Say what the reader sees and what to try: "Drag Amount past the middle and watch …".</figcaption>
+  <figcaption lang="zh">说明读者看到什么、该试什么：“把数量拖过中点，看……”。</figcaption>
+</figure>
+
+<p lang="en">Prose that explains what the reader just saw.</p>
+<p lang="zh">解释读者刚才看到了什么的正文。</p>
+
+<footer>
+  <p lang="en">An explorable explanation. The figures are live simulations running in your browser. State simplifications and illustrative numbers here.</p>
+  <p lang="zh">一篇可交互讲解。图形是在你浏览器里实时运行的模拟。在这里写明简化之处和示意性数字。</p>
+</footer>
+</main>
+
+<script>
+(() => {
+  // ---------- language ----------
+  const t = (en, zh) => (document.documentElement.dataset.lang === 'zh' ? zh : en);
+  const langHooks = [];
+  function setLang(l) {
+    const root = document.documentElement;
+    root.dataset.lang = l; root.lang = l === 'zh' ? 'zh-CN' : 'en';
+    document.title = document.querySelector('title').dataset[l];
+    document.querySelectorAll('[data-setlang]').forEach((b) => b.classList.toggle('on', b.dataset.setlang === l));
+    try { localStorage.setItem('explorable-lang', l); } catch { /* ignore */ }
+    const u = new URL(location.href); u.searchParams.set('lang', l); history.replaceState(null, '', u);
+    langHooks.forEach((f) => f());
+  }
+  document.querySelectorAll('[data-setlang]').forEach((b) => (b.onclick = () => setLang(b.dataset.setlang)));
+  document.querySelectorAll('[data-setlang]').forEach((b) => b.classList.toggle('on', b.dataset.setlang === document.documentElement.dataset.lang));
+  document.title = document.querySelector('title').dataset[document.documentElement.dataset.lang];
+
+  // ---------- helpers (keep these; they handle the fiddly parts) ----------
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const TAU = Math.PI * 2;
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  // A canvas drawn in logical units: `width` units across, height = width × data-aspect.
+  // Stays sharp on any screen, redraws itself (s.draw) when resized, and maps pointer positions.
+  function surface(canvas, width = 680) {
+    const ctx = canvas.getContext('2d');
+    const aspect = +canvas.dataset.aspect || 0.5;
+    const s = { canvas, ctx, w: width, h: width * aspect, k: 1, draw: null };
+    const fit = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth, cssH = Math.round(cssW * aspect);
+      canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+      canvas.style.height = cssH + 'px';
+      s.k = cssW / width;
+      ctx.setTransform(dpr * s.k, 0, 0, dpr * s.k, 0, 0);
+    };
+    fit();
+    new ResizeObserver(() => { fit(); s.draw && s.draw(); }).observe(canvas);
+    s.at = (e) => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / s.k, (e.clientY - r.top) / s.k]; };
+    return s;
+  }
+
+  // Run step(timeSeconds, dtSeconds) every frame, but only while `el` is on screen.
+  const animated = new Set();
+  function animate(el, step) {
+    const entry = { step, visible: false };
+    new IntersectionObserver(([e]) => { entry.visible = e.isIntersecting; }).observe(el);
+    animated.add(entry);
+  }
+  let lastT = performance.now();
+  requestAnimationFrame(function frame(now) {
+    const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+    for (const e of animated) if (e.visible) e.step(now / 1000, dt);
+    requestAnimationFrame(frame);
+  });
+
+  // Pointer dragging in logical units. down(x, y) may return false to ignore the press.
+  function drag(s, { down, move, up }) {
+    let id = null;
+    s.canvas.addEventListener('pointerdown', (e) => {
+      if (id !== null || down(...s.at(e)) === false) return;
+      id = e.pointerId;
+      try { s.canvas.setPointerCapture(id); } catch { /* best effort */ }
+      e.preventDefault();
+    });
+    s.canvas.addEventListener('pointermove', (e) => { if (e.pointerId === id) move(...s.at(e)); });
+    const end = (e) => {
+      if (e.pointerId !== id) return;
+      id = null;
+      try { s.canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+      up && up();
+    };
+    s.canvas.addEventListener('pointerup', end);
+    s.canvas.addEventListener('pointercancel', end);
+  }
+
+  function label(ctx, text, x, y, color = css('--muted'), align = 'left', size = 12) {
+    ctx.font = `500 ${size}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y);
+  }
+  function polyline(ctx, pts, color, width = 2) {
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.stroke();
+  }
+  // Sample fn(x) from x0 to x1 into points around a baseline.
+  function plot(x0, x1, base, scale, fn, step = 2) {
+    const pts = [];
+    for (let x = x0; x <= x1; x += step) pts.push([x, base - scale * fn(x)]);
+    return pts;
+  }
+  function roundRect(ctx, x, y, w, h, r, fill) {
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fillStyle = fill; ctx.fill();
+  }
+  // Spread labels vertically so none overlap: items = [{y, ...}] → adds .ly.
+  function spreadLabels(items, gap = 18) {
+    items.sort((a, b) => a.y - b.y);
+    let prev = -Infinity;
+    for (const it of items) { it.ly = Math.max(it.y, prev + gap); prev = it.ly; }
+    return items;
+  }
+  // Shared audio context, created on first use (browsers require a click first).
+  let audioCtx = null;
+  const audio = () => (audioCtx ||= new (window.AudioContext || window.webkitAudioContext)());
+
+  // Format numbers for readouts: real minus sign, sensible precision.
+  const fmt = (x, digits = 0) => (Number.isFinite(x) ? x.toFixed(digits).replace('-', '−') : '—');
+
+  // ---------- figures ----------
+  // Pattern: model functions first, then a draw() that reads controls and renders,
+  // wired to input events (static figures) or animate() (figures that change over time).
+  {
+    const fig = document.getElementById('fig-example');
+    const s = surface(fig.querySelector('canvas'));
+    const slider = fig.querySelector('input'), out = fig.querySelector('output');
+    const readout = fig.querySelector('.readout');
+
+    // MODEL: replace with the real rule/equation of the mechanism.
+    const model = (amount) => ({ height: amount });
+
+    function draw() {
+      const amount = +slider.value;
+      const m = model(amount);
+      out.textContent = Math.round(amount * 100) + '%';
+      readout.innerHTML = t(`Height is <b>${fmt(m.height * 100)}%</b>.`, `高度为 <b>${fmt(m.height * 100)}%</b>。`);
+      const { ctx, w, h } = s;
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, h - 30); ctx.lineTo(w, h - 30); ctx.stroke();
+      roundRect(ctx, w / 2 - 40, h - 30 - m.height * (h - 60), 80, m.height * (h - 60), 6, css('--c2'));
+      label(ctx, t('example', '示例'), w / 2, h - 14, css('--muted'), 'center');
+    }
+    slider.oninput = draw;
+    fig.querySelector('[data-role=reset]').onclick = () => { slider.value = 0.5; draw(); };
+    s.draw = draw;
+    langHooks.push(draw); // redraw canvas text when the language changes
+    draw();
+  }
+})();
+</script>
+</body>
+</html>

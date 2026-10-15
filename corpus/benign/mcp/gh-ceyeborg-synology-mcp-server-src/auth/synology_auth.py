@@ -1,0 +1,410 @@
+# src/synology_auth.py - Simple Synology authentication utilities
+
+import logging
+import threading
+from typing import Any, Callable, Dict, Optional, Tuple
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+
+# Module-level registry of SynologyAuth instances, keyed by base_url.
+# Used by SynologyAPIClient to perform transparent session re-auth when DSM
+# returns error code 119 ("SID not found"), which happens when the server-side
+# session expires (typically after ~1h of inactivity for SYNO.Core.* APIs).
+# Without this, the client's SID stays dead until the process restarts.
+_AUTH_REGISTRY: Dict[str, "SynologyAuth"] = {}
+
+# Seconds to wait for auth.cgi. Matches the DEFAULT_TIMEOUT the service modules
+# use. Without it these two calls wait forever: a NAS that accepts the TCP
+# connection and then stalls hangs the startup auto-login loop, and hangs
+# relogin() while it holds `_relogin_lock`, which wedges session recovery for
+# every caller behind it.
+AUTH_TIMEOUT = 15
+
+
+def _refuse_redirect(response, endpoint: str) -> Dict[str, Any]:
+    """Build the failure returned when auth.cgi answers with a 3xx.
+
+    Redirects are not followed on these two calls, and a 3xx is treated as a
+    failure rather than a retry, for one reason: requests replays the method
+    and body verbatim on a 307/308, so following a Location that points at
+    another host hands it this request's body -- the password, the OTP, the
+    device token, or the SID. `verify_ssl` defaults to False in this project,
+    which puts forging that redirect within reach of anyone who can sit on the
+    link.
+
+    `raise_for_status()` does not help here: it raises for 4xx and 5xx only and
+    lets a 3xx through untouched, so the check has to be explicit.
+    """
+    location = response.headers.get("Location", "<no Location header>")
+    logger.error(
+        "%s answered with HTTP %s redirecting to %s. Not following it: a 307/308 "
+        "would replay this request's body, credentials included, to that target.",
+        endpoint,
+        response.status_code,
+        location,
+    )
+    return {
+        "success": False,
+        "error": {
+            "code": "unexpected_redirect",
+            "message": (
+                f"{endpoint} returned HTTP {response.status_code} (a redirect), which "
+                "was refused, so no credentials were sent to the redirect target. "
+                "The usual cause is the wrong URL configured for this NAS -- an "
+                "http:// URL against a DSM that redirects to HTTPS, or a reverse "
+                "proxy in front of it. Configure the final https:// URL directly."
+            ),
+        },
+    }
+
+
+def get_auth_for_url(base_url: str) -> Optional["SynologyAuth"]:
+    """Return the SynologyAuth instance registered for `base_url`, if any.
+
+    Used by SynologyAPIClient.request() when it needs to recover from a
+    DSM error 119 (SID expired) by silently re-authenticating.
+    """
+    return _AUTH_REGISTRY.get(base_url.rstrip("/"))
+
+
+class SynologyAuth:
+    """Handles Synology NAS authentication using simple API calls."""
+
+    def __init__(self, base_url: str, verify_ssl: bool = False):
+        self.base_url = base_url.rstrip("/")
+        self.verify_ssl = verify_ssl
+        self.current_session_id: Optional[str] = None
+        # Mirrors what login_with_session uses by default; overwritten on every login.
+        self.current_session_type: str = "webui"
+        self.current_syno_token: Optional[str] = None
+        # Device token returned by DSM when login includes
+        # `enable_device_token=yes` (the 2FA "remember this device" flow).
+        # Reused by relogin() so OTP isn't required on session recovery.
+        self.current_device_id: Optional[str] = None
+        # Credentials cached on a successful login, used by relogin() to recover
+        # from DSM session expiry without requiring a process restart.
+        self._credentials: Optional[Tuple[str, str]] = None
+        # Device token cached from a prior login. Sent on relogin() as
+        # `device_id` so DSM treats us as a trusted device and skips OTP.
+        # Only populated when the original login used `enable_device_token=yes`
+        # — otherwise None, and relogin falls back to plain password auth.
+        self._cached_device_id: Optional[str] = None
+        # Optional callback invoked after a successful relogin() with
+        # (base_url, session_id, syno_token). Lets the caller (e.g. mcp_server)
+        # resync any cached session state with the refreshed SID.
+        self.on_relogin: Optional[Callable[[str, Optional[str], Optional[str]], None]] = None
+        # Serializes relogin() so concurrent DSM-119 recoveries don't each open a
+        # separate session (which would leak the orphaned SIDs on the NAS).
+        self._relogin_lock = threading.Lock()
+        # Register this instance for cross-module discovery (see _AUTH_REGISTRY).
+        _AUTH_REGISTRY[self.base_url] = self
+
+    def login(
+        self,
+        username: str,
+        password: str,
+        otp_code: Optional[str] = None,
+        device_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Authenticate with Synology NAS and return session info.
+
+        Defaults to `session=webui` — the same scope the DSM web UI uses.
+        Per live testing on DSM 7.3.2, session type doesn't actually
+        affect which APIs are reachable (account permissions do); we
+        pick `webui` for semantic alignment with the official client.
+        Use `login_with_session(...)` to pick a different session type.
+
+        Auth options:
+            - `device_id`: a previously-issued DSM device token. When supplied,
+              DSM treats us as a trusted device and skips any 2FA/OTP step.
+            - `otp_code`: a one-time 6-digit code from the user's authenticator.
+              Required only on the first 2FA login (where no `device_id` is
+              available yet). When both are given, `device_id` wins and the
+              OTP is ignored — DSM won't ask for it on a trusted device.
+        """
+        return self.login_with_session(
+            username, password, "webui", otp_code=otp_code, device_id=device_id
+        )
+
+    def login_with_session(
+        self,
+        username: str,
+        password: str,
+        session_type: str = "webui",
+        otp_code: Optional[str] = None,
+        device_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Authenticate with Synology NAS using specific session type.
+
+        See `login()` for the meaning of `otp_code` and `device_id`.
+        """
+        login_url = f"{self.base_url}/webapi/auth.cgi"
+
+        # Try common API versions (start with newer versions)
+        api_versions = ["7", "6", "3", "2"]
+
+        # Exception: the first-time 2FA bootstrap. Observed on DSM 7.3.2, a v7
+        # login with `enable_device_token=yes` succeeds but returns no `did`,
+        # so no trusted-device token is ever issued and every later start falls
+        # back to "OTP required" (403). v6 returns the token for the same
+        # request. Only reorder for the bootstrap; steady-state logins keep
+        # preferring v7.
+        if otp_code and not device_id:
+            api_versions = ["6", "7", "3", "2"]
+
+        for version in api_versions:
+            payload = {
+                "api": "SYNO.API.Auth",
+                "version": version,
+                "method": "login",
+                "account": username,
+                "passwd": password,
+                "session": session_type,
+                "format": "sid",
+                # DSM 7.3.2+ enforces CSRF on mutating endpoints; service
+                # modules send the returned token as X-SYNO-TOKEN. Older DSM
+                # ignores the flag (synotoken absent → header-less requests,
+                # which still work pre-7.3.2).
+                "enable_syno_token": "yes",
+            }
+            if device_id:
+                # Returning trusted device → DSM skips OTP. This is the path
+                # used by relogin() once we've cached a `did` from a prior
+                # 2FA login, and by callers who pre-loaded a `did` from
+                # settings.json at process start.
+                payload["device_id"] = device_id
+            elif otp_code:
+                # First-time 2FA login: include the user-supplied OTP and ask
+                # DSM to issue a device token (`did`) for reuse. Subsequent
+                # re-logins on this process use the device_id path above.
+                payload["otp_code"] = otp_code
+                payload["enable_device_token"] = "yes"
+
+            try:
+                # POST, not GET: `passwd` and `otp_code` in a query string are
+                # written verbatim to DSM's own nginx access log and to the log
+                # of every proxy in between, where they outlive the session.
+                # auth.cgi reads the same parameters from a form body, which is
+                # what the DSM web UI sends.
+                response = requests.post(
+                    login_url,
+                    data=payload,
+                    verify=self.verify_ssl,
+                    timeout=AUTH_TIMEOUT,
+                    allow_redirects=False,
+                )
+                # Returned, not `continue`d. A redirect says nothing about the
+                # API version, so retrying the remaining versions would only
+                # put three more copies of the password on the wire.
+                if 300 <= response.status_code < 400:
+                    return _refuse_redirect(response, "SYNO.API.Auth login")
+                response.raise_for_status()
+                result = response.json()
+
+                if result.get("success"):
+                    # Store session info for automatic logout
+                    self.current_session_id = result["data"]["sid"]
+                    self.current_session_type = session_type
+                    self.current_syno_token = result["data"].get("synotoken")
+                    # Cache the trusted-device token for relogin(). DSM only
+                    # returns `did` when the request includes
+                    # `enable_device_token=yes` (the first-time-OTP path); on
+                    # the returning-device path we send `device_id` but DSM
+                    # doesn't echo it back, so fall back to the input value.
+                    # Without this, relogin() would lose the device token
+                    # after the first successful login on the steady-state
+                    # configuration and silently fall through to plain
+                    # password auth — which DSM rejects for 2FA accounts.
+                    did = result["data"].get("did") or device_id
+                    if did:
+                        self.current_device_id = did
+                        self._cached_device_id = did
+                    # Cache credentials so relogin() can recover from session expiry.
+                    self._credentials = (username, password)
+                    return result
+                else:
+                    error_code = result.get("error", {}).get("code", "unknown")
+                    # Don't try other versions for auth errors
+                    if error_code in [400, 402, 403, 404]:
+                        return result
+            except Exception:
+                continue
+
+        # If all versions failed, return the last result
+        return {"success": False, "error": {"code": "unknown", "message": "Authentication failed"}}
+
+    def login_download_station(
+        self,
+        username: str,
+        password: str,
+        otp_code: Optional[str] = None,
+        device_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Authenticate specifically for Download Station."""
+        return self.login_with_session(
+            username, password, "DownloadStation", otp_code=otp_code, device_id=device_id
+        )
+
+    def relogin(self, stale_session_id: Optional[str] = None) -> bool:
+        """Re-authenticate using credentials cached from the last successful login.
+
+        Returns True on success, False if no credentials are cached or login fails.
+        Called by SynologyAPIClient when DSM returns error code 119 ("SID not
+        found"), which happens when the server-side session expires (typically
+        after ~1h of inactivity for SYNO.Core.* APIs). Without this, the client's
+        SID stays dead until the process restarts.
+
+        Concurrency-safe: the login is serialized by a per-instance lock. If
+        `stale_session_id` is given and another thread already refreshed the
+        session while this caller waited for the lock, the relogin is skipped
+        (the current session is already valid) — so simultaneous 119s open a
+        single new session instead of one per caller.
+        """
+        if not self._credentials:
+            return False
+        with self._relogin_lock:
+            # Another thread already recovered the session under the lock.
+            if (
+                stale_session_id is not None
+                and self.current_session_id is not None
+                and self.current_session_id != stale_session_id
+            ):
+                return True
+            username, password = self._credentials
+            # Reuse the cached device token when available: DSM treats us as
+            # a trusted device and won't require OTP. If we never had one
+            # (the initial login didn't use enable_device_token), this falls
+            # through to plain password auth — same behavior as pre-OTP.
+            result = self.login_with_session(
+                username,
+                password,
+                self.current_session_type,
+                device_id=self._cached_device_id,
+            )
+            success = bool(result.get("success"))
+            if success and self.on_relogin is not None:
+                # Notify the caller so it can resync cached session state with the
+                # new SID. A callback failure must never break the relogin path.
+                try:
+                    self.on_relogin(self.base_url, self.current_session_id, self.current_syno_token)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("on_relogin callback failed for %s: %s", self.base_url, exc)
+            return success
+
+    def logout(
+        self, session_id: Optional[str] = None, session_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Logout from Synology NAS.
+
+        Args:
+            session_id: Session ID to logout. If None, uses current session.
+            session_type: Session type to logout. If None, uses current session type.
+
+        Returns:
+            Dict with success status and any error details.
+        """
+        # Use provided parameters or fall back to current session
+        logout_session_id = session_id or self.current_session_id
+        logout_session_type = session_type or self.current_session_type
+
+        if not logout_session_id:
+            return {
+                "success": False,
+                "error": {"code": "no_session", "message": "No session ID provided or available"},
+            }
+
+        logout_url = f"{self.base_url}/webapi/auth.cgi"
+
+        # Try multiple API versions for logout (same approach as login)
+        api_versions = ["7", "6", "3", "2"]
+        last_error = None
+
+        for version in api_versions:
+            payload = {
+                "api": "SYNO.API.Auth",
+                "version": version,
+                "method": "logout",
+                "session": logout_session_type,
+                "_sid": logout_session_id,
+            }
+
+            try:
+                response = requests.post(
+                    logout_url,
+                    data=payload,
+                    verify=self.verify_ssl,
+                    timeout=AUTH_TIMEOUT,
+                    allow_redirects=False,
+                )
+                # The logout body carries a live SID, so it gets the same
+                # treatment as login, and likewise stops rather than retrying.
+                if 300 <= response.status_code < 400:
+                    return _refuse_redirect(response, "SYNO.API.Auth logout")
+                response.raise_for_status()
+                result = response.json()
+
+                if result.get("success"):
+                    # Clear current session if we logged out our own session
+                    if logout_session_id == self.current_session_id:
+                        self.current_session_id = None
+                        self.current_session_type = "webui"
+                        self.current_syno_token = None
+                        # Drop cached credentials when the user explicitly logs out;
+                        # otherwise a subsequent 119 would silently re-auth them
+                        # against their explicit intent.
+                        self._credentials = None
+                        # Also forget the trusted-device token: a user-initiated
+                        # logout ends the session deliberately, and reusing the
+                        # device_id on a later auto-relogin would contradict that.
+                        self.current_device_id = None
+                        self._cached_device_id = None
+                    return result
+                else:
+                    last_error = result
+                    error_code = result.get("error", {}).get("code", "unknown")
+                    # For certain errors, don't try other versions
+                    if error_code in [105, 106]:  # Invalid session or not logged in
+                        break
+
+            except requests.RequestException as e:
+                last_error = {
+                    "success": False,
+                    "error": {"code": "network_error", "message": f"Network error: {str(e)}"},
+                }
+                continue
+            except Exception as e:
+                last_error = {
+                    "success": False,
+                    "error": {"code": "unknown_error", "message": f"Unexpected error: {str(e)}"},
+                }
+                continue
+
+        # If we reach here, all attempts failed
+        if last_error:
+            return last_error
+        else:
+            return {
+                "success": False,
+                "error": {
+                    "code": "all_versions_failed",
+                    "message": "Logout failed with all API versions",
+                },
+            }
+
+    def is_logged_in(self) -> bool:
+        """Check if there's an active session."""
+        return self.current_session_id is not None
+
+    def get_session_info(self) -> Dict[str, Any]:
+        """Get current session information."""
+        return {
+            "session_id": self.current_session_id,
+            "session_type": self.current_session_type,
+            "syno_token": self.current_syno_token,
+            "device_id": self.current_device_id,
+            "logged_in": self.is_logged_in(),
+        }

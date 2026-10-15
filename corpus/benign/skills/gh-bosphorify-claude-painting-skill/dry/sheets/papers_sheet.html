@@ -1,0 +1,214 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>dry media: papers</title>
+<!-- Render: node render.mjs sheets/papers_sheet.html out/papers_sheet.png   (from painting-kit/dry) -->
+<script src="/dry/node_modules/p5/lib/p5.min.js"></script>
+<script src="/dry/node_modules/p5.brush/dist/p5.brush.js"></script>
+<script src="/dry/paper.js"></script>
+<style>
+  body { margin: 0; background: #777; }
+  #stage { position: relative; width: max-content; }
+  #stage canvas { display: block; }
+  #stage canvas + canvas { position: absolute; left: 0; top: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+// Each paper is a whole sketch of its own (Paper.init with a preset paints the whole canvas), so the sheet draws one paper
+// at a time on the p5 canvas and copies its panel onto the 2D overlay, which is what the render keeps.
+const W = 1800, H = 1770, SEED = 7;
+const SCALE = W / 200;
+let labels;
+
+function label(text, x, y, size = 16, color = '#d8d2c4') {
+  labels.font = `${size}px Helvetica, Arial, sans-serif`;
+  labels.fillStyle = color;
+  labels.textBaseline = 'top';
+  labels.fillText(text, x, y);
+}
+
+function setup() {
+  randomSeed(SEED);
+  noiseSeed(SEED);
+  pixelDensity(1);
+  createCanvas(W, H, WEBGL).parent('stage');
+  const overlay = document.createElement('canvas');
+  overlay.width = W; overlay.height = H;
+  document.getElementById('stage').append(overlay);
+  labels = overlay.getContext('2d');
+  labels.fillStyle = '#2a2826';
+  labels.fillRect(0, 0, W, H);
+  angleMode(DEGREES);
+  brush.scaleBrushes(SCALE);
+  label('Dry media sheet  ·  papers  ·  Paper.init(W, H, SEED, { preset })  ·  seed ' + SEED, 60, 36, 30, '#f0eadc');
+  label('every paper is a whole sketch of its own; each panel here is one, copied onto this sheet', 60, 82, 16, '#a9a295');
+}
+
+let layer = 0, beforeTooth = null;
+function draw() {
+  if (beforeTooth) { Paper.tooth(beforeTooth, LAYERS[layer - 1].tooth); beforeTooth = null; }
+  if (layer === LAYERS.length) { noLoop(); window.__done = true; return; }
+  translate(-W / 2, -H / 2);
+  const fn = LAYERS[layer++];
+  if (fn.tooth) beforeTooth = Paper.read();
+  fn();
+}
+
+// ---- the panels: 3 x 2, each 560 x 740, below a title band ----
+const PW = 560, PH = 740, GAP = 40, TOP = 180;
+const at = k => ({ x: 60 + (k % 3) * (PW + GAP), y: TOP + Math.floor(k / 3) * (PH + 90) });
+const LIGHT = '#f3f0e8', BLACK = '#1a1714', GRAPHITE = '#2e2b29';
+
+// One panel: init the paper, then media layers (each may carry a tooth), then copy the panel onto the overlay
+function panel(k, preset, title, sub, media) {
+  const { x, y } = at(k), box = (u, v) => [x + u, y + v];
+  const fns = [function init() { Paper.init(W, H, SEED + k, { preset }); }];
+  media.forEach(([name, tooth, draw]) => {
+    const fn = { [name]() { draw(box); } }[name];
+    if (tooth) fn.tooth = tooth;
+    fns.push(fn);
+  });
+  fns.push(function capture() {
+    labels.drawImage(drawingContext.canvas, x, y, PW, PH, x, y, PW, PH);
+    label(title, x, y - 56, 24, '#ece6d8');
+    label(sub, x, y - 26, 15, '#a9a295');
+  });
+  return fns;
+}
+
+// small helpers that draw with the current brush
+const ln = (box, a, b, c, d) => { const [x1, y1] = box(a, b), [x2, y2] = box(c, d); brush.line(x1, y1, x2, y2); };
+const sp = (box, pts, curv = 0.6) => brush.spline(pts.map(([u, v, p]) => [...box(u, v), p ?? 1]), curv);
+const circ = (box, u, v, r) => { const [cx, cy] = box(u, v); brush.circle(cx, cy, r); };
+const rect = (box, u, v, w, h) => { const [rx, ry] = box(u, v); brush.rect(rx, ry, w, h); };
+const hatched = (name, color, w, spacing, angle, opts, shape) => {
+  brush.noStroke(); brush.hatch(spacing, angle, opts); brush.hatchStyle(name, color, w); shape(); brush.noHatch();
+};
+
+const LAYERS = [
+  // 1. blue-black: white ink for line, white pencil for tone, chalk for a soft mass
+  ...panel(0, 'blue-black', 'blue-black', 'whiteink, whitepencil (tooth 0.8), chalk (tooth 0.9)', [
+    ['whiteInk', 0, box => {
+      brush.set('whiteink', LIGHT, 1.3);
+      circ(box, 170, 170, 110);
+      for (let i = 0; i < 16; i++) { const a = i * 22.5, r1 = 128, r2 = i % 2 ? 142 : 156; ln(box, 170 + r1 * cos(a), 170 + r1 * sin(a), 170 + r2 * cos(a), 170 + r2 * sin(a)); }
+      brush.set('whiteink', LIGHT, 0.8);
+      sp(box, [[40, 380, 0.5], [130, 350, 1.2], [230, 390, 1], [330, 356, 1], [420, 384, 0.6], [520, 360, 0.4]]);
+      sp(box, [[40, 410, 0.5], [130, 380, 1.1], [230, 420, 1], [330, 386, 1], [420, 414, 0.6], [520, 390, 0.4]]);
+      brush.set('whiteink', LIGHT, 1);
+      [[430, 90], [490, 160], [390, 210], [470, 250]].forEach(([u, v]) => { ln(box, u - 12, v, u + 12, v); ln(box, u, v - 12, u, v + 12); });
+    }],
+    ['whitePencil', 0.8, box => {
+      hatched('whitepencil', LIGHT, 1, 9, 50, { rand: 0.15 }, () => rect(box, 50, 470, 230, 210));
+      hatched('whitepencil', LIGHT, 1, 9, -40, { rand: 0.15 }, () => rect(box, 50, 470, 230, 210));
+    }],
+    ['chalk', 0.9, box => {
+      brush.set('chalk', LIGHT, 1.4);
+      sp(box, [[320, 500, 1], [400, 520, 1.1], [500, 500, 0.8]]);
+      sp(box, [[310, 560, 1], [410, 585, 1.1], [510, 565, 0.8]]);
+      sp(box, [[330, 625, 1], [420, 640, 1.1], [500, 625, 0.7]]);
+    }],
+  ]),
+  // 2. kraft: black pen, graphite and white ink
+  ...panel(1, 'kraft', 'kraft', 'pen, 2B (tooth 0.3), whiteink', [
+    ['pen', 0, box => {
+      brush.set('pen', BLACK, 1.4);
+      rect(box, 60, 60, 240, 190);
+      hatched('pen', BLACK, 1, 10, 45, { rand: 0.1 }, () => rect(box, 60, 60, 240, 190));
+      brush.set('pen', BLACK, 1);
+      circ(box, 430, 150, 80);
+      sp(box, [[60, 330, 0.6], [180, 300, 1.2], [300, 340, 1], [410, 310, 1], [500, 335, 0.5]]);
+    }],
+    ['graphite', 0.3, box => {
+      brush.set('2B', GRAPHITE, 1.3);
+      for (let i = 0; i < 9; i++) sp(box, [[70 + i * 6, 410 + i * 4, 0.7], [180, 400 + i * 4, 1], [300, 412 + i * 4, 1], [420 + i * 4, 404 + i * 4, 0.6]], 0.4);
+    }],
+    ['whiteInk', 0, box => {
+      brush.set('whiteink', LIGHT, 1.3);
+      ln(box, 80, 120, 190, 80); ln(box, 100, 170, 230, 110);
+      sp(box, [[60, 600, 0.5], [170, 570, 1.2], [300, 610, 1], [410, 575, 1], [500, 600, 0.5]]);
+      circ(box, 430, 150, 60);
+    }],
+  ]),
+  // 3. warm grey: graphite and white chalk
+  ...panel(2, 'warm-grey', 'warm grey', 'HB and 2B (tooth 0.3), chalk (tooth 0.6)', [
+    ['graphite', 0.3, box => {
+      brush.set('HB', GRAPHITE, 1.3);
+      circ(box, 280, 230, 150);
+      hatched('HB', GRAPHITE, 1, 9, 60, { rand: 0.15 }, () => circ(box, 290, 240, 140));
+      hatched('HB', GRAPHITE, 1, 9, 20, { rand: 0.15, gradient: 0.7 }, () => circ(box, 290, 240, 140));
+      brush.set('2B', GRAPHITE, 1.6);
+      sp(box, [[110, 440, 0.6], [250, 448, 1.2], [400, 440, 0.5]]);
+    }],
+    ['chalk', 0.6, box => {
+      brush.set('chalk', '#ffffff', 1.5);
+      sp(box, [[200, 150, 1], [240, 135, 1.1], [290, 140, 0.7]]);
+      sp(box, [[190, 185, 1], [235, 170, 1.1], [270, 172, 0.7]]);
+      sp(box, [[90, 560, 0.8], [240, 545, 1.2], [420, 562, 0.6]]);
+      sp(box, [[110, 610, 0.8], [260, 598, 1.2], [440, 612, 0.6]]);
+    }],
+  ]),
+  // 4. cool grey: the same media, a different subject
+  ...panel(3, 'cool-grey', 'cool grey', 'HB and 2B (tooth 0.3), chalk (tooth 0.6)', [
+    ['graphite', 0.3, box => {
+      brush.set('HB', GRAPHITE, 1.3);
+      ln(box, 120, 160, 280, 100); ln(box, 280, 100, 440, 160); ln(box, 440, 160, 280, 220); ln(box, 280, 220, 120, 160);
+      ln(box, 120, 160, 120, 330); ln(box, 280, 220, 280, 400); ln(box, 440, 160, 440, 330);
+      ln(box, 120, 330, 280, 400); ln(box, 280, 400, 440, 330);
+      hatched('2B', GRAPHITE, 1.2, 8, 75, { rand: 0.1 }, () => rect(box, 123, 200, 150, 190));
+      hatched('2B', GRAPHITE, 1.2, 8, 75, { rand: 0.1 }, () => rect(box, 123, 230, 150, 150));
+      hatched('HB', GRAPHITE, 1, 10, -60, { rand: 0.1 }, () => rect(box, 290, 240, 145, 150));
+    }],
+    ['chalk', 0.6, box => {
+      brush.set('chalk', '#ffffff', 1.5);
+      sp(box, [[200, 140, 1], [280, 120, 1.1], [360, 140, 0.8]]);
+      sp(box, [[230, 165, 1], [280, 152, 1.1], [330, 165, 0.8]]);
+      sp(box, [[110, 520, 0.8], [250, 505, 1.2], [440, 525, 0.6]]);
+    }],
+  ]),
+  // 5. graph paper: HB pencil, pen and a coloured pencil on a printed grid
+  ...panel(4, 'graph', 'graph paper', 'HB (tooth 0.2), pen, cpencil (tooth 0.4)', [
+    ['plan', 0.2, box => {
+      brush.set('HB', GRAPHITE, 1.3);
+      rect(box, 70, 80, 420, 300);
+      rect(box, 80, 90, 400, 280);
+      ln(box, 70, 380, 200, 380);
+      brush.set('HB', GRAPHITE, 0.9);
+      sp(box, [[200, 380, 1], [215, 330, 1], [250, 295, 1], [290, 282, 1]], 0.7);
+      ln(box, 200, 380, 290, 282);
+    }],
+    ['dimension', 0, box => {
+      brush.set('pen', BLACK, 1);
+      ln(box, 70, 440, 490, 440); ln(box, 70, 425, 70, 455); ln(box, 490, 425, 490, 455);
+      ln(box, 530, 80, 530, 380); ln(box, 515, 80, 545, 80); ln(box, 515, 380, 545, 380);
+      ln(box, 70, 500, 200, 500); ln(box, 70, 490, 70, 510); ln(box, 200, 490, 200, 510);
+    }],
+    ['colour', 0.4, box => {
+      hatched('cpencil', '#c0392b', 1.1, 9, 55, { rand: 0.15 }, () => rect(box, 300, 110, 170, 140));
+      hatched('cpencil', '#2f6f9f', 1.1, 9, -35, { rand: 0.15 }, () => rect(box, 100, 110, 150, 140));
+    }],
+  ]),
+  // 6. the key
+  function key() {
+    const { x, y } = at(5);
+    label('the light media', x, y - 56, 24, '#ece6d8');
+    label('Paper.media() registers them; Paper.init with a preset does it too', x, y - 26, 15, '#a9a295');
+    [['whiteink', 'opaque, crisp: lines, lettering, stars'],
+      ['whitepencil', 'waxy: hatching; layer tooth 0.8'],
+      ['chalk', 'dusty, wide: masses; tooth 0.9 on dark, 0.6 on grey'],
+      ['', ''],
+      ['Paper.presets', "'blue-black' 'kraft' 'warm-grey'"],
+      ['', "'cool-grey' 'graph'"],
+      ['', ''],
+      ['lift, margin', 'go back to the preset sheet']].forEach(([a, b], i) => {
+      label(a, x, y + 10 + i * 46, 22, '#f0eadc');
+      label(b, x + (a.length > 12 ? 190 : 150), y + 14 + i * 46, 16, '#b4ad9f');
+    });
+  },
+];
+</script>
+</body>
+</html>

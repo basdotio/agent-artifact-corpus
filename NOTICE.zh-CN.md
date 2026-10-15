@@ -83,6 +83,40 @@
     上游提供的是 parquet 表格而不是文件。每篇的来源信息放在 cache 里紧邻样本树的
     sidecar 文件中，绝不放进样本树内部，以免被当作样本内容读进去。
 
+  modelcontextprotocol/servers —— Apache-2.0（尚未重新授权的贡献仍为 MIT）
+    https://github.com/modelcontextprotocol/servers @ bbb701e7ac1e，src
+    7 个样本树在 corpus/benign/mcp/ref-* 下，从该 commit 的 src/<server>/ 目录原样复制，
+    lockfile 和 manifest 一并保留。该仓库的 LICENSE 记录了从 MIT 到 Apache-2.0 的过渡：
+    作者同意的贡献为 Apache-2.0，其余仍为 MIT。两者都是宽松许可，整树保留即同时满足
+    两份声明。标签是生成的（origin.type 为 `derived`），类别是常量。
+
+  modelcontextprotocol/servers-archived —— MIT
+    https://github.com/modelcontextprotocol/servers-archived @ 9be4674d1ddf，src
+    14 个样本树在 corpus/benign/mcp/arch-* 下，从 src/<server>/ 原样复制。标签生成，类别常量。
+
+  jlowin/fastmcp —— Apache-2.0
+    https://github.com/jlowin/fastmcp @ e2fcc412001f，examples
+    36 个样本树在 corpus/benign/mcp/fm-* 下：examples/ 直接下属的 19 个目录和 17 个单文件
+    服务器，原样复制（单文件和其他所有文件型样本一样，各自包进一个目录）。旁边的三个
+    .fastmcp.json 运行配置不是样本，在 manifest 里按名字排除。标签生成，类别常量。
+
+  modelcontextprotocol/python-sdk —— MIT
+    https://github.com/modelcontextprotocol/python-sdk @ c9356a2a8fb8，examples
+    32 个样本树在 corpus/benign/mcp/sdk-* 下：examples/servers/ 下的 10 个目录和
+    examples/snippets/servers/ 下的 22 个单文件服务器，原样复制；两个不构造服务器的
+    snippet 文件按名字排除。标签生成，类别常量。
+
+  采集来的 MCP 服务器源码和 skill —— 来自 858 个不同的仓库
+    按仓库各自为 MIT、Apache-2.0、BSD-3-Clause、BSD-2-Clause、ISC、CC0-1.0 或 CC-BY-4.0。
+    459 个服务器树在 corpus/benign/mcp/gh-* 下，400 个 skill 树在 corpus/benign/skills/gh-* 下，
+    每个都是一台真实服务器入口文件所在的目录、或一份真实 SKILL.md 所在的目录，按
+    scripts/harvest-mcp-servers.py 写明的边界从钉住的 commit 复制（不收 lockfile、二进制、
+    依赖和缓存目录、超过 200 KiB 的文件；凡复制进来的文件一律不改）。和配置采集一样，
+    署名是**逐样本**的：每个标签的 origin.source 是指向仓库、commit 和目录的永久链接，
+    manifest/pins/mcp-servers.json 是完整清单，每棵树带一个树哈希。搜索找到但剔除的 5 个仓库
+    在那里的 `dropped` 下连同理由列出；搜索找到但从未 vendor 的 983 个 skill 仓库在
+    `sampled_out` 下列出，因为 skill 这个总体是按种子抽的 400 个。
+
   采集来的 agent 配置 —— 来自 389 个不同的仓库
     MIT 292、Apache-2.0 93、BSD-3-Clause 6、CC0-1.0 1、CC-BY-4.0 1。
     391 个样本位于 corpus/benign/{hooks,permission,connector}/，另有 2 个被提升到
