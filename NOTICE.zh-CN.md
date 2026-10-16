@@ -83,6 +83,17 @@
     上游提供的是 parquet 表格而不是文件。每篇的来源信息放在 cache 里紧邻样本树的
     sidecar 文件中，绝不放进样本树内部，以免被当作样本内容读进去。
 
+  osunlp/SkillHarm —— CC-BY-4.0
+    https://huggingface.co/datasets/osunlp/SkillHarm @ cc21f90982ea
+    240 个样本树，位于 corpus/malicious/skills/sh-*，是所选 Fixed-Payload Poisoning 样本各自
+    被投毒的 skill 目录，原样拷贝（含 PDF 载荷；上游附带的其他二进制不抓取）。这是 641 个
+    FPP 样本的一个**抽样**，不是总体：scripts/prep-skillharm.py --vendor 20 按固定种子顺序
+    每类风险取 20 个。标签是生成的，不是 vendored 的：类别和严重度是本仓库断言的常量，
+    维度、层级和规避手法按 manifest/corpora.yaml 里的规则从上游自己的 risk_id 和
+    realization 派生；每个标签都记着 origin.type `derived`。每个样本都是上游点名的某个
+    LLM（design_agent_id）写出来的，所以它们是 fixture，不是在野样本。
+    署名：SkillHarm，OSU NLP group（osunlp），arXiv 2606.02540，CC-BY-4.0。
+
   modelcontextprotocol/servers —— Apache-2.0（尚未重新授权的贡献仍为 MIT）
     https://github.com/modelcontextprotocol/servers @ bbb701e7ac1e，src
     7 个样本树在 corpus/benign/mcp/ref-* 下，从该 commit 的 src/<server>/ 目录原样复制，

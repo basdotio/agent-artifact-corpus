@@ -45,8 +45,9 @@ their authors already thought of.
 This corpus is built the other way round. The benign half is harvested: 3,220 real
 configurations from 2,016 public repositories, collected rather than written, because a benign
 sample authored by someone who knows the rules unconsciously avoids the shapes that fire. Each
-of the 300 malicious samples carries a quote located in its own bytes, so a disputed label can
-be checked rather than argued.
+of the 300 malicious samples pinned or read by hand carries a quote located in its own bytes, so
+a disputed label can be checked rather than argued; the 240 derived from SkillHarm carry the
+rule that mapped them instead, and say so.
 
 Here is what that buys. A run against one real scanner showed `env | curl` completed no
 exfiltration chain at all — the whole environment could leave unflagged. After the fix,

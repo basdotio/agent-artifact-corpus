@@ -21,7 +21,7 @@ Do not pick by size. Pick by question, then check the hazards.
 | Your question | Use | Never use |
 |---|---|---|
 | **What is the false positive rate?** | `skillmd-138k` as the headline; `awesome-link-targets` when you need full trees with scripts | Anything labelled benign because a scanner stayed quiet. For a scanner that derives its rules from OWASP Agentic Top 10, `clawhub-security-signals` is circular |
-| **What is the recall?** | `datadog-ai-skills` (in-the-wild, deduplicated) plus `skillsgoat` (blind probe) | A pooled figure across overlapping corpora. Report per dimension, not aggregate |
+| **What is the recall?** | `datadog-ai-skills` (in-the-wild, deduplicated) plus `skillsgoat` (blind probe); `skillharm` for the dimensions those two leave thin, reported as coverage, not as a rate | A pooled figure across overlapping corpora. Report per dimension, not aggregate |
 | **Does it catch evasion, or just topics?** | `trailofbits-overt` (4 samples, 4 different mechanisms), `nvidia-skillspector-fixtures` (paired twins) | Size-based corpora. This question is answered by structure, not by n |
 | **Does it over-alert on security content?** | `fevzi-injection-corpus`, `guarddog-benign`, `mcp-guardbench`, `skillsgoat`'s 10 decoys | — |
 | **Hooks, permissions, MCP config?** | `skillcraft-audit` (hooks, permission bypass), `cisco-mcp-scanner-evals` (MCP) — malicious side only | Cisco's 3 benign samples as an MCP false-positive denominator |
@@ -76,7 +76,7 @@ popularity or vendor curation, none of them a security review.
 
 ---
 
-## Pinned and fetchable (18)
+## Pinned and fetchable (19)
 
 Each is pinned to a commit in the manifest and fetched with
 `make fetch E="<id>"`.
@@ -113,6 +113,16 @@ version corrupted its own measurements.
 bypass at all.**
 *Hazards*: single author, so shapes are stylistically correlated; and being the only source,
 there is no second opinion to check it against.
+
+**`skillharm`** — synthetic coverage of the thin dimensions.
+`https://huggingface.co/datasets/osunlp/SkillHarm` @ `cc21f90982ea`, **CC-BY-4.0**, vendorable.
+879 malicious (687 fixed-payload + 192 self-mutating), 0 benign; 240 of the fixed-payload
+samples are vendored as `sh-*`, 20 per risk in a seeded order, PDF payloads included. Twelve
+risks across data, system and autonomy; six realizations place the payload in `SKILL.md`, in a
+script the skill runs, in a helper it imports, or in a document or PDF it tells the agent to read.
+*Hazards*: every sample was written by an LLM the upstream names, so it is coverage, not a rate;
+the vendored set is a draw, not a census; and its `dos` sabotages dotfiles rather than consuming
+anything, so it lands on filesystem, not resource-abuse.
 
 **`cisco-mcp-scanner-evals`** — the MCP surface.
 `https://github.com/cisco-ai-defense/mcp-scanner` @ `be87b90d88bc`, subset `evals`,

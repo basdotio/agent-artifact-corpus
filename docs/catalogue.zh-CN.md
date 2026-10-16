@@ -20,7 +20,7 @@
 | 你的问题 | 用 | 绝不要用 |
 |---|---|---|
 | **误报率是多少** | `skillmd-138k` 做头条；需要带脚本的完整树时用 `awesome-link-targets` | 任何"因为扫描器没响所以是良性"的标注。对一个规则源自 OWASP Agentic Top 10 的扫描器来说，`clawhub-security-signals` 是循环论证 |
-| **召回率是多少** | `datadog-ai-skills`（在野，**须先去重**）加 `skillsgoat`（盲测） | 跨重叠语料的合并数。**按维度报，不要报聚合值** |
+| **召回率是多少** | `datadog-ai-skills`（在野，**须先去重**）加 `skillsgoat`（盲测）；那两份留薄的维度用 `skillharm`，按覆盖报，不按比率报 | 跨重叠语料的合并数。**按维度报，不要报聚合值** |
 | **抓的是规避还是话题** | `trailofbits-overt`（4 个样本，4 种机制）、`nvidia-skillspector-fixtures`（成对孪生） | 按规模选的语料。这个问题由结构回答，不由 n 回答 |
 | **会不会对安全内容过度告警** | `fevzi-injection-corpus`、`guarddog-benign`、`mcp-guardbench`、`skillsgoat` 的 10 个诱饵 | — |
 | **hook / 权限 / MCP 配置** | `skillcraft-audit`（hook 武器化、权限绕过）、`cisco-mcp-scanner-evals`（MCP）—— **只有恶意侧** | 拿 cisco 的 3 个良性样本当 MCP 误报分母 |
@@ -68,7 +68,7 @@ Glama 的 `qualityScore`（**付费位**）、各种信誉分，全是流行度�
 
 ---
 
-## 已钉住可直接拉取的 18 份
+## 已钉住可直接拉取的 19 份
 
 每一份都在 manifest 里钉到了 commit，用 `make fetch E="<id>"` 取。
 
@@ -97,6 +97,11 @@ Glama 的 `qualityScore`（**付费位**）、各种信誉分，全是流行度�
 `https://github.com/Clay-HHK/skillcraft-audit` @ `0b9c36f28e05`，**MIT**，可 vendoring。
 51 恶意（42 个单体 skill + 9 条链）/ 0 良性。**全世界唯一覆盖 hook 武器化和权限绕过的公开语料。**
 *风险*：单一作者，形态在风格上相关；而且作为唯一来源，**没有第二份可以对照校验**。
+
+**`skillharm`** —— 薄弱维度的合成覆盖。
+`https://huggingface.co/datasets/osunlp/SkillHarm` @ `cc21f90982ea`，**CC-BY-4.0**，可 vendoring。
+879 恶意（687 个固定载荷 + 192 个自变异）/ 0 良性；固定载荷样本里有 240 个已 vendoring 为 `sh-*`，按固定种子顺序每类风险 20 个，含 PDF 载荷。十二类风险横跨数据、系统、自主性三组；六种实现方式把载荷放在 `SKILL.md` 里、skill 会运行的脚本里、它导入的辅助模块里，或它让 agent 去读的文档或 PDF 里。
+*风险*：每个样本都是上游点名的某个 LLM 写的，所以是覆盖不是比率；vendoring 的那部分是抽样不是普查；它的 `dos` 是破坏 dotfile 而不是消耗资源，所以落在 filesystem 而不是 resource-abuse。
 
 **`cisco-mcp-scanner-evals`** —— MCP 面。
 `https://github.com/cisco-ai-defense/mcp-scanner` @ `be87b90d88bc`，子集 `evals`，
