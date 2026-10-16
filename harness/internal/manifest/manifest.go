@@ -204,6 +204,11 @@ type Derive struct {
 	//
 	// `constant:` is the weakest and is called out for that reason: it is a judgement applied
 	// uniformly to every sample in the entry, not something the upstream told us.
+	//
+	// For tier only, any other word (`path-segment`, `category-map`) names no source at all
+	// and leaves the tier to the `tier:` targets of category_axis_map — the upstream's own
+	// difficulty directory or realisation label decides, through the map, and a sample whose
+	// categories reach no `tier:` target is reported as unresolved rather than defaulted.
 	TierFrom     string `yaml:"tier_from"`
 	SeverityFrom string `yaml:"severity_from"`
 	ClassFrom    string `yaml:"class_from"`

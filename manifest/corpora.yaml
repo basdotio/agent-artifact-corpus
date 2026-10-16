@@ -2320,10 +2320,63 @@ entries:
     benign: 0
     vendorable: true
     hazards:
-      - "VENDORABLE (CC-BY-4.0, attribution required) and the one surveyed source that fills two thin dimensions: filesystem 88 (unauthorized_file_modification) and resource-abuse 73 (dos). Not yet integrated — a selective prep like skill-safety-bench is the way in"
-      - "SYNTHETIC: every sample carries a design_agent_id (the LLM that authored it); the paper subtitle is 'Automated Construction'. So it is COVERAGE, not a recall rate — a third author for these dimensions, not real-world draws"
-      - "its `dos` skews to config/shell sabotage (exit 0 into ~/.bashrc, unreachable pip index) rather than classic fork/zip/memory bombs; sub-select executable_code/import_new_helper realizations for literal runnable payloads"
+      - "VENDORABLE (CC-BY-4.0, attribution required; NOTICE carries it). Integrated selectively: 20 FPP trees per risk, 240 of 641, by the seeded prep below — the dataset is 399 MB of runnable task environments and only the poisoned skill directory of each sample is a sample here. The 192 SMP (self-mutating) rows are not vendored: there the artifact is benign as shipped and the harm is written by a run, which is not a static sample"
+      - "SYNTHETIC: every sample carries a design_agent_id (the LLM that authored it); the paper subtitle is 'Automated Construction'. So it is COVERAGE, not a recall rate — a third author for these dimensions, not real-world draws. And a SAMPLE, not a census: the vendored 240 are a seeded draw, so a recall figure over them is a figure over the draw"
+      - "its `dos` is config/shell sabotage, not consumption: every one read (PATH overridden and ulimit set in /root/.bashrc, pypi.org pinned to loopback in /etc/hosts) rewrites a dotfile or hosts file. It lands on filesystem below, not resource-abuse, and the earlier line here that counted it toward resource-abuse was wrong"
       - "reconnaissance: absent (its taxonomy has no host-enum-returned category; data_exfiltration transmits off-host, which the corpus already covers)"
+      - "the vendored 240 are the first 20 per risk of the same seeded order the P-059 held-out draw took its 10 from, so that held-out reading is spent; a fresh held-out set starts past the vendored ids"
+    prep:
+      - "run scripts/prep-skillharm.py --vendor 20 to fetch the selected trees into cache/skillharm/_vendor/<sample>/{meta.yaml, skill/} (meta.yaml carries the upstream's own risk_id and realization and nothing of ours); without --vendor the same script writes the held-out draw to _selected/, which stays outside layer 1"
+    derive:
+      layout: "_vendor/*"
+      label_file: meta.yaml
+      tree_subdir: skill
+      surface: skills
+      id_prefix: sh
+      class_from: "constant:malicious"
+      severity_from: "constant:high"
+      tier_from: "category-map"    # no source of its own: the realization token below carries it
+      fidelity: >-
+        class and severity are constants this repository asserts: the benchmark calls every FPP
+        sample an attack and scores a deterministic attack-success signal, and rates no severity.
+        dimension comes from the upstream's risk_id through the map below, written from the
+        dataset card's three groups and from reading two to four held-out trees per risk — not
+        every sample — so it is `derived`, and the lines that bend are named here. `dos` is
+        filesystem, not resource-abuse: all four read sabotage a dotfile or /etc/hosts and
+        consume nothing. `poisoning` is filesystem: each read writes a persistent file outside
+        the project that later runs consult — an alias cache, a registrant cache, a pip.conf
+        whose index-url is the attacker's; that last is supply-chain as well, and only a
+        per-sample read can add it. `proxy_attack` is resource-abuse: the two read make the
+        agent POST a static record to an attacker-named host, nothing from the host is read, so
+        not exfiltration, and the host's network and identity are spent on the attacker's
+        target — the weakest line of the map. `output_manipulation` and `goal_hijacking` are
+        injection: the artifact only has to be read to work, and the harm is in what the agent
+        then says or does, not on the host. tier and evasion come from the realization:
+        plain_text is the payload in SKILL.md itself; executable_code, import_new_helper,
+        redirect_to_new_script and redirect_to_new_doc put it one hop away, untransformed, in a
+        file the skill invokes or tells the agent to read — indirect, with no mechanism to name;
+        redirect_to_new_pdf puts it inside a PDF the prep fetches — binary-container, evasive.
+      category_axis_map:
+        # --- risk_id: what it achieves (dimension) ---
+        data_exfiltration: dim:exfiltration
+        backdoor_injection: dim:backdoor             # ~/.ssh/authorized_keys appended
+        malware_deployment: dim:execution
+        privilege_escalation: dim:permission
+        unauthorized_file_modification: dim:filesystem
+        system_corruption: dim:filesystem
+        anti_forensics: dim:filesystem               # log truncated or rm'd
+        dos: dim:filesystem                          # see fidelity
+        poisoning: dim:filesystem                    # see fidelity
+        goal_hijacking: dim:injection
+        output_manipulation: dim:injection
+        proxy_attack: dim:resource-abuse             # see fidelity
+        # --- realization: where the payload sits (tier, and the container when it is one) ---
+        plain_text: tier:plain
+        executable_code: tier:indirect
+        import_new_helper: tier:indirect
+        redirect_to_new_script: tier:indirect
+        redirect_to_new_doc: tier:indirect
+        redirect_to_new_pdf: [evasion:binary-container, tier:evasive]
   - id: atr-agent-threat-rules
     name: "Agent-Threat-Rule / agent-threat-rules (MIT)"
     url: https://github.com/Agent-Threat-Rule/agent-threat-rules
