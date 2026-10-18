@@ -30,6 +30,13 @@ The seeded order is the same as the held-out draw's, so the first ten of each ri
 held-out set and N=20 is a superset of it; once vendored, those samples are layer 1 and the
 held-out reading has to be drawn again from the rows that are not. `_selected/` is untouched: the
 P-059 result directories name those paths.
+
+--heldout N [--skip M]: THE NEXT HELD-OUT. Draws N per risk from the same seeded order AFTER its
+first M (default 20: the vendored rows), so it can never overlap layer 1 or the spent P-059 draw,
+into cache/skillharm/_heldout/<id>/ beside a sidecar label like `_selected/`'s, PDFs included (a
+redirect_to_new_pdf tree without its PDF is not a sample), and writes samples-heldout.jsonl. A risk
+with fewer than M+N rows gives what is left, and the counts are printed. Local only, like
+`_selected/`: the reading it exists for is totals, and nothing here is a corpus label.
 """
 
 import hashlib
@@ -52,6 +59,7 @@ OUT = CACHE / "_selected"
 SEED = 20261015
 PER_RISK = 10
 VENDOR = ROOT / "cache" / ENTRY / "_vendor"
+HELDOUT = ROOT / "cache" / ENTRY / "_heldout"
 MAX_FILE_BYTES = 200_000
 BINARY_EXT = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".tar", ".mp4", ".mp3",
               ".pptx", ".docx", ".xlsx", ".bin", ".so", ".parquet", ".db", ".sqlite"}
@@ -145,16 +153,25 @@ truth:
 def main() -> int:
     added = date.today().isoformat()
     vendor = 0
+    heldout, skip = 0, 20
     shard, shards = 0, 1
     for i, a in enumerate(sys.argv):
         if a == "--vendor" and i + 1 < len(sys.argv):
             vendor = int(sys.argv[i + 1])
+        if a == "--heldout" and i + 1 < len(sys.argv):
+            heldout = int(sys.argv[i + 1])
+        if a == "--skip" and i + 1 < len(sys.argv):
+            skip = int(sys.argv[i + 1])
         if a == "--shard" and i + 1 < len(sys.argv):
             # k/n: fetch only every n-th selected tree starting at k. The selection is the same
             # in every shard (same seed, same order), so n shards cover it exactly once between
             # them and never touch the same tree; the work list is written by shard 0/n only.
             shard, shards = (int(x) for x in sys.argv[i + 1].split("/"))
-    per_risk, out_root = (vendor, VENDOR) if vendor else (PER_RISK, OUT)
+    if vendor and heldout:
+        print("--vendor and --heldout draw different sets; pass one")
+        return 2
+    per_risk, out_root = (vendor, VENDOR) if vendor else ((heldout, HELDOUT) if heldout else (PER_RISK, OUT))
+    first = skip if heldout else 0
     CACHE.mkdir(parents=True, exist_ok=True)
     rev = revision()
     manifest_path = CACHE / "MANIFEST.json"
@@ -177,11 +194,11 @@ def main() -> int:
         print(f"  {dupes} duplicate row(s) in the upstream manifest, counted once")
     rng = random.Random(SEED)
     chosen = []
-    print(f"{ENTRY} @ {rev[:12]}: {len(fpp)} FPP samples over {len(by_risk)} risks; {per_risk} per risk, seed {SEED}" + (" (vendor layout)" if vendor else ""))
+    print(f"{ENTRY} @ {rev[:12]}: {len(fpp)} FPP samples over {len(by_risk)} risks; {per_risk} per risk, seed {SEED}" + (" (vendor layout)" if vendor else (f" (held-out: after the first {first} per risk)" if heldout else "")))
     for risk in sorted(by_risk):
         pool = sorted(by_risk[risk], key=lambda s: s["sample_id"])
         rng.shuffle(pool)
-        take = pool[:per_risk]
+        take = pool[first:first + per_risk]
         chosen.extend(take)
         print(f"  {risk:<32} {len(take):>3} of {len(pool)}")
 
@@ -216,7 +233,7 @@ def main() -> int:
             # quiet on them for want of a payload, not for want of a rule. The vendored layout
             # carries the PDF (5–13 KB each in the trees listed): a binary-container sample
             # without its container is not a sample.
-            if (suffix in BINARY_EXT and not (vendor and suffix == ".pdf")) or (e.get("size") or 0) > MAX_FILE_BYTES:
+            if (suffix in BINARY_EXT and not ((vendor or heldout) and suffix == ".pdf")) or (e.get("size") or 0) > MAX_FILE_BYTES:
                 continue
             p = dest / rel
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -248,8 +265,9 @@ def main() -> int:
     if shards > 1:
         print(f"shard {shard}/{shards}: {fetched} tree(s) fetched, {skipped} skipped; no work list from a shard — run once more without --shard to write it (every tree is then already fetched)")
         return 0
-    (CACHE / ("samples-vendor.jsonl" if vendor else "samples.jsonl")).write_text("".join(json.dumps(w) + "\n" for w in work))
-    print(f"{fetched} tree(s) under {out_root.relative_to(ROOT)}/, {skipped} skipped; work list {CACHE.relative_to(ROOT)}/{'samples-vendor.jsonl' if vendor else 'samples.jsonl'}")
+    worklist = "samples-vendor.jsonl" if vendor else ("samples-heldout.jsonl" if heldout else "samples.jsonl")
+    (CACHE / worklist).write_text("".join(json.dumps(w) + "\n" for w in work))
+    print(f"{fetched} tree(s) under {out_root.relative_to(ROOT)}/, {skipped} skipped; work list {CACHE.relative_to(ROOT)}/{worklist}")
     return 0
 
 
