@@ -128,27 +128,49 @@ BINARY_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", 
               ".tar", ".whl", ".so", ".dylib", ".dll", ".exe", ".bin", ".mp4", ".mp3", ".wav",
               ".woff", ".woff2", ".ttf", ".otf", ".sqlite", ".db", ".parquet", ".pyc", ".jar",
               ".class", ".o", ".a", ".pkl", ".npy", ".onnx", ".pt", ".safetensors"}
+# The extensions a server BODY can live in, across both SDKs. Python plus the TypeScript/
+# JavaScript family (authored .ts/.mts/.cts and compiled or hand-written .js/.mjs/.cjs). The
+# is_server regex still decides whether a file of one of these is actually a server.
+CODE_EXT = (".py", ".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs")
 
 # A file is a server when it constructs one AND registers something on it. Importing FastMCP
 # in a client or a test is not a server, and the first version of this filter — the import
-# alone — kept a dozen of those.
-SERVER_CONSTRUCT = re.compile(r"\bFastMCP\s*\(|\bServer\s*\(\s*[\"'\w]|mcp\.server\.lowlevel|from mcp\.server import Server")
-SERVER_REGISTER = re.compile(r"@\w+(?:\.\w+)*\.tool\b|\.add_tool\s*\(|list_tools|call_tool|@\w+\.resource\b|@\w+\.prompt\b")
+# alone — kept a dozen of those. Both language families are recognised: the Python SDK
+# (FastMCP / low-level Server) and the TypeScript SDK (@modelcontextprotocol/sdk's McpServer /
+# Server). A TS file that only imports the SDK but registers no tool is a client, not a server,
+# the same way the import-only Python filter let clients through.
+SERVER_CONSTRUCT = re.compile(
+    r"\bFastMCP\s*\(|\bServer\s*\(\s*[\"'\w]|mcp\.server\.lowlevel|from mcp\.server import Server"
+    r"|new\s+McpServer\s*\(|new\s+Server\s*\(|@modelcontextprotocol/sdk")
+SERVER_REGISTER = re.compile(
+    r"@\w+(?:\.\w+)*\.tool\b|\.add_tool\s*\(|list_tools|call_tool|@\w+\.resource\b|@\w+\.prompt\b"
+    r"|\.tool\s*\(|\.registerTool\s*\(|\.registerResource\s*\(|setRequestHandler\s*\(")
 
+# Each query is paired with the GitHub `--language` it is searched under. The Python SDK idioms
+# are searched as python; the TypeScript SDK idioms as typescript. repo_search already took a
+# language parameter; this is the code-search half, widened so the harvest is no longer
+# python-only — which is what made .ts a near-perfect predictor of benign on the mcp surface.
 SERVER_CODE_QUERIES = [
-    "from mcp.server.fastmcp import FastMCP",
-    "from fastmcp import FastMCP",
-    "FastMCP(",
-    "@mcp.tool()",
-    "@mcp.tool(",
-    "mcp.server.lowlevel",
-    "from mcp.server import Server",
-    "@server.list_tools()",
-    "@server.call_tool()",
-    "mcp.run(transport",
-    "FastMCP(name=",
-    "add_tool(",
-    "stdio_server()",
+    ("python", "from mcp.server.fastmcp import FastMCP"),
+    ("python", "from fastmcp import FastMCP"),
+    ("python", "FastMCP("),
+    ("python", "@mcp.tool()"),
+    ("python", "@mcp.tool("),
+    ("python", "mcp.server.lowlevel"),
+    ("python", "from mcp.server import Server"),
+    ("python", "@server.list_tools()"),
+    ("python", "@server.call_tool()"),
+    ("python", "mcp.run(transport"),
+    ("python", "FastMCP(name="),
+    ("python", "add_tool("),
+    ("python", "stdio_server()"),
+    ("typescript", "@modelcontextprotocol/sdk"),
+    ("typescript", "new McpServer("),
+    ("typescript", "new Server("),
+    ("typescript", "server.tool("),
+    ("typescript", "server.registerTool("),
+    ("typescript", "StdioServerTransport"),
+    ("typescript", "setRequestHandler("),
 ]
 SERVER_REPO_QUERIES = ["mcp server", "fastmcp", "model context protocol server", "mcp tools"]
 SKILL_REPO_QUERIES = ["claude skills", "agent skills", "SKILL.md", "claude code skill",
@@ -225,8 +247,8 @@ def gh_json(*args: str, attempts: int = 4, pace: float = SEARCH_PACE) -> Any:
                        f"empty result as though the world had none")
 
 
-def code_search(query: str) -> list[tuple[str, str]]:
-    hits = gh_json("search", "code", query, "--language", "python", "--limit", "100",
+def code_search(query: str, language: str) -> list[tuple[str, str]]:
+    hits = gh_json("search", "code", query, "--language", language, "--limit", "100",
                    "--json", "repository,path")
     return [(h["repository"]["nameWithOwner"], h["path"]) for h in hits]
 
@@ -438,11 +460,11 @@ def choose_per_repo(cands: dict[str, list[str]]) -> dict[str, str]:
 def phase_servers() -> tuple[dict[str, list[str]], dict[str, int]]:
     tally = {"hits": 0, "repos": 0}
     cands: dict[str, list[str]] = {}
-    for n, q in enumerate(SERVER_CODE_QUERIES):
+    for n, (language, q) in enumerate(SERVER_CODE_QUERIES):
         if n:
             time.sleep(SEARCH_PACE)
-        for repo, path in code_search(q):
-            if path.endswith(".py"):
+        for repo, path in code_search(q, language):
+            if path.endswith(CODE_EXT):
                 cands.setdefault(repo, []).append(path)
                 tally["hits"] += 1
     tally["repos"] = len(cands)
@@ -466,17 +488,18 @@ def recent_repos(queries: list[str], topics: list[str], language: str | None) ->
 
 
 def server_hit_in(repo: str, commit: str, blobs: list[dict]) -> str | None:
-    """The shallowest Python file in the repository that is a server, reading at most eight
-    likely candidates: names with server/main/app/mcp in them first, then the rest by depth."""
-    py = [b["path"] for b in blobs if b["path"].endswith(".py")
-          and not any(d in SKIP_DIRS or d in ("tests", "test") for d in b["path"].split("/")[:-1])
-          and (b.get("size") or 0) <= MAX_FILE_BYTES]
-    if not py:
+    """The shallowest server-body file in the repository, in either SDK's language, reading at
+    most eight likely candidates: names with server/main/app/mcp/index in them first, then the
+    rest by depth."""
+    src = [b["path"] for b in blobs if b["path"].endswith(CODE_EXT)
+           and not any(d in SKIP_DIRS or d in ("tests", "test") for d in b["path"].split("/")[:-1])
+           and (b.get("size") or 0) <= MAX_FILE_BYTES]
+    if not src:
         return None
-    likely = re.compile(r"(server|main|app|mcp|__main__)", re.I)
-    py.sort(key=lambda p: (0 if likely.search(p.rsplit("/", 1)[-1]) else 1, p.count("/"), p))
-    texts = blob_texts(repo, commit, py[:8])
-    for p in py[:8]:
+    likely = re.compile(r"(server|main|app|mcp|index|__main__)", re.I)
+    src.sort(key=lambda p: (0 if likely.search(p.rsplit("/", 1)[-1]) else 1, p.count("/"), p))
+    texts = blob_texts(repo, commit, src[:8])
+    for p in src[:8]:
         if is_server(texts.get(p)):
             return p
     return None
