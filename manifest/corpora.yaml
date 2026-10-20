@@ -391,6 +391,32 @@ entries:
         zhanlincui-ultimate-agent-skills-collection-vercel-deploy: "not read"
         zircote-dot-claude-skills-frontend-development: "not read"
 
+  - id: datadog-npm-mcp
+    name: "DataDog malicious-software-packages-dataset (samples/npm, MCP servers)"
+    url: https://github.com/DataDog/malicious-software-packages-dataset
+    commit: d156188d1e45763d6cb7995543a428de6c4056b8
+    sha256: ""
+    license: Apache-2.0
+    role: recall
+    # malicious npm packages captured from the registry that are ALSO real MCP servers. The
+    # count is what reading established, not the upstream headline (see hazards): samples/npm
+    # holds 1,000+ malicious_intent packages, almost none of them agent artifacts.
+    provenance: wild
+    subset: samples/npm/malicious_intent
+    malicious: 5
+    benign: 0
+    vendorable: true
+    hazards:
+      - "NOT the whole of samples/npm. That subset carries 1,000+ malicious_intent packages, overwhelmingly generic npm malware (droppers, /etc/passwd preinstalls, wallet stealers) on no surface this corpus models. ~128 have an agent-ish name; ~23 are MCP-shaped; these 5 are the ones that are BOTH a real MCP server AND malicious on reading. A recall figure here is over 5 read samples, not over the subset"
+      - "the 5 are selected by READING, not by name. Name matches rejected by reading include clean republishes flagged by mistake (an airtable-mcp, a WaterCrawl fork, a Playwright-MCP fork) and generic malware wearing an mcp-ish name — kept out the same way ~175 datadog-ai-skills samples are"
+      - "disjoint from datadog-ai-skills despite the shared upstream repo and commit: that entry vendors samples/ai-skills (SKILL.md trees), this one vendors samples/npm packages. No sample is in both, so they are NOT declared as overlaps — a false overlap would suppress correct pooling"
+      - "ONE VERSION PER PACKAGE is vendored. A package ships many near-duplicate versioned zips; the version carrying the payload is pinned by hand, because the malice is not always in the latest tag, and `corpus validate` refuses near-duplicates"
+      - "these are LIVE malware. The archives are zip-encrypted with the password `infected`, the malware-corpus convention. scripts/prep-datadog-npm.py copies already-extracted bytes; it never executes them, and `corpus fetch` deliberately does not unpack"
+      - "@lanyer640 (reverse shell :2333) and mcp-server-todo (wallet exfil :4433) hardcode the same C2 host 45.115.38.27 — plausibly one actor. Counted as two samples because they are two published packages with two distinct techniques, but a source-diversity read should know they may share an author"
+    prep:
+      - "extract the five keeper packages (unzip with password `infected`) into cache/datadog-npm-mcp/_extracted/, then run scripts/prep-datadog-npm.py to vendor them into corpus/malicious/mcp/dd-npm-*"
+      - "labels are hand-pinned, not derived: each carries basis.class read with a quote validate locates in the sample's own bytes"
+
   - id: skillsgoat
     name: "optimuslabs-io/skillsgoat"
     url: https://github.com/optimuslabs-io/skillsgoat
