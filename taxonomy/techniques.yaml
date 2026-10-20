@@ -563,3 +563,62 @@ techniques:
       A genuine opt-in telemetry client pointed at the project's own endpoint, off unless
       configured. The distinguishing element is whose host it is, that it is on by default, and
       that it carries call arguments off-host — not that the package reports metrics.
+
+  # ---------------------------------------------------------------------------------------
+  # Four tool-BODY mechanisms, named so hand-authored samples can be pinned in dimensions that
+  # previously had no technique at all. filesystem, reconnaissance and resource-abuse existed
+  # only as DIMENSIONS used by derived cisco samples — there was no way to name a mechanism and
+  # so no way to hand-author a scoreable sample in them; execution had only config-file
+  # techniques, none for a server body that runs a decoded payload. The shapes are cisco's own
+  # disclosed MCP-scanner examples, re-expressed so the same attack can be paired across
+  # languages. Each sample that uses one carries the quote it was read from.
+  - id: cloud-metadata-probe
+    title: Cloud metadata service probed for credentials
+    dimension: reconnaissance
+    what: >-
+      A tool fetches the cloud instance metadata endpoint — 169.254.169.254, or
+      metadata.google.internal with the Metadata-Flavor header — to read the instance identity
+      and the IAM/service-account security credentials attached to it. (cisco-ai-defense
+      mcp-scanner, unauthorized-network-access.)
+    benign_lookalike: >-
+      A tool that reports the host's own cloud region or instance type from a metadata path an
+      operator asked for. The distinguishing element is reaching the security-credentials path
+      and returning what it finds, not that the metadata IP is contacted.
+
+  - id: arbitrary-file-write
+    title: Arbitrary file write outside the workspace
+    dimension: filesystem
+    what: >-
+      A tool writes caller-controlled content to a path it does not constrain, so a system file
+      (/etc/crontab, a shell rc, a cron directory) can be overwritten or a backdoor file
+      planted. (cisco-ai-defense mcp-scanner, arbitrary-resource-access.)
+    benign_lookalike: >-
+      A tool that legitimately saves output to a path under a project directory. The
+      distinguishing element is the absence of any confinement — an absolute or traversing path
+      reaches a system file — not that the tool writes a file.
+
+  - id: resource-exhaustion
+    title: Unbounded resource-consuming loop
+    dimension: resource-abuse
+    what: >-
+      A tool runs an unbounded or caller-amplified loop — infinite busy-wait, unbounded hashing
+      rounds, nested multiplication, runaway allocation — consuming CPU, memory or disk until
+      the host degrades. (cisco-ai-defense mcp-scanner, resource-exhaustion.)
+    benign_lookalike: >-
+      A tool that does real, bounded work — a configurable number of KDF rounds, a sized buffer.
+      The distinguishing element is that the bound is missing or attacker-set with no ceiling,
+      not that the tool is compute-heavy.
+
+  - id: tool-body-dynamic-exec
+    title: Tool body executes a decoded or fetched payload
+    dimension: execution
+    what: >-
+      An MCP tool's implementation decodes, fetches or is handed code and runs it — eval, the
+      Function constructor, child_process, Python exec — instead of performing its advertised
+      job, so the caller (or whoever supplied the payload) gets arbitrary execution. (cisco-ai
+      -defense mcp-scanner, unauthorized-code-execution.) Distinct from the config-file
+      execution techniques: the payload runs in the server process, not via a trust file.
+    benign_lookalike: >-
+      A tool that evaluates a bounded expression in a real sandbox, or runs a fixed known
+      binary. The distinguishing element is unrestricted execution of input the tool decoded or
+      received, not that the tool runs a subprocess.
