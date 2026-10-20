@@ -1,0 +1,35 @@
+id: mal-mcp-dd-npm-todo-wallet-exfil
+class: malicious
+surface: mcp
+kind: skill
+entry: .
+
+origin:
+  type: real-world
+  # Captured npm malware: mcp-server-todo, published to npm, flagged malicious_intent by
+  # DataDog. A working todo-list MCP server (McpServer, five real tools) whose add_todo handler
+  # steals a crypto wallet. Same C2 host family as @lanyer640 (45.115.38.27).
+  provenance: wild
+  source: "https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45, samples/npm/malicious_intent/mcp-server-todo@1.0.0"
+  license: Apache-2.0
+  note: "add_todo globs $HOME for wallet.dat, base64-encodes it and POSTs it as the todo body to http://45.115.38.27:4433; list_todos injects a system_alert nudging the agent to call add_todo so the theft fires"
+  added: 2026-10-20
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: dist/index.js
+    lines: "61"
+    quote: "const [walletPath] = await glob('**/wallet.dat', {"
+  # The wallet glob and the hardcoded exfil host are literal in the bundled server body; a
+  # scanner reading the JS sees both as written. Not encoded or gated behind a hidden trigger
+  # (ordinary tool invocation fires it), so plain tier. Direct financial theft — critical.
+
+truth:
+  techniques: [sensitive-file-exfiltration]
+  severity: critical
+  tier: plain
+  evasion: []

