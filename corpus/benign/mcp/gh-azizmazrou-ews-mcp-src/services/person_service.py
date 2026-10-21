@@ -1,0 +1,680 @@
+"""
+PersonService - Unified person operations for EWS MCP v3.4.
+
+This service orchestrates person discovery across multiple sources:
+- Global Address List (GAL) - via GALAdapter with multi-strategy search
+- Personal Contacts
+- Email History (sent/received)
+
+KEY FEATURE: Fixes GAL 0-results bug with intelligent fallback strategies.
+v3.4: asyncio.to_thread for blocking EWS calls, asyncio.gather for concurrent scans.
+"""
+
+import asyncio
+import logging
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+
+from ..core.person import Person, PersonSource, CommunicationStats, EmailAddress
+from ..adapters.gal_adapter import GALAdapter
+from ..adapters.cache_adapter import get_cache
+from ..utils import safe_get
+
+
+class PersonService:
+    """
+    Person-centric service for discovering and managing people.
+
+    This is the CORE service in v3.0 architecture.
+    All person-related operations go through this service.
+    """
+
+    def __init__(self, ews_client):
+        """
+        Initialize PersonService.
+
+        Args:
+            ews_client: EWSClient instance
+        """
+        self.ews_client = ews_client
+        self.gal_adapter = GALAdapter(ews_client)
+        self.cache = get_cache()
+        self.logger = logging.getLogger(__name__)
+        # Populated by _search_email_history on TIMEOUT / THROTTLED /
+        # AUTH_EXPIRED / CONNECTION so the tool layer can attach an
+        # ``error_code`` to its response without having to re-classify.
+        self._last_error_code: Optional[str] = None
+        self._last_error_message: Optional[str] = None
+
+    @staticmethod
+    def _email_history_timeout_s() -> int:
+        """Default 10s. Configurable via EWS_EMAIL_HISTORY_TIMEOUT."""
+        import os as _os
+        try:
+            return max(1, min(120, int(_os.environ.get(
+                "EWS_EMAIL_HISTORY_TIMEOUT", "10"
+            ))))
+        except (TypeError, ValueError):
+            return 10
+
+    @staticmethod
+    def _classify_email_history_error(exc: BaseException) -> str:
+        """Return a short error_code tag for the response envelope.
+
+        Values: TIMEOUT, THROTTLED, AUTH_EXPIRED, GAL_UNAVAILABLE.
+        The default is GAL_UNAVAILABLE because the most common cause of
+        an unclassified failure here is EWS/GAL refusing the connection.
+        """
+        name = type(exc).__name__
+        msg = str(exc)
+        if name == "ErrorServerBusy" or "ServerBusy" in msg or "throttl" in msg.lower():
+            return "THROTTLED"
+        if name in ("ErrorAccessDenied", "UnauthorizedError", "Unauthorized") \
+                or "401" in msg or "Unauthorized" in msg:
+            return "AUTH_EXPIRED"
+        if "timed out" in msg.lower() or "Timeout" in name:
+            return "TIMEOUT"
+        return "GAL_UNAVAILABLE"
+
+    async def find_person(
+        self,
+        query: str,
+        sources: Optional[List[str]] = None,
+        include_stats: bool = True,
+        time_range_days: int = 365,
+        max_results: int = 50
+    ) -> List[Person]:
+        """
+        Find people using intelligent multi-source search.
+
+        This is the MAIN METHOD for person discovery in v3.0!
+
+        Search strategy:
+        1. Try GAL (multi-strategy search)
+        2. Try Personal Contacts (if enabled)
+        3. Try Email History (if enabled)
+        4. Merge and deduplicate results
+        5. Rank by relevance
+
+        Args:
+            query: Name, email, or domain to search
+            sources: Sources to search (default: all)
+            include_stats: Include communication statistics
+            time_range_days: Days back for email history
+            max_results: Maximum results to return
+
+        Returns:
+            List of Person objects, ranked by relevance
+        """
+        self.logger.info(f"🔍 PersonService.find_person: '{query}'")
+
+        # Default to all sources
+        if sources is None:
+            sources = ["gal", "contacts", "email_history"]
+
+        # Results collection: email -> Person
+        all_persons: Dict[str, Person] = {}
+
+        # Source 1: GAL Search (with multi-strategy fallback)
+        if "gal" in sources:
+            cache_key = f"gal_search:{query}"
+            gal_persons = await self.cache.get_or_fetch(
+                key=cache_key,
+                fetch_func=lambda: self.gal_adapter.search(
+                    query=query,
+                    max_results=max_results,
+                    return_full_data=True
+                ),
+                duration=self.cache.CACHE_DURATIONS['gal_search']
+            )
+
+            for person in gal_persons:
+                email = person.primary_email
+                if email:
+                    all_persons[email.lower()] = person
+
+            self.logger.info(f"  GAL: Found {len(gal_persons)} person(s)")
+
+        # Source 2: Personal Contacts
+        if "contacts" in sources:
+            contact_persons = await self._search_contacts(query)
+            for person in contact_persons:
+                email = person.primary_email
+                if email:
+                    email_key = email.lower()
+                    if email_key in all_persons:
+                        # Merge with existing
+                        all_persons[email_key] = all_persons[email_key].merge_with(person)
+                    else:
+                        all_persons[email_key] = person
+
+            self.logger.info(f"  Contacts: Found {len(contact_persons)} person(s)")
+
+        # Source 3: Email History
+        if "email_history" in sources:
+            email_persons = await self._search_email_history(
+                query=query,
+                days_back=time_range_days,
+                include_stats=include_stats
+            )
+
+            for person in email_persons:
+                email = person.primary_email
+                if email:
+                    email_key = email.lower()
+                    if email_key in all_persons:
+                        # Merge with existing
+                        all_persons[email_key] = all_persons[email_key].merge_with(person)
+                    else:
+                        all_persons[email_key] = person
+
+            self.logger.info(f"  Email History: Found {len(email_persons)} person(s)")
+
+        # Convert to list and rank
+        results = list(all_persons.values())
+
+        # Rank by relevance
+        results = self._rank_persons(results, query)
+
+        # Limit results
+        results = results[:max_results]
+
+        self.logger.info(f"  ✅ Total: {len(results)} unique person(s) found")
+
+        return results
+
+    async def get_person(
+        self,
+        email: str,
+        include_history: bool = True,
+        days_back: int = 365
+    ) -> Optional[Person]:
+        """
+        Get complete information about a specific person.
+
+        Args:
+            email: Person's email address
+            include_history: Include communication history
+            days_back: Days back for communication history
+
+        Returns:
+            Person object with complete information, or None if not found
+        """
+        self.logger.info(f"📧 PersonService.get_person: {email}")
+
+        # Try to find person via multi-source search
+        persons = await self.find_person(
+            query=email,
+            sources=["gal", "contacts", "email_history"],
+            include_stats=include_history,
+            time_range_days=days_back,
+            max_results=1
+        )
+
+        if persons:
+            return persons[0]
+
+        return None
+
+    async def get_communication_history(
+        self,
+        email: str,
+        days_back: int = 365,
+        max_emails: int = 100
+    ) -> Optional[CommunicationStats]:
+        """
+        Get detailed communication history with a person.
+
+        Args:
+            email: Person's email address
+            days_back: Days back to analyze
+            max_emails: Maximum emails to scan
+
+        Returns:
+            CommunicationStats object or None
+        """
+        self.logger.info(f"📊 Getting communication history: {email}")
+
+        try:
+            start_date = datetime.now(self.ews_client.account.default_timezone) - timedelta(days=days_back)
+            target_email = email.lower()
+
+            def _scan_inbox():
+                """Scan inbox for received emails (blocking)."""
+                received_count = 0
+                first_contact = None
+                last_contact = None
+
+                inbox = self.ews_client.account.inbox
+                received_items = inbox.filter(
+                    datetime_received__gte=start_date
+                ).order_by('-datetime_received').only('sender', 'datetime_received')
+
+                for item in list(received_items)[:max_emails]:
+                    sender = safe_get(item, 'sender')
+                    if sender:
+                        sender_email = safe_get(sender, 'email_address', '').lower()
+                        if sender_email == target_email:
+                            received_count += 1
+                            received_time = safe_get(item, 'datetime_received')
+                            if received_time:
+                                if not first_contact or received_time < first_contact:
+                                    first_contact = received_time
+                                if not last_contact or received_time > last_contact:
+                                    last_contact = received_time
+
+                return received_count, first_contact, last_contact
+
+            def _scan_sent():
+                """Scan sent items for sent emails (blocking)."""
+                sent_count = 0
+                first_contact = None
+                last_contact = None
+
+                sent_items = self.ews_client.account.sent
+                sent_query = sent_items.filter(
+                    datetime_sent__gte=start_date
+                ).order_by('-datetime_sent').only('to_recipients', 'datetime_sent')
+
+                for item in list(sent_query)[:max_emails]:
+                    recipients = safe_get(item, 'to_recipients', []) or []
+                    for recipient in recipients:
+                        recipient_email = safe_get(recipient, 'email_address', '').lower()
+                        if recipient_email == target_email:
+                            sent_count += 1
+                            sent_time = safe_get(item, 'datetime_sent')
+                            if sent_time:
+                                if not first_contact or sent_time < first_contact:
+                                    first_contact = sent_time
+                                if not last_contact or sent_time > last_contact:
+                                    last_contact = sent_time
+                            break  # Only count email once
+
+                return sent_count, first_contact, last_contact
+
+            # Run inbox and sent scans concurrently
+            (received_count, recv_first, recv_last), (sent_count, sent_first, sent_last) = await asyncio.gather(
+                asyncio.to_thread(_scan_inbox),
+                asyncio.to_thread(_scan_sent)
+            )
+
+            # Merge timestamps
+            first_contact = None
+            last_contact = None
+            for fc in [recv_first, sent_first]:
+                if fc:
+                    if not first_contact or fc < first_contact:
+                        first_contact = fc
+            for lc in [recv_last, sent_last]:
+                if lc:
+                    if not last_contact or lc > last_contact:
+                        last_contact = lc
+
+            stats = CommunicationStats(
+                total_emails=received_count + sent_count,
+                emails_sent=sent_count,
+                emails_received=received_count,
+                first_contact=first_contact,
+                last_contact=last_contact,
+            )
+
+            # Calculate emails per month
+            if days_back > 0:
+                months = days_back / 30
+                stats.emails_per_month = round(stats.total_emails / months, 1) if months > 0 else 0
+
+            return stats
+
+        except Exception as e:
+            self.logger.error(f"Failed to get communication history: {e}")
+            return None
+
+    async def _search_contacts(self, query: str) -> List[Person]:
+        """
+        Search personal contacts folder.
+
+        Args:
+            query: Search query
+
+        Returns:
+            List of Person objects from contacts
+        """
+        def _blocking():
+            persons = []
+            query_lower = query.lower()
+            try:
+                contacts = self.ews_client.account.contacts.all()
+                for contact in list(contacts)[:100]:  # Limit for performance
+                    try:
+                        # Check if query matches
+                        given_name = safe_get(contact, "given_name", "") or ""
+                        surname = safe_get(contact, "surname", "") or ""
+                        display_name = safe_get(contact, "display_name", "") or ""
+                        email_addrs = safe_get(contact, "email_addresses", []) or []
+
+                        # Get email
+                        email = ""
+                        if email_addrs:
+                            email = email_addrs[0].email if hasattr(email_addrs[0], 'email') else ""
+
+                        # Match query
+                        if (query_lower in given_name.lower() or
+                            query_lower in surname.lower() or
+                            query_lower in display_name.lower() or
+                            query_lower in email.lower()):
+
+                            # Convert to Person
+                            person = Person.from_contact(contact)
+                            persons.append(person)
+
+                    except Exception as e:
+                        self.logger.debug(f"Failed to process contact: {e}")
+                        continue
+            except Exception as e:
+                self.logger.warning(f"Contacts search failed: {e}")
+            return persons
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception as e:
+            self.logger.warning(f"Contacts search failed: {e}")
+            return []
+
+    async def _search_email_history(
+        self,
+        query: str,
+        days_back: int,
+        include_stats: bool
+    ) -> List[Person]:
+        """
+        Search email history for people.
+
+        Args:
+            query: Search query
+            days_back: Days back to search
+            include_stats: Include communication statistics
+
+        Returns:
+            List of Person objects from email history
+        """
+        try:
+            start_date = datetime.now(self.ews_client.account.default_timezone) - timedelta(days=days_back)
+
+            # Determine search type
+            is_domain_search = query.startswith("@")
+            domain_query = query[1:].lower() if is_domain_search else None
+            is_email_query = not is_domain_search and '@' in query
+
+            MAX_ITEMS = 2000  # Limit to prevent timeouts
+
+            def _scan_inbox() -> Dict[str, Dict[str, Any]]:
+                """Scan inbox for contacts (blocking)."""
+                contacts: Dict[str, Dict[str, Any]] = {}
+                inbox = self.ews_client.account.inbox
+                if is_email_query:
+                    inbox_items = inbox.filter(
+                        datetime_received__gte=start_date,
+                        sender__email_address=query
+                    ).order_by('-datetime_received').only('sender', 'datetime_received')
+                else:
+                    inbox_items = inbox.filter(
+                        datetime_received__gte=start_date
+                    ).order_by('-datetime_received').only('sender', 'datetime_received')
+
+                # Eagerly materialise a bounded slice inside this thread
+                # so exchangelib's auto-pagination happens under the
+                # wait_for timeout — not after it (Issue 1).
+                items = list(inbox_items[:MAX_ITEMS])
+
+                items_scanned = 0
+                for item in items:
+                    items_scanned += 1
+                    if items_scanned > MAX_ITEMS:
+                        break
+
+                    sender = safe_get(item, 'sender')
+                    if sender:
+                        email = safe_get(sender, 'email_address', '').lower()
+                        name = safe_get(sender, 'name', '')
+
+                        if not is_email_query:
+                            if domain_query:
+                                if not email.endswith(f"@{domain_query}"):
+                                    continue
+                            elif query:
+                                query_lower = query.lower()
+                                if query_lower not in name.lower() and query_lower not in email:
+                                    continue
+
+                        if email:
+                            if email not in contacts:
+                                contacts[email] = {
+                                    "email": email,
+                                    "name": name,
+                                    "email_count": 0,
+                                    "last_contact": None,
+                                    "first_contact": None
+                                }
+
+                            contacts[email]["email_count"] += 1
+
+                            received_time = safe_get(item, 'datetime_received')
+                            if received_time:
+                                if not contacts[email]["last_contact"] or received_time > contacts[email]["last_contact"]:
+                                    contacts[email]["last_contact"] = received_time
+                                if not contacts[email]["first_contact"] or received_time < contacts[email]["first_contact"]:
+                                    contacts[email]["first_contact"] = received_time
+                return contacts
+
+            def _scan_sent() -> Dict[str, Dict[str, Any]]:
+                """Scan sent items for contacts (blocking)."""
+                contacts: Dict[str, Dict[str, Any]] = {}
+                sent_items = self.ews_client.account.sent
+                sent_query_result = sent_items.filter(
+                    datetime_sent__gte=start_date
+                ).order_by('-datetime_sent').only('to_recipients', 'datetime_sent')
+
+                # Eagerly materialise — same reason as _scan_inbox above.
+                items = list(sent_query_result[:MAX_ITEMS])
+
+                items_scanned = 0
+                for item in items:
+                    items_scanned += 1
+                    if items_scanned > MAX_ITEMS:
+                        break
+
+                    recipients = safe_get(item, 'to_recipients', []) or []
+                    for recipient in recipients:
+                        email = safe_get(recipient, 'email_address', '').lower()
+                        name = safe_get(recipient, 'name', '')
+
+                        if is_email_query:
+                            if email != query.lower():
+                                continue
+                        elif domain_query:
+                            if not email.endswith(f"@{domain_query}"):
+                                continue
+                        elif query:
+                            query_lower = query.lower()
+                            if query_lower not in name.lower() and query_lower not in email:
+                                continue
+
+                        if email:
+                            if email not in contacts:
+                                contacts[email] = {
+                                    "email": email,
+                                    "name": name,
+                                    "email_count": 0,
+                                    "last_contact": None,
+                                    "first_contact": None
+                                }
+
+                            contacts[email]["email_count"] += 1
+
+                            sent_time = safe_get(item, 'datetime_sent')
+                            if sent_time:
+                                if not contacts[email]["last_contact"] or sent_time > contacts[email]["last_contact"]:
+                                    contacts[email]["last_contact"] = sent_time
+                                if not contacts[email]["first_contact"] or sent_time < contacts[email]["first_contact"]:
+                                    contacts[email]["first_contact"] = sent_time
+                return contacts
+
+            # Run inbox and sent scans concurrently, each bounded by
+            # ``EWS_EMAIL_HISTORY_TIMEOUT`` so a slow Exchange server
+            # can't pin us past the MCP 30s protocol timeout. Prior
+            # behaviour had no deadline and could block for 240s
+            # (reported pre-v1.27.0).
+            timeout_s = self._email_history_timeout_s()
+            try:
+                inbox_contacts, sent_contacts = await asyncio.wait_for(
+                    asyncio.gather(
+                        asyncio.to_thread(_scan_inbox),
+                        asyncio.to_thread(_scan_sent),
+                    ),
+                    timeout=timeout_s,
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "_search_email_history timed out after %ds "
+                    "(query=%r, days_back=%d, MAX_ITEMS=%d)",
+                    timeout_s, query, days_back, MAX_ITEMS,
+                )
+                # Surface a structured "empty with error_code" rather
+                # than raising — callers that fan out from source="all"
+                # still want GAL/contacts/domain results.
+                self._last_error_code = "TIMEOUT"
+                self._last_error_message = (
+                    f"email_history scan timed out after {timeout_s}s"
+                )
+                return []
+            except Exception as exc:
+                code = self._classify_email_history_error(exc)
+                self.logger.warning(
+                    "_search_email_history %s: %s: %s",
+                    code, type(exc).__name__, exc,
+                )
+                self._last_error_code = code
+                self._last_error_message = f"{type(exc).__name__}: {exc}"
+                return []
+
+            # Merge results
+            contacts: Dict[str, Dict[str, Any]] = {}
+            for c in [inbox_contacts, sent_contacts]:
+                for email, data in c.items():
+                    if email not in contacts:
+                        contacts[email] = data
+                    else:
+                        contacts[email]["email_count"] += data["email_count"]
+                        if data["last_contact"]:
+                            if not contacts[email]["last_contact"] or data["last_contact"] > contacts[email]["last_contact"]:
+                                contacts[email]["last_contact"] = data["last_contact"]
+                        if data["first_contact"]:
+                            if not contacts[email]["first_contact"] or data["first_contact"] < contacts[email]["first_contact"]:
+                                contacts[email]["first_contact"] = data["first_contact"]
+
+            # Convert to Person objects
+            persons = []
+            for contact_data in contacts.values():
+                stats = None
+                if include_stats:
+                    stats = CommunicationStats(
+                        total_emails=contact_data["email_count"],
+                        emails_sent=0,
+                        emails_received=0,
+                        first_contact=contact_data["first_contact"],
+                        last_contact=contact_data["last_contact"],
+                    )
+
+                person = Person(
+                    id=contact_data["email"],
+                    name=contact_data["name"] or contact_data["email"],
+                    email_addresses=[
+                        EmailAddress(
+                            address=contact_data["email"],
+                            is_primary=True
+                        )
+                    ],
+                    sources=[PersonSource.EMAIL_HISTORY],
+                    communication_stats=stats
+                )
+
+                persons.append(person)
+
+            return persons
+
+        except Exception as e:
+            self.logger.warning(f"Email history search failed: {e}")
+            return []
+
+    def _rank_persons(self, persons: List[Person], query: str) -> List[Person]:
+        """
+        Rank persons by relevance to query.
+
+        Ranking criteria:
+        1. Source priority (GAL > Contacts > Email History)
+        2. Name/email match quality
+        3. Communication volume
+        4. Recency of contact
+        5. VIP status
+
+        Args:
+            persons: List of Person objects
+            query: Search query
+
+        Returns:
+            Sorted list of Person objects
+        """
+
+        def calculate_score(person: Person) -> float:
+            score = 0.0
+            query_lower = query.lower()
+
+            # 1. Source priority (0-100)
+            score += person.source_priority
+
+            # 2. Exact match bonus (0-100)
+            if person.primary_email and query_lower == person.primary_email.lower():
+                score += 100
+            elif query_lower in person.name.lower():
+                score += 50
+
+            # 3. Communication volume (0-50)
+            if person.communication_stats:
+                email_score = min(person.communication_stats.total_emails, 50)
+                score += email_score
+
+            # 4. Recency bonus (0-30)
+            if person.communication_stats and person.communication_stats.last_contact:
+                # Use timezone-aware datetime to avoid comparison errors
+                now = datetime.now(timezone.utc)
+                last_contact = person.communication_stats.last_contact
+                # Ensure last_contact is timezone-aware
+                if last_contact.tzinfo is None:
+                    last_contact = last_contact.replace(tzinfo=timezone.utc)
+                days_ago = (now - last_contact).days
+                recency_score = max(0, 30 * (1 - days_ago / 365))
+                score += recency_score
+
+            # 5. VIP bonus (20)
+            if person.is_vip:
+                score += 20
+
+            # 6. Completeness bonus (0-20)
+            completeness = 0
+            if person.job_title:
+                completeness += 5
+            if person.department:
+                completeness += 5
+            if person.organization:
+                completeness += 5
+            if len(person.phone_numbers) > 0:
+                completeness += 5
+            score += completeness
+
+            return score
+
+        # Sort by score (descending)
+        persons.sort(key=calculate_score, reverse=True)
+
+        return persons

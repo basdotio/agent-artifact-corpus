@@ -18,6 +18,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from connectors.local_model import compile_with_model
+from connectors.ocds import award_history
 from connectors.public_sources import lookup
 from document_pipeline.extract import extract, verify_citation
 from mcp_server.schemas.models import ApprovalRequest, CaseRequest, Citation, Criterion, Finding, Plan, ProductLine
@@ -41,7 +42,8 @@ def audited(function):
             inputs = redact(inputs)
         except Exception:
             inputs = {"invalid_input": True}
-        case_id = kwargs.get("case_id") or (args[0] if args and isinstance(args[0],str) and args[0].startswith("case_") else None)
+        # Attribute the call to its case wherever the case ID appears, keyword or positional.
+        case_id = kwargs.get("case_id") or next((a for a in args if isinstance(a,str) and a.startswith("case_")), None)
         with self.store.lock:
             self.store.event(function.__name__, case_id, inputs, None, "STARTED", call_id=call_id, started_at=started)
             try:
@@ -145,7 +147,8 @@ class ProcurementService:
                               "supersedes_document": d.supersedes_document, "path": relative,
                               "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), "extraction": extraction})
         case = {"id": case_id, "name": request.name, "operator": request.operator, "closed_on": str(request.closed_on),
-                "closure_source": request.closure_source, "created_at": now(), "state": "FILES_VALIDATED",
+                "closure_source": request.closure_source, "reference_ocid": request.reference_ocid,
+                "created_at": now(), "state": "FILES_VALIDATED",
                 "documents": documents, "warnings": warnings, "plans": [], "runs": [], "drafts": [], "approvals": []}
         self.store.write(case_id, "manifest-v1.json", {k:v for k,v in case.items() if k != "documents"} |
                          {"documents": [{k:v for k,v in d.items() if k != "extraction"} for d in documents]})
@@ -153,11 +156,12 @@ class ProcurementService:
         return case
 
     @audited
-    def compile_evaluation_plan(self, case_id: str, model: str = ""):
+    def compile_evaluation_plan(self, case_id: str, model: str = "", feedback: str = ""):
         case = self._case(case_id)
         criteria, warnings, metadata = [], list(case["warnings"]), {}
         if model:
-            proposed, metadata = compile_with_model(case["documents"], model)
+            # feedback carries the validator's rejection of a previous attempt so the model can correct it.
+            proposed, metadata = compile_with_model(case["documents"], model, feedback[:2000])
             proposal_path = f"model-proposals/proposal_{uuid.uuid4().hex[:12]}.json"
             self.store.write(case_id, proposal_path, {"proposal":proposed,"metadata":metadata})
             metadata = {**metadata,"raw_proposal_path":proposal_path,
@@ -262,6 +266,10 @@ class ProcurementService:
                 if len(values) > 1:
                     status, claim = "UNRESOLVED", "Multiple submitted documents contain competing evidence; human review is required."
                 elif not values:
+                    # An absence is only defensible if the finding cites every bid page that was searched.
+                    citations += [Citation(document_id=d["id"], sha256=d["sha256"], page=p["page"],
+                                           section="Inspected submitted content", quote=p["text"])
+                                  for d in docs for p in d["extraction"]["pages"] if p["text"].strip()]
                     parser_failed = any(not d["extraction"]["pages"] or d["extraction"]["warnings"] for d in docs)
                     if parser_failed or c.method == "manual" or not all(d["extraction"].get("structured") for d in docs):
                         status, claim = "UNRESOLVED", "Extraction is incomplete or evidence requires manual review; absence cannot be established."
@@ -311,6 +319,32 @@ class ProcurementService:
                 "dependency_locks": {name:file_hash(name) for name in ("uv.lock","package-lock.json")}}
 
     @audited
+    def search_award_history(self, ocid: str = "", query: str = "", buyer: str = "", limit: int = 10, case_id: str = ""):
+        if not case_id:
+            return award_history(ocid=ocid, query=query, buyer=buyer, limit=limit)
+        case = self._case(case_id)
+        ocid = ocid or case.get("reference_ocid") or ""
+        result = award_history(ocid=ocid, query=query, buyer=buyer, limit=limit)
+        observations = []
+        record = result["records"][0] if ocid and result["records"] else None
+        published = (record or {}).get("closing_date_published")
+        if published and published[:10] != case["closed_on"]:
+            observations.append({"type": "CLOSING_DATE_DISCREPANCY", "status": "UNRESOLVED",
+                "declared_closed_on": case["closed_on"], "declared_source": case["closure_source"],
+                "published_closing_date": published[:10], "citation": record["citation"],
+                "effect": "Date-sensitive checks use the declared date until a named reviewer confirms which date applies."})
+        if result["status"] == "SOURCE_UNAVAILABLE":
+            observations.append({"type": "SOURCE_UNAVAILABLE", "status": "UNRESOLVED", "reason": result["reason"]})
+        annex = {"id": "awards_"+uuid.uuid4().hex[:12], "created_at": now(), "reference_ocid": ocid,
+                 "query": {"ocid": ocid, "query": query, "buyer": buyer, "limit": limit},
+                 "result": result, "observations": observations,
+                 "use": "Public context for the committee. It adds no evaluation criteria and no finding against a supplier."}
+        self.store.write(case_id, f"references/{annex['id']}.json", annex)
+        case["award_history"] = annex
+        self.store.save(case)
+        return annex
+
+    @audited
     def draft_evaluation_file(self, case_id: str):
         case = self._case(case_id)
         plan, run = self._plan(case), case.get("evaluation")
@@ -324,7 +358,12 @@ class ProcurementService:
         evidence = {"case_id": case_id, "case_name": case["name"], "plan": case["plan"], "evaluation": run,
                     "approvals": case["approvals"], "warnings": case["warnings"], "unsigned": True,
                     "committee_recommendation": "", "signatures": "", "award_decision": ""}
+        public = case.get("award_history")
+        if public:
+            evidence["public_award_history"] = public
         files = {"evidence-ledger.json": canonical(evidence).encode(), "report.html": self.report_html(evidence).encode()}
+        if public:
+            files["public-award-history.json"] = canonical(public).encode()
         stream = io.StringIO(newline="")
         writer = csv.writer(stream)
         writer.writerow(["bidder_id", "criterion_id", "status", "claim", "source_documents", "source_pages"])
@@ -334,7 +373,8 @@ class ProcurementService:
             writer.writerow(["'"+v if isinstance(v,str) and v.startswith(("=","+","-","@")) else v for v in values])
         files["compliance-matrix.csv"] = stream.getvalue().encode("utf-8-sig")
         files["price-observations.json"] = canonical(run["prices"]).encode()
-        files["unresolved-items.json"] = canonical([f for f in run["findings"] if f["status"] != "SUPPORTED"] + run["external_checks"]).encode()
+        files["unresolved-items.json"] = canonical([f for f in run["findings"] if f["status"] != "SUPPORTED"] + run["external_checks"]
+                                                   + (public or {}).get("observations", [])).encode()
         file_manifest = {name: hashlib.sha256(data).hexdigest() for name,data in files.items()}
         draft = {"id": draft_id, "plan_digest": plan.digest, "run_id": run["id"], "created_at": now(),
                  "files": file_manifest, "digest": digest(file_manifest), "exported": False}
@@ -388,12 +428,26 @@ class ProcurementService:
                        "<br>".join(f"{e(c['document_id'])}, page {c['page']}, SHA-256 {c['sha256']}<details><summary>Source text</summary><pre>{e(c['quote'])}</pre></details>" for c in f["citations"]) + "</td></tr>"
                        for f in evidence["evaluation"]["findings"])
         external = "".join(f"<li>{e(c['source'])}: {e(c['status'])}. {e(c['reason'])} Source: {e(c['url'])}; retrieval: {e(c['retrieved_at'])}; data as of: unknown.</li>" for c in evidence["evaluation"]["external_checks"])
+        public = evidence.get("public_award_history")
+        history = ""
+        if public:
+            result = public["result"]
+            notes = "".join(f"<li>{e(o['type'])} ({e(o['status'])}): " + (f"declared {e(o['declared_closed_on'])}, published "
+                            f"{e(o['published_closing_date'])}. " if "published_closing_date" in o else "")
+                            + f"{e(o.get('effect') or o.get('reason', ''))}</li>" for o in public["observations"])
+            awards = "".join(f"<tr><td>{e(r['ocid'])}</td><td>{e(a['suppliers'][0]['normalized_name'] if a['suppliers'] else '')}</td>"
+                             f"<td>{e(str(a['amount']))} {e(a['currency'] or '')}</td><td>{e(', '.join(a['flags']))}</td>"
+                             f"<td>{e(a['citation']['file'])} line {a['citation']['line']} {e(a['citation']['pointer'])}</td></tr>"
+                             for r in result.get("records", []) for a in r["awards"])
+            history = (f"<h2>Public award history (context only)</h2><p>{e(result.get('dataset', ''))}. {e(result.get('price_note', ''))}</p>"
+                       f"<ul>{notes}</ul><table><thead><tr><th>OCID</th><th>Supplier (normalized)</th><th>Award value</th><th>Data flags</th>"
+                       f"<th>Citation</th></tr></thead><tbody>{awards}</tbody></table><p>{e(public['use'])}</p>")
         return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>Unsigned evaluation draft</title><style>body{{font:16px/1.5 Arial,sans-serif;margin:40px;color:#172820}}table{{border-collapse:collapse;width:100%}}td,th{{padding:10px;border:1px solid #aaa;text-align:left;vertical-align:top}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}}td:last-child{{max-width:360px;overflow-wrap:anywhere}}@media print{{body{{margin:0;font-size:11px}}}}</style>
         <h1>{e(evidence['case_name'])}</h1><p>UNSIGNED DRAFT · Synthetic bids · Committee review required</p>
         <p>Plan {e(evidence['plan']['id'])}, revision {evidence['plan']['revision']}; locked by {e(evidence['plan']['approved_by'])}.</p>
         <h2>Compliance evidence</h2><table><thead><tr><th>Bidder</th><th>Criterion</th><th>Evidence status</th><th>Observation</th><th>Citations</th></tr></thead><tbody>{rows}</tbody></table>
         <h2>Price observations</h2><pre>{e(json.dumps(evidence['evaluation']['prices'],indent=2))}</pre>
-        <h2>External reference checks</h2><ul>{external}</ul><p>These observations do not introduce evaluation criteria.</p>
+        <h2>External reference checks</h2><ul>{external}</ul><p>These observations do not introduce evaluation criteria.</p>{history}
         <h2>Committee recommendation</h2><p>________________________________________</p><h2>Signatures</h2><p>________________________________________</p>
         <h2>Award decision</h2><p>________________________________________</p></html>'''

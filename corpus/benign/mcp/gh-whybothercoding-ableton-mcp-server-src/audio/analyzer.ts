@@ -1,0 +1,309 @@
+import { spawn } from 'node:child_process';
+import { access, constants, open, stat } from 'node:fs/promises';
+
+const SAMPLE_RATE = 22050;
+const ANALYSIS_SECONDS = 60;
+const FFT_SIZE = 4096;
+
+interface FfprobeResult {
+  format?: { format_name?: string; duration?: string; size?: string; bit_rate?: string };
+  streams?: Array<{
+    codec_type?: string;
+    codec_name?: string;
+    sample_rate?: string;
+    channels?: number;
+    channel_layout?: string;
+    bits_per_sample?: number;
+    bits_per_raw_sample?: string;
+  }>;
+}
+
+function runProcess(command: string, args: string[], maxBytes = 64 * 1024 * 1024, maxStderrBytes = 1024 * 1024): Promise<{ stdout: Buffer; stderr: string; stderrTruncated: boolean }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let stdoutLength = 0;
+    let stderrLength = 0;
+    let settled = false;
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      fail(new Error(`${command} exceeded the 120 second audio analysis timeout`));
+    }, 120_000);
+
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    };
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutLength += chunk.length;
+      if (stdoutLength > maxBytes) {
+        child.kill('SIGKILL');
+        fail(new Error(`Audio analysis output exceeded the ${maxBytes} byte safety limit`));
+        return;
+      }
+      stdout.push(chunk);
+    });
+    let stderrTruncated = false;
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (stderrLength < maxStderrBytes) {
+        stderr.push(chunk);
+        stderrLength += chunk.length;
+      } else {
+        stderrTruncated = true;
+      }
+    });
+    child.on('error', (error) => fail(error));
+    child.on('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`${command} failed${signal ? ` (${signal})` : ` with exit code ${code}`}: ${Buffer.concat(stderr).toString('utf8').trim()}`));
+        return;
+      }
+      resolve({ stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr).toString('utf8'), stderrTruncated });
+    });
+  });
+}
+
+function fft(real: Float64Array, imaginary: Float64Array): void {
+  const n = real.length;
+  for (let i = 1, j = 0; i < n; i += 1) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      [real[i], real[j]] = [real[j], real[i]];
+      [imaginary[i], imaginary[j]] = [imaginary[j], imaginary[i]];
+    }
+  }
+
+  for (let size = 2; size <= n; size <<= 1) {
+    const angle = (-2 * Math.PI) / size;
+    const stepReal = Math.cos(angle);
+    const stepImaginary = Math.sin(angle);
+    for (let start = 0; start < n; start += size) {
+      let weightReal = 1;
+      let weightImaginary = 0;
+      const half = size >> 1;
+      for (let offset = 0; offset < half; offset += 1) {
+        const even = start + offset;
+        const odd = even + half;
+        const oddReal = real[odd] * weightReal - imaginary[odd] * weightImaginary;
+        const oddImaginary = real[odd] * weightImaginary + imaginary[odd] * weightReal;
+        real[odd] = real[even] - oddReal;
+        imaginary[odd] = imaginary[even] - oddImaginary;
+        real[even] += oddReal;
+        imaginary[even] += oddImaginary;
+        const nextWeightReal = weightReal * stepReal - weightImaginary * stepImaginary;
+        weightImaginary = weightReal * stepImaginary + weightImaginary * stepReal;
+        weightReal = nextWeightReal;
+      }
+    }
+  }
+}
+
+function pcmMetrics(pcm: Buffer, channelCount: number) {
+  // Interleaved f32le. Peak/RMS span every channel so out-of-phase content isn't cancelled by a mono mix.
+  const frameCount = Math.floor(pcm.length / (4 * channelCount));
+  const channels = Array.from({ length: channelCount }, () => new Float32Array(frameCount));
+  let peak = 0;
+  let sumSquares = 0;
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      const sample = pcm.readFloatLE((frame * channelCount + channel) * 4);
+      channels[channel][frame] = sample;
+      const magnitude = Math.abs(sample);
+      if (magnitude > peak) peak = magnitude;
+      sumSquares += sample * sample;
+    }
+  }
+  const sampleCount = frameCount * channelCount;
+
+  const bandDefinitions = [
+    { name: 'sub_bass', minHz: 20, maxHz: 60 },
+    { name: 'bass', minHz: 60, maxHz: 250 },
+    { name: 'low_mid', minHz: 250, maxHz: 500 },
+    { name: 'mid', minHz: 500, maxHz: 2000 },
+    { name: 'high_mid', minHz: 2000, maxHz: 6000 },
+    { name: 'high', minHz: 6000, maxHz: SAMPLE_RATE / 2 }
+  ];
+  const bandPower = new Array(bandDefinitions.length).fill(0);
+  const windowCount = Math.max(1, Math.floor(frameCount / FFT_SIZE));
+  const real = new Float64Array(FFT_SIZE);
+  const imaginary = new Float64Array(FFT_SIZE);
+  const binWidth = SAMPLE_RATE / FFT_SIZE;
+
+  for (const samples of channels) {
+    for (let window = 0; window < windowCount; window += 1) {
+      const offset = window * FFT_SIZE;
+      for (let i = 0; i < FFT_SIZE; i += 1) {
+        const sample = offset + i < frameCount ? samples[offset + i] : 0;
+        const hann = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (FFT_SIZE - 1));
+        real[i] = sample * hann;
+        imaginary[i] = 0;
+      }
+      fft(real, imaginary);
+      for (let bin = 1; bin <= FFT_SIZE / 2; bin += 1) {
+        const frequency = bin * binWidth;
+        const bandIndex = bandDefinitions.findIndex((band) => frequency >= band.minHz && frequency < band.maxHz);
+        if (bandIndex >= 0) {
+          bandPower[bandIndex] += real[bin] * real[bin] + imaginary[bin] * imaginary[bin];
+        }
+      }
+    }
+  }
+
+  const totalBandPower = bandPower.reduce((total, value) => total + value, 0);
+  return {
+    sample_rate_hz: SAMPLE_RATE,
+    analyzed_duration_seconds: frameCount / SAMPLE_RATE,
+    peak_linear: peak,
+    peak_dbfs: peak > 0 ? 20 * Math.log10(peak) : null,
+    rms_linear: sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0,
+    rms_dbfs: sampleCount > 0 && sumSquares > 0 ? 10 * Math.log10(sumSquares / sampleCount) : null,
+    frequency_bands: bandDefinitions.map((band, index) => ({
+      name: band.name,
+      min_hz: band.minHz,
+      max_hz: band.maxHz,
+      relative_energy_percent: totalBandPower > 0 ? Math.round((10000 * bandPower[index]) / totalBandPower) / 100 : 0
+    }))
+  };
+}
+
+// Ableton's factory-pack .aif files are AIFF-C with the proprietary 'able' compression type, which ffmpeg cannot decode.
+async function isAbletonCompressedAiff(filePath: string): Promise<boolean> {
+  const handle = await open(filePath, 'r').catch(() => null);
+  if (!handle) return false;
+  try {
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(1024), 0, 1024, 0);
+    const head = buffer.subarray(0, bytesRead);
+    const commAt = head.indexOf('COMM');
+    return head.subarray(8, 12).toString('latin1') === 'AIFC' && commAt >= 0 && head.subarray(commAt + 26, commAt + 30).toString('latin1') === 'able';
+  } finally {
+    await handle.close();
+  }
+}
+
+export interface AnalyzeOptions {
+  /** Also return the momentary and short-term loudness over time and the loudness range (EBU R128). */
+  curve?: boolean;
+  /** Most points in the curve (default 120). */
+  maxPoints?: number;
+}
+
+const FRAME_LEVEL = '(-?inf|-?\\d+(?:\\.\\d+)?)';
+const LOUDNESS_FRAME = new RegExp(`\\bt:\\s*(\\d+(?:\\.\\d+)?)\\s+TARGET:\\s*-?\\d+\\s*LUFS\\s+M:\\s*${FRAME_LEVEL}\\s+S:\\s*${FRAME_LEVEL}\\s+I:\\s*${FRAME_LEVEL}\\s*LUFS\\s+LRA:\\s*(\\d+(?:\\.\\d+)?)\\s*LU`, 'g');
+
+/** ffmpeg's ebur128 prints a line every 100 ms (framelog=info): t, momentary (M, 400 ms), short-term (S, 3 s), running integrated (I) and LRA. Values at or under -120 LUFS are its floor, not a measurement. */
+export function parseLoudnessCurve(stderr: string, maxPoints = 120) {
+  const level = (text: string): number | null => {
+    const value = /inf/i.test(text) ? Number.NEGATIVE_INFINITY : Number(text);
+    return value <= -120 ? null : value;
+  };
+  const frames = Array.from(stderr.matchAll(LOUDNESS_FRAME), (m) => ({ time: Number(m[1]), momentary: level(m[2]), shortTerm: level(m[3]), range: Number(m[5]) }));
+  if (!frames.length) return null;
+  const stride = Math.max(1, Math.ceil(frames.length / Math.max(2, maxPoints)));
+  const sampled = frames.filter((_, index) => index % stride === stride - 1 || index === frames.length - 1);
+  const maxOf = (pick: (frame: (typeof frames)[number]) => number | null) => {
+    const values = frames.map(pick).filter((v): v is number => v !== null);
+    return values.length ? Math.max(...values) : null;
+  };
+  return {
+    points: sampled.map((f) => ({ time_seconds: Math.round(f.time * 10) / 10, momentary_lufs: f.momentary, short_term_lufs: f.shortTerm })),
+    max_momentary_lufs: maxOf((f) => f.momentary),
+    max_short_term_lufs: maxOf((f) => f.shortTerm),
+    loudness_range_lu: frames[frames.length - 1].range,
+    note: 'short_term_lufs is null for the first 3 s (its window is not full yet) and momentary_lufs for silence; each point is the last 100 ms frame of its stretch, the maxima cover every frame.'
+  };
+}
+
+export async function analyzeAudioFile(filePath: string, options: AnalyzeOptions = {}) {
+  if (!filePath || typeof filePath !== 'string') throw new Error('The Live clip did not provide a source audio file path');
+  const resolvedPath = filePath.trim();
+  const fileStat = await stat(resolvedPath).catch(() => null);
+  if (!fileStat?.isFile()) throw new Error(`Audio source file is unavailable on the MCP host: ${resolvedPath}`);
+  await access(resolvedPath, constants.R_OK).catch((err: NodeJS.ErrnoException) => {
+    throw new Error(`Audio source file is not readable by the MCP host (${err.code}): ${resolvedPath}`);
+  });
+
+  const ffprobe = process.env.FFPROBE_PATH || 'ffprobe';
+  const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
+  const probe = await runProcess(ffprobe, [
+    '-v', 'error', '-show_entries', 'format=format_name,duration,size,bit_rate:stream=codec_type,codec_name,sample_rate,channels,channel_layout,bits_per_sample,bits_per_raw_sample',
+    '-of', 'json', resolvedPath
+  ]).catch(async (err: Error) => {
+    if (/\.(rx2|rex|rcy)$/i.test(resolvedPath)) {
+      throw new Error(`Unsupported source: REX slice file cannot be decoded by ffmpeg: ${resolvedPath}. Analyze a rendered WAV/AIFF instead.`);
+    }
+    if (await isAbletonCompressedAiff(resolvedPath)) {
+      throw new Error(`Unsupported source: Ableton-compressed AIFF (codec 'able', used by Live pack samples) cannot be decoded by ffmpeg: ${resolvedPath}. Analyze a WAV/uncompressed copy instead.`);
+    }
+    throw err;
+  });
+  const probeData = JSON.parse(probe.stdout.toString('utf8')) as FfprobeResult;
+  const audioStream = probeData.streams?.find((stream) => stream.codec_type === 'audio');
+  if (!audioStream) throw new Error('The clip source contains no audio stream');
+
+  // framelog=verbose keeps the per-frame lines out of the output; the curve needs them (info), which makes stderr large: raise its limit and say so if it is hit
+  const loudnessRun = await runProcess(ffmpeg, [
+    '-hide_banner', '-nostats', '-i', resolvedPath, '-filter_complex', `ebur128=framelog=${options.curve ? 'info' : 'verbose'}:peak=true`, '-f', 'null', '-'
+  ], 1024, options.curve ? 32 * 1024 * 1024 : undefined);
+  if (loudnessRun.stderrTruncated) throw new Error('The loudness log of this file is too long to read in full: analyze it without curve, or bounce a shorter stretch');
+  const loudnessMatches = Array.from(loudnessRun.stderr.matchAll(/\bI:\s*(-?inf|-?\d+(?:\.\d+)?)\s*LUFS\b/gi));
+  const loudnessValue = loudnessMatches.at(-1)?.[1];
+  const truePeakValue = loudnessRun.stderr.match(/True peak:\s*Peak:\s*(-?inf|-?\d+(?:\.\d+)?)\s*dBFS/i)?.[1];
+  const channelCount = Math.max(1, audioStream.channels ?? 1);
+  const pcmRun = await runProcess(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-i', resolvedPath, '-t', String(ANALYSIS_SECONDS),
+    '-vn', '-ac', String(channelCount), '-ar', String(SAMPLE_RATE), '-f', 'f32le', '-'
+  ]);
+
+  // Sample peak/RMS come from the native-rate signal: the 22.05 kHz resample used for band analysis can overshoot.
+  const statsRun = await runProcess(ffmpeg, [
+    '-hide_banner', '-nostats', '-i', resolvedPath, '-t', String(ANALYSIS_SECONDS), '-vn',
+    '-af', 'astats=measure_perchannel=none:measure_overall=Peak_level+RMS_level', '-f', 'null', '-'
+  ], 1024);
+  const overall = statsRun.stderr.slice(Math.max(0, statsRun.stderr.lastIndexOf('Overall')));
+  const readDb = (label: string) => {
+    const match = overall.match(new RegExp(`${label} level dB:\\s*(-?inf|-?\\d+(?:\\.\\d+)?)`, 'i'));
+    return match && !/inf/i.test(match[1]) ? Number(match[1]) : match ? null : undefined;
+  };
+  const peakDb = readDb('Peak');
+  const rmsDb = readDb('RMS');
+  const signal = pcmMetrics(pcmRun.stdout, channelCount);
+  if (peakDb !== undefined) {
+    signal.peak_dbfs = peakDb;
+    signal.peak_linear = peakDb === null ? 0 : 10 ** (peakDb / 20);
+  }
+  if (rmsDb !== undefined) {
+    signal.rms_dbfs = rmsDb;
+    signal.rms_linear = rmsDb === null ? 0 : 10 ** (rmsDb / 20);
+  }
+
+  // ffmpeg's ebur128 oversampler can read slightly under the sample peak; a true peak is never lower.
+  const measuredTruePeak = truePeakValue && !/inf/i.test(truePeakValue) ? Number(truePeakValue) : null;
+  const truePeakDbtp = measuredTruePeak !== null && typeof signal.peak_dbfs === 'number' ? Math.max(measuredTruePeak, signal.peak_dbfs) : measuredTruePeak;
+
+  return {
+    file_path: resolvedPath,
+    format: probeData.format?.format_name || null,
+    duration_seconds: probeData.format?.duration ? Number(probeData.format.duration) : null,
+    file_size_bytes: probeData.format?.size ? Number(probeData.format.size) : fileStat.size,
+    bit_rate_bps: probeData.format?.bit_rate ? Number(probeData.format.bit_rate) : null,
+    codec: audioStream.codec_name || null,
+    source_sample_rate_hz: audioStream.sample_rate ? Number(audioStream.sample_rate) : null,
+    channels: audioStream.channels ?? null,
+    channel_layout: audioStream.channel_layout || null,
+    bit_depth: audioStream.bits_per_raw_sample ? Number(audioStream.bits_per_raw_sample) : (audioStream.bits_per_sample || null),
+    integrated_loudness_lufs: loudnessValue && !/inf/i.test(loudnessValue) ? Number(loudnessValue) : null,
+    true_peak_dbtp: truePeakDbtp,
+    ...(options.curve ? { loudness_over_time: parseLoudnessCurve(loudnessRun.stderr, options.maxPoints) } : {}),
+    signal,
+    analysis_notes: [`Signal statistics use the first ${ANALYSIS_SECONDS} seconds. Peak and RMS are measured at the source sample rate across all channels; frequency bands sum per-channel spectra after resampling to ${SAMPLE_RATE} Hz.`, 'Integrated loudness and true peak (dBTP, 4x oversampled) are measured over the full source file using the EBU R128 filter.']
+  };
+}

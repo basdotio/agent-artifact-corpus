@@ -1,0 +1,78 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: spond
+  namespace: mcp
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        autoscaling.knative.dev/target: "10"
+        autoscaling.knative.dev/metric: "concurrency"
+        autoscaling.knative.dev/window: "60s"
+        autoscaling.knative.dev/scale-down-delay: "2m"
+        autoscaling.knative.dev/scale-to-zero-pod-retention-period: "5m"
+        autoscaling.knative.dev/initialScale: "1"
+    spec:
+      containers:
+      - name: spond
+        image: registry.intern.flaatten.org:5000/spond:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        env:
+        - name: BASE_URL
+          value: "https://spond.mcp.fn.flaatten.org"
+        - name: SPOND_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: spond-credentials
+              key: username
+        - name: SPOND_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: spond-credentials
+              key: password
+        - name: MCP_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: mcp-auth-token
+              key: token
+        - name: KIDS_CONFIG
+          value: '<!-- FAMILY:KIDS_SPOND -->'
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "10m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 2
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      serviceAccountName: default

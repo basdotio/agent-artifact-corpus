@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+# How far a suggestion's recheck reached: the whole file is proved (strict), its
+# declaration is (declaration), or its declaration still has other holes (partial).
+SUGGESTION_VERIFICATIONS = frozenset({"strict", "declaration", "partial"})
+
 
 @dataclass(frozen=True)
 class OperationOutcome:
@@ -81,6 +85,24 @@ class OperationOutcome:
             # A completed trial batch can contain unsuccessful candidate tactics.
             # This says nothing about whether the theorem has been proved.
             return isinstance(result.get("results"), list)
+        if kind == "suggest":
+            # A closing tactic that changed nothing else, at one of the recheck tiers.
+            return (
+                result.get("status") == "closed"
+                and result.get("verification") in SUGGESTION_VERIFICATIONS
+                and isinstance(result.get("patch"), dict)
+            )
+        if kind in {"holes", "extract_decls"}:
+            # A listing of a file that does not compile yet is still a listing;
+            # its status and diagnostics say whether the file compiles.
+            listed = "holes" if kind == "holes" else "declarations"
+            return result.get("status") in {"ok", "error"} and isinstance(result.get(listed), list)
+        if kind == "sorry2lemma":
+            # Obligations are extracted, not proved; a failed extraction is not success.
+            return result.get("status") in {"extracted", "partial", "unchanged", "no_targets"}
+        if kind == "check_files":
+            # Every file passed; a single failure makes the batch unsuccessful.
+            return result.get("status") == "ok" and result.get("failed") == 0
         return kind == "check" and result.get("status") == "ok"
 
 

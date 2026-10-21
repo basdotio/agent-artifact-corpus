@@ -42,9 +42,16 @@ If the recommended NVIDIA engine won't start, update your graphics driver from n
 | **Qwen3-TTS 1.7B · Q4** | Graphics cards with 4 GB or less, and CPU-only PCs. | 1.5 GB |
 | **Fish Audio S2 Pro · Q8** | Very expressive, 80+ languages, emotion tags. NVIDIA cards with 8 GB or more. | 5.6 GB |
 | **Fish Audio S2 Pro · Q6** | The same for cards with 6 to 8 GB. | 4.5 GB |
+| **OmniVoice · Q8** | Fast and small, 96 languages. Every engine, including 4 GB cards and the CPU. | 945 MB |
+| **OmniVoice · Q4** | The same, compressed further: a third faster on the CPU. | 660 MB |
+| **Chatterbox** | Clones voices in 23 languages, incl. Hindi, Arabic, Swahili, Turkish. Graphics cards. | 2.1 GB |
+| **VoxCPM2** | Clones voices in 30 languages, 48 kHz. Graphics cards with 8 GB or more. | 3.0 GB |
+| **CosyVoice 3** | Fast cloning in 8 languages, incl. Cantonese. Graphics cards. | 2.3 GB |
+| **Kokoro** | Very fast, with its own 15 voices; over 2× real time even without a graphics card. | 190 MB |
+| **MOSS-TTS Nano** | Tiny, clones voices; over 2× real time even without a graphics card. | 190 MB |
 
-Both are the same model ([Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base)), free for
-commercial use (Apache 2.0), and speak 10 languages: English, Spanish, French, German, Italian, Portuguese,
+The two Qwen3-TTS downloads are the same model ([Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base)),
+free for commercial use (Apache 2.0), and speak 10 languages: English, Spanish, French, German, Italian, Portuguese,
 Russian, Japanese, Korean and Chinese. The Models page warns when a model is a tight fit or too big for your
 graphics card.
 
@@ -69,6 +76,56 @@ as Qwen3-TTS.
   Settings. Scripts for it are spoken in shorter parts (about 300 characters).
 
 ![One S2 Pro batch in English, Hindi, Urdu, Arabic, Japanese and Turkish](images/batch-s2.webp)
+
+### OmniVoice (a third voice model)
+
+[OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) is a small, fast voice model. In the app it speaks 96 languages: Qwen3-TTS's 10 plus Hindi, Urdu, Arabic, Bengali, Swahili,
+Cantonese, Hausa, Uzbek and many more (every language Whisper can also make subtitles for). It copies a voice from
+the same clips as Qwen3-TTS.
+
+- **Engine:** it runs on every engine: CUDA, the older-driver CUDA and Vulkan engines (on the graphics card), and the
+  CPU engine. Its own small engine part downloads with the model.
+- **Speed:** about 4× faster than real time on an NVIDIA card (a 10-minute script in about 2½ minutes, twice as fast
+  as Qwen3-TTS), about 3× on Vulkan. On the CPU it uses a quicker setting and takes about 2 to 3 times as long as
+  the audio (Q4 is the faster one there).
+- **Graphics memory:** under 2 GB, so it suits 4 GB cards. It stays loaded while you use it (it starts in about a
+  second) and unloads after a few idle minutes, or when another voice model speaks. Whisper runs beside it, except
+  on cards under 6 GB, where they take turns.
+- **Licence:** the model is for non-commercial use (CC-BY-NC 4.0; its makers changed it from Apache 2.0 in July
+  2026 because of its training data). Like S2 Pro, the app marks it in red, never picks it as the default by
+  itself, and AI agents can't use it unless you allow it on the Connect page.
+- Pick it per batch, quick take or preset in the **Voice model** list on the Create page, or as the default in
+  Settings. Long scripts are spoken in the usual parts (about 600 characters).
+
+### Chatterbox, VoxCPM2, CosyVoice 3, Kokoro and MOSS-TTS Nano (audio.cpp)
+
+These five run on [audio.cpp](https://github.com/0xShug0/audio.cpp), an engine for many voice models. Its own
+official build for your engine (CUDA, Vulkan or CPU) downloads with the first of them; on NVIDIA · CUDA that's
+about 460 MB (audio.cpp plus NVIDIA's cuFFT library). All five are free for commercial use.
+
+- **Chatterbox** ([Resemble AI](https://huggingface.co/ResembleAI/chatterbox), MIT) copies a voice from its clip in
+  23 languages, including Hindi, Arabic, Swahili, Turkish, Polish and Korean. About 2.7× faster than real time on an
+  NVIDIA card in about 3 GB (Korean needs up to 6 GB). It needs a graphics card: on the processor it's about 10×
+  slower than real time.
+- **VoxCPM2** ([OpenBMB](https://huggingface.co/openbmb/VoxCPM2), Apache 2.0) copies a voice from its clip and what
+  the clip says in 30 languages, including Hindi, Arabic, Thai, Vietnamese, Turkish and Swahili, at 48 kHz. About
+  2.8× faster than real time on an NVIDIA card, in about 6 GB: for cards with 8 GB or more.
+- **CosyVoice 3** ([Alibaba FunAudioLLM](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512), Apache 2.0)
+  copies a voice from its clip and what the clip says in English, Spanish, French, German, Italian, Chinese, Korean and
+  Cantonese, about 5× faster than real time in about 3 GB. (It also knows Russian and Japanese, but copies a voice from
+  another language poorly there, so they aren't offered.)
+- **Kokoro** ([hexgrad](https://huggingface.co/hexgrad/Kokoro-82M), Apache 2.0) is tiny and very fast: over 10× faster
+  than real time on a graphics card and about 2× on the processor alone. It **can't copy a voice**: it has its own
+  voices, and the app adds 15 of them to your voice library (marked **Kokoro**) in English (American and British),
+  Spanish, French, Hindi, Italian, Brazilian Portuguese and Chinese. Use those voices with Kokoro; the other models
+  can copy them too. A voice you delete isn't added back. Kokoro also downloads eSpeak NG (12 MB, GPL v3, a separate
+  library it uses for pronunciation).
+- **MOSS-TTS Nano** ([OpenMOSS](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Nano-100M), Apache 2.0) copies a voice
+  from its clip and what the clip says (heard by Whisper, as for S2 Pro), in under 1 GB: over 10× faster than real
+  time on a graphics card and about 2.5× on the processor alone. The app offers it in English, Spanish, French,
+  German and Chinese, the languages it speaks well.
+- One model is loaded at a time; it unloads after a few idle minutes or when another voice model speaks. On cards
+  under 12 GB it steps aside while Whisper makes the subtitles.
 
 ## Whisper models (subtitles and transcripts)
 

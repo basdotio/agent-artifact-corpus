@@ -3,7 +3,8 @@ import fnmatch
 import hashlib
 import json
 import os
-from pathlib import Path
+from grea.host.files import is_link
+from grea.host.paths import Path
 
 
 def digest(path):
@@ -16,14 +17,14 @@ def digest(path):
 
 def directory(path):
     path = Path(path)
-    if path.is_symlink() or not path.is_dir():
+    if is_link(path) or not path.is_dir():
         raise ValueError(f"Not a real directory: {path}")
     return path.resolve()
 
 
 def validate_output(path, sources=()):
     path = Path(path)
-    if path.exists() or path.is_symlink():
+    if path.exists() or is_link(path):
         raise ValueError(f"Output exists: {path}")
     if not path.parent.is_dir():
         raise ValueError(f"Output parent must exist: {path.parent}")
@@ -54,7 +55,7 @@ def inventory(root, exclude=()):
     for base, dirs, names in os.walk(root, followlinks=False):
         for name in sorted(dirs + names):
             path = Path(base) / name
-            if path.is_symlink():
+            if is_link(path):
                 raise ValueError(f"Symlink refused: {path}")
         for name in sorted(names):
             path = Path(base) / name

@@ -1,0 +1,1320 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>第三十六张 — The 36th Frame (video-gaga · Cinematic Film)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Noto+Serif+SC:wght@500;600&family=Courier+Prime:wght@400;700&family=Caveat:wght@500&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   CINEMATIC FILM — a documentary shot on film and projected in a dark room.
+   Scope letterbox (2.39:1), warm highlights over lifted teal blacks, halation
+   around every light, grain, gate weave, a breath of exposure flicker, dust and
+   the odd scratch. Nothing snaps: shots drift on slow dollies, titles fade up
+   out of focus and keep tracking open while they hold, cuts are dissolves,
+   dips to black and one film burn. Documentary furniture: a mono timecode
+   kicker over a serif line, subtitles set in the lower bar.
+   Rhythm: slow, but never still. Every shot moves (a push, a track, a tilt,
+   a rack), and the cut lands on the beat of the video's own score. In the
+   example below a first-person narrator sets the shot lengths, a second voice
+   speaks one line, and the shutter, the pull back and the title are music only.
+   ============================================================================= */
+const { ease, clamp, lerp, fx, draw, color } = CV;
+
+// === THEME (swap for brand) ==================================================
+const T = {
+  black: '#0B0A08',
+  cream: '#F1E6D0',       // titles, highlights
+  amber: '#E3A257',       // the one warm accent: timecodes, the light
+  dim: '#8A7F70',
+  leader: '#9C907E',      // countdown leader field
+  warm: '#FFB46E',        // grade: soft-light over everything
+  halation: '#FF6A2A',    // the red-orange bloom film gives a highlight
+  lift: '#121A1B',        // the floor of the blacks: film never reaches pure black
+  aspect: 2.39,           // scope; 1.85 for a flat frame, 1 to drop the bars
+  serif: '"Cormorant Garamond", "Noto Serif SC", Georgia, serif',
+  han: '"Noto Serif SC", "Songti SC", serif',
+  mono: '"Courier Prime", "Courier New", monospace',
+};
+const F = (w, px, fam = T.serif, style = '') => `${style ? style + ' ' : ''}${w} ${px}px ${fam}`;
+// the picture inside the letterbox bars
+const picture = (W, H, aspect = T.aspect) => {
+  const h = Math.min(H, W / aspect), y0 = (H - h) / 2;
+  return { y0, y1: y0 + h, h };
+};
+
+// === KIT: the film gate ======================================================
+// Everything the projector adds, drawn in the overlay over every frame:
+// gate weave, halation, the warm grade with lifted blacks, exposure flicker,
+// dust and scratches, vignette, grain. Pure functions of the frame index.
+const gateBufs = {};
+function gateBuf(key, w, h) {
+  let c = gateBufs[key];
+  if (!c || c.width !== w || c.height !== h) {
+    c = gateBufs[key] = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.g = c.getContext('2d', { willReadFrequently: true });
+  }
+  return c;
+}
+
+function filmGate(ctx, g, o = {}) {
+  const { weave = 1, halation = 0.5, grade = 0.2, flicker = 0.035, dust = 1, vignette = 0.55, grain = 0.08 } = o;
+  const cv = ctx.canvas, pw = cv.width, ph = cv.height, f = g.frame, W = g.W, H = g.H;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // gate weave: the frame drifts a pixel or two in the gate (over-scanned so no edge shows)
+  if (weave) {
+    const b = gateBuf('weave', pw, ph), k = pw / W, z = 1.004;
+    b.g.globalCompositeOperation = 'copy';
+    b.g.drawImage(cv, 0, 0);
+    const dx = CV.noise(f * 0.21, 3) * 1.4 * weave * k, dy = CV.noise(f * 0.17, 7) * 2 * weave * k;
+    ctx.drawImage(b, (pw - pw * z) / 2 + dx, (ph - ph * z) / 2 + dy, pw * z, ph * z);
+  }
+  // halation: the highlights bloom red-orange. No ctx.filter and no high-quality
+  // resampling (both can rasterise differently between pages): the frame is
+  // halved four times (a box blur), multiplied by itself so only the highlights
+  // survive, tinted, and scaled back up over the frame.
+  if (halation) {
+    let src = cv, w = pw, h = ph;
+    for (let i = 0; i < 4; i++) {
+      w = Math.max(4, w >> 1); h = Math.max(4, h >> 1);
+      const b = gateBuf(`halation${i}`, w, h);
+      b.g.globalCompositeOperation = 'copy';
+      b.g.drawImage(src, 0, 0, w, h);
+      src = b;
+    }
+    const hb = gateBuf('halation', w, h), g2 = hb.g;
+    g2.globalCompositeOperation = 'copy';
+    g2.drawImage(src, 0, 0);
+    g2.globalCompositeOperation = 'multiply';
+    g2.drawImage(src, 0, 0);
+    g2.drawImage(src, 0, 0);
+    g2.fillStyle = T.halation;
+    g2.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = halation;
+    ctx.drawImage(hb, 0, 0, pw, ph);
+  }
+  ctx.restore();
+  ctx.save();
+  // the grade: warm highlights, blacks lifted toward teal
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.globalAlpha = grade;
+  ctx.fillStyle = T.warm;
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'lighten';
+  ctx.fillStyle = T.lift;
+  ctx.fillRect(0, 0, W, H);
+  // exposure flicker
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = (CV.noise(f * 0.9, 5) * 0.5 + 0.5) * flicker;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  // dust: a few specks and hairs, new every frame; a scratch that lives for a few dozen frames
+  if (dust) {
+    const r = CV.rand(f * 13 + 1), n = Math.floor(r() * 3.4 * dust);
+    for (let i = 0; i < n; i++) {
+      const x = r() * W, y = r() * H, light = r() < 0.25, sz = 1 + r() * 3.5;
+      ctx.globalAlpha = 0.35 + r() * 0.35;
+      ctx.fillStyle = ctx.strokeStyle = light ? T.cream : '#000';
+      if (r() < 0.7) { ctx.beginPath(); ctx.ellipse(x, y, sz, sz * (0.6 + r() * 0.6), r() * 3, 0, Math.PI * 2); ctx.fill(); }
+      else {
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(x, y);
+        ctx.bezierCurveTo(x + (r() - 0.5) * 40, y + r() * 30, x + (r() - 0.5) * 40, y + r() * 30, x + (r() - 0.5) * 30, y + 20 + r() * 30);
+        ctx.stroke();
+      }
+    }
+    const seg = Math.floor(f / 37), rs = CV.rand(seg * 5 + 2);
+    if (rs() < 0.4 * dust) {
+      const x = rs() * W + CV.noise(f * 0.3, seg) * 6;
+      ctx.globalAlpha = 0.12 + rs() * 0.1;
+      ctx.fillStyle = T.cream;
+      ctx.fillRect(x, 0, 1.2, H);
+    }
+  }
+  ctx.restore();
+  draw.vignette(ctx, W, H, vignette, '#000');
+  draw.grain(ctx, f, grain, { blend: 'overlay' });
+}
+
+// Letterbox bars, drawn last. open: 0 = full frame, 1 = the full letterbox.
+function letterbox(ctx, W, H, open = 1, aspect = T.aspect) {
+  const bar = (H - picture(W, H, aspect).h) / 2 * clamp(open);
+  if (bar <= 0) return;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, bar);
+  ctx.fillRect(0, H - bar, W, bar);
+}
+
+// === KIT: camera and type ====================================================
+// The slow cinematic ease: long, soft settle.
+const drift = ease.bezier(0.33, 0, 0.15, 1);
+
+// A slow dolly over the whole shot (zoom and/or lateral track), never a snap.
+// The zoom holds (focusX, focusY) still on screen; x / y track the camera.
+function dolly(ctx, s, fn, { zoom = [1, 1.06], x = [0, 0], y = [0, 0], focusX = s.W / 2, focusY = s.H / 2 } = {}) {
+  const k = ease.inOutSine(s.p), z = lerp(zoom[0], zoom[1], k);
+  draw.camera(ctx, s.W, s.H, { zoom: z, focusX, focusY, x: lerp(x[0], x[1], k) + (s.W / 2 - focusX) / z, y: lerp(y[0], y[1], k) + (s.H / 2 - focusY) / z }, fn);
+}
+
+// A title that fades up out of focus and keeps tracking open while it holds.
+// spacing in em: [at t = 0, at t = life]. Returns 0..1 visibility.
+function trackTitle(ctx, str, x, y, t, { font = F(600, 120), fill = T.cream, spacing = [0.12, 0.3], life = 8, fadeIn = 1.4, blur = 10, exit = 0, align = 'center' } = {}) {
+  const a = ease.inOutSine(clamp(t / fadeIn)) * (1 - clamp(exit));
+  if (a <= 0) return 0;
+  ctx.save();
+  ctx.font = font;
+  const size = parseFloat(font.match(/(\d+(?:\.\d+)?)px/)[1]);
+  const sp = lerp(spacing[0], spacing[1], clamp(t / life)) * size;
+  ctx.letterSpacing = `${sp.toFixed(2)}px`;
+  const w = ctx.measureText(str).width - sp; // trailing spacing doesn't count
+  const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+  ctx.textAlign = 'left';
+  ctx.globalAlpha = a;
+  ctx.fillStyle = fill;
+  const b = (1 - a) * blur;
+  if (b > 0.05) ctx.filter = `blur(${b.toFixed(2)}px)`;
+  ctx.fillText(str, x0, y);
+  ctx.restore();
+  return a;
+}
+
+// Documentary super: a mono timecode kicker, a hairline that draws, a serif line.
+function lowerThird(ctx, x, y, kicker, line, t, { exit = 0, font = F(500, 42, T.han), width = 520, scrim = 0.5 } = {}) {
+  if (t <= 0) return;
+  const o = 1 - clamp(exit);
+  ctx.save();
+  // a soft scrim keeps the super legible over a busy picture
+  if (scrim > 0) {
+    const g = ctx.createLinearGradient(0, y - 170, 0, y + 70);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, `rgba(0,0,0,${scrim})`);
+    ctx.globalAlpha = o * ease.inOutSine(clamp(t / 1.2));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, y - 170, ctx.canvas.__cvW || ctx.canvas.width, 240);
+  }
+  ctx.globalAlpha = o * ease.inOutSine(clamp(t / 0.8));
+  ctx.font = F(400, 24, T.mono);
+  ctx.letterSpacing = '4px';
+  ctx.fillStyle = T.amber;
+  ctx.textAlign = 'left';
+  ctx.fillText(kicker, x, y - 64 + (1 - clamp(t / 0.8)) * 8);
+  ctx.letterSpacing = '0px';
+  ctx.fillStyle = color.rgba(T.cream, 0.55);
+  ctx.fillRect(x, y - 46, width * drift(clamp((t - 0.25) / 1.4)), 1.5);
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = o;
+  ctx.font = font;
+  ctx.fillStyle = T.cream;
+  fx.charReveal(ctx, line, x, y, t - 0.5, { stagger: 0.05, dur: 0.9, rise: 0.08, blur: 6, ease: ease.inOutSine });
+  ctx.restore();
+}
+
+// One frame of an academy countdown leader: n is the numeral, q 0→1 the sweep.
+function leader(ctx, W, H, n, q) {
+  const cx = W / 2, cy = H / 2, R = H * 0.36;
+  ctx.fillStyle = T.leader;
+  ctx.fillRect(0, 0, W, H);
+  // the sweep: a darker wedge turning clockwise from twelve o'clock
+  ctx.fillStyle = color.mix(T.leader, '#000', 0.28);
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, R * 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(q));
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = color.rgba('#000', 0.75);
+  ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+  ctx.strokeStyle = color.rgba(T.cream, 0.9);
+  ctx.lineWidth = 6;
+  for (const r of [R, R * 0.84]) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.font = F(600, H * 0.5);
+  ctx.fillStyle = '#111';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(n), cx, cy + H * 0.02);
+  ctx.textBaseline = 'alphabetic';
+}
+
+// Film burn: the stock overexposes into orange and white, and the next shot
+// comes through it. A custom transition; seed / x / y move where it burns from.
+function filmBurn(ctx, A, B, p, o = {}) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  ctx.drawImage(A, 0, 0);
+  const m = clamp((p - 0.38) / 0.24);
+  if (m > 0) { ctx.globalAlpha = m; ctx.drawImage(B, 0, 0); ctx.globalAlpha = 1; }
+  const k = Math.sin(Math.PI * p), r = CV.rand(o.seed ?? 3);
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  for (let i = 0; i < 5; i++) {
+    const x = W * ((o.x ?? 0.75) + (r() - 0.5) * 0.6 - p * 0.2), y = H * ((o.y ?? 0.45) + (r() - 0.5) * 0.7);
+    const rad = W * (0.12 + r() * 0.3) * (0.35 + 1.4 * k);
+    const gr = ctx.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, `rgba(255,238,200,${0.95 * k})`);
+    gr.addColorStop(0.3, `rgba(255,160,70,${0.8 * k})`);
+    gr.addColorStop(0.65, `rgba(210,60,20,${0.4 * k})`);
+    gr.addColorStop(1, 'rgba(120,20,0,0)');
+    ctx.fillStyle = gr;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
+}
+
+// A camera move that zooms about a point that stays put on screen (a push
+// toward something without re-centring it).
+const zoomAt = (ctx, s, { zoom = 1, focusX = s.W / 2, focusY = s.H / 2, x = 0, y = 0, rotate = 0 }, fn) =>
+  draw.camera(ctx, s.W, s.H, { zoom, rotate, focusX, focusY, x: x + (s.W / 2 - focusX) / zoom, y: y + (s.H / 2 - focusY) / zoom }, fn);
+
+// Frame advance: the roll pulls through the gate to the next frame. The old
+// picture slides off with the black frame line and the next one slides in,
+// smeared by the pull-down. A custom transition for a run of stills on one roll.
+function frameAdvance(ctx, A, B, p, o = {}) {
+  const W = ctx.canvas.width, H = ctx.canvas.height, dir = o.direction === 'right' ? 1 : -1;
+  const gap = W * 0.04, off = p * (W + gap) * dir, v = Math.sin(Math.PI * p);
+  const n = 1 + Math.round(v * (o.samples ?? 7)), spread = v * W * (o.blur ?? 0.06);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  for (let i = 0; i < n; i++) {
+    const d = n > 1 ? (i / (n - 1) - 0.5) * spread : 0;
+    ctx.globalAlpha = 1 / (i + 1); // running average: every sample weighs the same
+    ctx.drawImage(A, off + d, 0);
+    ctx.drawImage(B, off + d - dir * (W + gap), 0);
+  }
+  // the gate darkens a touch while the film is moving
+  ctx.globalAlpha = 0.3 * v;
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+}
+
+// === EXAMPLE: the last frame on a father's roll ==============================
+// A daughter finds a roll of 36 in her father's old camera with 35 frames
+// shot. Every photo is drawn in "print space": the 3:2 frame of the 35 mm
+// negative at 1920×1280, centred on the screen, so the scope picture shows
+// its middle band (y 238…1041) and a print or a contact sheet shows all of it.
+const PW = 1920, PH = 1280, PYO = (1080 - PH) / 2;
+const PIC = picture(1920, 1080); // { y0, y1, h } of the scope picture
+const inPrint = (ctx, fn) => { ctx.save(); ctx.translate(0, PYO); fn(); ctx.restore(); };
+
+// small geometry helpers
+const area = (p) => p.reduce((s, q, i) => { const r = p[(i + 1) % p.length]; return s + q[0] * r[1] - r[0] * q[1]; }, 0);
+function ellipsePts(cx, cy, rx, ry, rot = 0, n = 18) {
+  const out = [], c = Math.cos(rot), sn = Math.sin(rot);
+  for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2, x = Math.cos(a) * rx, y = Math.sin(a) * ry; out.push([cx + x * c - y * sn, cy + x * sn + y * c]); }
+  return out;
+}
+function capsule(a, b, r, n = 5) {
+  const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), out = [];
+  for (let i = 0; i <= n; i++) { const t = ang - Math.PI / 2 - (i / n) * Math.PI; out.push([a[0] + Math.cos(t) * r, a[1] + Math.sin(t) * r]); }
+  for (let i = 0; i <= n; i++) { const t = ang + Math.PI / 2 - (i / n) * Math.PI; out.push([b[0] + Math.cos(t) * r, b[1] + Math.sin(t) * r]); }
+  return out;
+}
+function glow(ctx, x, y, r, col, a) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color.rgba(col, a));
+  g.addColorStop(1, color.rgba(col, 0));
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+}
+const tracePoly = (ctx, pts) => { ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); };
+
+// The orange date a 90s point-and-shoot burned into the corner of the frame:
+// seven-segment digits, right-aligned at x, bottom at y, h tall.
+const SEG = { 0: 'abcdef', 1: 'bc', 2: 'abdeg', 3: 'abcdg', 4: 'bcfg', 5: 'acdfg', 6: 'acdefg', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg' };
+function dateStamp(ctx, str, x, y, h, a = 1) {
+  if (a <= 0) return;
+  const w = h * 0.52, th = h * 0.12, adv = w + h * 0.3;
+  const segs = { a: [th, 0, w - 2 * th, th], b: [w - th, th, th, h / 2 - 1.5 * th], c: [w - th, h / 2 + th / 2, th, h / 2 - 1.5 * th], d: [th, h - th, w - 2 * th, th], e: [0, h / 2 + th / 2, th, h / 2 - 1.5 * th], f: [0, th, th, h / 2 - 1.5 * th], g: [th, h / 2 - th / 2, w - 2 * th, th] };
+  let width = 0;
+  for (const ch of str) width += ch === ' ' ? adv * 0.6 : ch === "'" ? th * 2.6 : adv;
+  ctx.save();
+  ctx.translate(x - width, y - h);
+  ctx.transform(1, 0, -0.1, 1, h * 0.1, 0);
+  for (const pass of [0, 1]) {
+    ctx.globalAlpha = a * (pass ? 0.92 : 0.22);
+    ctx.fillStyle = pass ? '#FF9B52' : '#FF4E12';
+    const grow = pass ? 0 : th * 1.1;
+    let cx = 0;
+    for (const ch of str) {
+      if (ch === ' ') { cx += adv * 0.6; continue; }
+      if (ch === "'") { ctx.fillRect(cx - grow / 2, -grow / 2, th + grow, th * 2.2 + grow); cx += th * 2.6; continue; }
+      for (const k of SEG[ch] || '') { const [sx, sy, sw, sh] = segs[k]; ctx.fillRect(cx + sx - grow / 2, sy - grow / 2, sw + grow, sh + grow); }
+      cx += adv;
+    }
+  }
+  ctx.restore();
+}
+
+// An old print: warm, a little faded, blacks lifted to brown.
+function printTone(ctx, x, y, w, h, k = 1) {
+  if (k <= 0) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.globalAlpha = 0.5 * k;
+  ctx.fillStyle = '#F4B46A';
+  ctx.fillRect(x, y, w, h);
+  ctx.globalCompositeOperation = 'lighten';
+  ctx.globalAlpha = k;
+  ctx.fillStyle = '#2E2520';
+  ctx.fillRect(x, y, w, h);
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.globalAlpha = 0.22 * k;
+  ctx.fillStyle = '#EBD3A4';
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
+
+// --- People are only ever their shadows ---------------------------------------
+// A figure is a skeleton in figure space (u across, v up, 1 = head top), built
+// from capsules, then cast onto the sand by the low sun behind the camera:
+// stretched away from us and narrowing with distance. All its parts go in one
+// path filled once (nonzero), so overlaps never darken.
+const POSES = {
+  eye: { lEl: [-0.2, 0.785], lHa: [-0.05, 0.895], rEl: [0.2, 0.785], rHa: [0.05, 0.895], cam: [0, 0.9] },   // the camera at the eye, elbows out
+  low: { lEl: [-0.125, 0.665], lHa: [-0.05, 0.6], rEl: [0.125, 0.665], rHa: [0.05, 0.6], cam: [0, 0.605] }, // the camera held at the chest
+  arm: { lEl: [-0.15, 0.665], lHa: [-0.25, 0.63], rEl: [0.115, 0.66], rHa: [0.125, 0.5], cam: null },      // her arm through his
+};
+function lerpPose(a, b, k) {
+  const L = (p, q) => [lerp(p[0], q[0], k), lerp(p[1], q[1], k)];
+  return { lEl: L(a.lEl, b.lEl), lHa: L(a.lHa, b.lHa), rEl: L(a.rEl, b.rEl), rHa: L(a.rHa, b.rHa), cam: a.cam && b.cam ? L(a.cam, b.cam) : a.cam || b.cam };
+}
+function figurePolys(P, o) {
+  const polys = [ellipsePts(0, 0.928, 0.05, 0.062), capsule([0, 0.84], [0, 0.9], 0.026)];
+  if (o.ponytail) polys.push(ellipsePts(0.052, 0.885, 0.022, 0.058, -0.35, 12));
+  polys.push([[-0.1, 0.836], [0.1, 0.836], [0.114, 0.8], [0.084, 0.63], [0.094, 0.5], [-0.094, 0.5], [-0.084, 0.63], [-0.114, 0.8]]);
+  for (const sx of [-1, 1]) {
+    const hip = [sx * 0.05, 0.52], knee = [sx * 0.056, 0.27], ank = [sx * 0.072, 0.035];
+    polys.push(capsule(hip, knee, 0.044), capsule(knee, ank, 0.033), capsule(ank, [sx * 0.095, 0.012], 0.022));
+    const sh = [sx * 0.094, 0.802], el = sx < 0 ? P.lEl : P.rEl, ha = sx < 0 ? P.lHa : P.rHa;
+    polys.push(capsule(sh, el, 0.031), capsule(el, ha, 0.026));
+  }
+  if (P.cam) {
+    const [cx, cy] = P.cam;
+    polys.push([[cx - 0.09, cy - 0.036], [cx + 0.09, cy - 0.036], [cx + 0.09, cy + 0.04], [cx - 0.09, cy + 0.04]], [[cx - 0.034, cy], [cx + 0.034, cy], [cx + 0.034, cy + 0.075], [cx - 0.034, cy + 0.075]], [[cx + 0.045, cy + 0.04], [cx + 0.075, cy + 0.04], [cx + 0.075, cy + 0.06], [cx + 0.045, cy + 0.06]]);
+  }
+  return polys;
+}
+// f: { pose, x, base, len, width, lean, k, ponytail }
+function castShadows(ctx, figs, col, a) {
+  ctx.save();
+  ctx.beginPath();
+  for (const f of figs) {
+    const k = f.k ?? 1.1;
+    const map = ([u, v]) => { const c = (v * (1 + k)) / (1 + k * v), w = f.width * (1 - 0.42 * c); return [f.x + u * w + (f.lean ?? 0) * c, f.base - c * f.len]; };
+    for (const poly of figurePolys(f.pose, f)) {
+      const pts = poly.map(map);
+      if (area(pts) < 0) pts.reverse();
+      tracePoly(ctx, pts);
+    }
+  }
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = col;
+  // a soft penumbra, then the core
+  for (const [dx, al] of [[-2.5, 0.25], [2.5, 0.25], [0, 1]]) {
+    ctx.save(); ctx.translate(dx, -Math.abs(dx)); ctx.globalAlpha = a * al; ctx.fill('nonzero'); ctx.restore();
+  }
+  ctx.restore();
+}
+const DAD = (pose, x = 900) => ({ pose, x, base: 1330, len: 640, width: 960, lean: -60 });
+const HER = (pose = POSES.arm, x = 1132) => ({ pose, x, base: 1330, len: 600, width: 900, lean: -52, ponytail: true });
+
+// --- The sea (print space) -----------------------------------------------------
+const BHZ = 560; // horizon
+const CLOUDS = (() => { const r = CV.rand(8), out = []; for (let i = 0; i < 7; i++) out.push([r() * 2200 - 150, 150 + r() * 330, 220 + r() * 420, 12 + r() * 22, r()]); return out; })();
+function beachWorld(ctx, t, o = {}) {
+  const { figs = [], era = 0 } = o;
+  // the sky ahead is lit by the sun behind us: blue above, the pink belt at the horizon
+  let g = ctx.createLinearGradient(0, 0, 0, BHZ);
+  g.addColorStop(0, era ? '#56769C' : '#6A7E98'); g.addColorStop(0.5, '#9FA7BF'); g.addColorStop(0.84, '#E2B3A6'); g.addColorStop(1, '#F2CDB2');
+  ctx.fillStyle = g;
+  ctx.fillRect(-600, -600, PW + 1200, BHZ + 600);
+  for (const [x, y, w, h, k] of CLOUDS) {
+    const cx = ((x + t * (6 + k * 6)) % 2400) - 240;
+    const cg = ctx.createRadialGradient(cx, y, 0, cx, y, w);
+    cg.addColorStop(0, `rgba(248,222,210,${0.22 + k * 0.12})`); cg.addColorStop(1, 'rgba(248,222,210,0)');
+    ctx.save(); ctx.translate(cx, y); ctx.scale(1, h / w); ctx.translate(-cx, -y);
+    ctx.fillStyle = cg; ctx.fillRect(cx - w, y - w, w * 2, w * 2);
+    ctx.restore();
+  }
+  // a headland far off on the left, and a boat
+  ctx.fillStyle = '#9294AC';
+  ctx.beginPath(); ctx.moveTo(-600, BHZ); ctx.lineTo(-600, BHZ - 30);
+  ctx.bezierCurveTo(60, BHZ - 70, 260, BHZ - 44, 420, BHZ - 18); ctx.bezierCurveTo(520, BHZ - 6, 600, BHZ - 2, 680, BHZ); ctx.fill();
+  const bx = 1500 + t * 3;
+  ctx.fillStyle = '#7C7F98'; ctx.fillRect(bx, BHZ - 9, 46, 6); ctx.fillRect(bx + 14, BHZ - 17, 12, 8);
+  // the sea, its glints, and three waves running in
+  g = ctx.createLinearGradient(0, BHZ, 0, 700);
+  g.addColorStop(0, '#7189A4'); g.addColorStop(1, '#9AA9B9');
+  ctx.fillStyle = g;
+  ctx.fillRect(-600, BHZ, PW + 1200, 160);
+  for (let y = BHZ + 3, j = 0; y < 690; y += 3 + (y - BHZ) * 0.06, j++) {
+    for (let x = -600; x < PW + 600; x += 90) {
+      const n = CV.noise2(x * 0.006 + t * 0.25, j * 0.8, 4);
+      if (n > 0.25) { ctx.fillStyle = `rgba(250,232,222,${(n - 0.25) * 0.9})`; ctx.fillRect(x, y, 90 * n, 1 + (y - BHZ) * 0.02); }
+    }
+  }
+  const run = 700 + 16 * Math.sin(t * 0.7);
+  for (let j = 0; j < 3; j++) {
+    const ph = ((t * 0.22 + j / 3) % 1), y = lerp(BHZ + 20, run - 6, ease.inQuad(ph)), a = Math.sin(Math.PI * ph) * 0.7;
+    ctx.strokeStyle = `rgba(250,246,240,${a})`;
+    ctx.lineWidth = 2 + ph * 5;
+    ctx.beginPath();
+    for (let x = -600; x <= PW + 600; x += 40) { const yy = y + CV.noise2(x * 0.004, j * 3 + t * 0.2, 6) * (4 + ph * 10); x === -600 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy); }
+    ctx.stroke();
+  }
+  // wet sand mirrors the sky; then the dry sand, warm in the low sun
+  g = ctx.createLinearGradient(0, run - 10, 0, run + 70);
+  g.addColorStop(0, '#C9AEA8'); g.addColorStop(1, '#D8AE86');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(-600, run + 70);
+  for (let x = -600; x <= PW + 600; x += 40) ctx.lineTo(x, run + CV.noise2(x * 0.005, t * 0.15, 2) * 8);
+  ctx.lineTo(PW + 600, run + 70); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,250,244,0.75)'; ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (let x = -600; x <= PW + 600; x += 40) { const y = run + CV.noise2(x * 0.005, t * 0.15, 2) * 8; x === -600 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+  ctx.stroke();
+  g = ctx.createLinearGradient(0, run + 60, 0, PH + 300);
+  g.addColorStop(0, '#E7C194'); g.addColorStop(1, '#C9946A');
+  ctx.fillStyle = g;
+  ctx.fillRect(-600, run + 60, PW + 1200, PH + 600);
+  // ripples raked by the low light
+  for (let y = run + 70, j = 0; y < PH + 300; y += 7 + (y - BHZ) * 0.05, j++) {
+    const w = 1 + (y - BHZ) * 0.006;
+    ctx.lineWidth = w;
+    ctx.strokeStyle = 'rgba(150,104,70,0.32)';
+    ctx.beginPath();
+    for (let x = -600; x <= PW + 600; x += 60) { const yy = y + CV.noise2(x * 0.003, j * 0.37, 11) * (4 + w * 3); x === -600 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,232,200,0.28)';
+    ctx.save(); ctx.translate(0, -w * 1.6); ctx.stroke(); ctx.restore();
+  }
+  castShadows(ctx, figs, era ? '#4E4A66' : '#5A4A62', 0.78);
+  // two gulls
+  ctx.strokeStyle = '#3E3A46'; ctx.lineWidth = 3;
+  for (let i = 0; i < 2; i++) {
+    const x = 1150 + i * 120 + t * (14 + i * 4), y = 300 + i * 40 - t * 2, f = Math.sin(t * 5 + i * 2) * 8;
+    ctx.beginPath(); ctx.moveTo(x - 18, y - f); ctx.quadraticCurveTo(x - 7, y - 6, x, y); ctx.quadraticCurveTo(x + 7, y - 6, x + 18, y - f); ctx.stroke();
+  }
+}
+
+// --- The bicycle (print space) -------------------------------------------------
+const LEAVES = (() => {
+  const r = CV.rand(31), out = [];
+  for (let i = 0; i < 170; i++) { const k = r(), bx = lerp(-200, 980, k), by = lerp(-120, 360, k) + (r() - 0.5) * 300; out.push([bx, by, 14 + r() * 16, 7 + r() * 6, r() * 3, r() * 6]); }
+  return out;
+})();
+const PLASTER = (() => { const r = CV.rand(5), out = []; for (let i = 0; i < 60; i++) out.push([r() * PW, r() * 880, 20 + r() * 120, r()]); return out; })();
+function bicycle(ctx, t, sh = false) {
+  const R = 165, RH = [720, 765], FH = [1172, 765], BB = [905, 795], ST = [862, 545], HT = [1088, 548], HB = [1104, 612];
+  const tube = sh ? '#000' : '#1F3A2E', chrome = sh ? '#000' : '#B9BAB3';
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // wheels
+  for (const [hx, hy] of [RH, FH]) {
+    ctx.strokeStyle = sh ? '#000' : '#151515'; ctx.lineWidth = 15;
+    ctx.beginPath(); ctx.arc(hx, hy, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = chrome; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(hx, hy, R - 10, 0, Math.PI * 2); ctx.stroke();
+    if (!sh) {
+      ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(200,200,192,0.7)';
+      ctx.beginPath();
+      for (let i = 0; i < 36; i++) { const a = (i / 36) * Math.PI * 2 + 0.05, b = a + (i % 2 ? 0.5 : -0.5); ctx.moveTo(hx + Math.cos(b) * 12, hy + Math.sin(b) * 12); ctx.lineTo(hx + Math.cos(a) * (R - 12), hy + Math.sin(a) * (R - 12)); }
+      ctx.stroke();
+    }
+    ctx.fillStyle = chrome; ctx.beginPath(); ctx.arc(hx, hy, 14, 0, Math.PI * 2); ctx.fill();
+    // mudguard
+    ctx.strokeStyle = tube; ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.arc(hx, hy, R + 14, Math.PI * 1.08, Math.PI * 1.95); ctx.stroke();
+  }
+  // the frame: a 28-inch roadster in deep green
+  ctx.strokeStyle = tube; ctx.lineWidth = 17;
+  ctx.beginPath();
+  ctx.moveTo(...RH); ctx.lineTo(...BB); ctx.lineTo(...ST); ctx.lineTo(...RH);
+  ctx.moveTo(...ST); ctx.lineTo(...HT); ctx.moveTo(...BB); ctx.lineTo(...HB); ctx.lineTo(...HT);
+  ctx.stroke();
+  ctx.lineWidth = 12;
+  ctx.beginPath(); ctx.moveTo(...HB); ctx.quadraticCurveTo(1120, 700, FH[0], FH[1]); ctx.stroke();
+  // rear rack
+  ctx.strokeStyle = chrome; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(560, 585); ctx.lineTo(850, 585); ctx.moveTo(600, 585); ctx.lineTo(RH[0] - 10, RH[1]); ctx.moveTo(800, 585); ctx.lineTo(RH[0] + 10, RH[1]); ctx.stroke();
+  // chain case
+  ctx.fillStyle = sh ? '#000' : '#16271F';
+  ctx.beginPath(); ctx.moveTo(RH[0] - 10, RH[1] - 30); ctx.lineTo(BB[0], BB[1] - 56); ctx.arc(BB[0], BB[1], 56, -Math.PI / 2, Math.PI / 2); ctx.lineTo(RH[0] - 10, RH[1] + 30); ctx.arc(RH[0], RH[1], 30, Math.PI / 2, Math.PI * 1.5); ctx.fill();
+  // crank and pedal
+  ctx.strokeStyle = chrome; ctx.lineWidth = 9;
+  ctx.beginPath(); ctx.moveTo(...BB); ctx.lineTo(BB[0] + 60, BB[1] + 70); ctx.stroke();
+  ctx.fillStyle = sh ? '#000' : '#222'; ctx.fillRect(BB[0] + 38, BB[1] + 64, 50, 14);
+  // seat post and a sprung leather saddle
+  ctx.strokeStyle = chrome; ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.moveTo(...ST); ctx.lineTo(852, 512); ctx.stroke();
+  ctx.fillStyle = sh ? '#000' : '#3A2416';
+  ctx.beginPath(); ctx.moveTo(790, 500); ctx.quadraticCurveTo(820, 486, 900, 494); ctx.quadraticCurveTo(912, 500, 902, 508); ctx.quadraticCurveTo(830, 520, 790, 512); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = chrome; ctx.lineWidth = 3;
+  ctx.beginPath(); for (const x of [812, 832]) { for (let k = 0; k < 4; k++) ctx.arc(x, 520 + k * 6, 4, 0, Math.PI * 2); } ctx.stroke();
+  // stem and the upright handlebar
+  ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.moveTo(...HT); ctx.lineTo(1082, 488); ctx.stroke();
+  ctx.lineWidth = 9;
+  ctx.beginPath(); ctx.moveTo(1082, 488); ctx.bezierCurveTo(1110, 470, 1060, 452, 990, 462); ctx.stroke();
+  ctx.strokeStyle = sh ? '#000' : '#101010'; ctx.lineWidth = 14;
+  ctx.beginPath(); ctx.moveTo(1018, 459); ctx.lineTo(980, 464); ctx.stroke();
+  // a bell
+  ctx.fillStyle = chrome; ctx.beginPath(); ctx.arc(1056, 470, 13, 0, Math.PI * 2); ctx.fill();
+  // a red ribbon tied to the bar, lifting in the breeze
+  const tail = (k) => [1040 + k * 120, 476 + k * 70 + Math.sin(t * 3.1 - k * 4) * 16 * k];
+  ctx.strokeStyle = sh ? '#000' : '#C2312A'; ctx.lineWidth = 9;
+  ctx.beginPath(); ctx.moveTo(1040, 474);
+  for (let i = 1; i <= 8; i++) ctx.lineTo(...tail(i / 8));
+  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(1040, 474);
+  for (let i = 1; i <= 6; i++) { const [x, y] = tail(i / 8); ctx.lineTo(x - 20 * (i / 6), y + 26 * (i / 6) + Math.sin(t * 2.7 + i) * 6); }
+  ctx.stroke();
+}
+function bikeWorld(ctx, t) {
+  // a sunlit plaster wall above the old green dado, concrete below
+  let g = ctx.createLinearGradient(0, 0, 0, 880);
+  g.addColorStop(0, '#E6C89A'); g.addColorStop(1, '#D3AE7E');
+  ctx.fillStyle = g;
+  ctx.fillRect(-600, -600, PW + 1200, 1490);
+  for (const [x, y, rad, k] of PLASTER) { ctx.fillStyle = `rgba(${k < 0.5 ? '120,90,60' : '255,240,210'},0.06)`; ctx.beginPath(); ctx.ellipse(x, y, rad, rad * 0.6, k * 3, 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = '#7F917D'; ctx.fillRect(-600, 690, PW + 1200, 200);
+  ctx.fillStyle = 'rgba(230,205,160,0.5)';
+  const rr = CV.rand(9); for (let i = 0; i < 26; i++) { const x = rr() * PW, y = 690 + rr() * 190; ctx.fillRect(x, y, 6 + rr() * 30, 3 + rr() * 9); }
+  ctx.fillStyle = '#5E6C5B'; ctx.fillRect(-600, 686, PW + 1200, 8);
+  g = ctx.createLinearGradient(0, 890, 0, PH);
+  g.addColorStop(0, '#9D9284'); g.addColorStop(1, '#7E7468');
+  ctx.fillStyle = g; ctx.fillRect(-600, 890, PW + 1200, PH);
+  // the plane tree's shadow on the wall, stirring
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = 'rgba(120,92,80,0.5)';
+  ctx.beginPath();
+  for (const [x, y, rx, ry, rot, ph] of LEAVES) {
+    const dx = CV.noise(t * 0.5 + ph, 3) * 10, dy = CV.noise(t * 0.4 + ph, 7) * 6;
+    ctx.moveTo(x + dx + rx, y + dy); ctx.ellipse(x + dx, y + dy, rx, ry, rot + CV.noise(t * 0.6 + ph, 2) * 0.3, 0, Math.PI * 2);
+  }
+  ctx.fill('nonzero');
+  ctx.strokeStyle = 'rgba(120,92,80,0.5)'; ctx.lineWidth = 9;
+  ctx.beginPath(); ctx.moveTo(-200, -140); ctx.quadraticCurveTo(400, 120 + CV.noise(t * 0.3, 4) * 8, 980, 360); ctx.stroke();
+  // the bicycle's own shadow, thrown up and right
+  ctx.globalAlpha = 0.16;
+  ctx.translate(55, -22); ctx.transform(1, 0, 0.1, 1, -60, 0);
+  bicycle(ctx, t, true);
+  ctx.restore();
+  bicycle(ctx, t);
+}
+
+// --- A lit window, New Year's Eve 1999 (print space) ----------------------------
+const SNOW = (() => { const r = CV.rand(12), out = []; for (let i = 0; i < 320; i++) out.push([r() * 2400 - 240, r() * 1600, Math.pow(r(), 1.8), r() * 6]); return out; })();
+function snow(ctx, t, a = 1) {
+  for (const [x0, y0, z, ph] of SNOW) {
+    const sp = 30 + z * 120, y = ((y0 + t * sp) % 1600) - 160, x = x0 + Math.sin(t * 0.7 + ph) * (8 + z * 30) + t * 12 * z;
+    const r = 1.3 + z * 5.5;
+    if (z > 0.75) {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.2);
+      g.addColorStop(0, `rgba(240,240,250,${0.55 * a})`); g.addColorStop(1, 'rgba(240,240,250,0)');
+      ctx.fillStyle = g; ctx.fillRect(x - r * 2.2, y - r * 2.2, r * 4.4, r * 4.4);
+    } else {
+      ctx.fillStyle = `rgba(235,238,248,${(0.35 + z * 0.5) * a})`;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+function silhouette(ctx, t, wave) {
+  // her profile on the curtain: facing left, hair up in a bun; she waves
+  ctx.beginPath();
+  ctx.ellipse(1205, 560, 50, 60, -0.1, 0, Math.PI * 2);
+  ctx.moveTo(1268, 520); ctx.arc(1252, 518, 28, 0, Math.PI * 2);
+  ctx.moveTo(1160, 548); ctx.lineTo(1142, 578); ctx.lineTo(1160, 588); ctx.closePath();
+  ctx.rect(1185, 600, 42, 60);
+  ctx.moveTo(1100, 820); ctx.bezierCurveTo(1100, 700, 1150, 676, 1205, 660); ctx.bezierCurveTo(1270, 670, 1320, 700, 1330, 820); ctx.closePath();
+  if (wave > 0) {
+    const ang = -Math.PI / 2 - 0.35 + Math.sin(t * 7) * 0.32 * wave, sx = 1130, sy = 712, ex = sx - 40 * wave, ey = sy - 90 * wave;
+    const hx = ex + Math.cos(ang) * 80 * wave, hy = ey + Math.sin(ang) * 80 * wave;
+    for (const p of [capsule([sx, sy], [ex, ey], 22), capsule([ex, ey], [hx, hy], 17)]) tracePoly(ctx, area(p) < 0 ? p.slice().reverse() : p);
+    ctx.moveTo(hx + 20, hy); ctx.ellipse(hx, hy - 6, 20, 26, ang + Math.PI / 2, 0, Math.PI * 2);
+  }
+}
+function windowWorld(ctx, t, o = {}) {
+  const wave = o.wave ?? 0;
+  let g = ctx.createLinearGradient(0, 0, 0, PH);
+  g.addColorStop(0, '#0C1320'); g.addColorStop(1, '#1B2536');
+  ctx.fillStyle = g; ctx.fillRect(-600, -600, PW + 1200, PH + 1200);
+  ctx.strokeStyle = 'rgba(160,170,190,0.05)'; ctx.lineWidth = 2;
+  ctx.beginPath(); for (let y = 0; y < PH; y += 36) { ctx.moveTo(-600, y); ctx.lineTo(PW + 600, y); } ctx.stroke();
+  // the dark windows of the block, one with a television's blue
+  for (const [x, y] of [[180, 380], [560, 380], [180, 900], [560, 900], [1560, 900], [1560, 380]]) {
+    ctx.fillStyle = '#0A0F18'; ctx.fillRect(x, y, 260, 300);
+    ctx.strokeStyle = '#273246'; ctx.lineWidth = 8; ctx.strokeRect(x, y, 260, 300);
+  }
+  const tv = 0.18 + 0.12 * (CV.noise(t * 4, 9) * 0.5 + 0.5);
+  ctx.fillStyle = `rgba(90,130,220,${tv})`; ctx.fillRect(564, 904, 252, 292);
+  // her window
+  const X0 = 1000, Y0 = 380, X1 = 1420, Y1 = 820;
+  glow(ctx, 1210, 600, 620, '#FFB25C', 0.32);
+  g = ctx.createLinearGradient(X0, 0, X1, 0);
+  g.addColorStop(0, '#E9A35B'); g.addColorStop(0.5, '#FFD08A'); g.addColorStop(1, '#E59A52');
+  ctx.fillStyle = g; ctx.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(X0, Y0, X1 - X0, Y1 - Y0); ctx.clip();
+  // curtain folds
+  for (let x = X0; x < X1; x += 28) { ctx.fillStyle = `rgba(150,80,30,${0.08 + 0.06 * Math.sin(x * 0.21)})`; ctx.fillRect(x, Y0, 14, Y1 - Y0); }
+  ctx.globalCompositeOperation = 'multiply';
+  for (const [dx, al] of [[-5, 0.18], [5, 0.18], [0, 0.5]]) { ctx.save(); ctx.translate(dx, 0); ctx.fillStyle = `rgba(110,52,20,${al})`; silhouette(ctx, t, wave); ctx.fill('nonzero'); ctx.restore(); }
+  ctx.restore();
+  ctx.strokeStyle = '#2B1E16'; ctx.lineWidth = 16;
+  ctx.strokeRect(X0, Y0, X1 - X0, Y1 - Y0);
+  ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.moveTo((X0 + X1) / 2, Y0); ctx.lineTo((X0 + X1) / 2, Y1); ctx.moveTo(X0, Y0 + 150); ctx.lineTo(X1, Y0 + 150); ctx.stroke();
+  // snow on the sill
+  ctx.fillStyle = '#E4E7F0';
+  ctx.beginPath(); ctx.moveTo(X0 - 30, Y1 + 10); ctx.quadraticCurveTo(X0 + 200, Y1 - 14, X1 + 30, Y1 + 6); ctx.lineTo(X1 + 30, Y1 + 24); ctx.lineTo(X0 - 30, Y1 + 24); ctx.fill();
+  // the street lamp she'd see him under
+  ctx.fillStyle = '#05080D'; ctx.fillRect(360, 520, 14, 900);
+  ctx.fillRect(360, 520, 90, 10);
+  glow(ctx, 445, 540, 420, '#FFD9A0', 0.35);
+  ctx.fillStyle = '#FFF0D2'; ctx.beginPath(); ctx.arc(445, 538, 10, 0, Math.PI * 2); ctx.fill();
+  snow(ctx, t);
+}
+
+// --- The sky outside the hospital window, the morning she was born (print space)
+const BLOSSOM = (() => {
+  const r = CV.rand(44), out = [];
+  for (let i = 0; i < 46; i++) { const k = r(); out.push([k, (r() - 0.5) * 70, 9 + r() * 14, r() * 6, r() < 0.3]); }
+  return out;
+})();
+function bornWorld(ctx, t, o = {}) {
+  const k = clamp(o.dawn ?? 0.6), X0 = 470, Y0 = 250, X1 = 1450, Y1 = 1040;
+  ctx.fillStyle = color.mix('#2C3533', '#8C978F', k * 0.7);
+  ctx.fillRect(-600, -600, PW + 1200, PH + 1200);
+  // the sky through the glass
+  let g = ctx.createLinearGradient(0, Y0, 0, Y1);
+  g.addColorStop(0, color.mix('#1A2746', '#7B97C2', k)); g.addColorStop(0.55, color.mix('#3B3D62', '#E8B391', k)); g.addColorStop(1, color.mix('#6C4F62', '#FFD59B', k));
+  ctx.fillStyle = g; ctx.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(X0, Y0, X1 - X0, Y1 - Y0); ctx.clip();
+  glow(ctx, 1260, 1010, 700, '#FFC27A', 0.55 * k);
+  glow(ctx, 1260, 1010, 180, '#FFF0C8', 0.8 * k);
+  // rooftops of the town
+  ctx.fillStyle = color.mix('#141822', '#5C5466', k * 0.6);
+  const rr = CV.rand(3);
+  ctx.beginPath(); ctx.moveTo(X0, Y1);
+  for (let x = X0; x < X1;) { const w = 60 + rr() * 120, h = 40 + rr() * 110; ctx.lineTo(x, Y1 - h); ctx.lineTo(x + w, Y1 - h); x += w; }
+  ctx.lineTo(X1, Y1); ctx.fill();
+  // birds going over
+  ctx.strokeStyle = color.mix('#0C0F18', '#3A3040', k); ctx.lineWidth = 3.5;
+  for (let i = 0; i < 4; i++) {
+    const x = 560 + i * 90 + t * (48 + i * 9), y = 520 - i * 34 - t * 9 + Math.sin(i) * 20, f = Math.sin(t * 6 + i * 1.4) * 9;
+    ctx.beginPath(); ctx.moveTo(x - 17, y - f); ctx.quadraticCurveTo(x - 6, y - 5, x, y); ctx.quadraticCurveTo(x + 6, y - 5, x + 17, y - f); ctx.stroke();
+  }
+  // a branch of spring blossom across the top of the glass, swaying
+  const sw = CV.noise(t * 0.35, 21) * 14;
+  const bp = (u) => [lerp(X0 - 60, 1180, u) + sw * u, Y0 + 70 + Math.sin(u * 3) * 50 + u * 110 + sw * u * 0.6];
+  ctx.strokeStyle = color.mix('#120E10', '#3A2A26', k); ctx.lineCap = 'round';
+  for (let i = 0; i < 12; i++) { const [x0, y0] = bp(i / 12), [x1, y1] = bp((i + 1) / 12); ctx.lineWidth = lerp(16, 4, i / 12); ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); }
+  for (const [u, off, rad, ph, bud] of BLOSSOM) {
+    const [x, y] = bp(u), bx = x + Math.sin(ph) * off * 0.6, by = y + off * 0.5 + CV.noise(t * 0.8 + ph, 5) * 4;
+    ctx.fillStyle = bud ? color.mix('#4A2F3A', '#D88A9A', k) : color.mix('#6E5A68', '#FBE3E6', k);
+    for (let p = 0; p < 5; p++) { const a = ph + (p / 5) * Math.PI * 2; ctx.beginPath(); ctx.ellipse(bx + Math.cos(a) * rad * 0.55, by + Math.sin(a) * rad * 0.55, rad * 0.55, rad * 0.4, a, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = color.mix('#3A2A20', '#E7A25A', k); ctx.beginPath(); ctx.arc(bx, by, rad * 0.2, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+  // the window frame, painted many times over
+  ctx.strokeStyle = color.mix('#6C716C', '#EDE9DE', k * 0.8); ctx.lineWidth = 34;
+  ctx.strokeRect(X0, Y0, X1 - X0, Y1 - Y0);
+  ctx.lineWidth = 20;
+  ctx.beginPath(); ctx.moveTo((X0 + X1) / 2, Y0); ctx.lineTo((X0 + X1) / 2, Y1); ctx.moveTo(X0, 560); ctx.lineTo(X1, 560); ctx.stroke();
+  // morning light falls through onto the wall
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.fillStyle = color.rgba('#FFC890', 0.22 * k);
+  ctx.beginPath(); ctx.moveTo(X1 + 40, 300); ctx.lineTo(X1 + 420, 380); ctx.lineTo(X1 + 420, 1100); ctx.lineTo(X1 + 40, 1060); ctx.fill();
+  ctx.restore();
+  // a curtain at the left edge
+  g = ctx.createLinearGradient(X0 - 160, 0, X0 + 90, 0);
+  g.addColorStop(0, color.mix('#1A2020', '#9FB0A6', k * 0.6)); g.addColorStop(1, color.mix('#252C2B', '#C8D3CA', k * 0.6));
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(X0 - 600, -100); ctx.lineTo(X0 + 70, -100);
+  for (let y = -100; y <= PH + 100; y += 40) ctx.lineTo(X0 + 70 + Math.sin(y * 0.02 + t * 0.4) * 14 + CV.noise(t * 0.3, 8) * 8, y);
+  ctx.lineTo(X0 - 600, PH + 100); ctx.fill();
+}
+
+// --- The roll: 35 frames a father shot in 1999–2000, as thumbnails ---------------
+const WORLDS = { beach: beachWorld, bike: bikeWorld, window: windowWorld, born: bornWorld };
+const thumbs = {};
+function thumb(key, w, h, fn) {
+  let c = thumbs[key];
+  if (!c) {
+    c = thumbs[key] = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.scale(w / PW, h / PH);
+    fn(g);
+  }
+  return c;
+}
+const ROLL = (() => {
+  const r = CV.rand(1999), out = [];
+  const pad = (n) => String(n);
+  for (let n = 1; n <= 35; n++) {
+    let kind, o = {}, stamp, z = 1 + r() * 0.5, dx = (r() - 0.5) * 500, dy = (r() - 0.5) * 220, t = r() * 20;
+    if (n <= 6) { kind = 'beach'; stamp = `'99 8 ${14 + (n > 3)}`; o = n === 1 ? { figs: [DAD(POSES.eye)] } : n === 4 ? { figs: [DAD(POSES.low, 1200)] } : {}; }
+    else if (n <= 12) { kind = 'bike'; stamp = `'99 10 ${pad(2 + (n - 7) * 3)}`; }
+    else if (n <= 22) { kind = 'window'; stamp = n < 20 ? `'99 12 31` : `'00 1 1`; o = { wave: n === 19 ? 1 : 0 }; }
+    else { kind = 'born'; stamp = n < 30 ? `'00 3 ${pad(n - 10)}` : `'00 4 6`; o = { dawn: n === 35 ? 0.75 : r() }; }
+    if (n === 1 || n === 7 || n === 19 || n === 35) { z = 1; dx = 0; dy = 0; t = 0; }
+    out.push({ n, kind, o, stamp, z, dx, dy, t });
+  }
+  return out;
+})();
+function rollThumb(f, w = 480, h = 320) {
+  return thumb(`roll${f.n}:${w}`, w, h, (g) => {
+    g.save();
+    g.translate(PW / 2, PH / 2); g.scale(f.z, f.z); g.translate(-PW / 2 + f.dx, -PH / 2 + f.dy);
+    WORLDS[f.kind](g, f.t, f.o);
+    g.restore();
+    printTone(g, 0, 0, PW, PH, 1);
+    dateStamp(g, f.stamp, 1790, 1000, 46);
+  });
+}
+function negativeOf(f, w = 480, h = 320) {
+  return thumbs[`neg${f.n}:${w}`] || (thumbs[`neg${f.n}:${w}`] = (() => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(rollThumb(f, w, h), 0, 0);
+    g.globalCompositeOperation = 'difference'; g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+    g.globalCompositeOperation = 'multiply'; g.fillStyle = '#E39A60'; g.fillRect(0, 0, w, h);
+    return c;
+  })());
+}
+
+// --- The camera on the desk, now (screen space) -------------------------------
+const LEATHER = (() => { const r = CV.rand(17), out = []; for (let i = 0; i < 900; i++) out.push([580 + r() * 760, 528 + r() * 236, 1 + r() * 2.2, r()]); return out; })();
+const MOTES = (() => { const r = CV.rand(23), out = []; for (let i = 0; i < 46; i++) out.push([r() * 1200 + 400, r() * 700 + 150, 1 + r() * 2.5, r() * 6]); return out; })();
+function oldCamera(ctx, t) {
+  const L = 580, R = 1340, TOP = 470, BOT = 770;
+  // top plate (chrome) with the controls on it
+  let g = ctx.createLinearGradient(0, TOP - 40, 0, 532);
+  g.addColorStop(0, '#E9E6DE'); g.addColorStop(0.45, '#9E9C96'); g.addColorStop(1, '#5D5C58');
+  ctx.fillStyle = g;
+  draw.roundRect(ctx, L + 18, TOP - 34, 120, 40, 8); ctx.fill();          // rewind knob
+  draw.roundRect(ctx, R - 190, TOP - 26, 150, 32, 8); ctx.fill();         // advance lever housing
+  draw.roundRect(ctx, (L + R) / 2 - 50, TOP - 22, 100, 26, 4); ctx.fill(); // shoe
+  ctx.beginPath(); ctx.ellipse(R - 78, TOP - 30, 24, 8, 0, 0, Math.PI * 2); ctx.fill(); // shutter release
+  draw.roundRect(ctx, L, TOP, R - L, 66, 18); ctx.fill();
+  // rangefinder windows
+  ctx.fillStyle = '#20262A'; draw.roundRect(ctx, L + 64, TOP + 18, 80, 34, 5); ctx.fill();
+  ctx.fillStyle = '#2E3A40'; draw.roundRect(ctx, R - 220, TOP + 16, 120, 38, 5); ctx.fill();
+  ctx.fillStyle = 'rgba(255,240,210,0.5)'; ctx.fillRect(R - 210, TOP + 20, 40, 6); ctx.fillRect(L + 72, TOP + 22, 24, 5);
+  // the body in black leatherette
+  ctx.fillStyle = '#17171A'; draw.roundRect(ctx, L, TOP + 58, R - L, BOT - TOP - 58, 20); ctx.fill();
+  for (const [x, y, rad, k] of LEATHER) { ctx.fillStyle = k < 0.5 ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.05)'; ctx.fillRect(x, y, rad, rad); }
+  ctx.fillStyle = '#6F6D68'; ctx.fillRect(L, TOP + 58, R - L, 5);
+  // the lens: chrome mount, a knurled focus ring, the glass
+  const cx = (L + R) / 2, cy = 640;
+  g = ctx.createLinearGradient(cx - 150, cy - 150, cx + 150, cy + 150);
+  g.addColorStop(0, '#F2EFE8'); g.addColorStop(0.5, '#86847F'); g.addColorStop(1, '#3E3D3A');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, 152, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#0D0D0F'; ctx.beginPath(); ctx.arc(cx, cy, 132, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(200,200,190,0.35)'; ctx.lineWidth = 3;
+  ctx.beginPath(); for (let i = 0; i < 90; i++) { const a = (i / 90) * Math.PI * 2; ctx.moveTo(cx + Math.cos(a) * 112, cy + Math.sin(a) * 112); ctx.lineTo(cx + Math.cos(a) * 128, cy + Math.sin(a) * 128); } ctx.stroke();
+  ctx.strokeStyle = '#9A978F'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(cx, cy, 100, 0, Math.PI * 2); ctx.stroke();
+  g = ctx.createRadialGradient(cx - 20, cy - 30, 5, cx, cy, 88);
+  g.addColorStop(0, '#2B3448'); g.addColorStop(0.6, '#10141E'); g.addColorStop(1, '#050608');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, 88, 0, Math.PI * 2); ctx.fill();
+  // coating reflections and the lamp caught in the glass
+  ctx.strokeStyle = 'rgba(160,110,200,0.35)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(cx, cy, 62, -2.6, -1.7); ctx.stroke();
+  ctx.strokeStyle = 'rgba(110,200,160,0.3)'; ctx.beginPath(); ctx.arc(cx, cy, 44, 0.4, 1.3); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,236,200,0.9)'; ctx.beginPath(); ctx.ellipse(cx + 36, cy - 40, 14, 7, -0.6, 0, Math.PI * 2); ctx.fill();
+  // the frame counter on the top plate, seen edge-on
+  ctx.fillStyle = '#2A2A2A'; ctx.beginPath(); ctx.ellipse(R - 150, TOP - 8, 22, 7, 0, 0, Math.PI * 2); ctx.fill();
+}
+function deskScene(ctx, s, light) {
+  const { W, t } = s;
+  // the wall and the desk
+  ctx.fillStyle = '#1B1714'; ctx.fillRect(-300, -300, W + 600, 960);
+  let g = ctx.createLinearGradient(0, 640, 0, 1080);
+  g.addColorStop(0, '#4A2F1E'); g.addColorStop(1, '#2A1A10');
+  ctx.fillStyle = g; ctx.fillRect(-300, 640, W + 600, 700);
+  ctx.strokeStyle = 'rgba(20,10,4,0.45)'; ctx.lineWidth = 2;
+  ctx.beginPath(); for (let i = 0; i < 26; i++) { const y = 650 + i * i * 0.75 + i * 4; ctx.moveTo(-300, y); for (let x = -300; x < W + 300; x += 80) ctx.lineTo(x, y + CV.noise2(x * 0.004, i, 13) * 5); } ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.ellipse(960, 778, 420, 26, 0, 0, Math.PI * 2); ctx.fill();
+  oldCamera(ctx, t);
+  // a film canister beside it
+  ctx.fillStyle = '#2A2A2A'; draw.roundRect(ctx, 1430, 690, 70, 92, 8); ctx.fill();
+  ctx.fillStyle = '#C9A33A'; ctx.fillRect(1430, 712, 70, 46);
+  ctx.fillStyle = '#E8E1D0'; ctx.fillRect(1432, 718, 66, 3); ctx.fillRect(1432, 748, 66, 3);
+  // the lamp: everything outside its pool falls away
+  const lg = ctx.createRadialGradient(1040, 560, 120, 1040, 600, 980);
+  lg.addColorStop(0, `rgba(0,0,0,${1 - light})`); lg.addColorStop(0.45, `rgba(0,0,0,${1 - light * 0.75})`); lg.addColorStop(1, `rgba(0,0,0,${1 - light * 0.18})`);
+  ctx.fillStyle = lg; ctx.fillRect(-300, -300, W + 600, 1700);
+  ctx.save(); ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = color.rgba('#FFB36A', 0.5 * light); ctx.fillRect(-300, -300, W + 600, 1700); ctx.restore();
+  // dust turning in the beam
+  for (const [x, y, rad, ph] of MOTES) {
+    const mx = x + CV.noise(t * 0.15 + ph, 3) * 60, my = y + CV.noise(t * 0.12 + ph, 9) * 50 - t * 4;
+    const inBeam = clamp(1 - Math.hypot(mx - 1040, my - 520) / 620);
+    ctx.fillStyle = color.rgba('#FFE7C0', 0.55 * inBeam * light * (0.5 + 0.5 * Math.sin(t * 1.3 + ph * 3)));
+    ctx.beginPath(); ctx.arc(mx, my, rad, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// --- The frame counter, close (screen space) ----------------------------------
+const BRUSH = (() => { const r = CV.rand(61), out = []; for (let i = 0; i < 260; i++) out.push([r() * 1080 - 40, r() * 2400 - 300, 200 + r() * 900, r()]); return out; })();
+function counterDial(ctx, s, frame, hl36, land = 0) {
+  const { W, H } = s, cx = 760, cy = 540;
+  let g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, '#CFCCC4'); g.addColorStop(0.5, '#8F8D87'); g.addColorStop(1, '#5A5955');
+  ctx.fillStyle = g; ctx.fillRect(-200, -200, W + 400, H + 400);
+  for (const [y, x, w, k] of BRUSH) { ctx.fillStyle = k < 0.5 ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'; ctx.fillRect(x * 2 - 300, y, w, 1.5); }
+  // the advance lever reaching in from the right
+  ctx.fillStyle = '#1B1B1C';
+  ctx.beginPath(); ctx.moveTo(1180, 380); ctx.quadraticCurveTo(1500, 250, 2100, 300); ctx.lineTo(2100, 380); ctx.quadraticCurveTo(1500, 330, 1210, 470); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(1230, 350, 700, 3);
+  // the counter: a round window in the plate; a big dial turns behind it
+  const wx = 860, wy = 470, wr = 210, dcy = wy + 650, dr = 670, STEP = (9 * Math.PI) / 180; // S sits 36° past 35, outside the window
+  g = ctx.createLinearGradient(wx - 240, wy - 240, wx + 240, wy + 240);
+  g.addColorStop(0, '#5A5955'); g.addColorStop(0.5, '#F4F1EA'); g.addColorStop(1, '#4A4946');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(wx, wy, wr + 30, 0, Math.PI * 2); ctx.fill();
+  ctx.save();
+  ctx.beginPath(); ctx.arc(wx, wy, wr, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = '#0C0C0D'; ctx.fillRect(wx - wr, wy - wr, wr * 2, wr * 2);
+  ctx.translate(wx, dcy);
+  ctx.rotate(-(frame + 1) * STEP);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let n = -1; n <= 36; n++) {
+    ctx.save();
+    ctx.rotate((n + 1) * STEP);
+    const big = n === -1 || n % 2 === 0, k = n === 35 ? land : 0; // the frame it stops on grows and warms
+    ctx.font = F(700, lerp(big ? 66 : 44, 76, k), T.mono);
+    ctx.fillStyle = n === 36 ? color.mix('#E6E0D2', T.amber, hl36) : color.mix(big ? '#E6E0D2' : '#A39C8E', T.amber, k);
+    ctx.fillText(n === -1 ? 'S' : String(n), 0, -dr);
+    ctx.fillStyle = '#6E685E'; ctx.fillRect(-2, -dr + 50, 4, 22);
+    ctx.restore();
+  }
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic';
+  // a magnifier over the window, and the index
+  const gg = ctx.createLinearGradient(wx - 200, wy - 200, wx + 100, wy + 100);
+  gg.addColorStop(0, 'rgba(255,255,255,0.2)'); gg.addColorStop(0.45, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(wx, wy, wr, 0, Math.PI * 2); ctx.fill();
+  const sh = ctx.createRadialGradient(wx, wy, wr * 0.6, wx, wy, wr);
+  sh.addColorStop(0, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = sh; ctx.beginPath(); ctx.arc(wx, wy, wr, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#D23A26';
+  ctx.beginPath(); ctx.moveTo(wx, wy - wr + 6); ctx.lineTo(wx - 18, wy - wr - 30); ctx.lineTo(wx + 18, wy - wr - 30); ctx.closePath(); ctx.fill();
+}
+
+// --- The darkroom: a print coming up in the tray under the safelight ----------
+function darkroom(ctx, s, dev, still = 0) {
+  const { W, H, t } = s;
+  ctx.fillStyle = '#2A2622'; ctx.fillRect(-300, -300, W + 600, H + 600);
+  const rock = Math.sin(t * 1.1) * 0.006 * (1 - still);
+  ctx.save();
+  ctx.translate(960, 545); ctx.rotate(rock); ctx.translate(-960, -545);
+  // the tray
+  ctx.fillStyle = '#E6E1D6'; draw.roundRect(ctx, 400, 220, 1120, 650, 30); ctx.fill();
+  ctx.fillStyle = '#BDB7AA'; draw.roundRect(ctx, 440, 258, 1040, 574, 18); ctx.fill();
+  // the print under the developer, wavering with the liquid
+  const img = rollThumb(ROLL[0], 960, 640);
+  const PX = 630, PYp = 320, PWp = 660, PHp = 440;
+  ctx.fillStyle = '#F4F0E6'; ctx.fillRect(PX - 24, PYp - 24, PWp + 48, PHp + 48);
+  // the image comes up out of the white paper, wavering under the liquid
+  const a = ease.inOutSine(clamp(dev));
+  if (a > 0) {
+    const buf = gateBuf('print', img.width, img.height), strips = 32, sh = img.height / strips;
+    buf.g.globalCompositeOperation = 'copy';
+    buf.g.drawImage(img, 0, 0);
+    buf.g.globalCompositeOperation = 'source-over';
+    if (still < 1) for (let i = 0; i < strips; i++) buf.g.drawImage(img, 0, i * sh, img.width, sh, Math.sin(i * 0.5 + t * 2.2) * 3 * (1 - still), i * sh, img.width, sh);
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = a;
+    ctx.drawImage(buf, PX, PYp, PWp, PHp);
+    ctx.restore();
+  }
+  // the developer's surface: a dark film and the safelight sliding across it
+  ctx.fillStyle = `rgba(40,30,24,${0.18 * (1 - still)})`; draw.roundRect(ctx, 440, 258, 1040, 574, 18); ctx.fill();
+  const sx = 700 + Math.sin(t * 1.1) * 220;
+  const sg = ctx.createLinearGradient(sx - 160, 0, sx + 160, 0);
+  sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.5, `rgba(255,255,255,${0.22 * (1 - still)})`); sg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.save(); ctx.beginPath(); draw.roundRect(ctx, 440, 258, 1040, 574, 18); ctx.clip();
+  ctx.translate(sx, 545); ctx.rotate(0.5); ctx.translate(-sx, -545);
+  ctx.fillStyle = sg; ctx.fillRect(sx - 160, -200, 320, 1500);
+  ctx.restore();
+  ctx.restore();
+  // the safelight: everything goes red and dark
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = '#FF3A1E'; ctx.fillRect(-300, -300, W + 600, H + 600);
+  ctx.restore();
+  glow(ctx, 1640, 160, 520, '#FF3A1E', 0.45 + 0.04 * Math.sin(t * 9));
+  const vg = ctx.createRadialGradient(960, 545, 300, 960, 545, 1100);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.7)');
+  ctx.fillStyle = vg; ctx.fillRect(-300, -300, W + 600, H + 600);
+}
+
+// --- The negatives on a lightbox (screen space) -------------------------------
+// frames 31…36 of the roll; 36 is clear film
+const NEG = { x0: 220, y: 400, cell: 380, h: 253, gap: 34, edge: 56 };
+const negX = (n) => NEG.x0 + (n - 31) * (NEG.cell + NEG.gap);
+function lightbox(ctx, s, mark) {
+  const { W, H } = s;
+  let g = ctx.createRadialGradient(1500, 520, 100, 1500, 520, 2200);
+  g.addColorStop(0, '#FBF8F0'); g.addColorStop(1, '#D9D2C2');
+  ctx.fillStyle = g; ctx.fillRect(-300, -300, 3600, H + 600);
+  ctx.save();
+  ctx.translate(0, NEG.y); ctx.rotate(-0.025);
+  const L = NEG.x0 - 70, R = negX(36) + NEG.cell + 600, top = -NEG.edge, h = NEG.h + 2 * NEG.edge;
+  // the film base: orange, see-through
+  ctx.save(); ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = '#E8A16A'; ctx.fillRect(L, top, R - L, h);
+  for (let n = 31; n <= 35; n++) ctx.drawImage(negativeOf(ROLL[n - 1]), negX(n), 0, NEG.cell, NEG.h);
+  ctx.restore();
+  // sprocket holes punched through to the light
+  ctx.fillStyle = '#FBF6EA';
+  for (let x = L + 14; x < R; x += 46) { draw.roundRect(ctx, x, top + 14, 24, 30, 5); ctx.fill(); draw.roundRect(ctx, x, top + h - 44, 24, 30, 5); ctx.fill(); }
+  // edge printing
+  ctx.font = F(700, 24, T.mono); ctx.fillStyle = '#7A3A12'; ctx.textAlign = 'left';
+  for (let n = 31; n <= 36; n++) { ctx.fillText(`${n}`, negX(n) + 20, top + h - 52 + 26); ctx.fillText(`▸${n}A`, negX(n) + NEG.cell / 2 + 10, top + h - 52 + 26); }
+  // the empty frame: its edges, and what fills it
+  ctx.strokeStyle = 'rgba(122,58,18,0.35)'; ctx.lineWidth = 2; ctx.strokeRect(negX(36), 0, NEG.cell, NEG.h);
+  if (mark > 0) {
+    const x0 = negX(36) + 54, x1 = negX(36) + NEG.cell - 54, y = NEG.h / 2 + 30;
+    ctx.globalAlpha = clamp(mark * 3);
+    ctx.font = F(700, 30, T.mono); ctx.fillStyle = '#5A2A0E';
+    ctx.textAlign = 'left'; ctx.fillText('2000', x0, y - 26);
+    ctx.textAlign = 'right'; ctx.globalAlpha = clamp((mark - 0.6) * 3); ctx.fillText('2026', x1, y - 26);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#5A2A0E'; ctx.fillRect(x0, y, (x1 - x0) * drift(clamp(mark / 0.8)), 3);
+    ctx.fillRect(x0, y - 8, 3, 16);
+    if (mark > 0.8) ctx.fillRect(x1 - 3, y - 8, 3, 16);
+  }
+  ctx.restore();
+}
+
+// --- The door frame where he marked how tall she was (screen space, tall world)
+const MARKS = [[2001, 78], [2003, 96], [2005, 112], [2008, 131], [2011, 148], [2014, 160], [2018, 166]];
+const DOOR_FLOOR = 2300, CM = 11.5;
+function doorFrame(ctx, s, marks, light) {
+  const { W, t } = s;
+  // wallpaper, the casing, the door
+  ctx.fillStyle = '#D9CCB0'; ctx.fillRect(-300, -400, W + 600, DOOR_FLOOR + 800);
+  ctx.fillStyle = 'rgba(150,120,80,0.12)';
+  for (let y = -400; y < DOOR_FLOOR; y += 90) for (let x = -300; x < 760; x += 90) { ctx.beginPath(); ctx.arc(x + ((y / 90) % 2) * 45, y, 10, 0, Math.PI * 2); ctx.fill(); }
+  let g = ctx.createLinearGradient(760, 0, 920, 0);
+  g.addColorStop(0, '#CFCABE'); g.addColorStop(0.2, '#F1EEE6'); g.addColorStop(1, '#DCD7CB');
+  ctx.fillStyle = g; ctx.fillRect(760, -400, 160, DOOR_FLOOR + 400);
+  ctx.fillStyle = '#A7B9B0'; ctx.fillRect(920, -400, 900, DOOR_FLOOR + 400);
+  ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.fillRect(920, -400, 14, DOOR_FLOOR + 400);
+  ctx.strokeStyle = 'rgba(60,80,70,0.25)'; ctx.lineWidth = 6;
+  ctx.strokeRect(1010, 200, 640, 820); ctx.strokeRect(1010, 1180, 640, 900);
+  ctx.fillStyle = '#C9A548'; ctx.beginPath(); ctx.arc(1700, 1180, 22, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#4B3A2C'; ctx.fillRect(-300, DOOR_FLOOR, W + 600, 400);
+  ctx.fillStyle = '#E8E3D6'; ctx.fillRect(-300, DOOR_FLOOR - 26, 1060, 26);
+  // chipped paint on the casing
+  const r = CV.rand(4); ctx.fillStyle = 'rgba(150,130,100,0.35)';
+  for (let i = 0; i < 40; i++) { ctx.beginPath(); ctx.ellipse(770 + r() * 140, r() * DOOR_FLOOR, 2 + r() * 6, 1 + r() * 3, r() * 3, 0, Math.PI * 2); ctx.fill(); }
+  // the pencil marks, each drawn on, then its year written beside it
+  for (let i = 0; i < MARKS.length; i++) {
+    const k = marks[i] ?? 0;
+    if (k <= 0) continue;
+    const [year, cm] = MARKS[i], y = DOOR_FLOOR - cm * CM, wob = (i % 3) * 3 - 3;
+    ctx.strokeStyle = 'rgba(50,50,56,0.9)'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(766, y + wob * 0.3); ctx.lineTo(766 + 140 * drift(clamp(k * 2)), y - wob * 0.2); ctx.stroke();
+    ctx.font = F(500, 50, '"Caveat", cursive'); ctx.fillStyle = 'rgba(55,55,60,0.85)'; ctx.textAlign = 'left';
+    const label = `${year}`, n = Math.floor(clamp((k - 0.4) / 0.5) * label.length + 1e-6);
+    ctx.fillText(label.slice(0, n), 784, y + 46);
+  }
+  // the afternoon light crossing the door, day after day
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  const ph = (t * 0.32) % 1, lx = lerp(-700, 2300, ph);
+  ctx.fillStyle = color.rgba('#FFCB8A', 0.16 * light * Math.sin(Math.PI * ph));
+  ctx.beginPath(); ctx.moveTo(lx, -400); ctx.lineTo(lx + 380, -400); ctx.lineTo(lx + 120, DOOR_FLOOR + 400); ctx.lineTo(lx - 260, DOOR_FLOOR + 400); ctx.fill();
+  ctx.restore();
+}
+
+// --- The contact sheet: the whole roll, 4 strips of 9 (world space) -----------
+const CS = { cell: 300, ch: 200, pitch: 330, edge: 46, strip: 312, m: 40 };
+CS.w = 9 * CS.pitch - 30 + 2 * CS.m; CS.h = 4 * CS.strip - 20 + 2 * CS.m;
+const cellAt = (n) => ({ x: CS.m + ((n - 1) % 9) * CS.pitch, y: CS.m + Math.floor((n - 1) / 9) * CS.strip + CS.edge });
+function contactSheet(ctx, live, marks) {
+  ctx.fillStyle = '#EDE8DC'; ctx.fillRect(-4000, -4000, CS.w + 8000, CS.h + 8000);
+  for (let row = 0; row < 4; row++) {
+    const y = CS.m + row * CS.strip;
+    ctx.fillStyle = '#0E0D0C'; ctx.fillRect(CS.m - 20, y, CS.w - 2 * CS.m + 40, CS.strip - 20);
+    ctx.fillStyle = '#1D1B19';
+    for (let x = CS.m - 6; x < CS.w - CS.m + 10; x += 41) { draw.roundRect(ctx, x, y + 10, 18, 24, 4); ctx.fill(); draw.roundRect(ctx, x, y + CS.strip - 20 - 34, 18, 24, 4); ctx.fill(); }
+  }
+  ctx.font = F(700, 24, T.mono); ctx.fillStyle = '#CFC8B8'; ctx.textAlign = 'left';
+  for (let n = 1; n <= 36; n++) {
+    const c = cellAt(n);
+    if (n < 36) ctx.drawImage(rollThumb(ROLL[n - 1]), c.x, c.y, CS.cell, CS.ch);
+    ctx.fillText(`${n}`, c.x + 6, c.y + CS.ch + 36);
+    ctx.fillText(`▸${n}A`, c.x + CS.cell / 2, c.y + CS.ch + 36);
+  }
+  const c = cellAt(36);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(c.x, c.y, CS.cell, CS.ch); ctx.clip();
+  ctx.translate(c.x, c.y); ctx.scale(CS.cell / PW, CS.ch / PH);
+  live(ctx);
+  ctx.restore();
+  // the grease pencil: frame 1, frame 36
+  for (const [n, k, seed] of [[1, marks[0], 3], [36, marks[1], 8]]) {
+    if (k <= 0) continue;
+    const cc = cellAt(n), cx = cc.x + CS.cell / 2, cy = cc.y + CS.ch / 2;
+    ctx.strokeStyle = '#E2482C'; ctx.lineWidth = 9; ctx.lineCap = 'round';
+    draw.drawOn(ctx, draw.sketchCircle(cx, cy, 205, { seed, roughness: 7, steps: 60 }).map(([x, y]) => [cx + (x - cx), cy + (y - cy) * 0.72]), drift(clamp(k)));
+  }
+}
+
+const negCenter = (n) => {
+  const x = negX(n) + NEG.cell / 2, y = NEG.h / 2, a = -0.025;
+  return [x * Math.cos(a) - y * Math.sin(a), NEG.y + x * Math.sin(a) + y * Math.cos(a)];
+};
+// the pull back from the 36th frame to the whole contact sheet: q 0 → 1
+function sheetCamera(ctx, q, fn) {
+  const c = cellAt(36), ccx = c.x + CS.cell / 2, ccy = c.y + CS.ch / 2;
+  const Z0 = 1920 / CS.cell, Z1 = 0.56, Z = Math.exp(lerp(Math.log(Z0), Math.log(Z1), q));
+  const ax = lerp(960, 960 + (ccx - CS.w / 2) * Z1, q), ay = lerp(540, 545 + (ccy - CS.h / 2) * Z1, q);
+  ctx.save();
+  ctx.translate(ax, ay); ctx.scale(Z, Z); ctx.translate(-ccx, -ccy);
+  fn();
+  ctx.restore();
+}
+const PULL_BEATS = 7; // beats of pull-back, from the shutter scene's beat 2 into the sheet scene
+const shot36 = (T, stamp) => (g) => {
+  beachWorld(g, T, { era: 1, figs: [DAD(POSES.eye), HER()] });
+  dateStamp(g, "'26 5 3", 1790, 1000, 46, stamp);
+};
+
+// === VIDEO ===================================================================
+CV.create({
+  width: 1920, height: 1080, fps: 30,
+  background: T.black,
+  lang: 'zh-CN',
+  // the score designed for this video: tender, nostalgic, then lifting. A felt
+  // piano arpeggio carries it from the first frame; a music box sings in the
+  // gaps (her childhood); bass, a brushed kit and a strummed guitar come in as
+  // the photos come alive; the empty years turn to the relative-minor loop, and
+  // the return to the sea lifts on IV–V–I.
+  music: {
+    bpm: 76, seed: 36, key: 'Eb', mode: 'major', progression: [0, 4, 5, 3], kit: 'brush', swing: 0.12,
+    layers: [
+      { name: 'felt piano', inst: 'felt', notes: [0, 1, 2, 3, 2, 1, 2, 1], pattern: 'X.x.X.x.', gate: 1.8, vel: [0.11, 0.16], verb: 0.3 },
+      { name: 'bass', inst: 'bass', notes: ['root', 'root', 'fifth'], octave: -1, pattern: 'X..x..X.', vel: [0.18, 0.24], from: 0.35 },
+      { name: 'kick', inst: 'kick', pattern: 'X......xX.......', vel: [0.3, 0.42], from: 0.45 },
+      { name: 'brush', inst: 'snare', pattern: '....X.......X...', vel: [0.14, 0.22], from: 0.45 },
+      { name: 'strings', inst: 'strings', notes: 'chord', pattern: 'X---', vel: [0.04, 0.08], from: 0.5 },
+      { name: 'guitar', inst: 'acoustic', notes: 'chord', pattern: 'X.xX.x.x', strum: 0.018, vel: [0.06, 0.1], from: 0.58 },
+      { name: 'shaker', inst: 'shaker', pattern: 'x.x.x.x.x.x.x.x.', vel: [0.04, 0.07], from: 0.68 },
+    ],
+    lead: { inst: 'bell', kind: 'musicbox', range: [75, 91], rhythm: 'melodic', vel: 0.11, verb: 0.3 },
+    parts: {
+      years: { progression: [5, 3, 0, 4], seed: 5 },
+      sea: { progression: [3, 4, 0, 0], seed: 7 },
+    },
+  },
+  transition: { type: 'fade', duration: 1.2, ease: ease.inOutSine },
+  subtitles: {
+    // set in the lower letterbox bar, like a film print's subtitles
+    style: { font: F(500, 38, T.han), color: T.cream, box: null, stroke: 'rgba(0,0,0,0.6)', strokeWidth: 4, y: 0.94 },
+  },
+  scenes: [
+    // --- 1. Dark. The desk lamp clicks on: his old camera ---------------------
+    {
+      id: 'camera', voiceDelay: 3.3, tail: 1.2, energy: 0.35,
+      sfx: [{ at: (s) => s.onBeat(2), type: 'click', gain: 0.9 }],
+      draw(ctx, s) {
+        const { t } = s, on = s.onBeat(2);
+        // a tungsten lamp: a stutter, then it warms up
+        const light = t < on ? 0.14 : (t - on < 0.12 ? 0.55 : t - on < 0.2 ? 0.15 : 0.35 + 0.65 * ease.outCubic(clamp((t - on - 0.2) / 0.9)));
+        const k = ease.inOutSine(s.p);
+        draw.camera(ctx, s.W, s.H, { zoom: lerp(1, 1.24, k), focusX: lerp(960, 1120, k), focusY: lerp(600, 520, k) }, () => deskScene(ctx, s, light));
+        trackTitle(ctx, '2026 · 春', 170, PIC.y0 + 80, t - (on + 0.8), { font: F(400, 26, T.mono), fill: T.amber, spacing: [0.25, 0.4], life: s.dur, align: 'left', blur: 4, exit: s.out(0.8, ease.inOutSine) });
+      },
+    },
+    // --- 2. The frame counter: it runs up to 35 and stops one short ----------
+    {
+      id: 'counter', tail: 1.6, energy: 0.4,
+      sfx: [{ at: (s) => s.when('三十五', 2.5) + 0.45, type: 'click', gain: 0.7 }],
+      draw(ctx, s) {
+        const { t } = s, t36 = s.when('三十六', 0.1), t35 = s.when('三十五', 2.5);
+        const v = -1 + 36 * ease.outQuart(clamp((t - t36 + 0.1) / (t35 + 0.45 - t36 + 0.1)));
+        const fl = Math.floor(v + 1e-6), frame = fl + ease.outCubic(clamp((v - fl) * 2.5));
+        const hl = s.at(t36 + 0.3, 0.6) * (1 - 0.5 * s.at(t35, 0.8));
+        zoomAt(ctx, s, { zoom: lerp(1.0, 1.1, ease.inOutSine(s.p)), rotate: lerp(0.035, -0.01, ease.inOutSine(s.p)), focusX: 900, focusY: 520 }, () => counterDial(ctx, s, frame, hl, s.at(t35 + 0.45, 0.5)));
+        const out = s.out(0.9, ease.inOutSine);
+        trackTitle(ctx, '/ 36', 1640, 640, t - (t36 + 0.4), { font: F(500, 96), fill: color.rgba(T.cream, 0.7), spacing: [0.04, 0.12], life: s.dur, align: 'left', exit: out });
+        trackTitle(ctx, '35', 1620, 640, t - (t35 + 0.35), { font: F(600, 230), fill: T.amber, spacing: [0.02, 0.06], life: s.dur, align: 'right', exit: out, blur: 14 });
+      },
+    },
+    // --- 3. The darkroom: the first print comes up, and we fall into it -------
+    {
+      id: 'darkroom', tail: 4.6, energy: 0.45,
+      transition: { type: 'dip', duration: 1.2, ease: ease.inOutSine, color: '#000' },
+      draw(ctx, s) {
+        const { t } = s, dev = clamp((t - s.voiceStart - 0.3) / 4.2);
+        const push = ease.inOutCubic(clamp((t - (s.dur - 3.8)) / 2.4)); // done before the dissolve starts
+        const Z = Math.exp(lerp(0, Math.log(1920 / 660), push));
+        draw.camera(ctx, s.W, s.H, { zoom: Z * lerp(1.03, 1, push), focusX: 960, focusY: 540 }, () => darkroom(ctx, s, dev, push));
+      },
+    },
+    // --- 4. The first photo comes alive: the sea, and his own shadow ---------
+    {
+      id: 'sea', tail: 1.4, energy: 0.55,
+      transition: { type: 'fade', duration: 1.4, ease: ease.inOutSine, sfx: 'swell' },
+      draw(ctx, s) {
+        const { t } = s, k = ease.inOutSine(s.p);
+        zoomAt(ctx, s, { zoom: lerp(1, 1.09, k), focusX: 900, focusY: 600 }, () => inPrint(ctx, () => {
+          beachWorld(ctx, t, { figs: [DAD(POSES.eye)] });
+          printTone(ctx, -600, -600, PW + 1200, PH + 1200, 1);
+          dateStamp(ctx, "'99 8 14", 1790, 1000, 46);
+        }));
+        lowerThird(ctx, 160, 860, 'No. 01 · 1999.08.14', '北戴河', t - s.when('第一张', 0.1) - 0.6, { exit: s.out(0.7, ease.inOutSine), width: 420 });
+      },
+    },
+    // --- 5–7. The roll advances: a bicycle, a lit window, the morning she was born
+    {
+      id: 'bike', tail: 1.7, energy: 0.6,
+      transition: { type: frameAdvance, duration: 0.75, ease: ease.inOutCubic, sfx: 'click' },
+      draw(ctx, s) {
+        const { t } = s, k = ease.inOutSine(s.p);
+        zoomAt(ctx, s, { zoom: 1.06, x: lerp(-60, 60, k) }, () => inPrint(ctx, () => {
+          bikeWorld(ctx, t);
+          printTone(ctx, -600, -600, PW + 1200, PH + 1200, 1);
+          dateStamp(ctx, "'99 10 2", 1790, 1000, 46);
+        }));
+        lowerThird(ctx, 160, 860, 'No. 07 · 1999.10.02', '她家楼下', t - 0.5, { exit: s.out(0.6, ease.inOutSine), width: 420 });
+      },
+    },
+    {
+      id: 'window', tail: 1.8, energy: 0.6,
+      transition: { type: frameAdvance, duration: 0.75, ease: ease.inOutCubic, sfx: 'click' },
+      draw(ctx, s) {
+        const { t } = s, k = ease.inOutSine(s.p), wave = s.at(s.when('妈妈', 4.5) - 0.35, 0.9, ease.inOutSine);
+        zoomAt(ctx, s, { zoom: lerp(1.02, 1.16, k), focusX: 1180, focusY: 500 }, () => inPrint(ctx, () => {
+          windowWorld(ctx, t, { wave });
+          printTone(ctx, -600, -600, PW + 1200, PH + 1200, 1);
+          dateStamp(ctx, "'99 12 31", 1790, 1000, 46);
+        }));
+        lowerThird(ctx, 160, 860, 'No. 19 · 1999.12.31', '千禧年前夜', t - 0.5, { exit: s.out(0.6, ease.inOutSine), width: 420, scrim: 0.3 });
+      },
+    },
+    {
+      id: 'born', tail: 1.9, energy: 0.7,
+      transition: { type: frameAdvance, duration: 0.75, ease: ease.inOutCubic, sfx: 'click' },
+      sfx: [{ at: (s) => s.when('天', 3.8), type: 'shimmer', gain: 0.5 }],
+      draw(ctx, s) {
+        const { t } = s, k = ease.inOutSine(s.p);
+        zoomAt(ctx, s, { zoom: lerp(1.12, 1.0, k), focusX: 1000, focusY: 560 }, () => inPrint(ctx, () => {
+          bornWorld(ctx, t, { dawn: lerp(0.3, 1, ease.inOutSine(s.p)) });
+          printTone(ctx, -600, -600, PW + 1200, PH + 1200, 1);
+          dateStamp(ctx, "'00 4 6", 1790, 1000, 46);
+        }));
+        lowerThird(ctx, 160, 860, 'No. 35 · 2000.04.06', '清晨 5:52', t - 0.5, { exit: s.out(0.7, ease.inOutSine), width: 420 });
+      },
+    },
+    // --- 8. The negatives on the lightbox: frame 36 is clear film -------------
+    {
+      id: 'blank', part: 'years', tail: 2.0, energy: 0.4,
+      transition: { type: 'dip', duration: 1.2, ease: ease.inOutSine, color: '#000' },
+      draw(ctx, s) {
+        const { t } = s, tGe = s.when('格', 0.7), t26 = s.when('二十六', 1.6);
+        const track = ease.inOutCubic(clamp(t / (tGe + 0.9)));
+        const [x0, y0] = negCenter(33.4), [x1, y1] = negCenter(36);
+        const zoom = lerp(1.05, 2.1, ease.inOutCubic(clamp((t - tGe) / (t26 + 1.2 - tGe))));
+        draw.camera(ctx, s.W, s.H, { zoom, focusX: lerp(x0, x1, track), focusY: lerp(y0, y1, track) - 10 }, () => lightbox(ctx, s, clamp((t - t26) / 2.4)));
+      },
+    },
+    // --- 9. The years: the pencil marks on the door frame climb ---------------
+    {
+      id: 'grow', tail: 2.2, energy: 0.55,
+      draw(ctx, s) {
+        const { t } = s, start = s.when('他看着', 3.2) - 0.1, gap = s.beatLen / 2;
+        const marks = MARKS.map((_, i) => clamp((t - start - i * gap) / 0.9));
+        const idx = clamp((t - start) / gap, 0, MARKS.length - 1);
+        const i0 = Math.floor(idx), f = ease.inOutSine(idx - i0), yOf = (i) => DOOR_FLOOR - MARKS[Math.min(i, MARKS.length - 1)][1] * CM;
+        const follow = lerp(yOf(i0), yOf(i0 + 1), f) + 60;
+        const camY = lerp(DOOR_FLOOR - MARKS[0][1] * CM + 170, follow, ease.inOutSine(clamp((t - start + 0.6) / 1.2)));
+        draw.camera(ctx, s.W, s.H, { zoom: 1.5, focusX: lerp(880, 840, ease.inOutSine(s.p)), focusY: camY }, () => doorFrame(ctx, s, marks, 1));
+      },
+      sfx: MARKS.map((_, i) => ({ at: (s) => s.when('他看着', 3.2) - 0.1 + i * s.beatLen / 2, type: 'tick', gain: 0.35 })),
+    },
+    // --- 10. The film burns back to the sea: May, the two of them ------------
+    {
+      id: 'return', part: 'sea', tail: 1.4, energy: 0.75,
+      transition: { type: filmBurn, duration: 1.6, ease: ease.inOutSine, sfx: 'swell', seed: 9, x: 0.3, y: 0.4 },
+      draw(ctx, s) {
+        const { t } = s, tilt = ease.inOutCubic(clamp(t / (s.dur - 0.4)));
+        draw.camera(ctx, s.W, s.H, { y: lerp(-330, 0, tilt) }, () => inPrint(ctx, () => beachWorld(ctx, s.T, { era: 1, figs: [DAD(POSES.low), HER()] })));
+        lowerThird(ctx, 160, 860, '2026.05.03', '北戴河', t - s.when('五月', 0.5) - 0.4, { exit: s.out(0.7, ease.inOutSine), width: 300 });
+      },
+    },
+    // --- 11. His voice: he lifts the camera ----------------------------------
+    {
+      id: 'dad', tail: 0.9, energy: 0.62,
+      transition: { type: 'cut' },
+      draw(ctx, s) {
+        const k = s.at(s.when('拍照', 2.2) - 0.75, 1.3, ease.inOutCubic);
+        inPrint(ctx, () => beachWorld(ctx, s.T, { era: 1, figs: [DAD(lerpPose(POSES.low, POSES.eye, k)), HER()] }));
+      },
+    },
+    // --- 12. The shutter. The frame freezes and we pull back -----------------
+    {
+      id: 'shutter', narration: false, beats: 6, energy: 0.9,
+      transition: { type: 'cut' },
+      sfx: [{ at: (s) => s.onBeat(1), type: 'click', gain: 1.2 }],
+      draw(ctx, s) {
+        const { t } = s, tb = s.onBeat(1), Tf = s.T - t + tb, frozen = t >= tb;
+        const q = ease.inOutCubic(clamp((t - s.onBeat(2)) / (PULL_BEATS * s.beatLen)));
+        const stamp = s.at(tb + 0.5, 0.4);
+        if (!frozen) inPrint(ctx, () => beachWorld(ctx, s.T, { era: 1, figs: [DAD(POSES.eye), HER()] }));
+        else sheetCamera(ctx, q, () => contactSheet(ctx, shot36(Tf, stamp), [0, 0]));
+        // the shutter: two frames of black, then the flash of the frame being taken
+        if (frozen && t - tb < 0.07) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, s.W, s.H); }
+        else if (frozen) { ctx.fillStyle = color.rgba('#FFF6E6', 0.6 * Math.exp(-(t - tb - 0.07) / 0.14)); ctx.fillRect(0, 0, s.W, s.H); }
+      },
+    },
+    // --- 13. The whole roll: frame 1 and frame 36 -----------------------------
+    {
+      id: 'sheet', tail: 2.4, energy: 0.8,
+      transition: { type: 'cut' },
+      draw(ctx, s) {
+        const { t } = s, b = 4 + t / s.beatLen; // the first 4 beats of the pull happened in the shutter scene
+        const q = ease.inOutCubic(clamp(b / PULL_BEATS));
+        const Tf = s.T - t - 5 * s.beatLen; // the moment of the shutter, beat 1 of the 6-beat scene before
+        const m1 = s.at(s.when('三十六', 0.1) + 0.2, 0.9), m36 = s.at(s.when('拍完', 1.6), 0.9);
+        sheetCamera(ctx, q, () => contactSheet(ctx, shot36(Tf, 1), [m1, m36]));
+      },
+    },
+    // --- 14. The title -------------------------------------------------------
+    {
+      id: 'title', narration: false, beats: 10, energy: 0.5,
+      transition: { type: 'dip', duration: 1.4, ease: ease.inOutSine, color: '#000' },
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        const out = ease.inOutSine(clamp((t - s.onBeat(8)) / (s.dur - s.onBeat(8) - 0.2)));
+        trackTitle(ctx, '第三十六张', W / 2, H / 2 + 20, t - s.onBeat(0.5), { font: F(600, 132, T.han), spacing: [0.16, 0.36], life: s.dur, exit: out, fadeIn: 2 });
+        trackTitle(ctx, 'THE 36TH FRAME', W / 2, H / 2 + 110, t - s.onBeat(2.5), { font: F(500, 34), fill: T.amber, spacing: [0.5, 0.7], life: s.dur, exit: out, blur: 5 });
+        trackTitle(ctx, '献给我的爸爸', W / 2, H / 2 + 220, t - s.onBeat(4.5), { font: F(500, 26, T.han), fill: T.dim, spacing: [0.3, 0.42], life: s.dur, exit: out, blur: 4 });
+      },
+    },
+  ],
+  // the projector: grain, weave, halation, grade, dust; then the scope bars
+  overlay(ctx, g) {
+    filmGate(ctx, g);
+    letterbox(ctx, g.W, g.H);
+  },
+});
+</script>
+</body>
+</html>

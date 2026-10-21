@@ -92,7 +92,7 @@ Short introductions suitable for a post are in [`articles.md`](docs/articles.md)
 
 | Tool | Rule-level expectations | Note |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 4,726 layer-1 samples | the only one so far — see *Known gaps* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,074 layer-1 samples | the only one so far — see *Known gaps* |
 
 No second scanner has been wired up yet. Until one is, the tool-neutral claims above are a
 property of the schema rather than a demonstrated result, and that distinction is the reason
@@ -214,8 +214,8 @@ shows up there rather than in someone else's clone.
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 4,726 labels
-  carry such a block; the other 4,720 are pure `truth` and need no scanner to check. A
+- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,074 labels
+  carry such a block; the other 5,068 are pure `truth` and need no scanner to check. A
   scanner's rule list belongs to that scanner, so `taxonomy/tools.yaml` reaches it only
   through an environment variable and the validator now **rejects** a `rules_source.path`
   that leaves this repository. That rule exists because aguard's used to be
@@ -227,7 +227,7 @@ measures.
   which is where that check has to live.
 - **`sha256` is verified in layer 1 and still empty in layer 2.** The 393 harvested
   configuration files each carry the hash of the bytes as collected, and `make validate`
-  recomputes all 393 from the vendored artifact and fails on a mismatch. The 852 harvested
+  recomputes all 393 from the vendored artifact and fails on a mismatch. The 1,197 harvested
   server and skill TREES cannot: the label's `sha256` names one file and is refused on a tree,
   so their integrity claim is `tree_sha256` in `manifest/pins/mcp-servers.json`, recomputed by
   `scripts/harvest-mcp-servers.py --from-pins`, not by `make validate`. Every *manifest* entry still carries an empty
@@ -238,8 +238,8 @@ measures.
   needs a script under `scripts/` between the fetch and the derive. The scripts are pinned and
   seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
   entries in one command.
-- **The benign side is a sample; the malicious side is a census, with one exception.** 4,167
-  benign samples are drawn from stated populations under stated designs; 300 of the 540
+- **The benign side is a sample; the malicious side is a census, with one exception.** 4,506
+  benign samples are drawn from stated populations under stated designs; 309 of the 549
   malicious samples are everything their upstreams had, and the 240 from SkillHarm are a
   seeded draw of 20 per risk from 641. A recall figure and a false-positive figure from this corpus
   therefore rest on different kinds of denominator, and cannot be combined into one score.

@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import struct
-from pathlib import Path
+from grea.host.paths import Path
 from grea.safe_paths import relative_name, unique_paths, disjoint, write_bytes_new
 
 

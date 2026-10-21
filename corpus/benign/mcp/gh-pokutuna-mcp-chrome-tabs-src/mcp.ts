@@ -1,0 +1,391 @@
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
+import { z } from "zod";
+import {
+  Browser,
+  Tab,
+  TabRef,
+  TabContent,
+  getInterface,
+} from "./browser/browser.js";
+import { readFile } from "fs/promises";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+import { createHash } from "crypto";
+import * as view from "./view.js";
+import { runDefuddleInWorker } from "./util.js";
+
+export type McpServerOptions = {
+  applicationName: string;
+  excludeHosts: string[];
+  checkInterval: number;
+  browser: Browser;
+  maxContentChars: number;
+  extractionTimeout: number;
+};
+
+function isExcludedHost(url: string, excludeHosts: string[]): boolean {
+  // A blank or unparsable URL, such as an empty Safari tab, has no host
+  if (!URL.canParse(url)) return false;
+  const u = new URL(url);
+  return excludeHosts.some(
+    (d) => u.hostname === d || u.hostname.endsWith("." + d)
+  );
+}
+
+// Numeric IDs (Chrome, Safari) compare as numbers, others (Arc UUIDs) as text
+function compareIds(a: string, b: string): number {
+  if (/^\d+$/.test(a) && /^\d+$/.test(b)) return Number(a) - Number(b);
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// Browsers list windows front to back, which changes whenever the user
+// switches windows. Order them by ID (creation order) instead, keeping the tab
+// order within a window, so that an INDEX from `list` still names the same tab
+// after a window switch.
+async function listTabs(opts: McpServerOptions): Promise<Tab[]> {
+  const browser = getInterface(opts.browser);
+  const tabs = await browser.getTabList(opts.applicationName);
+  return tabs
+    .filter((t) => !isExcludedHost(t.url, opts.excludeHosts))
+    .sort((a, b) => compareIds(a.windowId, b.windowId));
+}
+
+async function getTab(
+  tabRef: TabRef | null,
+  opts: McpServerOptions
+): Promise<TabContent> {
+  const browser = getInterface(opts.browser);
+  // Refuse an excluded host before running any script in its page
+  const info = await browser.getTabInfo(opts.applicationName, tabRef);
+  if (isExcludedHost(info.url, opts.excludeHosts)) {
+    throw new Error("Content not available for excluded host");
+  }
+  // Read the tab just resolved, even if the active tab changes meanwhile
+  const raw = await browser.getPageContent(opts.applicationName, {
+    windowId: info.windowId,
+    tabId: info.tabId,
+  });
+  // The tab may have navigated to an excluded host since it was resolved
+  if (isExcludedHost(raw.url, opts.excludeHosts)) {
+    throw new Error("Content not available for excluded host");
+  }
+  try {
+    const content = await runDefuddleInWorker(
+      raw.content,
+      raw.url,
+      opts.extractionTimeout
+    );
+    return {
+      title: raw.title,
+      url: raw.url,
+      content,
+    };
+  } catch (error) {
+    throw new Error(
+      `Failed to extract content: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+export async function executeListTabs(
+  options: McpServerOptions,
+  includeUrl: boolean = false
+): Promise<string> {
+  const tabs = await listTabs(options);
+  return view.formatList(tabs, includeUrl);
+}
+
+// The CLI renders a human-readable table; the MCP tool keeps its Markdown list
+export async function executeListTabsForCli(
+  options: McpServerOptions,
+  includeUrl: boolean = false
+): Promise<string> {
+  const tabs = await listTabs(options);
+  return view.formatListForCli(tabs, includeUrl);
+}
+
+export async function executeReadTabContent(
+  options: McpServerOptions,
+  id?: string,
+  startIndex: number = 0,
+  pagination: view.Pagination = view.toolPagination
+): Promise<string> {
+  // An unparsable id, including an empty one, must not fall through to the
+  // active tab; only an omitted id reads it
+  let tabRef: TabRef | null = null;
+  if (id !== undefined) {
+    tabRef = view.parseTabRef(id);
+    if (!tabRef) {
+      throw new Error(
+        `Invalid tab ID: "${id}". Expected ID:<windowId>:<tabId>.`
+      );
+    }
+  }
+  const tab = await getTab(tabRef, options);
+  return view.formatTabContent(
+    tab,
+    startIndex,
+    options.maxContentChars,
+    pagination
+  );
+}
+
+// Resolves against a freshly fetched list, so the index means the same thing it
+// would in a `list` run right now -- not in whatever listing the user last saw.
+export async function executeReadTabContentByIndex(
+  options: McpServerOptions,
+  index: number,
+  startIndex: number = 0,
+  pagination: view.Pagination = view.toolPagination
+): Promise<string> {
+  const tabs = await listTabs(options);
+  const target = tabs[index - 1];
+  if (!target) {
+    throw new Error(
+      tabs.length === 0
+        ? "No open tabs."
+        : `No tab at index ${index}. Currently 1-${tabs.length}; run "list" for the current numbering.`
+    );
+  }
+  const tab = await getTab(
+    { windowId: target.windowId, tabId: target.tabId },
+    options
+  );
+  return view.formatTabContent(
+    tab,
+    startIndex,
+    options.maxContentChars,
+    pagination
+  );
+}
+
+export async function packageVersion(): Promise<string> {
+  const packageJsonText = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), "../package.json"),
+    "utf8"
+  );
+  const packageJson = JSON.parse(packageJsonText);
+  return packageJson.version;
+}
+
+function hashTabList(tabs: Tab[]): string {
+  const sortedTabs = tabs.slice().sort((a, b) => {
+    if (a.windowId !== b.windowId) return a.windowId < b.windowId ? -1 : 1;
+    if (a.tabId !== b.tabId) return a.tabId < b.tabId ? -1 : 1;
+    return 0;
+  });
+  const dump = sortedTabs
+    .map((tab) => `${tab.windowId}:${tab.tabId}:${tab.title}:${tab.url}`)
+    .join("|");
+  return createHash("sha256").update(dump, "utf8").digest("hex");
+}
+
+export async function createMcpServer(
+  options: McpServerOptions
+): Promise<McpServer> {
+  const server = new McpServer(
+    {
+      name: "chrome-tabs",
+      title: "Chrome Tabs",
+      version: await packageVersion(),
+    },
+    {
+      instructions: "Use this server to access the user's open browser tabs.",
+      capabilities: {
+        resources: {
+          listChanged: true,
+        },
+      },
+      debouncedNotificationMethods: ["notifications/resources/list_changed"],
+    }
+  );
+
+  server.registerTool(
+    "list_tabs",
+    {
+      title: "List Tabs",
+      description:
+        "List all open tabs in the user's browser with their titles and tab references.",
+      inputSchema: z.object({
+        includeUrl: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            "Include URLs in the output. Enable only when you need to reference specific URLs. (default: false, hostnames always included)"
+          ),
+      }),
+    },
+    async (args) => {
+      const { includeUrl } = args;
+      return {
+        content: [
+          {
+            type: "text",
+            text: await executeListTabs(options, includeUrl),
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerTool(
+    "read_tab_content",
+    {
+      title: "Read Tab Content",
+      description:
+        "Get readable content from a tab in the user's browser. Provide ID (from list_tabs output) to read a specific tab, or omit for the active tab.",
+      inputSchema: z.object({
+        id: z
+          .string()
+          .optional()
+          .describe(
+            "Tab reference from list_tabs output (e.g: ID:12345:67890). If omitted, uses the currently active tab."
+          ),
+        startIndex: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .default(0)
+          .describe(
+            "Starting character position for content extraction (default: 0)"
+          ),
+      }),
+    },
+    async (args) => {
+      const { id, startIndex } = args;
+      return {
+        content: [
+          {
+            type: "text",
+            text: await executeReadTabContent(options, id, startIndex),
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerTool(
+    "open_in_new_tab",
+    {
+      title: "Open in New Tab",
+      description:
+        "Open a URL in a new tab to present content or enable user interaction with webpages",
+      inputSchema: z.object({
+        url: z.string().url().describe("URL to open in the browser"),
+      }),
+    },
+    async (args) => {
+      const { url } = args;
+      const browser = getInterface(options.browser);
+      const tabRef = await browser.openURL(options.applicationName, url);
+      const tabId = `ID:${tabRef.windowId}:${tabRef.tabId}`;
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Successfully opened URL in new tab. Tab: \`${tabId}\``,
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerResource(
+    "current_tab",
+    "tab://current",
+    {
+      title: "Active Browser Tab",
+      description: "Content of the currently active tab in the user's browser",
+      mimeType: "text/markdown",
+    },
+    async (uri) => {
+      const tab = await getTab(null, options);
+      // TODO: Add pagination support for resources (startIndex parameter)
+      const text = view.formatTabContent(tab, 0, undefined);
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            text,
+            mimeType: "text/markdown",
+          },
+        ],
+      };
+    }
+  );
+
+  // Register tab://{windowId}/{tabId} resources only when checkInterval > 0
+  // In 2025-10, few MCP clients support resource subscriptions, so this is disabled by default
+  if (options.checkInterval > 0) {
+    server.registerResource(
+      "tabs",
+      new ResourceTemplate(view.uriTemplate, {
+        list: async () => {
+          const tabs = await listTabs(options);
+          return {
+            resources: tabs.map((tab) => ({
+              uri: view.formatUri(tab),
+              name: view.formatTabName(tab),
+              mimeType: "text/markdown",
+            })),
+          };
+        },
+      }),
+      {
+        title: "Browser Tabs",
+        description: "Content of a specific tab in the user's browser",
+        mimeType: "text/markdown",
+      },
+      async (uri, { windowId, tabId }) => {
+        const tabRef: TabRef = {
+          windowId: String(windowId),
+          tabId: String(tabId),
+        };
+        const tab = await getTab(tabRef, options);
+        // TODO: Add pagination support for resources (startIndex parameter)
+        const text = view.formatTabContent(tab, 0, undefined);
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: "text/markdown",
+              text,
+            },
+          ],
+        };
+      }
+    );
+  }
+
+  if (options.checkInterval > 0) {
+    let lastHash: string = hashTabList(await listTabs(options));
+    let stopped = false;
+    const check = async () => {
+      try {
+        const hash = hashTabList(await listTabs(options));
+        if (hash !== lastHash) {
+          server.sendResourceListChanged();
+          lastHash = hash;
+        }
+      } catch (error) {
+        console.error("Error during periodic tab list update:", error);
+      }
+      // The connection may have closed while the osascript call was in flight
+      if (stopped) return;
+      // Use setTimeout instead of setInterval to avoid overlapping calls
+      timer = setTimeout(check, options.checkInterval);
+    };
+    // Wait one interval, otherwise the first tick polls right after the snapshot above
+    let timer = setTimeout(check, options.checkInterval);
+    // serveStdio builds one instance per connection, so the poller has to stop
+    // with the instance
+    server.server.onclose = () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }
+
+  return server;
+}

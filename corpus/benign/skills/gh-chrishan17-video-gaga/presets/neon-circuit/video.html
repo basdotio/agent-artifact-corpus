@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>NIGHT/SHIFT 黑客松 · 竖屏预告（video-gaga · Neon Circuit）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=ZCOOL+QingKe+HuangYou&family=Noto+Sans+SC:wght@900&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   NEON CIRCUIT — vertical short, cyber / night-city.
+   Two neons (magenta = energy, cyan = information) on ink-violet black.
+   Glitch and RGB split are *punctuation*: they fire on the beat a word lands,
+   then decay within 6 frames. The hook is in the first second. Captions are big,
+   karaoke-highlighted, and sit above the platform UI safe zone.
+   ============================================================================= */
+const { ease, clamp, lerp, fx, draw, color, rand, noise } = CV;
+
+// === THEME ===================================================================
+const T = {
+  bg: '#07060D',
+  ink: '#EDEBFF',
+  dim: '#5B5875',
+  mag: '#FF2E88',
+  cyan: '#00E5FF',
+  latin: '"Chakra Petch", "Noto Sans SC", sans-serif',
+  cjk: '"ZCOOL QingKe HuangYou", "Noto Sans SC", sans-serif',
+};
+const F = (w, px, fam = T.latin) => `${w} ${px}px ${fam}`;
+
+// === KIT: neon, RGB split, night city ========================================
+// Draw text with an RGB split whose strength decays after a hit time.
+function splitText(ctx, str, x, y, t, hitAt, col = T.ink) {
+  const k = Math.exp(-Math.max(0, t - hitAt) * 9) * (t >= hitAt ? 1 : 0);
+  const off = 14 * k;
+  if (off > 0.4) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = color.rgba(T.mag, 0.85);
+    ctx.fillText(str, x - off, y);
+    ctx.fillStyle = color.rgba(T.cyan, 0.85);
+    ctx.fillText(str, x + off, y + off * 0.3);
+    ctx.restore();
+  }
+  ctx.fillStyle = col;
+  ctx.fillText(str, x, y);
+}
+
+// Neon tube: soft glow + bright core. Flicker is seeded, so it's deterministic.
+function neon(ctx, str, x, y, col, on) {
+  ctx.save();
+  ctx.shadowColor = col;
+  ctx.shadowBlur = 40 * on;
+  ctx.fillStyle = color.rgba(col, 0.9 * on);
+  ctx.fillText(str, x, y);
+  ctx.shadowBlur = 12 * on;
+  ctx.fillStyle = color.mix(col, '#ffffff', 0.55 * on);
+  ctx.fillText(str, x, y);
+  ctx.restore();
+}
+// Procedural skyline: seeded buildings with windows that blink slowly.
+const city = (() => {
+  const r = rand(42), b = [];
+  let x = -20;
+  while (x < 1100) { const w = 60 + r() * 120; b.push({ x, w, h: 260 + r() * 620, seed: (r() * 1e6) | 0 }); x += w + 6; }
+  return b;
+})();
+function skyline(ctx, W, H, t, rise) {
+  const base = H * 0.74;
+  for (const bd of city) {
+    const h = bd.h * rise;
+    ctx.fillStyle = '#0E0C1A';
+    ctx.fillRect(bd.x, base - h, bd.w, h);
+    const rr = rand(bd.seed);
+    for (let wy = base - h + 20; wy < base - 16; wy += 26) for (let wx = bd.x + 10; wx < bd.x + bd.w - 14; wx += 20) {
+      const v = rr();
+      if (v < 0.72) continue;
+      const blink = noise(t * 0.8 + v * 40, bd.seed % 97) > -0.6 ? 1 : 0.2;
+      ctx.fillStyle = color.rgba(v > 0.93 ? T.mag : v > 0.86 ? T.cyan : '#FFD9A8', 0.5 * blink);
+      ctx.fillRect(wx, wy, 8, 12);
+    }
+  }
+  // horizon line
+  const g = ctx.createLinearGradient(0, base, 0, base + 6);
+  g.addColorStop(0, color.rgba(T.mag, 0.9));
+  g.addColorStop(1, color.rgba(T.mag, 0));
+  ctx.fillStyle = g;
+  ctx.fillRect(0, base, W, 6);
+}
+
+// Perspective floor grid rushing toward camera.
+function floor(ctx, W, H, t, horizon, alpha) {
+  ctx.save();
+  ctx.strokeStyle = color.rgba(T.cyan, 0.35 * alpha);
+  ctx.lineWidth = 2;
+  const vp = W / 2;
+  for (let i = -12; i <= 12; i++) {
+    ctx.beginPath();
+    ctx.moveTo(vp + i * 20, horizon);
+    ctx.lineTo(vp + i * 260, H);
+    ctx.stroke();
+  }
+  const speed = (t * 112 / 60 / 2) % 1; // one line every two beats
+  for (let k = 0; k < 14; k++) {
+    const z = (k + speed) / 14;
+    const y = horizon + Math.pow(z, 2.2) * (H - horizon);
+    ctx.globalAlpha = z * alpha;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Neon tubes don't strobe: two short drop-outs, then they hold (≤ 3 flashes/s).
+function flicker(t, start) {
+  const lt = t - start;
+  if (lt < 0) return 0;
+  if (lt < 0.08) return 0.8;
+  if (lt < 0.2) return 0.08;
+  if (lt < 0.27) return 0.6;
+  if (lt < 0.45) return 0.12;
+  return Math.min(1, 0.7 + (lt - 0.45) * 2);
+}
+
+// === VIDEO ===================================================================
+CV.create({
+  width: 1080, height: 1920, fps: 30,
+  background: T.bg,
+  lang: 'zh-CN',
+  // the score designed for this video: night drive: a minor key, sixteenth-note synth bass, an arpeggiated pluck, a big backbeat
+  // a dense score: the bed dips a little deeper under the voice
+  music: {
+    bpm: 112, seed: 5, duck: -14, key: 'F#', mode: 'minor', progression: [0, 5, 2, 6],
+    layers: [
+      { name: 'pad', inst: 'pad', notes: 'chord', pattern: 'X---', vel: 0.07, cutoff: [1100, 2300], attack: 0.25 },
+      { name: 'bass', inst: 'bass', synth: true, octave: -1, notes: ['root', 'root', 'root^', 'root'], pattern: 'XXXXXXXXXXXXXXXX', gate: 0.8, vel: 0.17, cutoff: [220, 500], envDecay: 0.05, from: 0.3 },
+      { name: 'arp', inst: 'pluck', octave: 1, notes: [0, 1, 2, 1, 2, 3, 2, 1], pattern: 'XXXXXXXX', gate: 0.8, vel: 0.08, bright: 0.85, echo: 0.3, from: 0.45 },
+      { name: 'kick', inst: 'kick', pattern: 'X.X.', vel: 0.6, from: 0.5 },
+      { name: 'snare', inst: 'snare', pattern: '.X.X', vel: 0.3, from: 0.5 },
+      { name: 'hats', inst: 'hat', pattern: 'xXxXxXxX', vel: 0.06, from: 0.6 },
+      { name: 'four on the floor', inst: 'kick', pattern: '.X.X', vel: 0.5, from: 0.85 },
+    ],
+    lead: { inst: 'lead', range: [66, 81], rhythm: 'melodic', vel: 0.08, saw: 0.7, cutoff: 3200, echo: 0.4 },
+  },
+  transition: { type: 'glitch', duration: 0.4, tint: T.mag, ease: ease.linear },
+  subtitles: {
+    maxChars: 10,
+    style: {
+      font: `900 68px "Noto Sans SC", sans-serif`, color: T.ink, highlight: T.cyan,
+      box: null, stroke: T.bg, strokeWidth: 14, y: 0.8,
+    },
+  },
+  scenes: [
+    // --- 1. 03:00 — the hook is on screen at frame 0; the voice waits a beat ---
+    {
+      id: 'three', voiceDelay: 0.9, energy: 0.35,
+      // the clock's seconds tick audibly (three quiet ticks, then the voice)
+      sfx: [1, 2].map((k) => ({ at: k, type: 'tick', gain: 0.5 })),
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        skyline(ctx, W, H, t, ease.enter(clamp(t / 1.2)));
+        const secs = Math.floor(t);
+        const clock = `03:00:${String(secs).padStart(2, '0')}`;
+        const out = s.out(0.3, ease.exit, 0.2);
+        ctx.globalAlpha = 1 - out;
+        ctx.font = F(700, 168);
+        ctx.textAlign = 'center';
+        splitText(ctx, clock, W / 2, 660 - out * 40, t, Math.max(0.05, secs));
+        ctx.font = F(500, 30);
+        ctx.fillStyle = T.cyan;
+        ctx.letterSpacing = '8px';
+        ctx.fillText('LOCAL TIME · SHANGHAI', W / 2, 730 - out * 40);
+        ctx.letterSpacing = '0px';
+        ctx.globalAlpha = 1;
+        ctx.font = F(400, 132, T.cjk);
+        ctx.fillStyle = T.ink;
+        fx.charReveal(ctx, '城市还没睡', W / 2, 960, t - s.when('城市', 1.2), { stagger: 0.06, dur: 0.35, rise: 0.2, align: 'center', exit: out });
+      },
+    },
+    // --- 2. 48H / 100 / 01 — three hits, each on its word; earlier ones recede
+    {
+      id: 'count', tail: 0.6, energy: 0.6,
+      sfx: [{ at: '四十八', type: 'click' }, { at: '一百', type: 'click' }, { at: '一个', type: 'click' }],
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        floor(ctx, W, H, s.T, H * 0.7, s.at(0, 0.6));
+        const hits = [
+          { at: s.when('四十八', 0.3), big: '48H', small: 'NON-STOP', col: T.mag, y: 640 },
+          { at: s.when('一百', 1.6), big: '100', small: 'TEAMS', col: T.ink, y: 930 },
+          { at: s.when('一个', 2.8), big: '01', small: 'QUESTION', col: T.cyan, y: 1220 },
+        ];
+        ctx.textAlign = 'left';
+        hits.forEach((h, i) => {
+          if (t < h.at - 0.05) return;
+          const p = ease.swift(clamp((t - h.at + 0.05) / 0.3));
+          const x = lerp(-300, 120, p);
+          // subtract to emphasise: a row dims once the next one lands
+          const next = hits[i + 1];
+          const dim = next ? ease.standard(clamp((t - next.at) / 0.3)) : 0;
+          ctx.globalAlpha = 1 - 0.6 * dim;
+          ctx.font = F(700, 280);
+          splitText(ctx, h.big, x, h.y, t, h.at, h.col);
+          const bw = ctx.measureText(h.big).width;
+          ctx.font = F(500, 40);
+          ctx.fillStyle = T.dim;
+          ctx.letterSpacing = '6px';
+          ctx.fillText(h.small, x + bw + 30, h.y - 30);
+          ctx.letterSpacing = '0px';
+          // a cyan tick bar grows under the newest number
+          ctx.fillStyle = color.rgba(h.col, 0.9);
+          ctx.fillRect(x, h.y + 36, bw * ease.enter(clamp((t - h.at - 0.1) / 0.4)), 6);
+          ctx.globalAlpha = 1;
+        });
+      },
+    },
+    // --- 3. The question: a terminal types, then the question lands (the hit)
+    {
+      id: 'ask', voiceDelay: 1.45, tail: 0.5, energy: 0.72, // the terminal finishes typing before the question
+      transition: { type: 'whip', direction: 'up', duration: 0.45, ease: ease.swift },
+      sfx: [{ at: 0.1, type: 'type' }, { at: 0.55, type: 'type' }, { at: 1.0, type: 'type' }, { at: '你能', type: 'hit', gain: 0.8 }],
+      draw(ctx, s) {
+        const { W, t } = s;
+        const x = 90, y = 420, w = W - 180, h = 420;
+        ctx.strokeStyle = color.rgba(T.cyan, 0.8);
+        ctx.lineWidth = 3;
+        draw.roundRect(ctx, x, y, w, h, 18);
+        ctx.fillStyle = 'rgba(0,229,255,0.05)';
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = color.rgba(T.cyan, 0.8);
+        ctx.fillRect(x, y, w, 56);
+        ctx.font = F(700, 26);
+        ctx.fillStyle = T.bg;
+        ctx.textAlign = 'left';
+        ctx.fillText('night-shift ~ zsh', x + 24, y + 38);
+        ctx.font = F(500, 40);
+        const lines = ['> git init idea', '> npm run build --48h', '> deploy ?'];
+        lines.forEach((ln, i) => {
+          const p = clamp((t - 0.1 - i * 0.45) / 0.4);
+          ctx.fillStyle = i === 2 ? T.mag : T.ink;
+          // caret blinks on the beat
+          const caret = i === 2 && p >= 1 && (s.beat % 1) < 0.5 ? '█' : '';
+          ctx.fillText(fx.typewriter(ln, p) + caret, x + 32, y + 130 + i * 80);
+        });
+        ctx.font = F(400, 150, T.cjk);
+        ctx.textAlign = 'center';
+        const q = s.when('你能', 0.4);
+        ['你能', '造出什么？'].forEach((ln, i) => {
+          ctx.save();
+          const p = ease.swift(clamp((t - q - i * 0.25) / 0.35));
+          ctx.globalAlpha = p;
+          ctx.translate(W / 2, 1110 + i * 180);
+          ctx.scale(lerp(1.25, 1, p), lerp(1.25, 1, p));
+          splitText(ctx, ln, 0, 0, t, q + i * 0.25, i === 1 ? T.mag : T.ink);
+          ctx.restore();
+        });
+      },
+    },
+    // --- 3b. Breath: no voice — the 48-hour clock arms itself on the beat -------
+    {
+      id: 'arm', narration: false, beats: 4, energy: 0.85,
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        floor(ctx, W, H, s.T, H * 0.62, 0.8);
+        const b = (i) => s.onBeat(i);
+        ctx.textAlign = 'center';
+        ctx.font = F(500, 34);
+        ctx.fillStyle = T.cyan;
+        ctx.letterSpacing = '10px';
+        ctx.globalAlpha = ease.enter(clamp((t - b(0)) / 0.3));
+        ctx.fillText('COUNTDOWN ARMED', W / 2, 700);
+        ctx.letterSpacing = '0px';
+        ctx.globalAlpha = 1;
+        // digits decode over two beats, then hold; a soft glow breathes on each beat
+        const dp = clamp((t - b(0)) / (s.beatLen * 2));
+        ctx.font = F(700, 190);
+        ctx.save();
+        ctx.shadowColor = T.mag;
+        ctx.shadowBlur = 18 + 22 * s.pulse(0.14);
+        // (scramble keeps only spaces, so decode '48 00 00' and put the colons back)
+        splitText(ctx, fx.scramble('48 00 00', dp, { chars: '0123456789', seed: 9, rate: 24 }).replace(/ /g, ':'), W / 2, 930, t, b(2), T.ink);
+        ctx.restore();
+        // the charge bar fills in four beat-steps
+        const bx = 140, bw = W - 280, by = 1010;
+        ctx.strokeStyle = color.rgba(T.ink, 0.35);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bx, by, bw, 26);
+        for (let k = 0; k < 4; k++) {
+          const q = ease.swift(clamp((t - b(k)) / 0.2));
+          ctx.fillStyle = k === 3 ? T.mag : T.cyan;
+          ctx.fillRect(bx + 4 + k * (bw - 8) / 4, by + 4, ((bw - 8) / 4 - 6) * q, 18);
+        }
+      },
+    },
+    // --- 4. Wordmark flickers on like a neon sign; the date lands on its word --
+    {
+      id: 'end', tail: 1.4, energy: 0.55,
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        floor(ctx, W, H, s.T * 0.4, H * 0.66, 0.6);
+        ctx.textAlign = 'center';
+        ctx.font = F(700, 150);
+        neon(ctx, 'NIGHT', W / 2, 560, T.mag, flicker(t, 0.1));
+        neon(ctx, 'SHIFT', W / 2, 720, T.cyan, flicker(t, s.onBeat(1)));
+        ctx.font = F(500, 44);
+        ctx.fillStyle = T.ink;
+        ctx.letterSpacing = '14px';
+        ctx.globalAlpha = s.at(0.9, 0.4);
+        ctx.fillText('HACKATHON 2026', W / 2, 820);
+        ctx.letterSpacing = '0px';
+        ctx.font = F(700, 120);
+        const d = s.when('十月', 1.0);
+        ctx.globalAlpha = 1;
+        splitText(ctx, fx.typewriter('10.24', clamp((t - d) / 0.4)), W / 2, 1060, t, d + 0.1, T.ink);
+        ctx.font = F(400, 88, T.cjk);
+        ctx.fillStyle = T.mag;
+        fx.charReveal(ctx, '上海见', W / 2, 1180, t - s.when('上海', 1.6), { stagger: 0.08, dur: 0.3, align: 'center' });
+      },
+    },
+  ],
+  // HUD chrome + CRT texture — persistent across cuts
+  overlay(ctx, g) {
+    const { W, H, T: t, frame } = g;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1.5);
+    ctx.strokeStyle = color.rgba(T.ink, 0.55);
+    ctx.lineWidth = 3;
+    const m = 48, l = 56;
+    [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]].forEach(([x, y, sx, sy]) => {
+      ctx.beginPath();
+      ctx.moveTo(x, y + sy * l); ctx.lineTo(x, y); ctx.lineTo(x + sx * l, y);
+      ctx.stroke();
+    });
+    ctx.font = F(700, 28);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = Math.floor(g.beat) % 2 ? color.rgba(T.mag, 0.25) : T.mag; // blinks with the beat (≈1 Hz)
+    ctx.beginPath(); ctx.arc(m + 22, m + 50, 10, 0, 7); ctx.fill();
+    ctx.fillStyle = T.ink;
+    // <example>
+    ctx.fillText('REC  NIGHT/SHIFT', m + 44, m + 60);
+    // </example>
+    ctx.textAlign = 'right';
+    ctx.fillStyle = T.dim;
+    const tc = (f) => `${String(Math.floor(f / 30 / 60)).padStart(2, '0')}:${String(Math.floor(f / 30) % 60).padStart(2, '0')}:${String(f % 30).padStart(2, '0')}`;
+    ctx.fillText(tc(frame), W - m - 10, m + 60);
+    ctx.restore();
+    draw.vignette(ctx, W, H, 0.5);
+    draw.grain(ctx, frame, 0.05);
+  },
+});
+</script>
+</body>
+</html>

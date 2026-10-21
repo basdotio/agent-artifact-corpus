@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-from pathlib import Path
+from grea.host.paths import Path
 from grea.safe_paths import disjoint, write_bytes_new
 
 

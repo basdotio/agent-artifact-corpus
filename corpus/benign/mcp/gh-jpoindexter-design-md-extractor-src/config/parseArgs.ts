@@ -1,0 +1,97 @@
+import { Command } from 'commander';
+import { resolveSessionConfig } from './sessionConfig.js';
+import type { SessionConfig } from './sessionConfig.js';
+import { defaultViewports, type ViewportConfig } from './viewports.js';
+
+export type ExtractConfig = {
+  url: string;
+  outDir: string;
+  pages: string[];
+  viewports: ViewportConfig[];
+  maxComponents: number;
+  preview: boolean;
+  timeoutMs: number;
+  session?: SessionConfig;
+  sessionWarnings?: string[];
+};
+
+export function parseExtractArgs(argv: string[]): ExtractConfig {
+  const program = new Command();
+  program.exitOverride();
+  program.name('design-md-extractor');
+
+  let config: ExtractConfig | undefined;
+
+  program
+    .command('extract')
+    .argument('<url>')
+    .option('--out <directory>')
+    .option('--pages <urls...>', 'additional URLs to inspect', [])
+    .option(
+      '--viewports <list>',
+      'comma-separated viewport names',
+      'desktop,tablet,mobile',
+    )
+    .option('--max-components <number>', 'maximum component samples', '80')
+    .option('--no-preview', 'skip preview.html')
+    .option('--timeout <ms>', 'page load timeout', '30000')
+    .option(
+      '--cookies <path>',
+      'cookie file (Playwright JSON or Netscape cookies.txt) to inject',
+    )
+    .option(
+      '--user-agent <ua>',
+      'User-Agent to match the browser that obtained the cookies',
+    )
+    .option(
+      '--profile <dir>',
+      'persistent Chrome profile dir; opens a real headed window so you can clear Cloudflare/login once, then reuses the session',
+    )
+    .option(
+      '--headless',
+      'run the persistent --profile session headless (only after the session is established)',
+    )
+    .action((url: string, options: Record<string, unknown>) => {
+      if (!String(options.out ?? '').trim()) {
+        throw new Error('--out is required');
+      }
+
+      const selectedNames = String(options.viewports)
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean);
+      const selectedViewports = defaultViewports.filter((viewport) =>
+        selectedNames.includes(viewport.name),
+      );
+
+      const { session, warnings: sessionWarnings } = resolveSessionConfig({
+        profile: options.profile as string | undefined,
+        cookies: options.cookies as string | undefined,
+        userAgent: options.userAgent as string | undefined,
+        headless: options.headless as boolean | undefined,
+      });
+
+      config = {
+        url: new URL(url).toString(),
+        outDir: String(options.out),
+        pages: Array.isArray(options.pages)
+          ? options.pages.map((page) => new URL(String(page)).toString())
+          : [],
+        viewports:
+          selectedViewports.length > 0 ? selectedViewports : defaultViewports,
+        maxComponents: Number.parseInt(String(options.maxComponents), 10),
+        preview: options.preview !== false,
+        timeoutMs: Number.parseInt(String(options.timeout), 10),
+        session,
+        sessionWarnings,
+      };
+    });
+
+  program.parse(argv, { from: 'user' });
+
+  if (!config) {
+    throw new Error('extract command is required');
+  }
+
+  return config;
+}

@@ -49,6 +49,10 @@ PRICING_LABELS = {
     "time_and_materials": "Time and materials",
     "retainer": "Retainer",
 }
+# Pricing fields (plus package_items or effort, by project_type) must be sourced from the RFP or the user.
+PRICING_ALWAYS = ("currency", "pricing_model", "payment_schedule", "payment_terms", "tax_treatment")
+PRICING_WHEN_SET = ("fees", "governing_law")
+PRICING_SOURCES = {"rfp", "user"}
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SOFFICE_PATHS = [
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",
@@ -74,6 +78,7 @@ def validate(data, schema):
     if errors:
         lines = [f"{'.'.join(map(str, e.path)) or '(root)'}: {e.message}" for e in errors]
         raise SowError("invalid SOW data:\n  " + "\n  ".join(lines))
+    check_pricing_sources(data)
     total = pricing(data)["total"]
     if total < 0:
         raise SowError("invalid SOW data:\n  fees: the total is negative")
@@ -91,6 +96,25 @@ def validate(data, schema):
             DocxImage.from_file(str(path))
         except Exception as e:
             raise SowError(f"invalid SOW data:\n  client_logo_path: not a readable image ({e})") from e
+
+
+def is_set(value):
+    """Empty and whitespace-only text, and empty lists, count as not set."""
+    return bool(value.strip() if isinstance(value, str) else value)
+
+
+def check_pricing_sources(data):
+    """Pricing comes only from the RFP or the user: `default`, `inferred` and no entry all fail."""
+    sources = data.get("_sources", {})
+    fields = ["package_items" if data["project_type"] == "package" else "effort", *PRICING_ALWAYS]
+    fields += [f for f in PRICING_WHEN_SET if is_set(data.get(f))]
+    lines = [
+        f"_sources.{f}: pricing must come from the RFP or the user (got {sources.get(f, 'missing')})"
+        for f in fields
+        if sources.get(f) not in PRICING_SOURCES
+    ]
+    if lines:
+        raise SowError("invalid SOW data:\n  " + "\n  ".join(lines))
 
 
 def pricing(data):

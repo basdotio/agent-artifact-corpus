@@ -1,0 +1,351 @@
+# Local Falcon MCP Server
+
+<p align="center">
+  <img src="https://www.localfalcon.com/uploads/identity/logos/742656_falcon-ai-logo.svg" alt="Local Falcon" width="120" />
+</p>
+
+<p align="center">
+  <strong>An MCP (Model Context Protocol) server for the Local Falcon AI visibility and local search intelligence platform</strong>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@local-falcon/mcp"><img src="https://img.shields.io/npm/v/@local-falcon/mcp.svg" alt="npm version"></a>
+  <a href="https://github.com/local-falcon/mcp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg" alt="Node.js"></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.8-blue.svg" alt="TypeScript"></a>
+  <a href="https://www.localfalcon.com"><img src="https://img.shields.io/badge/Local%20Falcon-Website-red" alt="Local Falcon"></a>
+  <a href="https://docs.localfalcon.com"><img src="https://img.shields.io/badge/API%20Docs-docs.localfalcon.com-green" alt="API Docs"></a>
+</p>
+
+---
+
+## AI Visibility and Local Search Intelligence MCP Server
+
+[Local Falcon](https://www.localfalcon.com/) is an AI visibility and local search intelligence platform that tracks business visibility across AI search platforms, Google Maps, and Apple Maps. This MCP server is implemented in TypeScript using the official MCP SDK and exposes Local Falcon scanning, tracking, reporting, and connected Google Business Profile management to MCP clients.
+
+---
+
+## Features
+
+- **MCP tools** for scanning, reporting, campaign management, competitor analysis, reviews, Falcon Guard monitoring, and Google Business Profile management
+- **Interactive MCP Apps widget** — geo-grid heatmap with Google Maps, colored rank pins, and clickable detail panels
+- **OAuth 2.1** with PKCE, refresh token support, and dynamic client registration
+- **Explicit tool annotations** — `readOnlyHint`, `destructiveHint`, and `openWorldHint` describe each tool's effects and scope
+- **Multi-platform** — Google Maps, Apple Maps, ChatGPT, Gemini, Google AI Overviews, AI Mode
+- **ChatGPT MCP connector compatible** — OAuth scope alignment, widget sandbox domain, structured content parsing
+- **HTML sanitizer** for AI scrape content displayed in the heatmap widget
+
+---
+
+## Prerequisites
+
+- [Node.js](https://nodejs.org/) (install the LTS version)
+
+## Authentication
+
+### OAuth (Recommended)
+
+OAuth is the recommended way to connect to the Local Falcon MCP server. It provides a secure, token-based authentication flow — no API key management required. You'll be redirected to Local Falcon to authorize access, and tokens are handled automatically.
+
+1. Set the URL to `https://mcp.localfalcon.com/mcp`
+2. Set **Authentication** to **OAuth**
+3. Leave **Client ID** and **Client Secret** empty — the server handles client registration automatically
+4. Connect and authorize when redirected to Local Falcon
+
+### Bearer Token
+
+If your MCP client does not support OAuth, you can use your Local Falcon API key as a Bearer token.
+
+1. Set the URL to `https://mcp.localfalcon.com/mcp`
+2. Set **Authentication** to **Bearer Token**
+3. Enter your Local Falcon API key as the token value
+
+### API Key via Query String
+
+If your MCP client does not support OAuth or Bearer Token authentication, you can pass your API key directly in the URL:
+
+```
+https://mcp.localfalcon.com/mcp?local_falcon_api_key=INSERT_YOUR_API_KEY_HERE
+```
+
+---
+
+## Running via Remote (HTTP)
+
+For MCP clients that use `mcp-remote` (all platforms):
+
+```json
+{
+  "mcpServers": {
+    "local-falcon-mcp": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://mcp.localfalcon.com/mcp?local_falcon_api_key=INSERT_YOUR_API_KEY_HERE"
+      ]
+    }
+  }
+}
+```
+
+## Running via Remote (SSE — Legacy)
+
+**The /sse endpoint is considered legacy and will be removed in a future version. Use the /mcp endpoint instead.**
+
+```json
+{
+  "mcpServers": {
+    "local-falcon-mcp": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://mcp.localfalcon.com/sse?local_falcon_api_key=INSERT_YOUR_API_KEY_HERE"
+      ]
+    }
+  }
+}
+```
+
+## Running via STDIO
+
+**One-click install:** Download the latest `.mcpb` bundle from [Releases](https://github.com/local-falcon/mcp/releases) and open it in Claude Desktop. For manual installation, follow the steps below.
+
+For local installations, first install the package:
+
+```bash
+mkdir lf-mcp
+cd lf-mcp
+npm i @local-falcon/mcp
+```
+
+For MacOS/Unix:
+```json
+{
+  "mcpServers": {
+    "local-falcon-mcp": {
+      "command": "node",
+      "args": ["/Users/YOUR_USERNAME/lf-mcp/node_modules/@local-falcon/mcp/dist/index.js"],
+      "env": {
+        "LOCAL_FALCON_API_KEY": "INSERT_YOUR_API_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+For Windows:
+```json
+{
+  "mcpServers": {
+    "local-falcon-mcp": {
+      "command": "node",
+      "args": ["C:\\Users\\YOUR_USERNAME\\lf-mcp\\node_modules\\@local-falcon\\mcp\\dist\\index.js"],
+      "env": {
+        "LOCAL_FALCON_API_KEY": "INSERT_YOUR_API_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+---
+
+## MCP Apps
+
+The server includes an interactive [MCP Apps](https://modelcontextprotocol.io/specification/2025-03-26/server/utilities/apps) widget that renders inside supported AI clients (Claude, ChatGPT).
+
+### Geo-Grid Heatmap
+
+When you call `getLocalFalconReport`, clients that support MCP Apps will display an interactive geo-grid heatmap widget featuring:
+
+- **Metrics bar** — keyword, business name, grid size, ARP, ATRP, SoLV, scan date
+- **Google Maps** — full interactive map with colored rank pins (green = rank 1, red = rank 9+)
+- **Detail panel** — click any pin to see the full business listing at that grid point with ratings, reviews, categories, and AI scrape content
+- **HTML sanitizer** — AI scrape content is sanitized with an allowlist of safe tags, attributes, and image domains before rendering
+
+The widget is built as a single-file HTML application using Vite and served as an MCP App resource.
+
+---
+
+## Deployment profiles
+
+The same `https://mcp.localfalcon.com/mcp` endpoint automatically exposes **57 tools** to authenticated sessions identified as ChatGPT and **60 tools** to other MCP clients. Profile selection reuses the existing request-source attribution in `requestSource.ts`; there is no separate endpoint, deployment profile variable, or additional client detector. The profile is bound to the authenticated session, and recognized ChatGPT API calls retain `request_source=chatgpt` downstream.
+
+Session profiles are bound after authentication and ownership checks. Established ChatGPT sessions retain their attribution when later signals are missing or weaker. A later normal-to-ChatGPT change requires a fresh initialization before more tools can run. Recovery retains the profile while its credential-bound record remains in memory (up to 24 hours, bounded by capacity); after a process restart or record expiry/eviction, clients must initialize again. Legacy SSE waits for initialization before registering its tools.
+
+The ChatGPT profile does not register `getLocalFalconGoogleBusinessLocations`, `getLocalFalconRankingAtCoordinate`, or `getLocalFalconKeywordAtCoordinate`, because these On-Demand tools record separately billable usage. The normal profile and On-Demand API retain those capabilities. `getLocalFalconGrid` remains available in both profiles, as does `searchForLocalFalconBusinessLocation`, which costs exactly **2 existing credits per successful search**.
+
+The ChatGPT profile is an existing-account integration. It may use existing account entitlements and credits, but must not buy credits, trigger Auto Recharge, initiate checkout, change subscriptions, promote upgrades, or cause separate monetary usage charges. A neutral informational link to [plans and entitlements](https://www.localfalcon.com/pricing) is allowed. ChatGPT responses normalize Local Falcon failures, remove transactional account copy/links, and exclude Knowledge Base article IDs `15`, `16`, `23`, `37`, `57`, and `81` from search and direct retrieval. Normal-profile KB access is unchanged; articles `28`, `50`, and `58` remain available.
+
+### ChatGPT deployment checklist
+
+1. Deploy the reviewed MCP code to the existing service and use the same `/mcp` URL for ChatGPT and other clients.
+2. Verify authenticated `tools/list` with ChatGPT-attributed and other-client sessions against the expected profiles. Confirm that the three excluded tools cannot be called directly from ChatGPT sessions.
+3. **Submission gate:** Pia must deploy and verify the remaining scheduled-campaign no-Auto-Recharge protection in LF.api/LF.internal before final OpenAI submission. MCP response filtering and profile selection do not themselves prove backend charge isolation.
+4. Shaun/Pia must review and deploy the separate LF.app OAuth entitlement wording changes. They are not deployed with the MCP service.
+
+These are deployment instructions, not a record of production changes. The implementation work does not change production infrastructure or deploy either application.
+
+## Tools
+
+All tools explicitly declare the three MCP annotation hints. Hints describe behavior; they are not a substitute for authorization or confirmation of consequential actions.
+
+| Annotation | Meaning in this server |
+|---|---|
+| `readOnlyHint: true` | Retrieves data without changing state or consuming credits/billable usage. |
+| `destructiveHint: true` | Spends credits, enables future credit use, or overwrites/removes existing state. Reversibility alone does not make an update non-destructive. |
+| `openWorldHint: false` | Interacts with bounded account data, connected GBP reads, the fixed Local Falcon KB, or local grid arithmetic. Data's historical origin does not determine this hint. |
+| `openWorldHint: true` | Searches open public systems, schedules/runs public scans, or publishes/edits a public GBP. |
+
+### Scan Reports
+* **listLocalFalconScanReports**: Lists all existing scan reports. Check here first before running new scans to avoid duplicates.
+* **getLocalFalconReport**: Retrieves a specific scan report by report key (e.g., `https://www.localfalcon.com/reports/view/XXXXX`). Renders an interactive geo-grid heatmap in MCP Apps-capable clients.
+* **runLocalFalconScan**: Runs a new scan at the specified coordinates to get ranking data for a business.
+
+### Campaign Management
+* **listLocalFalconCampaignReports**: Lists all campaign reports. Campaigns track rankings at scale with scheduled scans.
+* **getLocalFalconCampaignReport**: Retrieves a specific campaign report (e.g., `https://www.localfalcon.com/campaigns/view/XXXXX`).
+* **createLocalFalconCampaign**: Creates a new campaign with scheduled recurring scans.
+* **updateLocalFalconCampaign**: Edits an existing campaign — settings, locations or keywords.
+* **runLocalFalconCampaign**: Manually triggers a campaign to run immediately.
+* **pauseLocalFalconCampaign**: Pauses a campaign's scheduled runs.
+* **resumeLocalFalconCampaign**: Resumes a paused campaign.
+* **reactivateLocalFalconCampaign**: Reactivates a campaign deactivated due to insufficient credits.
+
+### Reviews Analysis
+* **listLocalFalconReviewsAnalysisReports**: Lists all Reviews Analysis reports with AI-powered review insights.
+* **getLocalFalconReviewsAnalysisReport**: Retrieves a specific Reviews Analysis report.
+
+### Falcon Guard (GBP Monitoring)
+* **listLocalFalconGuardReports**: Lists Falcon Guard reports for monitored locations.
+* **getLocalFalconGuardReport**: Retrieves a specific Falcon Guard report by place_id.
+* **addLocationsToFalconGuard**: Adds locations to Falcon Guard protection.
+* **pauseFalconGuardProtection**: Pauses protection for specified locations.
+* **resumeFalconGuardProtection**: Resumes protection for paused locations.
+* **removeFalconGuardProtection**: Removes locations from Falcon Guard entirely.
+
+### Trend Reports
+* **listLocalFalconTrendReports**: Lists auto-generated trend reports showing ranking changes over time.
+* **getLocalFalconTrendReport**: Retrieves a specific trend report (e.g., `https://www.localfalcon.com/reports/trend/view/XXXXX`).
+
+### Auto Scans
+* **listLocalFalconAutoScans**: Lists individually scheduled automatic scans (not campaign-based).
+
+### Location Reports
+* **listLocalFalconLocationReports**: Lists auto-generated reports aggregating scans for specific locations.
+* **getLocalFalconLocationReport**: Retrieves a specific location report (e.g., `https://www.localfalcon.com/reports/location/view/XXXXX`).
+
+### Keyword Reports
+* **listLocalFalconKeywordReports**: Lists auto-generated reports aggregating scans for specific keywords.
+* **getLocalFalconKeywordReport**: Retrieves a specific keyword report (e.g., `https://www.localfalcon.com/reports/keyword/view/XXXXX`).
+
+### Competitor Reports
+* **getLocalFalconCompetitorReports**: Lists auto-generated competitor analysis reports.
+* **getLocalFalconCompetitorReport**: Retrieves a specific competitor report (e.g., `https://www.localfalcon.com/reports/competitor/view/XXXXX`).
+
+### Location Management
+* **listAllLocalFalconLocations**: Lists all business locations saved in your account.
+* **listLocalFalconLocationGroups**: Lists saved location groups in the account.
+* **getLocalFalconGoogleBusinessLocations**: Searches Google for business listings to find Place IDs.
+* **searchForLocalFalconBusinessLocation**: Searches for business locations on Google or Apple platforms. Costs 2 existing Local Falcon credits per successful search.
+* **saveLocalFalconBusinessLocationToAccount**: Saves a business location to your account.
+
+### On-Demand Tools
+* **getLocalFalconGrid**: Helper tool that generates grid coordinates for single-point checks.
+* **getLocalFalconRankingAtCoordinate**: Single-point ranking check at one coordinate.
+* **getLocalFalconKeywordAtCoordinate**: Single-point keyword search at one coordinate.
+
+### Knowledge Base
+* **searchLocalFalconKnowledgeBase**: Searches the Local Falcon Knowledge Base for help articles, how-to guides, and platform documentation.
+* **getLocalFalconKnowledgeBaseArticle**: Retrieves the full content of a specific Knowledge Base article by ID.
+
+### Account
+* **viewLocalFalconAccountInformation**: Retrieves account info including user, credits, and subscription details.
+
+---
+
+### Manage Google Business Profile
+
+Act on the **live** Google Business Profile behind a location, not on Local Falcon report data. All require the location to be connected to a Google account in your Local Falcon dashboard.
+
+* **getLocalFalconGbpProfile**: Retrieves the live profile — name, address, phone, categories, hours, website, open status.
+* **getLocalFalconGbpGoogleUpdates**: Retrieves Google's pending version of the profile, for spotting unapplied Google-suggested edits.
+* **getLocalFalconGbpVerificationStatus**: Checks Google verification state. Unverified or suspended profiles rank poorly or not at all.
+* **getLocalFalconGbpAttributes**: Lists attributes currently set on the profile.
+* **getLocalFalconGbpAvailableAttributes**: Lists attributes Google permits for a category, with expected value types.
+* **listLocalFalconGbpServices**: Lists services on the profile, with descriptions and prices.
+* **getLocalFalconGbpPerformanceMetrics**: Google's own engagement metrics — impressions, calls, website clicks, direction requests.
+* **listLocalFalconGbpPosts**: Lists profile posts (updates, events, offers, alerts).
+* **listLocalFalconGbpMedia**: Lists owner-uploaded photos and videos, filterable by category.
+* **listLocalFalconGbpCustomerMedia**: Lists customer-uploaded photos and videos.
+* **listLocalFalconGbpReviews**: Lists Google reviews and owner replies. Filter by rating or unanswered.
+* **listLocalFalconGbpActionLinks**: Lists action links (booking, ordering, appointments).
+* **getLocalFalconGbpAvailableActionTypes**: Lists action link types the profile supports.
+* **searchLocalFalconGbpCategories**: Searches Google's category taxonomy for `gcid:` identifiers.
+* **searchLocalFalconGbpChains**: Searches Google's chain directory.
+* **manageLocalFalconGbpPosts**: Creates, updates or deletes a post. Writes live to Google.
+* **manageLocalFalconGbpMedia**: Adds, recategorises or deletes owner media. Writes live to Google.
+* **manageLocalFalconGbpReviewReplies**: Publishes or deletes public replies to reviews, singly or up to 50 at once.
+* **manageLocalFalconGbpActionLinks**: Adds, updates or removes action links.
+* **manageLocalFalconGbpServices**: Adds, removes or wholesale-replaces services. `replace` overwrites the entire list.
+* **updateLocalFalconGbpProfile**: Updates core details, hours, open status or attributes. `CLOSED_PERMANENTLY` is effectively irreversible.
+
+## Skills
+
+This repo includes two AI skills under `skills/`:
+
+| Skill | Path | Description |
+|---|---|---|
+| **Local Falcon MCP** | `skills/local-falcon-mcp/` | MCP tool usage guidance for the ChatGPT profile |
+| **Local Visibility** | `skills/local-visibility-skill/` | General AI visibility & local SEO strategy — platform analysis, metrics interpretation, prompt templates |
+
+---
+
+## For Developers
+
+> **Note:** End users only need [Node.js](https://nodejs.org/) (LTS) and npm to install and run this server. The instructions below are for contributors and developers working on the source code.
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) 18+ (LTS recommended)
+- npm (included with Node.js)
+
+### Build
+
+```bash
+npm install
+npm run build
+```
+
+The build compiles TypeScript to `dist/` and builds the MCP Apps UI widget to `dist/ui/`.
+
+### Run MCP Inspector
+
+```bash
+npm run inspector
+```
+
+### Run MCP Server
+
+```bash
+npm run start             # STDIO mode (default)
+npm run start:sse         # SSE mode with OAuth
+npm run start:http        # HTTP mode with OAuth
+npm run start:HTTPAndSSE  # Both SSE and HTTP
+```
+
+
+---
+
+
+## License
+
+MIT
+
+---
+
+## Acknowledgments
+- [Local Falcon API Documentation](https://docs.localfalcon.com)
+- [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol)
+- [@modelcontextprotocol/sdk](https://www.npmjs.com/package/@modelcontextprotocol/sdk) (Anthropic MCP SDK)
+- [@modelcontextprotocol/ext-apps](https://www.npmjs.com/package/@modelcontextprotocol/ext-apps) (MCP Apps SDK)

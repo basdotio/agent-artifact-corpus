@@ -1,0 +1,637 @@
+"""Round-trip tests for the workbuddy adapter (JSONL + workbuddy.db).
+
+Fixture mirrors the real WorkBuddy 5.3.13 store layout verified on
+2026-08-16: ~/.workbuddy/projects/<slug>/<conversationId>.jsonl events plus
+a SQLite workbuddy.db ``sessions`` table (epoch-ms timestamps). All paths
+live inside the tempdir so tests never touch the real ~/.workbuddy.
+"""
+
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+import time
+import unittest
+import uuid
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from adapters.workbuddy import WorkBuddyAdapter  # noqa: E402
+
+USER_ID = "c5a8ab07-321f-4d75-9336-b130b422582c"
+SID = "aaaaaaaa-1111-2222-3333-444444444444"
+TS_MS = 1786804436000  # epoch ms
+
+
+def make_db(home: Path, cwd: str, title: str = "Fixture chat"):
+    home.mkdir(parents=True, exist_ok=True)
+    db = home / "workbuddy.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE sessions ("
+        " id TEXT PRIMARY KEY, cwd TEXT NOT NULL, user_id TEXT NOT NULL,"
+        " title TEXT, custom_title TEXT, status TEXT NOT NULL,"
+        " created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,"
+        " deleted_at INTEGER, is_playground INTEGER NOT NULL,"
+        " source_mode TEXT, is_background_automation INTEGER, mode TEXT,"
+        " model TEXT, expert_id TEXT, expert_locale TEXT,"
+        " expert_runtime_identity TEXT, expert_marketplace TEXT,"
+        " permission_mode TEXT, last_activity_at INTEGER,"
+        " use_sandbox_cli INTEGER, project_id TEXT, plugin_context_json TEXT,"
+        " last_user_prompt_expert_selection TEXT)")
+    conn.execute(
+        "INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+        "?,?,?,?,?)",
+        (SID, cwd, USER_ID, title, None, "completed", TS_MS, TS_MS + 5000,
+         None, 0, "design", None, "design", "custom-local:deepseek-v4-flash",
+         None, None, None, None, None, TS_MS + 5000, None, None, None, None))
+    conn.commit()
+    conn.close()
+
+
+def write_jsonl(home: Path, cwd: str, events: list[dict]) -> Path:
+    slug = WorkBuddyAdapter.slugify(cwd)
+    p = home / "projects" / slug / f"{SID}.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(json.dumps(e, ensure_ascii=False)
+                           for e in events) + "\n", encoding="utf-8")
+    return p
+
+
+def make_fixture(home: Path, cwd: str) -> Path:
+    """Full local store: db row + jsonl with every event type."""
+    make_db(home, cwd)
+    events = [
+        {"timestamp": TS_MS, "type": "ai-title", "aiTitle": "Fixture chat",
+         "sessionId": SID, "cwd": cwd},
+        {"id": str(uuid.uuid4()), "timestamp": TS_MS + 1000, "type": "message",
+         "role": "user", "status": "completed",
+         "content": [{"type": "input_text", "text": "hello workbuddy"}],
+         "sessionId": SID, "cwd": cwd},
+        {"id": str(uuid.uuid4()), "timestamp": TS_MS + 2000,
+         "type": "reasoning", "content": [],
+         "rawContent": [{"type": "reasoning_text", "text": "thinking hard"}],
+         "sessionId": SID, "cwd": cwd},
+        {"id": str(uuid.uuid4()), "timestamp": TS_MS + 3000, "type": "message",
+         "role": "assistant", "status": "completed",
+         "content": [{"type": "output_text", "text": "hi there"}],
+         "sessionId": SID, "cwd": cwd},
+        {"id": str(uuid.uuid4()), "timestamp": TS_MS + 4000,
+         "type": "function_call", "callId": "call_abc", "name": "Skill",
+         "arguments": '{"skill": "x"}', "sessionId": SID, "cwd": cwd},
+        {"id": str(uuid.uuid4()), "timestamp": TS_MS + 5000,
+         "type": "function_call_result", "callId": "call_abc", "name": "Skill",
+         "status": "completed", "output": {"type": "text", "text": "done"},
+         "sessionId": SID, "cwd": cwd},
+    ]
+    write_jsonl(home, cwd, events)
+    return home
+
+
+def new_adapter(td: Path, cwd: str | None = None):
+    """Adapter whose store lives inside the tempdir."""
+    home = td / ".workbuddy"
+    home.mkdir(parents=True, exist_ok=True)
+    return WorkBuddyAdapter(home), home, cwd or (td / "WorkProject").as_posix()
+
+
+class WorkBuddyReadTest(unittest.TestCase):
+    def test_read_full_session(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            cwd = (td / "WorkProject").as_posix()
+            home = make_fixture(td / ".workbuddy", cwd)
+            a = WorkBuddyAdapter(home)
+            sessions = a.read_sessions()
+            self.assertEqual(len(sessions), 1)
+            s = sessions[0]
+            self.assertEqual(s["id"], SID)
+            self.assertEqual(s["title"], "Fixture chat")
+            # the local model column is never read into the canonical
+            # payload (LOCAL_ONLY_SESSION_FIELDS, decision record 2026.10.06.1)
+            self.assertNotIn("model", s)
+            self.assertEqual(s["cwd"], cwd)
+            self.assertAlmostEqual(s["started_at"], TS_MS / 1000.0, places=3)
+            msgs = s["messages"]
+            self.assertEqual(len(msgs), 5)
+            self.assertEqual(msgs[0]["role"], "user")
+            self.assertEqual(msgs[0]["content"], "hello workbuddy")
+            self.assertEqual(msgs[1]["role"], "assistant")
+            self.assertEqual(msgs[1]["reasoning"], "thinking hard")
+            self.assertEqual(msgs[2]["content"], "hi there")
+            self.assertEqual(msgs[3]["role"], "assistant")
+            self.assertEqual(msgs[3]["tool_name"], "Skill")
+            self.assertEqual(msgs[3]["tool_call_id"], "call_abc")
+            self.assertEqual(msgs[4]["role"], "tool")
+            self.assertEqual(msgs[4]["content"], "done")
+            for m in msgs:
+                self.assertEqual(m["session_id"], SID)
+
+    def test_read_empty_store(self):
+        with tempfile.TemporaryDirectory() as td:
+            a, home, _ = new_adapter(Path(td))
+            self.assertEqual(a.read_sessions(), [])
+            self.assertEqual(a.status()["sessions"], 0)
+
+
+class WorkBuddyWriteTest(unittest.TestCase):
+    def _canonical(self, cwd: str, sid: str = SID,
+                   title: str = "Written chat") -> dict:
+        return {
+            "id": sid,
+            "started_at": TS_MS / 1000.0,
+            "title": title,
+            "cwd": cwd,
+            "messages": [
+                {"session_id": sid, "role": "user",
+                 "content": "from server", "timestamp": (TS_MS + 1000) / 1000.0},
+                {"session_id": sid, "role": "assistant",
+                 "content": "server reply",
+                 "timestamp": (TS_MS + 2000) / 1000.0},
+                {"session_id": sid, "role": "tool",
+                 "content": "tool out", "tool_name": "search",
+                 "tool_call_id": "call_zzz",
+                 "timestamp": (TS_MS + 3000) / 1000.0},
+            ],
+        }
+
+    def test_write_creates_store(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            a, home, cwd = new_adapter(td)
+            stats = a.write_sessions([self._canonical(cwd)])
+            self.assertEqual(stats["imported"], 1)
+            self.assertEqual(stats["new_messages"], 3)
+            slug = WorkBuddyAdapter.slugify(cwd)
+            proj = home / "projects" / slug
+            self.assertTrue(proj.is_dir())
+            # the cwd directory itself is auto-created (WorkBuddy requires it)
+            self.assertTrue(Path(cwd).is_dir())
+            jf = proj / f"{SID}.jsonl"
+            self.assertTrue(jf.exists())
+            events = [json.loads(l) for l in
+                      jf.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(events[0]["type"], "ai-title")
+            self.assertEqual(events[0]["aiTitle"], "Written chat")
+            kinds = [e["type"] for e in events]
+            self.assertEqual(kinds.count("message"), 2)
+            self.assertEqual(kinds.count("function_call_result"), 1)
+            conn = sqlite3.connect(home / "workbuddy.db")
+            row = conn.execute("SELECT id, cwd, user_id, title, status, "
+                               "created_at, is_playground FROM sessions "
+                               "WHERE id=?", (SID,)).fetchone()
+            conn.close()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[1], cwd)
+            self.assertEqual(row[3], "Written chat")
+            self.assertEqual(row[5], TS_MS)
+
+    def test_roundtrip(self):
+        with tempfile.TemporaryDirectory() as td:
+            a, home, cwd = new_adapter(Path(td))
+            a.write_sessions([self._canonical(cwd)])
+            sessions = a.read_sessions()
+            self.assertEqual(len(sessions), 1)
+            s = sessions[0]
+            self.assertEqual(s["title"], "Written chat")
+            self.assertEqual(len(s["messages"]), 3)
+            roles = [m["role"] for m in s["messages"]]
+            self.assertEqual(roles, ["user", "assistant", "tool"])
+
+    def test_append_to_existing_session(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            cwd = (td / "WorkProject").as_posix()
+            home = make_fixture(td / ".workbuddy", cwd)
+            a = WorkBuddyAdapter(home)
+            # same id; 3 messages matching the fixture's (role, ts) dedupe
+            # keys (user@+1000, reasoning@+2000 -> assistant, result@+5000
+            # -> tool) plus one genuinely new message
+            c = self._canonical(cwd, title="Fixture chat")
+            c["messages"] = [
+                {"session_id": SID, "role": "user",
+                 "content": "hello workbuddy",
+                 "timestamp": (TS_MS + 1000) / 1000.0},
+                {"session_id": SID, "role": "assistant",
+                 "content": "",
+                 "timestamp": (TS_MS + 2000) / 1000.0},
+                {"session_id": f"workbuddy:{SID}", "role": "tool",
+                 "content": "done", "tool_name": "Skill",
+                 "tool_call_id": "call_abc",
+                 "timestamp": (TS_MS + 5000) / 1000.0},
+                {"session_id": SID, "role": "assistant",
+                 "content": "one more", "timestamp": (TS_MS + 6000) / 1000.0},
+            ]
+            stats = a.write_sessions([c])
+            self.assertEqual(stats["imported"], 0)
+            self.assertEqual(stats["updated"], 1)
+            self.assertEqual(stats["new_messages"], 1)
+            self.assertEqual(stats["duplicates"], 3)
+            sessions = a.read_sessions()
+            self.assertEqual(len(sessions[0]["messages"]), 6)
+
+
+    def test_upsert_preserves_local_model(self):
+        """A pulled session carrying a model must not overwrite the local
+        model column: the model is WorkBuddy's own choice and never synced
+        (LOCAL_ONLY_SESSION_FIELDS, decision record 2026.10.06.1)."""
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            cwd = (td / "WorkProject").as_posix()
+            home = make_fixture(td / ".workbuddy", cwd)
+            a = WorkBuddyAdapter(home)
+            c = self._canonical(cwd, title="Fixture chat")
+            c["model"] = "pulled-from-a-peer"
+            a.write_sessions([c])
+            conn = sqlite3.connect(home / "workbuddy.db")
+            row = conn.execute("SELECT model FROM sessions WHERE id=?",
+                               (SID,)).fetchone()
+            conn.close()
+            self.assertEqual(row[0], "custom-local:deepseek-v4-flash")
+
+    def test_upsert_preserves_local_cwd(self):
+        """B1 regression: a workbuddy-owned session's row cwd must survive a
+        pull whose server copy carries a divergent cwd (the 2026-08-25
+        split-session incident: the pull repointed the row at a stale copy
+        and stranded newer messages)."""
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            cwd_a = (td / "ProjectA").as_posix()
+            cwd_b = (td / "ProjectB").as_posix()
+            home = make_fixture(td / ".workbuddy", cwd_a)
+            a = WorkBuddyAdapter(home)
+            c = self._canonical(cwd_b, title="Pulled with divergent cwd")
+            stats = a.write_sessions([c])
+            self.assertEqual(stats["updated"], 1)
+            conn = sqlite3.connect(home / "workbuddy.db")
+            row = conn.execute("SELECT cwd FROM sessions WHERE id=?",
+                               (SID,)).fetchone()
+            conn.close()
+            self.assertEqual(row[0], cwd_a)  # local cwd kept
+
+    def test_upsert_moves_foreign_session_cwd(self):
+        """B1: foreign sessions still follow the pulled cwd (no local
+        truth — the pulled path IS their storage location)."""
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            cwd_a = (td / "ProjectA").as_posix()
+            cwd_b = (td / "ProjectB").as_posix()
+            home = make_fixture(td / ".workbuddy", cwd_a)
+            a = WorkBuddyAdapter(home)
+            c = self._canonical(cwd_b, title="Foreign pull")
+            c["agent_type"] = "hermes"
+            a.write_sessions([c])
+            conn = sqlite3.connect(home / "workbuddy.db")
+            row = conn.execute("SELECT cwd FROM sessions WHERE id=?",
+                               (SID,)).fetchone()
+            conn.close()
+            self.assertEqual(row[0], cwd_b)
+
+    def test_read_merges_split_session_copies(self):
+        """B2: a session split across project dirs reads as one merged,
+        timestamp-ordered stream — the stale row-cwd copy plus a newer
+        live file elsewhere must not lose the newer events."""
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            cwd_a = (td / "ProjectA").as_posix()
+            cwd_b = (td / "ProjectB").as_posix()
+            home = make_fixture(td / ".workbuddy", cwd_a)
+            # newer events exist only in a second copy (the live file)
+            extra = [
+                {"id": str(uuid.uuid4()), "timestamp": TS_MS + 6000,
+                 "type": "message", "role": "user", "status": "completed",
+                 "content": [{"type": "input_text", "text": "round two"}],
+                 "sessionId": SID, "cwd": cwd_b},
+                {"id": str(uuid.uuid4()), "timestamp": TS_MS + 7000,
+                 "type": "message", "role": "assistant", "status": "completed",
+                 "content": [{"type": "output_text", "text": "second answer"}],
+                 "sessionId": SID, "cwd": cwd_b},
+            ]
+            write_jsonl(home, cwd_b, extra)
+            a = WorkBuddyAdapter(home)
+            s = a.read_sessions()[0]
+            msgs = s["messages"]
+            self.assertEqual(len(msgs), 7)  # 5 fixture + 2 newer
+            self.assertEqual(msgs[-1]["role"], "assistant")
+            self.assertEqual(msgs[-1]["content"], "second answer")
+            timestamps = [m["timestamp"] for m in msgs]
+            self.assertEqual(timestamps, sorted(timestamps))
+
+    def test_write_sessions_stamps_real_last_activity(self):
+        """A pulled session must land with its newest message time, not the
+        sync instant: WorkBuddy's list orders by COALESCE(updated_at,
+        created_at), so `now` made every pulled session read as "just now"
+        and collapse onto one timestamp (decision record 2026.09.13.3)."""
+        with tempfile.TemporaryDirectory() as td:
+            a, home, cwd = new_adapter(Path(td))
+            a.write_sessions([self._canonical(cwd)])
+            newest_ms = TS_MS + 3000          # newest message in the fixture
+            conn = sqlite3.connect(str(home / "workbuddy.db"))
+            row = conn.execute("SELECT created_at, updated_at, last_activity_at"
+                               " FROM sessions WHERE id=?", (SID,)).fetchone()
+            conn.close()
+            self.assertEqual(row[1], newest_ms)                  # updated_at
+            self.assertEqual(row[2], newest_ms)                  # last_activity
+            self.assertLess(row[2], int(time.time() * 1000) - 60_000)
+
+            # the server-derived value wins when the pull carries it (the
+            # server computes it from the stored messages); it is clamped to
+            # the session's own start so updated_at never precedes created_at
+            pulled = dict(self._canonical(cwd), id="foreign-1",
+                          agent_type="hermes",
+                          last_activity_at=(TS_MS + 600_000) / 1000.0,
+                          messages=[])
+            a.write_sessions([pulled])
+            conn = sqlite3.connect(str(home / "workbuddy.db"))
+            row = conn.execute("SELECT updated_at, last_activity_at FROM sessions"
+                               " WHERE id=?", ("foreign-1",)).fetchone()
+            conn.close()
+            self.assertEqual(row, (TS_MS + 600_000, TS_MS + 600_000))
+
+    def test_write_sessions_falls_back_to_now_without_timestamps(self):
+        with tempfile.TemporaryDirectory() as td:
+            a, home, cwd = new_adapter(Path(td))
+            a.write_sessions([{"id": "no-ts", "cwd": cwd, "title": "x",
+                               "messages": []}])
+            conn = sqlite3.connect(str(home / "workbuddy.db"))
+            row = conn.execute("SELECT updated_at FROM sessions WHERE id=?",
+                               ("no-ts",)).fetchone()
+            conn.close()
+            self.assertGreater(row[0], int(time.time() * 1000) - 60_000)
+
+    def test_foreign_id_kept(self):
+        """A codex:-prefixed session must keep its bare id locally."""
+        with tempfile.TemporaryDirectory() as td:
+            a, home, cwd = new_adapter(Path(td))
+            fid = "11111111-1111-1111-1111-111111111111"
+            c = self._canonical(cwd, sid=fid)
+            c["id"] = f"codex:{fid}"
+            for m in c["messages"]:
+                m["session_id"] = c["id"]
+            stats = a.write_sessions([c])
+            self.assertEqual(stats["imported"], 1)
+            slug = WorkBuddyAdapter.slugify(cwd)
+            self.assertTrue((home / "projects" / slug / f"{fid}.jsonl").exists())
+            sessions = a.read_sessions()
+            self.assertEqual(sessions[0]["id"], fid)  # foreign id unchanged
+
+
+class WorkBuddyProjectsTest(unittest.TestCase):
+    """workbuddy.db ``workspaces`` <-> canonical projects (shared pool)."""
+
+    SERVER = {
+        "id": "p_srv", "slug": "srv-proj", "name": "Server Name",
+        "description": None, "created_at": 1_700_000_000.0, "archived": 0,
+    }
+
+    def _adapter(self, td: Path):
+        home = td / ".workbuddy"
+        home.mkdir(parents=True, exist_ok=True)
+        return WorkBuddyAdapter(home), home
+
+    def _use_workspace(self, home: Path, path: str, ts_ms: int):
+        """One workspace row, as the desktop app writes it."""
+        Path(path).mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(home / "workbuddy.db"))
+        conn.execute("CREATE TABLE IF NOT EXISTS workspaces ("
+                     " path TEXT PRIMARY KEY, last_opened_at INTEGER NOT NULL)")
+        conn.execute("INSERT OR REPLACE INTO workspaces VALUES (?,?)",
+                     (path, ts_ms))
+        conn.commit()
+        conn.close()
+
+    def _pulled(self, *paths: str, pid: str = "p_srv",
+                name: str = "Server Name", slug: str = "srv-proj") -> dict:
+        p = dict(self.SERVER, id=pid, name=name, slug=slug,
+                 primary_path=paths[0])
+        p["folders"] = [{"path": x, "label": None,
+                         "is_primary": 1 if i == 0 else 0,
+                         "added_at": 1_700_000_000} for i, x in enumerate(paths)]
+        return p
+
+    def test_read_projects_mints_stable_path_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            a, home = self._adapter(td)
+            a_path, b_path = str(td / "ProjA"), str(td / "ProjB")
+            self._use_workspace(home, a_path, TS_MS)
+            self._use_workspace(home, b_path, TS_MS + 60_000)
+
+            projects = a.read_projects()
+            self.assertEqual({p["primary_path"] for p in projects},
+                             {a_path, b_path})
+            by_path = {p["primary_path"]: p for p in projects}
+            self.assertEqual(by_path[a_path]["name"], "ProjA")
+            self.assertEqual(by_path[b_path]["name"], "ProjB")
+            self.assertAlmostEqual(by_path[a_path]["created_at"],
+                                   TS_MS / 1000.0, places=3)
+            self.assertTrue(all(p["id"].startswith("wb_") for p in projects))
+            # the path flattening is unique per directory: two projects can
+            # never collide onto one slug (and thus merge server-side)
+            self.assertNotEqual(by_path[a_path]["slug"], by_path[b_path]["slug"])
+            self.assertEqual(by_path[a_path]["folders"],
+                             [{"path": a_path, "label": None, "is_primary": 1,
+                               "added_at": by_path[a_path]["created_at"]}])
+            # newest workspace first
+            self.assertEqual(projects[0]["primary_path"], b_path)
+            # ids survive a restart (the sidecar is the local id registry)
+            self.assertEqual([p["id"] for p in WorkBuddyAdapter(home).read_projects()],
+                             [p["id"] for p in projects])
+
+    def test_write_projects_adds_workspaces_and_read_adopts_server_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            a, home = self._adapter(td)
+            a_path, b_path = str(td / "ProjA"), str(td / "ProjB")
+
+            stats = a.write_projects([self._pulled(a_path, b_path)])
+            self.assertEqual(stats["imported"], 2)
+            conn = sqlite3.connect(str(home / "workbuddy.db"))
+            rows = dict(conn.execute("SELECT path, last_opened_at FROM workspaces"))
+            conn.close()
+            self.assertEqual(rows, {a_path: 1_700_000_000_000,
+                                    b_path: 1_700_000_000_000})
+            self.assertTrue(Path(a_path).is_dir())   # WorkBuddy needs the dir
+
+            # one project for the whole server project -- the second path must
+            # not mint a second one -- and the SERVER's name survives (a
+            # derived basename would read as a local edit and overwrite it)
+            projects = a.read_projects()
+            self.assertEqual(len(projects), 1)
+            self.assertEqual(projects[0]["id"], "p_srv")
+            self.assertEqual(projects[0]["name"], "Server Name")
+            self.assertEqual(projects[0]["slug"], "srv-proj")
+            self.assertEqual(projects[0]["created_at"], 1_700_000_000.0)
+            self.assertEqual([f["path"] for f in projects[0]["folders"]],
+                             [a_path, b_path])
+
+    def test_write_projects_keeps_existing_rows_and_local_only_paths(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            a, home = self._adapter(td)
+            known, local_only = str(td / "Known"), str(td / "LocalOnly")
+            self._use_workspace(home, known, TS_MS)      # opened by the user
+            self._use_workspace(home, local_only, TS_MS + 1000)
+
+            stats = a.write_projects([self._pulled(known)])
+            # an existing row is never re-dated: last_opened_at is the app's
+            # own clock, and importing cannot invent a second row for it
+            self.assertEqual(stats["imported"], 0)
+            conn = sqlite3.connect(str(home / "workbuddy.db"))
+            rows = dict(conn.execute("SELECT path, last_opened_at FROM workspaces"))
+            conn.close()
+            self.assertEqual(rows, {known: TS_MS, local_only: TS_MS + 1000})
+            # the pulled path carries its server identity; the path with no
+            # server project keeps a minted one
+            by_path = {p["primary_path"]: p for p in a.read_projects()}
+            self.assertEqual(by_path[known]["id"], "p_srv")
+            self.assertTrue(by_path[local_only]["id"].startswith("wb_"))
+            # a second pull of the same project changes nothing (idempotent)
+            self.assertEqual(a.write_projects([self._pulled(known)])["imported"], 0)
+
+    def test_read_projects_skips_root_workspaces(self):
+        """A drive root / user home stays a WorkBuddy workspace but is never a
+        project (no id minted, no sidecar key), and a root-shaped project from
+        the server is neither materialised nor recorded."""
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            a, home = self._adapter(td)
+            proj = str(td / "Proj")
+            self._use_workspace(home, proj, TS_MS)
+            self._use_workspace(home, str(Path.home()), TS_MS + 1000)
+
+            projects = a.read_projects()
+            self.assertEqual([p["primary_path"] for p in projects], [proj])
+            # stable across a restart (nothing root-shaped reached the sidecar)
+            self.assertEqual(
+                [p["id"] for p in WorkBuddyAdapter(home).read_projects()],
+                [p["id"] for p in projects])
+
+            for root in (str(Path(td).anchor), str(Path.home())):
+                root_only = self._pulled(root, pid="p_root", name="Root",
+                                         slug="root")
+                self.assertEqual(a.write_projects([root_only]),
+                                 {"imported": 0}, root)
+
+            conn = sqlite3.connect(str(home / "workbuddy.db"))
+            rows = sorted(r[0] for r in conn.execute("SELECT path FROM workspaces"))
+            conn.close()
+            self.assertEqual(rows, sorted([proj, str(Path.home())]))
+            self.assertEqual([p["primary_path"] for p in a.read_projects()],
+                             [proj])
+
+    def test_read_projects_empty_store(self):
+        with tempfile.TemporaryDirectory() as td:
+            a, _ = self._adapter(Path(td))
+            self.assertEqual(a.read_projects(), [])
+            self.assertEqual(a.write_projects([]), {"imported": 0})
+
+
+class WorkBuddySlugTest(unittest.TestCase):
+    def test_slugify(self):
+        self.assertEqual(WorkBuddyAdapter.slugify(r"F:\OpenCode\agentctxsync"),
+                         "f-OpenCode-agentctxsync")
+        self.assertEqual(WorkBuddyAdapter.slugify(r"C:\Users\rong\HermesSyncTest"),
+                         "c-Users-rong-HermesSyncTest")
+        self.assertEqual(WorkBuddyAdapter.slugify("/home/user/proj"),
+                         "home-user-proj")
+        self.assertEqual(WorkBuddyAdapter.slugify("C:/Users/a/b"),
+                         "c-Users-a-b")
+        self.assertEqual(WorkBuddyAdapter.slugify("E:\\"), "e")
+        self.assertEqual(WorkBuddyAdapter.slugify("E:/"), "e")
+
+
+class WorkBuddyDiscoverTest(unittest.TestCase):
+    """Home discovery across two app generations (see ``discover()``).
+
+    WorkBuddy was renamed with 5.6 and with it the app home: current builds
+    (appName "WorkBuddy", install dir ``Programs\\WorkBuddy``) write
+    ``~/.workbuddy``, the retired "WorkBuddy AI" builds (<=5.5.x, install dir
+    ``Programs\\WorkBuddyAI``) wrote ``~/.workbuddy-ai``. An upgraded machine
+    keeps both dirs, each with its own store, so name order alone is not a
+    valid tie-break -- ``discover()`` follows the app's own ``last-launch.json``.
+    """
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.root = Path(self.td.name)
+        self.addCleanup(self.td.cleanup)
+        self.home_patch = mock.patch.object(Path, "home",
+                                            return_value=self.root)
+        self.home_patch.start()
+        self.addCleanup(self.home_patch.stop)
+        # neutralise any dev-machine WORKBUDDY_HOME
+        self.env_patch = mock.patch.dict(os.environ,
+                                         {"WORKBUDDY_HOME": ""}, clear=False)
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
+
+    def _home(self, name: str, launch: str | None = None) -> Path:
+        home = self.root / name
+        home.mkdir(parents=True, exist_ok=True)
+        if launch:
+            (home / "last-launch.json").write_text(
+                json.dumps({"version": "5.5.2", "timestamp": launch}),
+                encoding="utf-8")
+        return home
+
+    def _discover(self) -> Path | None:
+        return WorkBuddyAdapter().discover()
+
+    def test_only_current_layout(self):
+        self._home(".workbuddy")
+        self.assertEqual(self._discover(), self.root / ".workbuddy")
+
+    def test_only_legacy_layout(self):
+        self._home(".workbuddy-ai")
+        self.assertEqual(self._discover(), self.root / ".workbuddy-ai")
+
+    def test_missing_home_discover_fails(self):
+        self.assertIsNone(self._discover())
+
+    def test_newer_launch_prefers_current_layout(self):
+        self._home(".workbuddy-ai", "2026-09-15T20:49:57.423Z")
+        self._home(".workbuddy", "2026-10-16T11:01:33.860Z")
+        self.assertEqual(self._discover(), self.root / ".workbuddy")
+
+    def test_newer_legacy_launch_wins(self):
+        # a machine still running the "WorkBuddy AI" build: .workbuddy is the
+        # stale home of the even older era and must NOT be picked
+        self._home(".workbuddy", "2026-08-19T02:01:00.000Z")
+        self._home(".workbuddy-ai", "2026-09-22T19:10:00.000Z")
+        self.assertEqual(self._discover(), self.root / ".workbuddy-ai")
+
+    def test_missing_markers_prefer_current_layout(self):
+        self._home(".workbuddy-ai")
+        self._home(".workbuddy")
+        self.assertEqual(self._discover(), self.root / ".workbuddy")
+
+    def test_env_override(self):
+        self._home(".workbuddy")
+        custom = self.root / "custom-home"
+        custom.mkdir()
+        env_patch = mock.patch.dict(os.environ,
+                                    {"WORKBUDDY_HOME": str(custom)},
+                                    clear=False)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        self.assertEqual(self._discover(), custom)
+
+    def test_env_override_missing_dir_disables_discovery(self):
+        # an explicit override that no longer exists is a config error: it
+        # silences discovery ("workbuddy home not found") instead of silently
+        # syncing a different generation than the one the operator named
+        self._home(".workbuddy")
+        env_patch = mock.patch.dict(
+            os.environ,
+            {"WORKBUDDY_HOME": str(self.root / "nope")}, clear=False)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        self.assertIsNone(self._discover())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -3,7 +3,7 @@
 Loads explicitly selected Python modules (trusted local code), never auto-imports assets.
 """
 import argparse,importlib.util,json,sys
-from pathlib import Path
+from grea.host.paths import Path
 
 def load(path):
     sys.dont_write_bytecode=True

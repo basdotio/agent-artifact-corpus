@@ -8,7 +8,7 @@ import stat
 import tempfile
 from pathlib import Path
 
-from .client import LeanWarpCloud
+from .client import Interface, LeanWarpCloud
 from .endpoints import api_origin
 from .session import SessionError
 
@@ -21,10 +21,10 @@ def credentials_path() -> Path:
     )
 
 
-def load_client() -> LeanWarpCloud:
+def load_client(*, interface: Interface = "python") -> LeanWarpCloud:
     key = os.environ.get("LEANWARP_API_KEY")
     if key is not None:
-        return LeanWarpCloud(key)
+        return LeanWarpCloud(key, interface=interface)
     path = credentials_path()
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -53,13 +53,20 @@ def load_client() -> LeanWarpCloud:
         raise SessionError(
             f"{path} is not a valid credential file; run `leanwarp auth login` to replace it"
         ) from error
-    return LeanWarpCloud(key)
+    return LeanWarpCloud(key, interface=interface)
+
+
+def signed_in() -> bool:
+    """Whether a key is configured, valid or not; load_client reports any problem."""
+    return "LEANWARP_API_KEY" in os.environ or credentials_path().exists()
 
 
 def save_credentials(api_key: str) -> None:
-    # Validate and authenticate before replacing a working configuration.
-    with LeanWarpCloud(api_key) as cloud:
-        cloud.versions()
+    # Validate and authenticate before replacing a working configuration. Only
+    # `leanwarp auth login` saves credentials.
+    with LeanWarpCloud(api_key, interface="cli") as cloud:
+        # The catalog is public, so it cannot prove the key; the account can.
+        cloud.account()
     path = credentials_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.parent.is_symlink() or path.is_symlink():

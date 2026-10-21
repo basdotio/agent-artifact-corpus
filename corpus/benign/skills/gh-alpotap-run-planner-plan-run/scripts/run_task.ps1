@@ -276,13 +276,35 @@ $sessionStarted = $false
 # acceptEdits only auto-approves file edits. Headless mode has nobody to click "approve" on
 # shell commands, so the agent is pre-authorised to run them. git push is denied: tasks commit
 # locally. --tools keeps only the tools a task uses (35K -> 11K tokens of context on every turn),
-# and --strict-mcp-config with no config loads no MCP servers.
+# and --strict-mcp-config loads only the MCP servers named below (none by default).
+#
+# The task's **Tools:** line is the planner's list of what the task needs. Every tool on it is
+# pre-approved, because headless nobody can approve a call and an unapproved one is refused.
+# "Browser" is a preset: the browser MCP server in runs/browser-mcp.json, loaded for this task
+# only, since its tool definitions are re-sent on every turn of every task that has them.
 $common = @("--model", $Model, "--permission-mode", "acceptEdits", "--strict-mcp-config")
 if ($Effort) { $common += @("--effort", $Effort) }
-if ($Tools -ne "default") { $common += @("--tools", $Tools) }
+$allowed = @("Bash", "PowerShell")
+if ($Tools -ne "default") {
+  $builtin = @()
+  foreach ($t in ($Tools -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+    if ($t -ieq "Browser") {
+      $browserCfg = Join-Path $Repo "runs\browser-mcp.json"
+      if (-not (Test-Path $browserCfg)) {
+        Write-Host "Task $Task asks for the Browser tools, but $browserCfg does not exist. Copy it from the run-planner templates." -ForegroundColor Red
+        exit 2
+      }
+      $common += @("--mcp-config", $browserCfg)
+      $allowed += "mcp__browser"
+    } elseif ($t -like "mcp__*") { $allowed += $t }
+    else { $builtin += $t; $allowed += $t }
+  }
+  # A line that names only MCP tools (or only Browser) still gets the lean built-in set.
+  if ($builtin.Count -eq 0) { $builtin = @("Bash", "PowerShell", "Read", "Edit", "Write", "Grep", "Glob") }
+  $common += @("--tools", ($builtin -join ","))
+}
 foreach ($d in $addDirs) { $common += @("--add-dir", $d) }
-$common += @("--allowedTools", "Bash", "PowerShell",
-             "--disallowedTools", "Bash(git push *)", "PowerShell(git push *)")
+$common += @("--allowedTools") + $allowed + @("--disallowedTools", "Bash(git push *)", "PowerShell(git push *)")
 
 function Format-Tool($name, $inp) {
   $detail = ""

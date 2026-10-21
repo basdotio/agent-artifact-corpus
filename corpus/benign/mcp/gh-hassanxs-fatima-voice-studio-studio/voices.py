@@ -40,9 +40,12 @@ class Voices:
             meta = folder / "voice.json"
             if folder.is_dir() and meta.exists() and (folder / "clip.wav").exists():
                 try:
-                    out.append(json.loads(meta.read_text(encoding="utf-8")))
+                    v = json.loads(meta.read_text(encoding="utf-8"))
                 except ValueError:
                     continue
+                if "cut_end" not in (v.get("report") or {"cut_end": None}):  # prepared before that check existed
+                    self._recheck(v, folder)
+                out.append(v)
         return sorted(out, key=lambda v: v["name"].lower())
 
     def get(self, ref: str) -> dict | None:
@@ -56,6 +59,19 @@ class Voices:
     def clip(self, ref: str) -> Path | None:
         v = self.get(ref)
         return self.root / v["id"] / "clip.wav" if v else None
+
+    def _recheck(self, v: dict, folder: Path) -> None:
+        """Run the clip report again on a voice prepared by an older version (once), so its card warns about a clip
+        cut off mid-word."""
+        try:
+            report = audio.clip_report(*audio.load(folder / "clip.wav"))
+        except Exception:
+            return
+        v["report"], v["advice"] = report, advice(report)
+        try:
+            self._save(v)
+        except OSError:
+            pass
 
     def _save(self, v: dict) -> None:
         p = self._meta_path(v["id"])
@@ -165,15 +181,14 @@ class Voices:
 
 
 def _cut_point(a: np.ndarray, sr: int) -> int:
-    """Where to end a long clip: the quietest moment between 12 s and MAX_SECONDS (so no word is cut)."""
-    lo, hi = int(12 * sr), int(MAX_SECONDS * sr)
-    hop = int(0.02 * sr)
-    window = a[lo:hi]
-    n = len(window) // hop
-    if n < 2:
-        return hi
-    energy = (window[: n * hop].reshape(n, hop) ** 2).mean(axis=1)
-    return lo + int(np.argmin(energy)) * hop + hop // 2
+    """Where to end a long clip: a real pause between 12 s and MAX_SECONDS, so no word is cut (see
+    media.pause_near), else the quietest moment there."""
+    from .media import frame_db, pause_near
+    db = frame_db(a, sr, 0.01)
+    if len(db) < 2:
+        return int(MAX_SECONDS * sr)
+    k = pause_near(db, min(1600, len(db) - 1), reach_s=4.0)  # around 16 s, so between 12 and 20 s
+    return int(min(max(int((k + 0.5) * 0.01 * sr), 12 * sr), MAX_SECONDS * sr))
 
 
 def advice(report: dict) -> list[str]:
@@ -185,6 +200,9 @@ def advice(report: dict) -> list[str]:
         tips.append("A bit short. 6–15 seconds of speech usually copies the voice more closely.")
     if report["snr_db"] < 20:
         tips.append("There's noticeable background noise. Try “Reduce background noise”, or use a cleaner recording.")
+    if report.get("cut_end"):
+        tips.append("The clip ends in the middle of a word. Some voice models then say the rest of that word before "
+                    "your script. Use Edit to pick a range that ends at a pause.")
     if report["clipped"]:
         tips.append("The recording is distorted (too loud when it was made). A cleaner clip will sound better.")
     return tips

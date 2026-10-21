@@ -52,6 +52,28 @@ S2 Pro doesn't run on the older-driver CUDA engine or the CPU engine: on **Setup
 (or *AMD / Intel · Vulkan*). If the engine part is missing (after switching engines, for example), click **Get it**
 on S2 Pro's card on the Models page.
 
+### OmniVoice: "engine part is missing" or "couldn't start"
+
+If the engine part is missing (after switching engines, for example), click **Get it** on OmniVoice's card on the
+Models page. If it couldn't start, the details are in `omnivoice.log` (**Settings → Folders → Logs**).
+
+### Chatterbox, VoxCPM2, CosyVoice 3, Kokoro or MOSS-TTS Nano: "engine part" or "pronunciation part is missing"
+
+Click **Get it** on the model's card on the Models page: it fetches audio.cpp for your engine, or eSpeak NG for
+Kokoro. If a part couldn't start, the details are in `audiocpp.log` (**Settings → Folders → Logs**).
+
+### An extra word or sound at the very start of a take
+
+If a take starts with a bit of a word that isn't in your script (often the end of the last word in the voice's clip),
+the voice's clip ends in the middle of a word, and the voice model finished that word before reading. The voice's
+card says "The clip ends in the middle of a word". Open **Edit** on the voice and set **to (seconds)** a little
+later, where the speaker pauses, then make the take again.
+
+### "Kokoro speaks only with its own voices"
+
+Kokoro can't copy a voice from a clip. Pick one of the voices marked **Kokoro** on the Voices page, or another voice
+model for the voice you chose.
+
 ### The NVIDIA engine won't start, or Setup says the driver is too old
 
 Update your graphics driver from [nvidia.com](https://www.nvidia.com/Download/index.aspx) or the NVIDIA app, then

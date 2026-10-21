@@ -124,9 +124,19 @@ class Store:
 
     def save(self, b: dict) -> None:
         meta = self.folder(b) / "batch.json"
-        tmp = meta.with_suffix(".tmp")
-        tmp.write_text(json.dumps(b, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(meta)
+        data = json.dumps(b, indent=2, ensure_ascii=False)
+        # Windows briefly refuses a file another save, a virus scanner or the search indexer has open: try again
+        tmp = meta.with_name(f"batch.{uuid.uuid4().hex[:8]}.tmp")  # its own name: two saves at once don't collide
+        tmp.write_text(data, encoding="utf-8")
+        for attempt in range(10):
+            try:
+                tmp.replace(meta)
+                return
+            except PermissionError:
+                if attempt == 9:
+                    tmp.unlink(missing_ok=True)
+                    raise
+                time.sleep(0.05 * (attempt + 1))
 
     def _unique(self, name: str) -> str:
         candidate, i = name, 2

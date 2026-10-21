@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>全球最繁忙的机场（video-gaga · Data Globe）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700;900&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=block" rel="stylesheet">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.min.js"}}</script>
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script type="module">
+/* =============================================================================
+   DATA GLOBE — a data story told on a dotted night globe (three.js).
+   Navy cartographic field, land as a field of dots, one warm accent (amber =
+   the data). The globe turns to each place as it is named, arcs draw between
+   the places that matter, and the numbers live in a calm 2D panel on the left.
+   Camera continuity: consecutive scenes cut on the beat while the globe keeps
+   turning, so the world never "jumps". One music-only beat holds the ranking.
+   ============================================================================= */
+import * as THREE from 'three';
+const { ease, clamp, lerp, fx, draw, color } = CV;
+
+// === THEME ===================================================================
+const T = {
+  field: '#06101D',
+  field2: '#0C1D33',     // glow behind the globe
+  ocean: '#0A1A2D',
+  land: '#A7BEDA',       // cool neutral: geography
+  grid: '#2F4B70',
+  amber: '#FFB547',      // the data
+  ink: '#E9EEF5',
+  dim: '#7E92AC',
+  serif: '"Noto Serif SC", "Songti SC", serif',
+  sans: '"Noto Sans SC", "PingFang SC", sans-serif',
+  mono: '"IBM Plex Mono", ui-monospace, monospace',
+};
+const F = (w, px, fam = T.sans) => `${w} ${px}px ${fam}`;
+const W = 1920, H = 1080, L = 140;
+const RAD = Math.PI / 180;
+
+// === EXAMPLE: data (ACI World, 2023 passenger traffic, preliminary) ==========
+// Passengers in 万人次 (10,000s). ATL 104.65M · DXB 86.99M · DFW 81.76M · LHR 79.18M · HND 78.72M
+const TOP5 = [
+  { code: 'ATL', name: '亚特兰大', v: 10465 },
+  { code: 'DXB', name: '迪拜', v: 8699 },
+  { code: 'DFW', name: '达拉斯-沃斯堡', v: 8176 },
+  { code: 'LHR', name: '伦敦希思罗', v: 7918 },
+  { code: 'HND', name: '东京羽田', v: 7872 },
+];
+const CITY = {
+  ATL: { name: '亚特兰大', lon: -84.43, lat: 33.64, rank: 1, v: 10465 },
+  DXB: { name: '迪拜', lon: 55.36, lat: 25.25, rank: 2, v: 8699 },
+  LHR: { name: '伦敦', lon: -0.45, lat: 51.47, rank: 4, v: 7918 },
+  HND: { name: '东京', lon: 139.78, lat: 35.55, rank: 5, v: 7872 },
+};
+const DAILY = 10465 / 365; // ≈ 28.7 万人次 / 天
+const SOURCE = '数据：ACI World 2023 年全球机场旅客吞吐量（初步）';
+
+// === KIT: land mask ==========================================================
+// coarse continent outlines [lon, lat] (stylised, not survey-grade)
+const LAND = [
+  // North America
+  [[-166,68],[-156,71],[-141,70],[-128,70],[-110,68],[-95,68],[-94,60],[-88,56],[-80,52],[-79,56],[-77,60],[-78,63],[-70,62],[-64,60],[-60,55],[-56,52],[-60,47],[-66,44],[-70,42],[-74,40],[-76,35],[-81,31],[-80,25],[-82,27],[-84,30],[-89,30],[-94,29],[-97,26],[-97,21],[-94,18],[-90,21],[-87,21],[-88,16],[-84,15],[-83,10],[-79,9],[-77,8],[-80,7],[-85,10],[-87,13],[-92,14],[-96,16],[-105,20],[-106,23],[-110,23],[-112,29],[-114,31],[-117,32],[-121,35],[-124,40],[-124,46],[-125,49],[-131,54],[-136,58],[-146,61],[-152,59],[-158,57],[-165,54],[-162,59],[-166,62]],
+  // Greenland, Baffin, Arctic islands
+  [[-55,82],[-30,83],[-20,80],[-18,75],[-22,70],[-30,68],[-40,65],[-43,60],[-48,61],[-52,65],[-54,70],[-58,76],[-68,78],[-60,81]],
+  [[-80,73],[-70,72],[-62,67],[-65,63],[-73,64],[-80,69]],
+  [[-120,77],[-95,80],[-80,80],[-90,74],[-105,72],[-118,72]],
+  // South America
+  [[-77,8],[-72,12],[-64,10],[-60,8],[-52,5],[-50,0],[-44,-2],[-35,-5],[-35,-9],[-39,-14],[-40,-20],[-44,-23],[-48,-26],[-53,-34],[-58,-35],[-57,-38],[-62,-39],[-65,-42],[-65,-46],[-69,-51],[-68,-55],[-72,-53],[-75,-47],[-73,-40],[-71,-30],[-70,-18],[-76,-14],[-81,-5],[-80,0],[-78,3]],
+  // Eurasia
+  [[-9,37],[-9,43],[-2,43.5],[-1,46],[-4.5,48],[2,51],[5,53],[8,54],[9,57],[10.5,57.5],[11,56],[14,54],[19,54.5],[21,57],[24,59.5],[30,60],[32,65],[35,67],[41,67],[44,68.5],[55,68.5],[60,69.5],[68,69],[73,72],[80,73],[88,75],[100,77],[110,74],[113,73.5],[128,72],[140,72.5],[150,71],[160,70],[170,70],[180,68.5],[180,65],[173,61],[164,60],[162,55],[156,51],[156,57],[150,59],[143,59],[137,54],[140,48],[135,43],[130,42.5],[129,35],[126,35],[126,38],[125,40],[121,40],[118,39],[122,37],[120,35],[121,31],[122,30],[120,26],[116,23],[110,21],[108,21.5],[106,18],[109,12],[105,8.5],[103,10.5],[100,13],[99,8],[101,3],[104,1.3],[98,8],[98,16],[94,17],[92,22],[90,22],[87,21],[85,19.5],[80,15],[80,10],[77,8],[73,16],[73,21],[70,22],[67,24.5],[62,25],[57,25.5],[56,27],[52,27.5],[50,30],[48,29],[50,26],[51,24.5],[55,25],[56,24],[59,22.5],[55,17],[52,16],[45,13],[43,13],[39,21],[35,28],[34.5,29.5],[35,33],[36,36],[30,36.5],[27,37],[26,40],[29,41],[26,40.5],[23,40],[23,37],[21,38],[20,40],[19,42],[13.6,45.6],[12.3,45.2],[7,43.5],[3,43.3],[3,42],[0.5,40.5],[-0.5,38],[-2,36.7],[-5.5,36]],
+  // Scandinavia, Italy, British Isles, Iceland
+  [[5,58],[5,62],[10,64],[15,68],[20,70],[28,71],[31,70],[29,69],[25,66],[22,65.5],[18,62.5],[17,60.5],[19,60],[16,57],[14,55.5],[12,56],[11,58.5],[8,58]],
+  [[7.5,44],[8.8,44.4],[10.2,43.9],[12.3,41.7],[15.6,40],[15.6,38],[16.1,38],[17.2,39],[18.5,40.2],[16.9,41.1],[14,42.5],[12.4,44.3],[12.3,45.4],[13.7,45.7]],
+  [[-5.5,50],[1.5,51],[1.7,53],[0,54],[-2,56],[-1.8,57.6],[-3,58.6],[-5,58.5],[-6,57],[-5,55],[-3,54.5],[-3,53.4],[-4.5,53],[-5,51.7]],
+  [[-10,51.5],[-6,52],[-6,54],[-7.5,55.3],[-10,54]],
+  [[-24,65.5],[-14,65.5],[-14,64],[-22,63.5]],
+  // Africa, Madagascar
+  [[-17,21],[-17,15],[-15,11],[-13,8],[-8,4.5],[-3,5],[2,6],[5,4.5],[9,4],[9.5,1],[9,-2],[12,-6],[13,-12],[12,-17],[15,-27],[18,-34.5],[20,-35],[26,-34],[31,-29.5],[33,-26],[35.5,-24],[35,-20],[40.5,-15],[40,-10],[39,-5],[41,-1],[43,1],[48,4.5],[51,11.5],[44,11],[43,12.5],[39,16],[37,21],[35,24],[32.5,30],[30,31],[25,31.6],[20,30.5],[15,32],[11,33.5],[10,37],[3,36.8],[-2,35.5],[-6,35.8],[-10,30],[-13,27]],
+  [[44,-25],[47,-25],[50,-15],[49.5,-12],[47,-15],[44,-20]],
+  // Japan, Philippines, Sri Lanka, Indonesia, New Guinea
+  [[129.7,33],[131,31],[132,33.5],[135,33.5],[137,34.5],[140,35],[141,38],[142,41],[144,42.5],[145.5,43.5],[142,45.5],[140,43],[140,41],[139.5,40],[139.5,38],[137,37],[136,35.7],[133,35.5],[131,34.5]],
+  [[120,18.5],[122,18.5],[124,13],[126,7],[126,10],[122,7],[119,10],[120,15]],
+  [[79.8,6],[80,9.8],[81.9,7.5],[81.5,6.1]],
+  [[95,5.5],[98,4],[104,-1],[106,-6],[102,-4],[99,0],[95,3]],
+  [[105,-6],[114,-7],[114,-8.5],[106,-7.5]],
+  [[109,2],[115,6.5],[119,6],[118,1],[116,-4],[111,-3.5],[109,-1]],
+  [[131,-1],[141,-2.5],[147,-6],[150,-10.5],[142,-9],[138,-8],[132,-4]],
+  // Australia, New Zealand
+  [[113.5,-22],[114,-26],[115,-34],[118,-35],[123,-34],[129,-31.5],[135,-35],[138,-34],[140,-38],[146,-39],[150,-37.5],[153,-31],[153,-25],[149,-20],[146,-17],[145,-14.5],[142.5,-10.7],[141.5,-13],[141,-17],[136,-15],[137,-12],[132,-11],[130,-13],[127,-14],[125,-16],[122,-18],[121,-19.5],[117,-21]],
+  [[172.7,-34.5],[178.5,-37.6],[176.8,-40],[174.7,-41.3],[173,-41],[174,-39.5]],
+  [[172.5,-40.5],[174,-41.6],[171,-44.5],[168,-46.6],[166.5,-45.8],[170.5,-42.5]],
+];
+function inPoly(lon, lat, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+const isLand = (lon, lat) => lat < -68 || LAND.some((p) => inPoly(lon, lat, p));
+
+// lon/lat (deg) → unit vector; lon 0 faces +z (the camera) when the globe is unrotated
+function vec(lon, lat, r = 1) {
+  const a = lon * RAD, b = lat * RAD;
+  return new THREE.Vector3(Math.cos(b) * Math.sin(a) * r, Math.sin(b) * r, Math.cos(b) * Math.cos(a) * r);
+}
+
+// === KIT: the globe (built once) =============================================
+const gl = CV.three(THREE, { width: W, height: H, toneMapping: false });
+const pxScale = gl.canvas.height / H;
+const world = new THREE.Scene();
+const cam = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
+const globe = new THREE.Group();
+world.add(globe);
+
+// ocean sphere (also hides the back half of the dots)
+const ocean = new THREE.Mesh(new THREE.SphereGeometry(0.996, 96, 64), new THREE.MeshBasicMaterial({ color: T.ocean, transparent: true }));
+globe.add(ocean);
+
+// atmosphere: a soft fresnel rim behind the sphere
+const atmo = new THREE.Mesh(new THREE.SphereGeometry(1.09, 64, 48), new THREE.ShaderMaterial({
+  uniforms: { uColor: { value: new THREE.Color('#4A86D8') }, uAlpha: { value: 1 } },
+  vertexShader: 'varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: 'uniform vec3 uColor; uniform float uAlpha; varying vec3 vN; void main(){ float i = pow(clamp(0.62 - dot(vN, vec3(0.0, 0.0, 1.0)), 0.0, 1.0), 3.2) * 0.55 * uAlpha; gl_FragColor = vec4(uColor * i, i); }',
+  // premultiplied one/one: adds light *and* alpha, so it glows over the transparent 2D backdrop
+  side: THREE.BackSide, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor, transparent: true, depthWrite: false,
+}));
+globe.add(atmo);
+// explicit draw order: transparent objects are otherwise sorted by bounding-sphere centre,
+// and the land cloud's centre is not the globe's — the ocean would paint over the dots
+atmo.renderOrder = 0; ocean.renderOrder = 1;
+
+// land dots: a Fibonacci sphere masked by the outlines, revealed top → bottom
+const dotPos = [], dotSeed = [];
+{
+  const N = 16000, ga = Math.PI * (3 - Math.sqrt(5)), r = CV.rand(11);
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (2 * (i + 0.5)) / N, rr = Math.sqrt(1 - y * y), phi = i * ga;
+    const x = Math.cos(phi) * rr, z = Math.sin(phi) * rr;
+    const lat = Math.asin(y) / RAD, lon = Math.atan2(x, z) / RAD;
+    if (!isLand(lon, lat)) continue;
+    dotPos.push(x * 1.002, y * 1.002, z * 1.002);
+    dotSeed.push(r());
+  }
+}
+const dotGeo = new THREE.BufferGeometry();
+dotGeo.setAttribute('position', new THREE.Float32BufferAttribute(dotPos, 3));
+dotGeo.setAttribute('aSeed', new THREE.Float32BufferAttribute(dotSeed, 1));
+const dotMat = new THREE.ShaderMaterial({
+  uniforms: { uReveal: { value: 1 }, uSize: { value: 5 * pxScale }, uColor: { value: new THREE.Color(T.land) }, uAlpha: { value: 1 } },
+  vertexShader: `attribute float aSeed; uniform float uReveal; uniform float uSize; varying float vA;
+    void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+      float h = 1.0 - (position.y + 1.0) * 0.5;               // 0 at the north pole
+      vA = smoothstep(0.0, 0.12, uReveal * 1.25 - h - aSeed * 0.12);
+      gl_PointSize = uSize * (4.6 / -mv.z); }`,
+  fragmentShader: `uniform vec3 uColor; uniform float uAlpha; varying float vA;
+    void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.32, d) * vA * uAlpha; if (a < 0.01) discard; gl_FragColor = vec4(uColor, a * 0.95); }`,
+  transparent: true, depthWrite: false,
+});
+const dots = new THREE.Points(dotGeo, dotMat);
+dots.renderOrder = 3;
+globe.add(dots);
+
+// graticule every 30°
+const gratPts = [];
+for (let lon = -180; lon < 180; lon += 30) for (let lat = -84; lat < 84; lat += 4) gratPts.push(vec(lon, lat, 1.001), vec(lon, lat + 4, 1.001));
+for (let lat = -60; lat <= 60; lat += 30) for (let lon = -180; lon < 180; lon += 4) gratPts.push(vec(lon, lat, 1.001), vec(lon + 4, lat, 1.001));
+const gratMat = new THREE.LineBasicMaterial({ color: T.grid, transparent: true, opacity: 0.4, depthWrite: false });
+const grat = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(gratPts), gratMat);
+grat.renderOrder = 2;
+globe.add(grat);
+
+// === EXAMPLE: city markers and arcs ==========================================
+// city markers: an amber dot + an expanding ring, flat on the surface
+const amber = new THREE.Color(T.amber);
+const markers = {};
+for (const [code, c] of Object.entries(CITY)) {
+  const n = vec(c.lon, c.lat, 1.004);
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(code === 'ATL' ? 0.017 : 0.013, 32), new THREE.MeshBasicMaterial({ color: amber, transparent: true, depthWrite: false }));
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.02, 0.026, 48), new THREE.MeshBasicMaterial({ color: amber, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+  for (const m of [dot, ring]) { m.position.copy(n); m.lookAt(n.clone().multiplyScalar(2)); m.renderOrder = 5; globe.add(m); }
+  markers[code] = { dot, ring };
+}
+
+// great-circle arcs from ATL, lifted with distance, drawn on with drawRange
+const SEG = 100, RADIAL = 6;
+const arcs = ['LHR', 'DXB', 'HND'].map((to) => {
+  const a = vec(CITY.ATL.lon, CITY.ATL.lat), b = vec(CITY[to].lon, CITY[to].lat);
+  const ang = a.angleTo(b), pts = [];
+  for (let i = 0; i <= 64; i++) {
+    const u = i / 64;
+    const p = new THREE.Vector3().copy(a).multiplyScalar(Math.sin((1 - u) * ang) / Math.sin(ang)).add(b.clone().multiplyScalar(Math.sin(u * ang) / Math.sin(ang)));
+    pts.push(p.multiplyScalar(1.004 + (0.04 + (0.16 * ang) / Math.PI) * Math.sin(Math.PI * u)));
+  }
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, SEG, 0.0055, RADIAL, false), new THREE.MeshBasicMaterial({ color: amber, transparent: true, depthWrite: false }));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.012, 16, 12), new THREE.MeshBasicMaterial({ color: '#FFE2A8', transparent: true, depthWrite: false }));
+  tube.renderOrder = 4; head.renderOrder = 6;
+  globe.add(tube, head);
+  return { to, curve, tube, head };
+});
+
+// === KIT: globe pose and projection ==========================================
+// view: { lon, lat, dist, x, y } — the place facing the camera, camera distance, globe offset
+function setGlobe(v, st = {}) {
+  globe.position.set(v.x ?? 0.85, v.y ?? 0.08, 0);
+  globe.rotation.set((v.lat - 8) * RAD, -v.lon * RAD, 0, 'XYZ'); // the place sits a little above centre
+  cam.position.set(0, 0, v.dist);
+  cam.lookAt(0, 0, 0);
+  const a = st.alpha ?? 1;
+  dotMat.uniforms.uReveal.value = st.reveal ?? 1;
+  dotMat.uniforms.uAlpha.value = a;
+  ocean.material.opacity = a;
+  atmo.material.uniforms.uAlpha.value = a * (st.atmo ?? 1);
+  gratMat.opacity = 0.4 * a * (st.reveal ?? 1);
+  globe.updateMatrixWorld(true);
+  cam.updateMatrixWorld();
+}
+
+// === EXAMPLE: the world of this video ========================================
+// one function sets EVERY animated property (scenes share the world)
+function setWorld(v, st = {}) {
+  setGlobe(v, st);
+  const a = st.alpha ?? 1;
+  for (const [code, m] of Object.entries(markers)) {
+    const c = st.cities?.[code] ?? { on: 0, ring: -1 };
+    m.dot.material.opacity = clamp(c.on) * a;
+    m.dot.scale.setScalar(0.4 + 0.6 * ease.outBack(clamp(c.on)));
+    const k = c.ring ?? -1;
+    m.ring.visible = k >= 0 && k < 1;
+    m.ring.scale.setScalar(1 + 4 * ease.outCubic(clamp(k)));
+    m.ring.material.opacity = (1 - clamp(k)) * 0.85 * a;
+  }
+  arcs.forEach((arc, i) => {
+    const p = clamp(st.arcs?.[i] ?? 0);
+    arc.tube.geometry.setDrawRange(0, Math.floor(p * SEG) * RADIAL * 6);
+    arc.tube.visible = p > 0;
+    arc.tube.material.opacity = 0.9 * a;
+    // the head rides the front while drawing; afterwards a soft "traveller" can loop
+    const u = st.travel != null ? st.travel[i] : p;
+    arc.head.visible = p > 0 && (p < 1 || st.travel != null);
+    if (arc.head.visible) arc.head.position.copy(arc.curve.getPointAt(clamp(u)));
+    arc.head.material.opacity = a;
+  });
+  globe.updateMatrixWorld(true);
+  cam.updateMatrixWorld();
+}
+
+// === KIT: globe camera moves =================================================
+// screen position of a place (and whether it faces us)
+const tmp = new THREE.Vector3();
+function project(lon, lat, r = 1.0) {
+  const wv = vec(lon, lat, r).applyMatrix4(globe.matrixWorld);
+  const n = wv.clone().sub(globe.position).normalize();
+  const facing = n.dot(tmp.copy(cam.position).sub(wv).normalize());
+  wv.project(cam);
+  return { x: (wv.x + 1) / 2 * W, y: (1 - wv.y) / 2 * H, facing };
+}
+
+// view interpolation along the shortest longitude path
+function viewLerp(a, b, p) {
+  const dl = ((b.lon - a.lon + 540) % 360) - 180;
+  return { lon: a.lon + dl * p, lat: lerp(a.lat, b.lat, p), dist: lerp(a.dist, b.dist ?? a.dist, p), x: lerp(a.x ?? 0.85, b.x ?? a.x ?? 0.85, p), y: lerp(a.y ?? 0.08, b.y ?? a.y ?? 0.08, p) };
+}
+function track(t, start, moves) {
+  let v = start;
+  for (const m of moves) v = viewLerp(v, m.to, (m.ease || ease.standard)(clamp((t - m.at) / m.dur)));
+  return v;
+}
+// === EXAMPLE: places =========================================================
+const at = (code, dist = 4.6) => ({ lon: CITY[code].lon, lat: CITY[code].lat, dist });
+
+// === KIT: 2D panel ===========================================================
+function backdrop(ctx, s, glow = 1) {
+  const g = ctx.createRadialGradient(W * 0.72, H * 0.47, 0, W * 0.72, H * 0.47, H * 0.75);
+  g.addColorStop(0, color.rgba(T.field2, glow));
+  g.addColorStop(1, color.rgba(T.field, 0));
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+function kicker(ctx, s, label) {
+  const p = ease.enter(clamp((s.t - s.onBeat(0) + 0.05) / 0.5)), q = s.out(0.3, ease.exit, 0.1);
+  ctx.textAlign = 'left';
+  ctx.font = F(500, 30);
+  ctx.fillStyle = T.dim;
+  ctx.globalAlpha = p * (1 - q);
+  ctx.fillText(label, L + (1 - p) * -20, 150);
+  ctx.letterSpacing = '0px';
+  ctx.globalAlpha = 1;
+}
+// === EXAMPLE: city labels, footnote, views ===================================
+// city label anchored to the globe: a short leader line and the name
+function label(ctx, code, p, opts = {}) {
+  if (p <= 0) return;
+  const c = CITY[code], q = project(c.lon, c.lat);
+  const a = clamp(p) * clamp((q.facing - 0.1) / 0.2) * (opts.alpha ?? 1);
+  if (a <= 0.01) return;
+  const dx = opts.dx ?? 34, dy = opts.dy ?? -30;
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = color.rgba(T.amber, 0.7);
+  ctx.lineWidth = 1.5;
+  draw.drawOn(ctx, [[q.x + dx * 0.25, q.y + dy * 0.25], [q.x + dx, q.y + dy], [q.x + dx + 18, q.y + dy]], ease.outCubic(clamp(p * 1.5)));
+  ctx.textAlign = 'left';
+  ctx.font = F(700, opts.big ? 34 : 28);
+  ctx.fillStyle = T.ink;
+  ctx.fillText(c.name, q.x + dx + 26, q.y + dy + 10);
+  const nw = ctx.measureText(c.name).width;
+  ctx.font = F(500, opts.big ? 24 : 20, T.mono);
+  ctx.fillStyle = T.amber;
+  ctx.fillText(code, q.x + dx + 34 + nw, q.y + dy + 9);
+  ctx.globalAlpha = 1;
+}
+// a city's marker state: pops in at tOn, with one ring; `beacon` keeps a ring on every beat
+function cityState(s, tOn, beacon = false) {
+  const on = clamp((s.t - tOn) / 0.35);
+  let ring = clamp((s.t - tOn) / 1.3);
+  if (ring >= 1) ring = -1;
+  if (beacon && s.t > tOn + 1.3 && s.beatLen) ring = (s.beat - Math.floor(s.beat)) * 0.9;
+  return { on, ring };
+}
+const footnote = (ctx, a, text = SOURCE) => {
+  ctx.font = F(400, 21, T.mono);
+  ctx.fillStyle = T.dim;
+  ctx.textAlign = 'left';
+  ctx.globalAlpha = a;
+  ctx.fillText(text, L, 905);
+  ctx.globalAlpha = 1;
+};
+
+// views that chain across the cuts (each scene starts where the last one ended)
+const V0 = { lon: -40, lat: 18, dist: 7.6, x: 0.85, y: 0.08 };
+const VH = { lon: 10, lat: 30, dist: 4.6 };
+const hookView = (s) => {
+  const v = viewLerp(V0, VH, ease.enter(clamp(s.t / 3.4)));
+  return { ...v, lon: v.lon + 4 * (s.t / s.dur) };   // a slow drift that continues to the cut
+};
+const hookEnd = (dur) => ({ ...VH, lon: VH.lon + 4, x: 0.85, y: 0.08 });
+
+// === VIDEO ===================================================================
+CV.create({
+  width: W, height: H, fps: 30,
+  background: T.field,
+  lang: 'zh-CN',
+  fonts: [F(900, 88, T.serif), F(700, 28), F(500, 24, T.mono)],
+  // the score designed for this video: space and light: lydian sevenths that change every two bars, a few piano notes, no drums
+  music: {
+    bpm: 80, seed: 7, key: 'C', mode: 'lydian', progression: [0, 3, 5, 4], sevenths: true, chordBars: 2,
+    layers: [
+      { name: 'pad', inst: 'sinepad', notes: 'chord', bars: 2, pattern: 'X-------', vel: 0.07, attack: 1.4, release: 2.6 },
+      { name: 'piano (two notes)', inst: 'keys', octave: 1, notes: [0, 1], pattern: 'X..X....', gate: 4, vel: 0.05, bright: 0.3, decay: 2, echo: 0.3, from: 0.3, to: 0.55 },
+      { name: 'piano', inst: 'keys', octave: 1, notes: [0, 1, 2, 1], pattern: 'X..X.X.X', gate: 4, vel: 0.05, bright: 0.3, decay: 2, echo: 0.3, from: 0.55 },
+      { name: 'sub', inst: 'bass', octave: -2, bars: 2, pattern: 'X-', vel: 0.14, decay: 6, from: 0.4 },
+      { name: 'celesta', inst: 'bell', kind: 'celesta', notes: [2], octave: 2, pattern: '..X.', vel: 0.035, verb: 0.7, from: 0.7 },
+    ],
+    lead: { inst: 'keys', range: [72, 86], rhythm: 'sparse', vel: 0.09, bright: 0.35, decay: 2.2, echo: 0.35 },
+  },
+  transition: 'cut',
+  subtitles: {
+    style: { font: F(500, 40), color: T.ink, box: 'rgba(6,16,29,0.78)', y: 0.92, radius: 6 },
+  },
+  scenes: [
+    // --- 1. Hook: the globe arrives out of the dark, the question lands --------
+    {
+      id: 'hook', voiceDelay: 1.3, energy: 0.3,
+      draw(ctx, s) {
+        const { t } = s;
+        backdrop(ctx, s, s.at(0, 2));
+        setWorld(hookView(s), { reveal: s.at(0.2, 2.4, ease.inOutSine), atmo: s.at(0.4, 2) });
+        gl.render(ctx, world, cam);
+        ctx.fillStyle = T.ink;
+        ctx.font = F(900, 88, T.serif);
+        const out = s.out(0.45, ease.exit, 0.1);
+        fx.wordReveal(ctx, '2023 年，', L, 420, t, { sync: s, dur: 0.45, rise: 0.22, exit: out });
+        fx.wordReveal(ctx, '全球最繁忙的机场', L, 540, t, { sync: s, dur: 0.45, rise: 0.22, exit: out });
+        fx.wordReveal(ctx, '是哪一座？', L, 660, t, { sync: s, dur: 0.45, rise: 0.22, exit: out, colorFor: () => T.amber });
+      },
+    },
+    // --- 2. Contenders: the globe turns to each city as it is named ------------
+    {
+      id: 'contenders', energy: 0.45,
+      sfx: ['伦敦', '迪拜', '东京'].map((w) => ({ at: w, type: 'tick', gain: 0.8 })),
+      draw(ctx, s) {
+        const { t } = s;
+        const tL = s.when('伦敦', 0.5), tD = s.when('迪拜', 1.1), tH = s.when('东京', 1.7);
+        const v = track(t, hookEnd(), [
+          { at: tL - 0.45, dur: 0.8, to: at('LHR') },
+          { at: tD - 0.4, dur: 0.75, to: at('DXB') },
+          { at: tH - 0.45, dur: 0.9, to: at('HND') },
+        ]);
+        backdrop(ctx, s);
+        setWorld(v, { cities: { LHR: cityState(s, tL), DXB: cityState(s, tD), HND: cityState(s, tH) } });
+        gl.render(ctx, world, cam);
+        label(ctx, 'LHR', clamp((t - tL) / 0.5), { dx: -40, dy: -46 });
+        label(ctx, 'DXB', clamp((t - tD) / 0.5), { dy: 34 });
+        label(ctx, 'HND', clamp((t - tH) / 0.5));
+        kicker(ctx, s, '前五名里的三座');
+        // the list builds in the order the places are named
+        const out = s.out(0.35, ease.exit, 0.1);
+        [['LHR', tL], ['DXB', tD], ['HND', tH]].forEach(([code, tc], i) => {
+          const p = ease.enter(clamp((t - tc + 0.05) / 0.45));
+          if (p <= 0) return;
+          const c = CITY[code], y = 400 + i * 120;
+          ctx.globalAlpha = p * (1 - out);
+          ctx.textAlign = 'left';
+          ctx.font = F(500, 26, T.mono);
+          ctx.fillStyle = T.amber;
+          ctx.fillText(`NO.${c.rank}`, L, y + (1 - p) * 24);
+          ctx.font = F(700, 56, T.serif);
+          ctx.fillStyle = T.ink;
+          ctx.fillText(c.name, L + 120, y + (1 - p) * 24);
+          ctx.font = F(400, 30, T.mono);
+          ctx.fillStyle = T.dim;
+          ctx.fillText(`${fx.countUp(ease.outQuart(clamp((t - tc) / 0.9)), 0, c.v)} 万人次`, L + 120, y + 48 + (1 - p) * 24);
+          ctx.globalAlpha = 1;
+        });
+      },
+    },
+    // --- 3. The answer: a long swing west to Atlanta, arcs reach out -----------
+    {
+      id: 'answer', energy: 0.6, tail: 0.7,
+      sfx: [{ at: '亚特兰大', type: 'swell', dur: 0.9 }, { at: (s) => s.when('一亿', 3) - 0.05, type: 'pop' }],
+      draw(ctx, s) {
+        const { t } = s;
+        const tUS = s.when('美国', 0.8), tA = s.when('亚特兰大', 1.8), tY = s.when('一亿', 3.0);
+        const v = track(t, at('HND'), [{ at: tUS - 0.5, dur: Math.max(1.2, tA - tUS + 0.6), to: at('ATL', 4.15), ease: ease.inOutCubic }]);
+        backdrop(ctx, s);
+        const arcsP = [0, 1, 2].map((i) => ease.inOutCubic(clamp((t - tA - 0.4 - i * 0.3) / 1.3)));
+        setWorld(v, {
+          cities: { LHR: { on: 1, ring: -1 }, DXB: { on: 1, ring: -1 }, HND: { on: 1, ring: -1 }, ATL: cityState(s, tA - 0.05, true) },
+          arcs: arcsP,
+        });
+        gl.render(ctx, world, cam);
+        label(ctx, 'ATL', clamp((t - tA) / 0.5), { big: true });
+        ctx.fillStyle = T.ink;
+        ctx.font = F(500, 44);
+        fx.wordReveal(ctx, '但第一名在美国：', L, 380, t, { sync: s, dur: 0.4, rise: 0.25 });
+        ctx.font = F(900, 132, T.serif);
+        ctx.fillStyle = T.amber;
+        fx.wordReveal(ctx, '亚特兰大', L, 540, t, { sync: s, dur: 0.5, rise: 0.2, blur: 6 });
+        // the year's total counts up on "一亿"
+        const p = clamp((t - tY + 0.05) / 1.1);
+        if (p > 0) {
+          ctx.globalAlpha = clamp(p * 4);
+          ctx.textAlign = 'left';
+          ctx.font = F(700, 76, T.mono);
+          ctx.fillStyle = T.ink;
+          const num = fx.countUp(ease.outQuart(p), 0, 10465);
+          ctx.fillText(num, L, 680);
+          const nw = ctx.measureText(num).width;
+          ctx.font = F(500, 34);
+          ctx.fillStyle = T.dim;
+          ctx.fillText('万人次 / 年', L + nw + 18, 680);
+          ctx.globalAlpha = 1;
+        }
+      },
+    },
+    // --- 3b. A breath: the ranking, no voice --------------------------------
+    {
+      id: 'ranking', narration: false, beats: 6, energy: 0.75,
+      transition: { type: 'dissolve', duration: 0.7, seed: 5, softness: 0.08 },
+      sfx: [{ at: (s) => s.onBeat(2), type: 'shimmer' }],
+      draw(ctx, s) {
+        const { t } = s;
+        const k = ease.inOutSine(clamp(t / (s.dur * 0.8)));
+        backdrop(ctx, s, 0.6);
+        setWorld(viewLerp(at('ATL', 4.15), { lon: CITY.ATL.lon + 12, lat: CITY.ATL.lat, dist: 5.4, x: 1.55, y: 0.08 }, k), {
+          alpha: lerp(1, 0.32, k),
+          cities: { LHR: { on: 1, ring: -1 }, DXB: { on: 1, ring: -1 }, HND: { on: 1, ring: -1 }, ATL: { on: 1, ring: -1 } },
+          arcs: [1, 1, 1],
+        });
+        gl.render(ctx, world, cam);
+        ctx.textAlign = 'left';
+        ctx.font = F(500, 30);
+        ctx.fillStyle = T.dim;
+        ctx.globalAlpha = s.at(0.1, 0.5);
+        ctx.fillText('2023 年旅客吞吐量前五名（万人次）', L, 230);
+        ctx.globalAlpha = 1;
+        // ATL lands on the first beat, the rest follow on the second: the gap is the story
+        const MAXW = 900;
+        TOP5.forEach((r, i) => {
+          const t0 = i === 0 ? s.onBeat(0) : s.onBeat(1) + (i - 1) * 0.09;
+          const p = ease.outQuart(clamp((t - t0) / 0.9));
+          const y = 330 + i * 108, lead = i === 0;
+          ctx.globalAlpha = clamp((t - t0) / 0.25);
+          ctx.font = F(lead ? 700 : 500, lead ? 34 : 30);
+          ctx.fillStyle = lead ? T.ink : T.dim;
+          ctx.fillText(`${r.name}`, L, y);
+          const nw = ctx.measureText(r.name).width;
+          ctx.font = F(500, 22, T.mono);
+          ctx.fillText(r.code, L + nw + 14, y - 2);
+          ctx.fillStyle = lead ? T.amber : color.rgba('#6E8BB0', 0.8);
+          ctx.fillRect(L, y + 20, (MAXW * r.v / 10465) * p, lead ? 26 : 18);
+          ctx.font = F(500, lead ? 30 : 24, T.mono);
+          ctx.fillStyle = lead ? T.amber : T.dim;
+          ctx.fillText(fx.countUp(p, 0, r.v), L + (MAXW * r.v / 10465) * p + 16, y + (lead ? 44 : 38));
+          ctx.globalAlpha = 1;
+        });
+        footnote(ctx, s.at(s.onBeat(2), 0.6));
+      },
+    },
+    // --- 4. Daily: back to Atlanta, the number per day, travellers on the arcs
+    {
+      id: 'daily', energy: 0.45, tail: 1.9,
+      transition: { type: 'dissolve', duration: 0.7, seed: 9, softness: 0.08 },
+      draw(ctx, s) {
+        const { t } = s;
+        const tN = s.when('二十九', 1.4);
+        const v = { lon: CITY.ATL.lon + lerp(-6, 2, ease.inOutSine(s.p)), lat: CITY.ATL.lat, dist: lerp(4.9, 4.5, ease.inOutSine(s.p)), x: 0.85, y: 0.08 };
+        backdrop(ctx, s);
+        // one traveller per arc, looping on the bar: passengers in motion
+        const bar = s.beatLen * 4;
+        setWorld(v, {
+          cities: { LHR: { on: 1, ring: -1 }, DXB: { on: 1, ring: -1 }, HND: { on: 1, ring: -1 }, ATL: cityState(s, -2, true) },
+          arcs: [1, 1, 1],
+          travel: [0, 1, 2].map((i) => ((s.T / bar + i / 3) % 1)),
+        });
+        gl.render(ctx, world, cam);
+        label(ctx, 'ATL', 1, { big: true });
+        kicker(ctx, s, '每一天');
+        ctx.fillStyle = T.ink;
+        ctx.font = F(700, 56, T.serif);
+        fx.wordReveal(ctx, '平均每天', L, 390, t, { sync: s, dur: 0.45, rise: 0.25 });
+        const p = clamp((t - tN + 0.1) / 1.1);
+        if (p > 0) {
+          ctx.globalAlpha = clamp(p * 4);
+          ctx.font = F(900, 190, T.serif);
+          ctx.fillStyle = T.amber;
+          const num = fx.countUp(ease.outQuart(p), 0, DAILY, { decimals: 1 });
+          ctx.fillText(num, L - 6, 600);
+          const nw = ctx.measureText(num).width;
+          ctx.font = F(700, 52);
+          ctx.fillStyle = T.ink;
+          ctx.fillText('万人次', L + nw + 14, 600);
+          ctx.globalAlpha = 1;
+        }
+        ctx.font = F(500, 34);
+        ctx.fillStyle = T.dim;
+        ctx.globalAlpha = ease.enter(clamp((t - s.when('进出', 2.4)) / 0.5));
+        ctx.fillText('从这里出发或到达', L, 690);
+        ctx.globalAlpha = 1;
+        footnote(ctx, ease.enter(clamp((t - s.nextBeat(s.voiceEnd)) / 0.6)), `${SOURCE}　·　日均 = 10,465 万 ÷ 365`);
+      },
+    },
+  ],
+  overlay(ctx, g) {
+    draw.vignette(ctx, g.W, g.H, 0.45, '#02060C');
+    draw.grain(ctx, g.frame, 0.035);
+  },
+});
+</script>
+</body>
+</html>

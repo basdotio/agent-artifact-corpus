@@ -1,0 +1,1396 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>慢慢说</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;900&family=Noto+Sans+SC:wght@500;700;900&family=Noto+Serif+SC:wght@600;700;900&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   慢慢说 — a 2.5-minute personal story in the Swiss Kinetic style, set in Chinese.
+   A man who stutters tells how a word gets stuck, how he learned to go round it,
+   and how a wedding toast took eight seconds to start. Type is the picture: the
+   red caret is his voice, the red slab is the wall it hits. The wall comes back
+   in every chapter until it falls, and the opening line returns at the end.
+   Two voices: his (Yunxi, set in sans) and his sister's (Xiaoxiao, set in serif).
+   ============================================================================= */
+const { ease, clamp, lerp, fx, draw, color, text, rand, noise } = CV;
+
+// === THEME ===================================================================
+const T = {
+  paper: '#F2F0EB',
+  ink: '#111111',
+  red: '#E62E2D',
+  mute: '#BDB9B0',     // receded type on paper
+  dim: '#55524C',      // receded type on ink
+  sans: '"Noto Sans SC", sans-serif',
+  serif: '"Noto Serif SC", serif',
+  latin: '"Archivo", "Noto Sans SC", sans-serif',
+};
+const F = (w, px, fam = T.sans) => `${w} ${px}px ${fam}`;
+const W = 1920, H = 1080, M = 96, COLS = 12, CW = (W - M * 2) / COLS;
+const X0 = M + CW;                       // the main text column
+
+// === KIT: snap moves, grid, labels (Swiss Kinetic) ===========================
+// Snap: fast start, dead stop.
+const snap = ease.bezier(0.7, 0, 0.1, 1);
+// eased 0→1 of a move that starts at local time t0
+const win = (t, t0, d = 0.35, e = snap) => e(clamp((t - t0) / d));
+
+function grid(ctx, p, col) {
+  if (p <= 0) return;
+  ctx.save();
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= COLS; i++) {
+    const q = snap(clamp(p * 1.6 - i * 0.05));
+    if (q <= 0) continue;
+    const x = Math.round(M + i * CW) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(x, M);
+    ctx.lineTo(x, M + (H - M * 2) * q);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function label(ctx, str, x, y, col = T.ink, align = 'left', size = 24) {
+  ctx.save();
+  ctx.font = F(500, size, T.latin);
+  ctx.letterSpacing = '4px';
+  ctx.textAlign = align;
+  ctx.fillStyle = col;
+  ctx.fillText(str, x, y);
+  ctx.restore();
+}
+
+// A line of type that rises out of its own mask (pin) and drops back into it (pout).
+function slam(ctx, str, x, y, size, pin, pout = 0, { w = 900, fam = T.sans, col = T.ink, align = 'left', track = 0 } = {}) {
+  if (pin <= 0 || pout >= 1) return 0;
+  ctx.save();
+  ctx.font = F(w, size, fam);
+  ctx.letterSpacing = `${track}px`;
+  ctx.textAlign = align;
+  ctx.fillStyle = col;
+  const width = ctx.measureText(str).width;
+  fx.mask(ctx, 0, y - size * 1.08, W, size * 1.36, () => ctx.fillText(str, x, y + (1 - pin) * size * 1.2 + pout * size * 1.2));
+  ctx.restore();
+  return width;
+}
+
+// A camera move: scale z about (fx, fy), drift by (dx, dy).
+function cam(ctx, z, fx0, fy0, fn, dx = 0, dy = 0) {
+  ctx.save();
+  ctx.translate(fx0 + dx, fy0 + dy);
+  ctx.scale(z, z);
+  ctx.translate(-fx0, -fy0);
+  fn();
+  ctx.restore();
+}
+
+// === KIT: the voice and the wall (this video) ================================
+// Type as it is typed. keys = [[time, text], …] in time order: a stutter types,
+// deletes and types again. New characters drop in; the red caret (his voice)
+// sits after the text, shivers inside `stuck` = [from, to] and blinks on the
+// beat when idle. Returns the width of the text.
+function typed(ctx, s, keys, x, y, size, o = {}) {
+  const { w = 900, fam = T.sans, col = T.ink, caret = true, stuck = null, out = 0, solid = false, caretCol = T.red } = o;
+  const t = s.t;
+  let cur = [], born = [], last = -1e9;
+  for (const [kt, str] of keys) {
+    if (kt > t) break;
+    const a = Array.from(str);
+    let k = 0;
+    while (k < a.length && k < cur.length && a[k] === cur[k]) k++;
+    born = born.slice(0, k).concat(a.slice(k).map(() => kt));
+    cur = a;
+    last = kt;
+  }
+  ctx.save();
+  ctx.font = F(w, size, fam);
+  ctx.textAlign = 'left';
+  const dy = out * size * 1.25;
+  ctx.beginPath();
+  ctx.rect(0, y - size * 1.08, W, size * 1.4);
+  ctx.clip();
+  let acc = 0;
+  cur.forEach((ch, i) => {
+    const p = ease.outCubic(clamp((t - born[i]) / 0.14));
+    ctx.globalAlpha = p;
+    ctx.fillStyle = col;
+    ctx.fillText(ch, x + acc, y - (1 - p) * size * 0.2 + dy);
+    acc += ctx.measureText(ch).width;
+  });
+  if (caret) {
+    const isStuck = stuck && t >= stuck[0] && t < stuck[1];
+    const idle = !isStuck && t - last > 0.45;
+    const on = solid || !idle || ((s.beat % 1) + 1) % 1 < 0.55;
+    if (on) {
+      const j = isStuck ? noise(Math.floor(s.frame / 2) * 1.9, 11) * size * 0.06 : 0;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = caretCol;
+      ctx.fillRect(x + acc + size * 0.08 + j, y - size * 0.82 + dy, Math.max(8, size * 0.09), size * 0.94);
+    }
+  }
+  ctx.restore();
+  return acc;
+}
+
+// keys for a string typed one character at a time from `times` (one per char)
+const spell = (str, times) => Array.from(str).map((_, i) => [times[i], Array.from(str).slice(0, i + 1).join('')]);
+// keys for a stutter: the first character typed, deleted and typed again n times
+function stammer(ch, t0, n = 3, beat = 0.17) {
+  const keys = [];
+  for (let i = 0; i < n; i++) {
+    keys.push([t0 + i * beat * 2, ch]);
+    if (i < n - 1) keys.push([t0 + i * beat * 2 + beat, '']);
+  }
+  return keys;
+}
+
+// A character that will not come out: it shivers on twos and leaves echoes behind it.
+function tremble(ctx, s, ch, x, y, size, amt, { col = T.ink, w = 900, fam = T.sans, align = 'center', alpha = 1 } = {}) {
+  ctx.save();
+  ctx.font = F(w, size, fam);
+  ctx.textAlign = align;
+  ctx.fillStyle = col;
+  const f = Math.floor(s.frame / 2);
+  if (amt > 0.01) {
+    for (let k = 3; k >= 1; k--) {
+      ctx.globalAlpha = alpha * 0.1 * amt * (4 - k);
+      ctx.fillText(ch, x - k * size * 0.06 * amt, y);
+    }
+  }
+  ctx.globalAlpha = alpha;
+  ctx.fillText(ch, x + noise(f * 1.7, 3) * size * 0.035 * amt, y + noise(f * 1.3, 7) * size * 0.02 * amt);
+  ctx.restore();
+}
+
+// The wall: a red slab that draws down from y0 to y1.
+function slab(ctx, x, y0, y1, p, w = 30) {
+  if (p <= 0) return;
+  ctx.fillStyle = T.red;
+  ctx.fillRect(x - w / 2, y0, w, (y1 - y0) * p);
+}
+
+// 00:SS in fixed-width cells, so the digits don't wobble while they count.
+function timer(ctx, sec, x, y, size, col, align = 'left') {
+  const str = `00:${String(sec).padStart(2, '0')}`;
+  const cell = (c) => (c === ':' ? size * 0.32 : size * 0.6);
+  const total = Array.from(str).reduce((a, c) => a + cell(c), 0);
+  let cx = align === 'right' ? x - total : align === 'center' ? x - total / 2 : x;
+  ctx.save();
+  ctx.font = F(900, size, T.latin);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = col;
+  for (const c of str) {
+    ctx.fillText(c, cx + cell(c) / 2, y);
+    cx += cell(c);
+  }
+  ctx.restore();
+  return total;
+}
+
+// Chapter shutter: a red slab crosses the frame and the cut happens behind it.
+function shutterFn(ctx, A, B, p) {
+  const Wc = ctx.canvas.width, Hc = ctx.canvas.height;
+  ctx.drawImage(p < 0.5 ? A : B, 0, 0);
+  const a = snap(clamp(p * 2)), b = snap(clamp(p * 2 - 1));
+  ctx.fillStyle = T.red;
+  ctx.fillRect(Wc * b, 0, Wc * (a - b), Hc);
+}
+const shutter = { type: shutterFn, duration: 0.7, ease: ease.linear, sfx: 'swish' };
+
+// A chapter card (music only): the number in outline rises out of the floor,
+// the title slams in, a red square sets the full stop.
+function card(id, n, title, sub, part, energy) {
+  return {
+    id, ch: n, card: true, narration: false, beats: 3, part, energy, background: T.ink, transition: shutter,
+    draw(ctx, s) {
+      const t = s.t, b = (i) => s.onBeat(i);
+      grid(ctx, 1, color.rgba(T.paper, 0.06));
+      const out = win(t, b(2.5), 0.28, ease.inCubic);
+      ctx.save();
+      ctx.font = F(900, 560, T.latin);
+      ctx.letterSpacing = '-24px';
+      ctx.strokeStyle = color.rgba(T.paper, 0.9);
+      ctx.lineWidth = 3;
+      const pin = win(t, b(0) - 0.2, 0.6, ease.enter);
+      fx.mask(ctx, 0, 0, W, H - M + 6, () => ctx.strokeText(String(n).padStart(2, '0'), M - 24 - s.p * 60, H - M + (1 - pin) * 480 + out * 480));
+      ctx.restore();
+      ctx.globalAlpha = win(t, b(0.5), 0.3) * (1 - out);
+      label(ctx, sub, X0 + CW * 5, 590, color.rgba(T.paper, 0.6));
+      ctx.globalAlpha = 1;
+      const tw = slam(ctx, title, X0 + CW * 5, 800, 190, win(t, b(1) - 0.05, 0.4), out, { col: T.paper, track: lerp(40, -4, win(t, b(1) - 0.05, s.beatLen * 1.6, ease.enter)) });
+      const q = win(t, b(1.6), 0.3) * (1 - out);
+      ctx.fillStyle = T.red;
+      if (q > 0) ctx.fillRect(X0 + CW * 5 + tw + 22, 800 - 40, 40 * q, 40);
+    },
+  };
+}
+
+// === DATA (seeded, built once) ===============================================
+const LAUGH = (() => {
+  const r = rand(41), out = [];
+  for (let i = 0; i < 96; i++) {
+    out.push({ x: 40 + r() * 1840, y: 120 + r() * 880, size: 60 + r() ** 2 * 230, a: 0.25 + r() * 0.75, d: r() * 0.9, fall: r() * 0.5, spin: (r() - 0.5) * 0.8 });
+  }
+  return out.sort((a, b) => a.d - b.d);
+})();
+const CROWD = (() => {
+  const r = rand(7), out = [];
+  for (let row = 0; row < 13; row++) for (let col = 0; col < 30; col++) out.push({ x: 90 + col * 60 + (r() - 0.5) * 14, y: 190 + row * 58 + (r() - 0.5) * 12, row, col });
+  return out;
+})();
+const ME_IN_CROWD = CROWD.find((c) => c.row === 6 && c.col === 19);
+const DRAFT = (() => { const r = rand(19), out = []; for (let i = 0; i < 44; i++) out.push(0.45 + r() * 0.55); return out; })();
+const KEEP = [7, 15, 22];                // the three lines that survive the edit
+const SHARDS = (() => {
+  const r = rand(23), out = [];
+  for (let i = 0; i < 16; i++) out.push({ y0: i / 16, h: 1 / 16, vx: (r() - 0.25) * 900, vy: -200 - r() * 700, rot: (r() - 0.5) * 9 });
+  return out;
+})();
+const IDEAS = ['先做个小样', '砍掉一半功能', '直接问用户', '换个名字', '周五就能上线', '数据口径不对', '这块我来做', '推迟一周', '可以更简单', '别再加班了'];
+const MENU = [['01', '牛肉面', '28'], ['02', '番茄鸡蛋面', '22'], ['03', '宫保鸡丁饭', '26'], ['04', '炒饭', '18']];
+// the classroom: 6 × 4 desks, mine is the 23rd
+const DESK = { x0: 170, y0: 270, w: 150, h: 84, gx: 36, gy: 46, cols: 6, rows: 4, me: 22 };
+const deskPos = (i) => ({ x: DESK.x0 + (i % DESK.cols) * (DESK.w + DESK.gx), y: DESK.y0 + Math.floor(i / DESK.cols) * (DESK.h + DESK.gy) });
+// the city map: blocks, the straight street, the wall, the detour
+const MAP = { x0: 170, y0: 210, bw: 174, bh: 118, sx: 60, sy: 56, cols: 7, rows: 4 };
+const ROUTE = [[130, 530], [374, 530], [374, 704], [842, 704], [842, 356], [1310, 356], [1310, 704], [1544, 704], [1544, 530], [1790, 530]];
+
+function cityMap(ctx, p, col = '#E2DED6') {
+  ctx.save();
+  for (let r = 0; r < MAP.rows; r++) for (let c = 0; c < MAP.cols; c++) {
+    const q = snap(clamp(p * 2 - (r + c) * 0.06));
+    if (q <= 0) continue;
+    const x = MAP.x0 + c * (MAP.bw + MAP.sx), y = MAP.y0 + r * (MAP.bh + MAP.sy);
+    ctx.fillStyle = col;
+    ctx.globalAlpha = q;
+    draw.roundRect(ctx, x + (1 - q) * MAP.bw * 0.5, y + (1 - q) * MAP.bh * 0.5, MAP.bw * q, MAP.bh * q, 10);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+// a polyline drawn on to p, with the red square riding its head
+function route(ctx, pts, p, { col = T.red, width = 10, head = true } = {}) {
+  if (p <= 0) return;
+  ctx.save();
+  ctx.strokeStyle = col;
+  ctx.lineWidth = width;
+  ctx.lineJoin = 'miter';
+  ctx.lineCap = 'butt';
+  draw.drawOn(ctx, pts, p);
+  if (head) {
+    const a = fx.along(pts, p);
+    ctx.fillStyle = col;
+    ctx.fillRect(a.x - 16, a.y - 16, 32, 32);
+  }
+  ctx.restore();
+}
+
+// the stage: a spotlight, a floor and an audience of small lights
+function stage(ctx, s, { light = 1, lit = 0, wave = null, pulse = 0 } = {}) {
+  if (light > 0) {
+    ctx.save();
+    ctx.globalAlpha = light;
+    const g = ctx.createLinearGradient(0, 0, 0, 760);
+    g.addColorStop(0, color.rgba(T.paper, 0.02));
+    g.addColorStop(1, color.rgba(T.paper, 0.16));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(860, -10);
+    ctx.lineTo(1060, -10);
+    ctx.lineTo(1340, 760);
+    ctx.lineTo(580, 760);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = color.rgba(T.paper, 0.2);
+    ctx.beginPath();
+    ctx.ellipse(960, 760, 380, 46, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // four rows of guests, back to front
+  for (let r = 0; r < 4; r++) {
+    const y = 812 + r * 36, n = 22 + r * 2, span = 1240 + r * 160;
+    for (let i = 0; i < n; i++) {
+      const x = 960 - span / 2 + (i + (r % 2) * 0.5) * (span / n);
+      const k = wave == null ? lit : clamp(wave - (3 - r) * 0.18 - Math.abs(x - 960) / 2600) * 1;
+      const glow = clamp(Math.max(lit, k));
+      ctx.fillStyle = color.rgba(T.paper, 0.2 + 0.7 * glow);
+      const rad = 6 + r * 1.2 + glow * 3 + pulse * glow * 2.5;
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// a microphone on a stand
+function mic(ctx, x, y, p) {
+  if (p <= 0) return;
+  ctx.save();
+  ctx.translate(0, (1 - p) * 400);
+  ctx.strokeStyle = T.paper;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(x, y + 60);
+  ctx.lineTo(x, 760);
+  ctx.stroke();
+  ctx.fillStyle = T.paper;
+  draw.roundRect(ctx, x - 22, y - 50, 44, 92, 22);
+  ctx.fill();
+  ctx.restore();
+}
+
+// === CHROME ==================================================================
+const CH = ['', '卡住', '十一秒', '绕路', '请柬', '八秒', '现在'];
+function chrome(ctx, g) {
+  const cur = g.scenes.filter((sc) => sc.start <= g.T + 1e-6).pop();
+  if (!cur) return;
+  const dark = cur.background === T.ink || cur.background === T.red;
+  const col = dark ? T.paper : T.ink;
+  const endFade = clamp((g.duration - g.T - 1.8) / 0.5);
+  if (!cur.card && cur.ch) {
+    const first = g.scenes.find((sc) => sc.ch === cur.ch && !sc.card);
+    ctx.save();
+    ctx.globalAlpha = clamp((g.T - first.start - 0.3) / 0.4) * endFade * 0.85;
+    ctx.fillStyle = cur.background === T.red ? T.paper : T.red;
+    ctx.fillRect(M, 54, 16, 16);
+    ctx.font = F(600, 22, T.latin);
+    ctx.letterSpacing = '3px';
+    ctx.fillStyle = col;
+    ctx.textAlign = 'left';
+    ctx.fillText(String(cur.ch).padStart(2, '0'), M + 30, 70);
+    ctx.font = F(500, 22);
+    ctx.fillText(CH[cur.ch], M + 76, 70);
+    ctx.textAlign = 'right';
+    ctx.fillText('阿哲  自述', W - M, 70);
+    ctx.restore();
+  }
+  // time made visible: a hairline at the foot of the frame steps on every beat
+  if (Number.isFinite(g.beat)) {
+    const total = Math.round(g.duration / g.beatLen);
+    const k = clamp(Math.floor(g.beat + 1e-6) + 1, 0, total) / total;
+    ctx.fillStyle = color.rgba(col, 0.35 * endFade);
+    ctx.fillRect(M, H - 38, (W - M * 2) * k, 2);
+  }
+}
+
+// === VIDEO ===================================================================
+CV.create({
+  width: 1920, height: 1080, fps: 30,
+  background: T.paper,
+  lang: 'zh-CN',
+  transition: 'cut',
+  voiceDelay: 0.3, tail: 0.5,
+  subtitles: {
+    style: { font: '500 40px "Noto Sans SC", sans-serif', color: T.paper, box: 'rgba(17,17,17,0.86)', y: 0.925, radius: 0, padX: 22, padY: 12 },
+  },
+  overlay: chrome,
+  // intimate, tense, then free · 88 BPM · A minor, opening into C major at the
+  // wedding · a felt-piano arpeggio is the signature (it is there from the first
+  // bar), strings and a finger bass come in as the story moves, a room kit with
+  // brushes-light hats carries the groove, an acoustic guitar joins at the peak ·
+  // celesta melody in the gaps.
+  music: {
+    bpm: 88, seed: 7, key: 'A', mode: 'minor', progression: [0, 5, 2, 6], kit: 'room', swing: 0.12, volume: 0.8, duck: -13,
+    parts: {
+      school: { progression: [0, 5, 3, 4], seed: 12 },                                              // a classroom, a countdown
+      detour: { mode: 'dorian', progression: [0, 3, 0, 6], seed: 5, lead: { rhythm: 'rhythmic' } }, // clever detours, a little wry
+      invite: { key: 'C', mode: 'major', progression: [0, 4, 5, 3], seed: 9 },                      // the invitation: first light
+      stage: { progression: [0, 5], chordBars: 2, seed: 3, lead: { rhythm: 'sparse' } },            // eight seconds, held breath
+      free: { key: 'C', mode: 'major', progression: [5, 3, 0, 4], seed: 21 },                       // the wall falls
+      home: { key: 'C', mode: 'major', progression: [3, 4, 0, 0], seed: 2 },                        // now: IV–V–I, uplifting
+    },
+    layers: [
+      { name: 'felt piano', inst: 'felt', notes: [0, 1, 2, 1, 3, 1, 2, 1], pattern: 'XxXxXxXx', gate: 1.8, vel: [0.1, 0.15] },
+      { name: 'strings', inst: 'strings', notes: 'chord', pattern: 'X---', vel: [0.03, 0.06], from: 0.3 },
+      { name: 'bass', inst: 'bass', octave: -1, notes: ['root', 'root', 'fifth'], pattern: 'X..x..X.', vel: 0.26, from: 0.35 },
+      { name: 'kick', inst: 'kick', pattern: 'X.....x.X.......', vel: 0.4, from: 0.45 },
+      { name: 'snare', inst: 'snare', pattern: '....X.......X...', vel: 0.15, from: 0.5 },
+      { name: 'hat', inst: 'hat', pattern: 'x.x.x.x.x.x.x.x.', vel: 0.06, from: 0.55 },
+      { name: 'guitar', inst: 'acoustic', notes: 'chord', pattern: 'X..x..x.', strum: 0.02, vel: 0.1, from: 0.8 },
+      { name: 'shaker', inst: 'shaker', pattern: 'xXxXxXxXxXxXxXxX', vel: 0.05, from: 0.85 },
+    ],
+    lead: { inst: 'bell', kind: 'celesta', range: [74, 88], rhythm: 'melodic', vel: 0.13, echo: 0.2 },
+  },
+  scenes: [
+    // ===== 01 · 卡住 ============================================================
+    {
+      // the red caret waits through the pre-roll; then the name, then the line
+      // that will not come out in one go
+      id: 'open', ch: 1, voiceDelay: 2.4, tail: 0.7, energy: 0.4, captions: 'file',
+      draw(ctx, s) {
+        const t = s.t;
+        grid(ctx, clamp((t - s.onBeat(0)) / (s.beatLen * 2)), color.rgba(T.ink, 0.07));
+        const out = s.out(0.35, ease.inCubic);
+        const l1 = '我叫阿哲。';
+        const k1 = spell(l1, s.syncTimes(Array.from(l1)));
+        const a = s.when('我说话', 4.0);
+        const recede = win(t, a - 0.1, 0.4, ease.standard);
+        typed(ctx, s, [[0, ''], ...k1], X0, 400, 110, { col: color.mix(T.ink, T.mute, recede), caret: t < a - 0.05, out });
+        if (t >= a - 0.05) {
+          const rest = '说话，会卡住。';
+          const tRest = [s.when('说话'), s.when('说话') + 0.07, s.when('说话') + 0.14, s.when('会卡'), s.when('会卡') + 0.12, s.when('住'), s.when('住') + 0.1];
+          let tt = a + 1.0;
+          const keys = [...stammer('我', a, 3, 0.16)];
+          Array.from(rest).forEach((ch, i) => { tt = Math.max(tt + 0.06, tRest[i]); keys.push([tt, '我' + Array.from(rest).slice(0, i + 1).join('')]); });
+          typed(ctx, s, keys, X0, 700, 180, { stuck: [a, a + 0.95], out });
+        }
+      },
+    },
+    {
+      // the word runs at an invisible wall, twice, then hits it, and the wall shows itself
+      id: 'wall', ch: 1, tail: 1.0, energy: 0.45,
+      sfx: [
+        { at: (s) => s.when('出不来') + 0.12, type: 'tick', gain: 0.5 },
+        { at: (s) => s.when('出不来') + 0.47, type: 'tick', gain: 0.5 },
+        { at: (s) => s.when('撞上') + 0.1, type: 'boom', gain: 0.55 },
+      ],
+      draw(ctx, s) {
+        const t = s.t;
+        const tA = s.when('那个字', 0.4), tB = s.when('出不来', 2.6), tC = s.when('撞上', 3.8), tD = s.when('墙', 5.1);
+        const WX = 1330;
+        const x = CV.tween(t, [[tA - 0.25, -260], [tA + 0.45, 560, ease.enter], [tB - 0.12, 640], [tB + 0.12, 1130, ease.inCubic], [tB + 0.3, 1020, ease.outCubic],
+          [tB + 0.47, 1130, ease.inCubic], [tB + 0.65, 1000, ease.outCubic], [tC - 0.05, 980], [tC + 0.1, 1130, ease.inCubic], [tC + 0.55, 1040, ease.outCubic]]);
+        const shk = fx.shake(t, tC + 0.1, 14, { decay: 0.2 });
+        ctx.save();
+        ctx.translate(shk.x, shk.y);
+        // impacts squash the word against the wall
+        const hit = (t0) => (t > t0 ? Math.exp(-(t - t0) / 0.09) : 0);
+        const sq = Math.max(hit(tB + 0.12) * 0.5, hit(tB + 0.47) * 0.5, hit(tC + 0.1));
+        const fall = s.out(0.4, ease.inCubic);
+        ctx.save();
+        ctx.translate(x + 180, 700 + fall * 500);
+        ctx.scale(1 - sq * 0.28, 1 + sq * 0.12);
+        ctx.font = F(900, 380);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = T.ink;
+        ctx.fillText('字', 0, 0);
+        ctx.restore();
+        // the wall: invisible until the hit, then a slab; on its name, wide enough to say it
+        const sp = win(t, tC + 0.08, 0.22, ease.outCubic);
+        const wide = win(t, tD - 0.1, 0.45);
+        const ww = lerp(30, 120, wide);
+        slab(ctx, WX + ww / 2 - 15, 150, 890, sp, ww);
+        if (wide > 0) {
+          ctx.save();
+          ctx.font = F(900, 66);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = T.paper;
+          Array.from('看不见的墙').forEach((ch, i) => {
+            ctx.globalAlpha = win(t, tD + i * 0.06, 0.25);
+            ctx.fillText(ch, WX + ww / 2 - 15, 330 + i * 92);
+          });
+          ctx.restore();
+        }
+        ctx.restore();
+      },
+    },
+
+    // ===== 02 · 十一秒 ==========================================================
+    card('card2', 2, '十一秒', '小学  二年级', 'school', 0.45),
+    {
+      // the classroom from above: desks snap in, mine is red, the reading goes round
+      id: 'class', ch: 2, tail: 0.5, energy: 0.45,
+      draw(ctx, s) {
+        const t = s.t;
+        const tR = s.when('轮流', 2.9), tS = s.when('座位', 2.6);
+        const reader = t < tR ? -1 : Math.min(6, Math.floor(((t - tR) / Math.max(0.3, s.dur - tR)) * 7));
+        classroom(ctx, s, reader, 1);
+        // a leader from my desk to the margin: who I am, and where
+        const me = deskPos(DESK.me);
+        const lp = win(t, tS, 0.45);
+        if (lp > 0) {
+          ctx.fillStyle = T.red;
+          const x1 = me.x + DESK.w, y1 = me.y + DESK.h / 2, x2 = 1390;
+          ctx.fillRect(x1, y1 - 2, (x2 - x1) * lp, 4);
+          ctx.globalAlpha = win(t, tS + 0.3, 0.3);
+          ctx.font = F(900, 64);
+          ctx.fillStyle = T.ink;
+          ctx.fillText('我', x2 + 20, y1 + 22);
+          label(ctx, '第 23 个', x2 + 100, y1 + 12, T.ink);
+          ctx.globalAlpha = 1;
+        }
+      },
+    },
+    {
+      // the reading comes closer; I count the people left, then the beats count for me
+      id: 'count', ch: 2, tail: 4.6, energy: 0.55,
+      sfx: [0, 1, 2, 3, 4].map((k) => ({ at: (s) => s.nextBeat(s.voiceEnd + 0.1) + k * s.beatLen, type: 'tick', gain: 0.4 + k * 0.12 })),
+      draw(ctx, s) {
+        const t = s.t;
+        const tb = s.nextBeat(s.voiceEnd + 0.1);
+        let reader = 7 + Math.floor(clamp(t / Math.max(0.5, tb - 0.2)) * 10);
+        if (t >= tb) reader = Math.min(DESK.me, 17 + Math.floor((t - tb) / s.beatLen + 1e-6));
+        const me = deskPos(DESK.me);
+        // the camera leans in on my desk (it stays where it is; the room grows around it)
+        const z = lerp(1, 1.16, ease.inOutSine(s.p)), fx0 = me.x + DESK.w / 2, fy0 = me.y + DESK.h / 2;
+        ctx.save();
+        ctx.translate(fx0, fy0);
+        ctx.scale(z, z);
+        ctx.translate(-fx0, -fy0);
+        classroom(ctx, s, reader, 1);
+        ctx.restore();
+        // how many are left before me
+        const left = DESK.me - reader;
+        const since = t < tb ? Math.max(0, t - (Math.floor(clamp(t / Math.max(0.5, tb - 0.2)) * 10) * (tb - 0.2)) / 10) : (t - tb) % s.beatLen;
+        const p = snap(clamp(since / 0.18));
+        label(ctx, '前面还剩', 1600, 250, T.ink, 'center', 28);
+        ctx.save();
+        ctx.font = F(900, 420, T.latin);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = left <= 3 ? T.red : T.ink;
+        fx.mask(ctx, 1300, 290, 600, 420, () => ctx.fillText(String(Math.max(left, 1)), 1600, 650 + (1 - p) * 300));
+        ctx.restore();
+        label(ctx, '人', 1600, 730, T.ink, 'center', 28);
+      },
+    },
+    {
+      // my turn (red), the first lesson in a row of practice squares: zoom into the first one
+      id: 'spring', ch: 2, background: T.red, tail: 0.9, energy: 0.6,
+      transition: { type: 'iris', x: (DESK.x0 + 4 * (DESK.w + DESK.gx) + DESK.w / 2) / W, y: (DESK.y0 + 3 * (DESK.h + DESK.gy) + DESK.h / 2) / H, duration: 0.5, ease: snap },
+      draw(ctx, s) {
+        const t = s.t;
+        const t1 = s.when('轮到我了', 0.3), t2 = s.when('课文', 1.6), t3 = s.when('春', 3.4);
+        slam(ctx, '轮到我了。', X0, 620, 220, win(t, t1 - 0.1, 0.35), win(t, t2 - 0.25, 0.25, ease.inCubic), { col: T.paper });
+        const gp = win(t, t2 - 0.05, 0.4);
+        if (gp <= 0) return;
+        label(ctx, '第一课', X0, 300, color.rgba(T.paper, 0.75 * gp));
+        const z = win(t, t3 - 0.12, 0.55, ease.swift);
+        const bx = 520, by = 380, bs = 176;
+        ctx.save();
+        ctx.translate(lerp(bx + bs / 2, 960, z), lerp(by + bs / 2, 520, z));
+        ctx.scale(lerp(1, 3.1, z), lerp(1, 3.1, z));
+        ctx.translate(-(bx + bs / 2), -(by + bs / 2));
+        Array.from('春天来了。').forEach((ch, i) => {
+          const q = win(t, t2 + i * 0.06, 0.3);
+          if (q <= 0) return;
+          const x = bx + i * bs, y = by + (1 - q) * 40;
+          ctx.globalAlpha = q * (i === 0 ? 1 : 1 - z);
+          ctx.strokeStyle = T.paper;
+          ctx.lineWidth = i === 0 ? 4 : 2;
+          ctx.strokeRect(x, y, bs, bs);
+          ctx.setLineDash([8, 8]);
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = color.rgba(T.paper, 0.5);
+          ctx.beginPath();
+          ctx.moveTo(x, y + bs / 2); ctx.lineTo(x + bs, y + bs / 2);
+          ctx.moveTo(x + bs / 2, y); ctx.lineTo(x + bs / 2, y + bs);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = F(i === 0 ? 900 : 500, 136);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = i === 0 ? T.paper : color.rgba(T.paper, 0.55);
+          if (i > 0 || t >= t3 - 0.12) ctx.fillText(ch, x + bs / 2, y + bs / 2 + 48);
+        });
+        ctx.restore();
+      },
+    },
+    {
+      // one character, eleven seconds; then the whole class laughs
+      id: 'eleven', ch: 2, background: T.ink, tail: 0.8, energy: 0.65,
+      sfx: Array.from({ length: 11 }, (_, k) => ({ at: (s) => { const a = s.when('一个字', 0.5), b = s.when('十一秒', 2.4) + 0.35; return a + (b - a) * Math.sqrt((k + 1) / 11.5); }, type: 'tick', gain: 0.3 + k * 0.04 })),
+      draw(ctx, s) {
+        const t = s.t;
+        const tA = s.when('一个字', 0.5), tB = s.when('十一秒', 2.4) + 0.35, tL = s.when('全班', 3.8);
+        cam(ctx, lerp(1, 1.1, ease.inOutSine(clamp(t / 3.5))), 560, 560, () => tremble(ctx, s, '春', 560, 760, 560, 1, { col: T.paper }));
+        const sec = Math.min(11, Math.floor(11.5 * ease.inQuad(clamp((t - tA) / (tB - tA)))));
+        ctx.globalAlpha = win(t, tA - 0.2, 0.3);
+        label(ctx, '卡住了', 1110, 340, color.rgba(T.paper, 0.6), 'left', 26);
+        timer(ctx, sec, 1110, 560, 210, sec >= 11 ? T.red : T.paper);
+        ctx.globalAlpha = 1;
+        // the laughter: 哈 from every side, until there is no room left
+        ctx.save();
+        ctx.textAlign = 'center';
+        for (const h of LAUGH) {
+          const p = clamp((t - tL - h.d * 0.8) / 0.16);
+          if (p <= 0) continue;
+          const k = lerp(1.5, 1, snap(p));
+          ctx.font = F(900, h.size * k);
+          ctx.fillStyle = color.rgba(T.paper, h.a * p);
+          ctx.fillText('哈', h.x, h.y);
+        }
+        ctx.restore();
+      },
+    },
+    {
+      // the laughter falls away; what is left is a lesson, and it gets smaller
+      id: 'less', ch: 2, background: T.ink, tail: 1.3, energy: 0.3,
+      draw(ctx, s) {
+        const t = s.t;
+        ctx.save();
+        ctx.textAlign = 'center';
+        for (const h of LAUGH) {
+          const ft = Math.max(0, t - h.fall * 0.6);
+          const y = h.y + 2400 * ft * ft;
+          if (y - h.size > H) continue;
+          ctx.save();
+          ctx.translate(h.x, y);
+          ctx.rotate(h.spin * ft * 2);
+          ctx.font = F(900, h.size);
+          ctx.fillStyle = color.rgba(T.paper, h.a);
+          ctx.fillText('哈', 0, 0);
+          ctx.restore();
+        }
+        ctx.restore();
+        const tS = s.when('少说话', 3.4);
+        const shrink = win(t, tS + 1.0, 1.1, ease.inOutCubic);
+        ctx.save();
+        ctx.font = F(700, 76);
+        ctx.fillStyle = color.mix(T.paper, T.dim, shrink);
+        fx.wordReveal(ctx, '从那天起，我学会了一件事：', X0, 420, t, { sync: s, dur: 0.3, rise: 0.2 });
+        ctx.restore();
+        // 少说话: it lands big, then shrinks to almost nothing
+        const k = lerp(1, 0.2, shrink);
+        ctx.save();
+        ctx.translate(X0, 700);
+        ctx.scale(k, k);
+        slam(ctx, '少说话。', 0, 0, 270, win(t, tS - 0.08, 0.35), 0, { col: T.paper });
+        ctx.restore();
+      },
+    },
+
+    // ===== 03 · 绕路 ============================================================
+    card('card3', 3, '绕路', '长大以后', 'detour', 0.55),
+    {
+      // the straight street has a wall in it; the red line goes the long way round
+      id: 'detour', ch: 3, tail: 1.1, energy: 0.6,
+      draw(ctx, s) {
+        const t = s.t;
+        const tR = s.when('绕路', 1.9), tH = s.when('高手', 2.2);
+        const p = clamp((t - tR + 0.35) / Math.max(1, s.dur - tR - 0.2));
+        const head = fx.along(ROUTE, ease.inOutSine(p));
+        draw.camera(ctx, W, H, { zoom: 1.06, focusX: lerp(W / 2, head.x, 0.25), focusY: lerp(H / 2, head.y, 0.2) }, () => {
+          cityMap(ctx, clamp(t / 0.9));
+          // the straight way, and the wall across it
+          ctx.fillStyle = color.rgba(T.ink, 0.25 * win(t, 0.4, 0.4));
+          for (let x = 140; x < 1780; x += 28) ctx.fillRect(x, 528, 14, 4);
+          slab(ctx, 959, 498, 562, win(t, 0.6, 0.3), 26);
+          ctx.globalAlpha = win(t, 0.8, 0.3);
+          label(ctx, '此路不通', 959, 478, T.red, 'center', 22);
+          ctx.globalAlpha = 1;
+          // me, and what I wanted to say
+          ctx.fillStyle = T.ink;
+          ctx.beginPath(); ctx.arc(130, 530, 18, 0, Math.PI * 2); ctx.fill();
+          ctx.fillRect(1772, 512, 36, 36);
+          label(ctx, '想说的话', 1790, 484, T.ink, 'center', 22);
+          route(ctx, ROUTE, ease.inOutSine(p));
+        });
+        ctx.globalAlpha = win(t, tH, 0.3);
+        label(ctx, '直线 1.6 KM   实际 4.3 KM', W - M, 160, T.ink, 'right', 24);
+        ctx.globalAlpha = 1;
+      },
+    },
+    {
+      // the menu: what I want is the word I can't say; what I order is the word I can
+      id: 'menu', ch: 3, tail: 0.9, energy: 0.6, transition: { type: 'whip', direction: 'left', duration: 0.45 },
+      sfx: [{ at: (s) => s.when('说得出口', 3.4), type: 'pop', gain: 0.6 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const tW = s.when('想', 2.1), tS = s.when('是', 3.1), tE = s.when('说得出口', 3.4);
+        const out = s.out(0.35, ease.inCubic);
+        label(ctx, '菜单', X0, 236, T.ink);
+        const rowY = (i) => 360 + i * 140;
+        MENU.forEach(([n, dish, price], i) => {
+          const p = win(t, s.onBeat(i * 0.5), 0.3);
+          if (p <= 0) return;
+          const y = rowY(i);
+          ctx.fillStyle = color.rgba(T.ink, 0.85);
+          ctx.fillRect(X0, y + 34, 780 * p * (1 - out), 2);
+          const chosen = i === 3 ? win(t, tE - 0.05, 0.3) : 0;
+          if (chosen > 0) {
+            ctx.fillStyle = T.ink;
+            ctx.fillRect(X0 - 16, y - 76, 812 * chosen, 104);
+          }
+          ctx.save();
+          ctx.beginPath(); ctx.rect(X0 - 20, y - 90, 840, 124); ctx.clip();
+          const dy = (1 - p) * 110 + out * 120;
+          ctx.font = F(500, 26, T.latin);
+          ctx.fillStyle = chosen > 0.5 ? T.paper : T.ink;
+          ctx.fillText(n, X0, y + dy - 6);
+          ctx.font = F(700, 72);
+          ctx.fillText(dish, X0 + 80, y + dy);
+          ctx.font = F(600, 40, T.latin);
+          ctx.textAlign = 'right';
+          ctx.fillText(price, X0 + 780, y + dy - 6);
+          ctx.restore();
+        });
+        // 牛肉面: marked, then struck out
+        ctx.font = F(700, 72);
+        const wN = ctx.measureText('牛肉面').width;
+        fx.highlight(ctx, X0 + 74, rowY(0) - 30, wN + 12, 30, win(t, tW, 0.35, ease.standard) * (1 - out), { color: color.rgba(T.red, 0.35) });
+        const strike = win(t, tS - 0.05, 0.3);
+        if (strike > 0) { ctx.fillStyle = T.red; ctx.fillRect(X0 + 74, rowY(0) - 24, (wN + 12) * strike * (1 - out), 8); }
+        // the word on the right: 牛 shivers and won't come; 炒饭 lands
+        const nIn = win(t, tW - 0.05, 0.35), nOut = win(t, tS - 0.1, 0.3, ease.inCubic);
+        if (nIn > 0 && nOut < 1) {
+          ctx.save();
+          fx.mask(ctx, 1150, 240, 700, 600, () => tremble(ctx, s, '牛', 1490, 700 + (1 - nIn) * 500 + nOut * 520, 460, 1, { col: T.ink }));
+          ctx.restore();
+          ctx.globalAlpha = nIn * (1 - nOut);
+          label(ctx, '这个字  总是卡住', 1490, 230, T.red, 'center', 24);
+          ctx.globalAlpha = 1;
+        }
+        slam(ctx, '炒饭', 1490, 680, 300, win(t, tE - 0.05, 0.35), out, { align: 'center' });
+      },
+    },
+    {
+      // ten ideas on the table; they shrink into four characters
+      id: 'meeting', ch: 3, tail: 1.0, energy: 0.62, transition: { type: 'whip', direction: 'left', duration: 0.45 },
+      sfx: [{ at: (s) => s.when('四个字', 4.3), type: 'swish', gain: 0.6 }, { at: (s) => s.when('我没意见', 5.3), type: 'pop', gain: 0.7 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const tI = s.when('十个想法', 1.7), tO = s.when('说', 2.9), tF = s.when('四个字', 4.3), tN = s.when('我没意见', 5.3);
+        label(ctx, '周会  10:00', X0, 220, T.ink);
+        const cw = 300, chh = 168, gx = 36, x0 = (W - (cw * 5 + gx * 4)) / 2;
+        IDEAS.forEach((idea, i) => {
+          const r = Math.floor(i / 5), c = i % 5;
+          const p = win(t, tI - 0.3 + i * 0.07, 0.3);
+          if (p <= 0) return;
+          const cx = x0 + c * (cw + gx) + cw / 2, cy = 360 + r * (chh + 40) + chh / 2;
+          const q = win(t, tF - 0.1 + ((i * 7) % 10) * 0.035, 0.45, ease.inCubic);
+          if (q >= 1) return;
+          const gray = win(t, tO, 0.4, ease.standard);
+          ctx.save();
+          ctx.translate(lerp(cx, 960, q), lerp(cy + (1 - p) * 60, 600, q));
+          ctx.scale(1 - q, 1 - q);
+          ctx.globalAlpha = p;
+          ctx.strokeStyle = color.mix(T.ink, T.mute, gray);
+          ctx.lineWidth = 3;
+          ctx.strokeRect(-cw / 2, -chh / 2, cw, chh);
+          ctx.fillStyle = color.mix(T.ink, T.mute, gray);
+          ctx.font = F(600, 24, T.latin);
+          ctx.fillText(String(i + 1).padStart(2, '0'), -cw / 2 + 20, -chh / 2 + 40);
+          ctx.font = F(700, 40);
+          const lines = text.wrap(ctx, idea, cw - 40);
+          lines.forEach((ln, k) => ctx.fillText(ln, -cw / 2 + 20, 22 + k * 50 - (lines.length - 1) * 25));
+          ctx.restore();
+        });
+        slam(ctx, '我没意见。', 960, 680, 220, win(t, tN - 0.1, 0.35), s.out(0.3, ease.inCubic), { align: 'center' });
+      },
+    },
+    {
+      // a crowd of 人; one red 我 goes grey and the search never lands on it
+      id: 'hide', ch: 3, tail: 1.1, energy: 0.3,
+      draw(ctx, s) {
+        const t = s.t;
+        const tH = s.when('藏', 0.9), tF = s.when('连', 3.6);
+        const fade = win(t, tH, 0.9, ease.standard);
+        draw.camera(ctx, W, H, { zoom: lerp(1.0, 1.12, ease.inOutSine(s.p)), focusX: 1000, focusY: 540 }, () => {
+          ctx.save();
+          ctx.textAlign = 'center';
+          for (const c of CROWD) {
+            const p = clamp(t * 2.2 - (c.row * 0.08 + c.col * 0.02));
+            if (p <= 0) continue;
+            const me = c === ME_IN_CROWD;
+            ctx.globalAlpha = p;
+            ctx.font = F(me ? 900 : 500, 40);
+            ctx.fillStyle = me ? color.mix(T.red, '#A9A59C', fade) : '#A9A59C';
+            ctx.fillText(me ? '我' : '人', c.x, c.y);
+          }
+          ctx.restore();
+          // the search ring wanders and never lands on me
+          const sp = win(t, tF - 0.2, 0.3);
+          if (sp > 0) {
+            const k = clamp((t - tF) / 2.4);
+            const path = [[560, 400], [880, 700], [1360, 380], [1080, 760], [1500, 640], [760, 520]];
+            const a = fx.along(path, ease.inOutSine(k));
+            ctx.strokeStyle = T.ink;
+            ctx.lineWidth = 5;
+            ctx.globalAlpha = sp;
+            ctx.beginPath();
+            ctx.arc(a.x, a.y, 70, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillRect(a.x + 48, a.y + 48, 50, 8);
+          }
+        });
+      },
+    },
+
+    // ===== 04 · 请柬 ============================================================
+    card('card4', 4, '请柬', '去年秋天', 'invite', 0.42),
+    {
+      // the invitation opens; the seal lands on 结婚
+      id: 'invite', ch: 4, tail: 0.6, energy: 0.45,
+      sfx: [{ at: (s) => s.when('结婚', 1.5), type: 'pop', gain: 0.7 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const open = win(t, 0.05, 0.6, ease.enter);
+        const tM = s.when('妹妹', 1.1), tJ = s.when('结婚', 1.5);
+        const cx = 960, cy = 520, cw = 860, ch = 520;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(1, Math.max(0.004, open));
+        ctx.strokeStyle = T.ink;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(-cw / 2, -ch / 2, cw, ch);
+        ctx.strokeRect(-cw / 2 + 16, -ch / 2 + 16, cw - 32, ch - 32);
+        ctx.restore();
+        const c = (d) => win(t, 0.45 + d, 0.4);
+        ctx.globalAlpha = c(0);
+        label(ctx, 'WEDDING', cx, cy - 150, T.ink, 'center', 24);
+        ctx.globalAlpha = 1;
+        slam(ctx, '阿妍  &  周远', cx, cy + 10, 96, c(0.1), 0, { w: 700, fam: T.serif, align: 'center' });
+        ctx.fillStyle = T.ink;
+        ctx.fillRect(cx - 160 * c(0.2), cy + 56, 320 * c(0.2), 2);
+        slam(ctx, '2025 · 10 · 18', cx, cy + 140, 44, c(0.25), 0, { w: 600, fam: T.latin, align: 'center' });
+        // 妹妹: a red tag pointing at her name
+        const mp = win(t, tM - 0.05, 0.35);
+        if (mp > 0) {
+          ctx.fillStyle = T.red;
+          ctx.fillRect(cx - 330, cy - 74, 110 * mp, 4);
+          ctx.globalAlpha = mp;
+          label(ctx, '妹妹', cx - 340, cy - 64, T.red, 'right', 30);
+          ctx.globalAlpha = 1;
+        }
+        // the seal
+        const sp = win(t, tJ - 0.08, 0.28);
+        if (sp > 0) {
+          const k = lerp(1.8, 1, sp);
+          ctx.save();
+          ctx.translate(cx + cw / 2 - 100, cy + ch / 2 - 100);
+          ctx.scale(k, k);
+          ctx.globalAlpha = sp;
+          ctx.fillStyle = T.red;
+          ctx.fillRect(-58, -58, 116, 116);
+          ctx.font = F(900, 86, T.serif);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = T.paper;
+          ctx.fillText('囍', 0, 30);
+          ctx.restore();
+        }
+      },
+    },
+    {
+      // her voice, set in serif: a hanging red quote mark and the question
+      id: 'ask', ch: 4, tail: 0.8, energy: 0.42, captions: 'file', transition: { type: 'zoom', duration: 0.5, ease: snap },
+      draw(ctx, s) {
+        const t = s.t;
+        const out = s.out(0.35);
+        ctx.save();
+        ctx.font = F(900, 380, T.serif);
+        ctx.fillStyle = T.red;
+        ctx.globalAlpha = win(t, 0, 0.3);
+        ctx.fillText('“', X0 - 70, 560 - (1 - win(t, 0, 0.4)) * 60);
+        ctx.restore();
+        ctx.save();
+        ctx.font = F(700, 150, T.serif);
+        ctx.fillStyle = T.ink;
+        fx.wordReveal(ctx, '哥，', X0 + 150, 470, t, { sync: s, dur: 0.35, rise: 0.25, exit: out });
+        ctx.font = F(700, 116, T.serif);
+        fx.wordReveal(ctx, '婚礼上你来讲几句吧？', X0 + 150, 680, t, { sync: s, dur: 0.3, rise: 0.25, exit: out });
+        ctx.restore();
+        ctx.globalAlpha = win(t, s.voiceEnd - 0.4, 0.3) * (1 - out);
+        label(ctx, '—  妹妹  阿妍', X0 + 154, 800, T.ink, 'left', 26);
+      },
+    },
+    {
+      // my answer: 不 stammers, and the wall comes back
+      id: 'refuse', ch: 4, background: T.ink, tail: 0.8, energy: 0.35, captions: 'file',
+      sfx: [{ at: (s) => s.when('不行', 1.4) + 0.42, type: 'boom', gain: 0.4 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const tN = s.when('不行', 1.4), tB = s.when('我讲不好', 2.2);
+        ctx.save();
+        ctx.font = F(500, 64);
+        ctx.fillStyle = color.rgba(T.paper, 0.75);
+        fx.wordReveal(ctx, '我第一反应是：', X0, 330, t, { sync: s, dur: 0.3, rise: 0.2 });
+        ctx.restore();
+        typed(ctx, s, [[0, ''], ...stammer('不', tN - 0.3, 3, 0.13), [tN + 0.42, '不行'], [tN + 0.5, '不行。']], X0, 680, 320, { col: T.paper, stuck: [tN - 0.3, tN + 0.42] });
+        slab(ctx, 1500, 150, 890, win(t, tN + 0.42, 0.22, ease.outCubic), 30);
+        ctx.save();
+        ctx.font = F(500, 60);
+        ctx.fillStyle = color.rgba(T.paper, 0.55);
+        fx.charReveal(ctx, '我讲不好。', X0, 860, t - tB + 0.05, { stagger: 0.09, dur: 0.3, rise: 0.2 });
+        ctx.restore();
+      },
+    },
+    {
+      // her answer. On 慢慢 the wall falls over and lies down; 你慢慢说 spreads out, slowly
+      id: 'wait', ch: 4, tail: 2.1, energy: 0.5, captions: 'file',
+      sfx: [{ at: (s) => s.when('慢慢', 1.8) + 0.62, type: 'boom', gain: 0.35 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const tS = s.when('慢慢', 1.8), tW = s.when('我们', 2.8);
+        // the wall from the last shot falls (pivot at its foot) and becomes the ground
+        const fall = win(t, tS, 0.62, ease.inCubic);
+        const settle = fx.shake(t, tS + 0.62, 6, { decay: 0.15 });
+        ctx.save();
+        ctx.translate(1515, 890 + settle.y);
+        ctx.rotate(-Math.PI / 2 * fall);
+        ctx.fillStyle = T.red;
+        ctx.fillRect(-30, -740, 30, 740);
+        ctx.restore();
+        ctx.save();
+        ctx.font = F(600, 72, T.serif);
+        ctx.fillStyle = T.ink;
+        fx.wordReveal(ctx, '没关系。', X0, 300, t, { sync: s, dur: 0.35, rise: 0.25 });
+        // slowness made visible: the tracking keeps opening long after the words land
+        const track = lerp(0, 56, ease.inOutSine(clamp((t - tS) / 3.8)));
+        ctx.letterSpacing = `${track.toFixed(1)}px`;
+        ctx.font = F(900, 170, T.serif);
+        fx.wordReveal(ctx, '你慢慢说，', X0, 580, t, { sync: s, dur: 0.45, rise: 0.2 });
+        ctx.letterSpacing = '0px';
+        ctx.font = F(700, 110, T.serif);
+        fx.wordReveal(ctx, '我们等你。', X0, 790, t, { sync: s, dur: 0.4, rise: 0.25 });
+        ctx.restore();
+      },
+    },
+    {
+      // three thousand characters, cut to three lines (their words stay hidden for now)
+      id: 'draft', ch: 4, tail: 0.9, energy: 0.6,
+      draw(ctx, s) {
+        const t = s.t;
+        const tW = s.when('写', 1.4), t3k = s.when('三千', 1.7), tD = s.when('删到', 3.2), t3 = s.when('三', 4.8);
+        const scroll = lerp(0, 820, ease.inOutCubic(clamp((t - tW) / (tD - tW))));
+        const cut = (i) => win(t, tD + ((i * 5) % 17) * 0.05, 0.3, ease.inCubic);
+        ctx.save();
+        ctx.beginPath(); ctx.rect(170, 150, 760, 780); ctx.clip();
+        DRAFT.forEach((wk, i) => {
+          const keep = KEEP.indexOf(i);
+          const y = 190 + i * 40 - scroll;
+          const yy = keep >= 0 ? lerp(y, 380 + keep * 150, win(t, tD + 1.0, 0.5)) : y;
+          if (yy < 120 || yy > 960) return;
+          if (keep >= 0) {
+            const k = win(t, tD + 1.0, 0.5);
+            ctx.fillStyle = color.mix(T.mute, T.ink, k);
+            ctx.fillRect(250, yy - lerp(10, 26, k), 600 * lerp(wk, 0.9 - keep * 0.12, k), lerp(20, 52, k));
+            if (k > 0) { ctx.globalAlpha = k; ctx.font = F(900, 56, T.latin); ctx.fillStyle = T.red; ctx.fillText(String(keep + 1), 190, yy + 20); ctx.globalAlpha = 1; }
+          } else {
+            const c = cut(i);
+            if (c >= 1) return;
+            ctx.fillStyle = T.mute;
+            ctx.fillRect(250 + 600 * wk * c, yy - 10, 600 * wk * (1 - c), 20);
+            if (c > 0) { ctx.fillStyle = T.red; ctx.fillRect(250 + 600 * wk * c, yy - 2, 600 * wk * (1 - c), 4); }
+          }
+        });
+        ctx.restore();
+        // the count: up to 3,000 characters, then down to 3 lines
+        const up = ease.outQuart(clamp((t - t3k + 0.1) / 0.8));
+        const down = ease.inOutCubic(clamp((t - tD) / (t3 - tD)));
+        const n = t < tD ? Math.round(3000 * up) : Math.max(3, Math.round(3000 * (1 - down)));
+        const unit = t >= t3 - 0.05 ? '句' : '字';
+        ctx.globalAlpha = win(t, tW - 0.2, 0.3);
+        label(ctx, t >= t3 - 0.05 ? '最后剩下' : '稿子', 1150, 330, T.ink, 'left', 28);
+        ctx.font = F(900, 240, T.latin);
+        ctx.fillStyle = unit === '句' ? T.red : T.ink;
+        const str = n.toLocaleString('en-US');
+        ctx.fillText(str, 1140, 620);
+        const nw = ctx.measureText(str).width;
+        ctx.font = F(900, 110);
+        ctx.fillText(unit, 1160 + nw, 620);
+        ctx.globalAlpha = 1;
+      },
+    },
+    {
+      // a hundred recordings on the phone, faster and faster
+      id: 'practice', ch: 4, background: T.ink, tail: 1.0, energy: 0.7, transition: { type: 'push', direction: 'up', duration: 0.5, ease: snap },
+      sfx: [{ at: (s) => s.when('一百', 3.3) + 0.25, type: 'pop', gain: 0.7 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const t1 = s.when('一遍一遍', 1.6), t2 = s.when('一百', 3.3) + 0.25;
+        const n = Math.max(1, Math.round(1 + 99 * ease.inQuad(clamp((t - t1) / (t2 - t1)))));
+        const frac = (() => { const f = 1 + 99 * ease.inQuad(clamp((t - t1) / (t2 - t1))); return f - Math.floor(f); })();
+        const ph = win(t, 0, 0.5, ease.enter);
+        const px = 330, py = 150, pw = 440, phh = 780;
+        ctx.save();
+        ctx.translate(0, (1 - ph) * 300);
+        ctx.globalAlpha = ph;
+        ctx.strokeStyle = T.paper;
+        ctx.lineWidth = 4;
+        draw.roundRect(ctx, px, py, pw, phh, 54);
+        ctx.stroke();
+        ctx.fillStyle = T.paper;
+        ctx.fillRect(px + pw / 2 - 50, py + 26, 100, 10);
+        ctx.save();
+        draw.roundRect(ctx, px + 4, py + 60, pw - 8, phh - 64, 50);
+        ctx.clip();
+        for (let k = 0; k < 9; k++) {
+          const idx = n - k;
+          if (idx < 1) break;
+          const y = py + 120 + (k + (n < 100 && t > t1 ? frac : 0)) * 92;
+          ctx.font = F(600, 30);
+          ctx.fillStyle = k === 0 ? T.paper : color.rgba(T.paper, 0.55);
+          ctx.fillText(`练习 ${String(idx).padStart(3, '0')}`, px + 36, y);
+          for (let b = 0; b < 16; b++) {
+            const hh = 6 + Math.abs(noise(idx * 3.1 + b * 0.7, 2)) * 34;
+            ctx.fillRect(px + 250 + b * 9, y - 12 - hh / 2, 5, hh);
+          }
+          ctx.fillStyle = color.rgba(T.paper, 0.18);
+          ctx.fillRect(px + 36, y + 30, pw - 72, 1);
+        }
+        ctx.restore();
+        ctx.restore();
+        ctx.globalAlpha = win(t, t1 - 0.3, 0.3);
+        label(ctx, '练了', 1140, 330, color.rgba(T.paper, 0.6), 'left', 28);
+        ctx.font = F(900, 300, T.latin);
+        ctx.fillStyle = n >= 100 ? T.red : T.paper;
+        const str = String(n).padStart(3, '0');
+        ctx.fillText(str, 1130, 640);
+        const nw = ctx.measureText(str).width;
+        ctx.font = F(900, 110);
+        ctx.fillText('遍', 1150 + nw, 640);
+        ctx.globalAlpha = 1;
+      },
+    },
+
+    // ===== 05 · 八秒 ============================================================
+    card('card5', 5, '八秒', '婚礼那天', 'stage', 0.4),
+    {
+      // the stage: a light, the guests, a microphone
+      id: 'stage', ch: 5, background: T.ink, tail: 0.6, energy: 0.32,
+      sfx: [{ at: (s) => s.when('站上台', 1.4), type: 'swell', gain: 0.6 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const tL = s.when('站上台', 1.4), tM = s.when('接过', 2.5);
+        stage(ctx, s, { light: win(t, tL - 0.1, 0.3, ease.standard) });
+        mic(ctx, 960, 470, win(t, tM - 0.1, 0.45, ease.enter));
+        ctx.globalAlpha = win(t, 0.3, 0.4);
+        label(ctx, '宴会厅  18:42', W - M, 160, color.rgba(T.paper, 0.6), 'right');
+        ctx.globalAlpha = 1;
+      },
+    },
+    {
+      // the first word: 我. It shivers; the wall is there again
+      id: 'stuck', ch: 5, background: T.ink, tail: 0.5, energy: 0.25,
+      sfx: [{ at: (s) => s.when('卡', 1.6), type: 'tick', gain: 0.6 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const tW = s.when('第一个字', 0.4), tK = s.when('卡', 1.6);
+        stage(ctx, s, {});
+        const p = win(t, tW - 0.1, 0.4);
+        ctx.save();
+        fx.mask(ctx, 0, 0, W, 760, () => tremble(ctx, s, '我', 960, 680 + (1 - p) * 560, 440, win(t, tK - 0.1, 0.3, ease.linear), { col: T.paper }));
+        ctx.restore();
+        slab(ctx, 1260, 200, 760, win(t, tK, 0.22, ease.outCubic), 30);
+      },
+    },
+    {
+      // eight seconds, one beat each. Nobody moves.
+      id: 'silence', ch: 5, background: T.ink, narration: false, beats: 8, energy: 0.12,
+      sfx: Array.from({ length: 8 }, (_, k) => ({ at: (s) => s.onBeat(k), type: 'tick', gain: 0.35 })),
+      draw(ctx, s) {
+        const t = s.t;
+        // the camera leans in for eight beats
+        cam(ctx, lerp(1, 1.14, ease.inOutSine(s.p)), 1060, 520, () => {
+          stage(ctx, s, {});
+          tremble(ctx, s, '我', 960, 680, 440, lerp(1, 0.75, s.p), { col: T.paper });
+          slab(ctx, 1260, 200, 760, 1, 30);
+        });
+        const sec = clamp(Math.floor((t - s.onBeat(0)) / s.beatLen + 1e-6) + 1, 0, 8);
+        label(ctx, '卡住', W - M, 170, color.rgba(T.paper, 0.6), 'right', 26);
+        timer(ctx, sec, W - M, 320, 150, T.paper, 'right');
+      },
+    },
+    {
+      // eight, not eleven. Nobody laughs; the room lights up, back rows first
+      id: 'nobody', ch: 5, background: T.ink, tail: 1.0, energy: 0.3,
+      draw(ctx, s) {
+        const t = s.t;
+        const tX = s.when('没有人笑', 1.4), tL = s.when('笑', 2.0), tW = s.when('他们', 4.2);
+        const wave = clamp((t - tW + 0.1) / 1.4) * 1.6;
+        // ... and pulls back out as the room lights up
+        cam(ctx, lerp(1.14, 1, win(t, tW - 0.3, 2.2, ease.inOutCubic)), 1060, 520, () => {
+          stage(ctx, s, { wave });
+          tremble(ctx, s, '我', 960, 680, 440, lerp(0.75, 0.15, win(t, tW, 1.4, ease.standard)), { col: T.paper });
+          slab(ctx, 1260, 200, 760, 1, 30);
+        });
+        label(ctx, '卡住', W - M, 170, color.rgba(T.paper, 0.6), 'right', 26);
+        timer(ctx, 8, W - M, 320, 150, T.paper, 'right');
+        // the other time: eleven seconds, and laughter, struck out
+        const gp = win(t, tX - 0.1, 0.35);
+        if (gp > 0) {
+          ctx.globalAlpha = gp;
+          label(ctx, '二年级', W - M, 400, color.rgba(T.paper, 0.45), 'right', 22);
+          const tw = timer(ctx, 11, W - M, 470, 60, color.rgba(T.paper, 0.45), 'right');
+          ctx.font = F(900, 52);
+          ctx.textAlign = 'right';
+          ctx.fillStyle = color.rgba(T.paper, 0.45);
+          ctx.fillText('哈哈哈', W - M - tw - 30, 468);
+          const st = win(t, tL, 0.3);
+          ctx.fillStyle = T.red;
+          ctx.fillRect(W - M - (tw + 200) * st, 448, (tw + 200) * st, 6);
+          ctx.globalAlpha = 1;
+        }
+      },
+    },
+    {
+      // the first sentence: the wall breaks, 我 drops into its place at the head of the line
+      id: 'through', ch: 5, part: 'free', background: T.ink, tail: 0.9, energy: 0.9, captions: 'file',
+      sfx: [{ at: (s) => s.when('我妹妹', 1.8) - 0.05, type: 'hit' }],
+      draw(ctx, s) {
+        const t = s.t;
+        const tS = s.when('我妹妹', 1.8) - 0.05;
+        stage(ctx, s, { lit: 1, light: 1 - win(t, tS, 0.6, ease.standard) * 0.6 });
+        // the wall, until it breaks
+        if (t < tS) slab(ctx, 1260, 200, 760, 1, 30);
+        else {
+          const dt = t - tS;
+          ctx.fillStyle = T.red;
+          for (const sh of SHARDS) {
+            const y = 200 + sh.y0 * 560 + sh.vy * dt + 1600 * dt * dt;
+            if (y > H + 100) continue;
+            ctx.save();
+            ctx.translate(1260 + sh.vx * dt, y);
+            ctx.rotate(sh.rot * dt);
+            ctx.fillRect(-15, 0, 30, sh.h * 560);
+            ctx.restore();
+          }
+        }
+        // 我 moves from the spotlight to the head of the sentence
+        const mv = win(t, tS - 0.1, 0.5, ease.swift);
+        const size = lerp(440, 150, mv);
+        tremble(ctx, s, '我', lerp(960, X0 + 75, mv), lerp(680, 430, mv), size, (1 - mv) * 0.15, { col: T.paper });
+        if (mv > 0.9) {
+          ctx.save();
+          ctx.font = F(900, 150);
+          ctx.fillStyle = T.paper;
+          fx.wordReveal(ctx, '妹妹，', X0 + 150, 430, t, { sync: s, dur: 0.3, rise: 0.25 });
+          const red = new Set(['最', '勇', '敢']);
+          fx.wordReveal(ctx, '是我见过最勇敢的人。', X0, 650, t, { sync: s, dur: 0.3, rise: 0.25, colorFor: (w) => (red.has(w.text) ? T.red : T.paper) });
+          ctx.restore();
+        }
+        // the break: one flash of light
+        if (t > tS) { ctx.fillStyle = color.rgba(T.paper, 0.55 * Math.exp(-(t - tS) / 0.12)); ctx.fillRect(0, 0, W, H); }
+      },
+    },
+    {
+      // the other two sentences, typed out while the room claps on the beat
+      id: 'cheer', ch: 5, background: T.ink, narration: false, beats: 11, energy: 0.95,
+      draw(ctx, s) {
+        const t = s.t;
+        stage(ctx, s, { lit: 1, light: 0.4, pulse: s.pulse(0.2) });
+        const shrink = win(t, 0, 0.5, ease.swift);
+        ctx.save();
+        ctx.translate(X0, lerp(430, 230, shrink));
+        ctx.scale(lerp(1, 0.42, shrink), lerp(1, 0.42, shrink));
+        ctx.font = F(900, 150);
+        ctx.fillStyle = color.mix(T.paper, T.dim, shrink * 0.6);
+        ctx.fillText('我妹妹，', 0, 0);
+        ctx.translate(0, 220);
+        ctx.fillText('是我见过最勇敢的人。', 0, 0);
+        ctx.restore();
+        const l2 = '小时候别人笑我，她总是第一个站出来。', l3 = '今天，换我站在这里，祝她幸福。';
+        const t2 = s.onBeat(1), t3 = s.onBeat(6);
+        const ks = (str, t0) => spell(str, Array.from(str).map((_, i) => t0 + i * 0.075));
+        ctx.globalAlpha = win(t, t2 - 0.1, 0.3);
+        label(ctx, '2', X0 - 60, 470, T.red, 'left', 40);
+        ctx.globalAlpha = win(t, t3 - 0.1, 0.3);
+        label(ctx, '3', X0 - 60, 640, T.red, 'left', 40);
+        ctx.globalAlpha = 1;
+        const out = s.out(0.3, ease.inCubic);
+        typed(ctx, s, ks(l2, t2), X0, 470, 80, { col: T.paper, caret: t < t3, out });
+        typed(ctx, s, ks(l3, t3), X0, 640, 80, { col: T.paper, caret: t >= t3, out });
+      },
+    },
+    {
+      // a ledger of the toast: 3 sentences, 2 minutes, 0 phones
+      id: 'long', ch: 5, tail: 0.9, energy: 0.8,
+      transition: { type: 'blinds', count: COLS, direction: 'vertical', stagger: 0.6, duration: 0.5, ease: snap },
+      sfx: [{ at: (s) => s.when('三', 0.3), type: 'tick' }, { at: (s) => s.when('两分钟', 2.2), type: 'tick' }, { at: (s) => s.when('没有', 3.8), type: 'pop', gain: 0.8 }],
+      draw(ctx, s) {
+        const t = s.t;
+        grid(ctx, 1, color.rgba(T.ink, 0.07));
+        const rows = [
+          { at: s.when('三', 0.3), n: '3', what: '句话' },
+          { at: s.when('两分钟', 2.2), n: '2:00', what: '分钟' },
+          { at: s.when('没有', 3.8), n: '0', what: '人低头看手机' },
+        ];
+        rows.forEach((r, i) => {
+          const y = 360 + i * 240;
+          const p = win(t, r.at - 0.1, 0.35);
+          if (p <= 0) return;
+          const later = i < 2 ? win(t, rows[i + 1].at - 0.1, 0.4, ease.standard) * 0.7 : 0;
+          const col = i === 2 ? T.red : color.mix(T.ink, T.mute, later);
+          ctx.fillStyle = color.rgba(T.ink, 0.8);
+          ctx.fillRect(X0, y + 50, (W - M - X0) * p, 2);
+          slam(ctx, r.n, X0, y, 220, p, 0, { fam: T.latin, col, track: -6 });
+          slam(ctx, r.what, X0 + CW * 4, y - 10, 76, win(t, r.at + 0.05, 0.35), 0, { w: 700, col });
+        });
+      },
+    },
+
+    // ===== 06 · 现在 ============================================================
+    card('card6', 6, '现在', '一年以后', 'home', 0.6),
+    {
+      // the opening line again, still stuck; but the line on the map now goes straight
+      id: 'still', ch: 6, tail: 1.0, energy: 0.55,
+      draw(ctx, s) {
+        const t = s.t;
+        const a = s.when('现在的我', 0.3), tB = s.when('但', 3.8), tG = s.when('不再', 4.1);
+        const rest = '说话，还是会卡住。';
+        const tr = [s.when('说话'), s.when('说话') + 0.1, s.when('说话') + 0.2, s.when('还是'), s.when('还是') + 0.12, s.when('会'), s.when('卡'), s.when('住'), s.when('住') + 0.1];
+        const keys = [[0, ''], ...stammer('我', a + 0.2, 3, 0.15)];
+        let tt = a + 1.0;
+        Array.from(rest).forEach((ch, i) => { tt = Math.max(tt + 0.06, tr[i]); keys.push([tt, '我' + Array.from(rest).slice(0, i + 1).join('')]); });
+        const up = win(t, tB - 0.1, 0.5, ease.standard);
+        ctx.save();
+        ctx.translate(X0, lerp(560, 330, up));
+        ctx.scale(lerp(1, 0.62, up), lerp(1, 0.62, up));
+        typed(ctx, s, keys, 0, 0, 160, { stuck: [a + 0.2, a + 1.0], caret: t < tB });
+        ctx.restore();
+        // the street again: the wall is still there; the line goes straight through
+        const mp = win(t, tB - 0.05, 0.4);
+        if (mp > 0) {
+          ctx.globalAlpha = mp;
+          ctx.fillStyle = color.rgba(T.ink, 0.25);
+          for (let x = 240; x < 1680; x += 28) ctx.fillRect(x, 718, 14, 4);
+          ctx.fillStyle = T.ink;
+          ctx.beginPath(); ctx.arc(240, 720, 18, 0, Math.PI * 2); ctx.fill();
+          ctx.fillRect(1662, 702, 36, 36);
+          slab(ctx, 960, 680, 760, 1, 26);
+          ctx.globalAlpha = 1;
+          route(ctx, [[240, 720], [1680, 720]], ease.inOutCubic(clamp((t - tG) / 1.4)), { width: 10 });
+          ctx.globalAlpha = win(t, tG + 1.3, 0.3);
+          label(ctx, '直走', 1680, 670, T.red, 'center', 30);
+          ctx.globalAlpha = 1;
+        }
+      },
+    },
+    {
+      // the voice you are hearing, drawn as it speaks; then the tag on it
+      id: 'borrowed', ch: 6, background: T.ink, tail: 0.9, energy: 0.45,
+      sfx: [{ at: (s) => s.when('不是我的', 2.4), type: 'tick', gain: 0.8 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const tN = s.when('不是我的', 2.4);
+        const words = s.voice?.words || [];
+        const tv = t - s.voiceStart;
+        let env = 0;
+        for (const w of words) env = Math.max(env, clamp((tv - w.start + 0.05) / 0.08) * clamp((w.end + 0.08 - tv) / 0.12));
+        const dimmed = win(t, tN, 0.5, ease.standard);
+        ctx.globalAlpha = win(t, 0, 0.3);
+        label(ctx, '你听到的声音', X0, 300, color.rgba(T.paper, 0.6));
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = color.mix(T.paper, T.dim, dimmed);
+        const n = 96, x0 = X0, span = W - M - X0 - CW;
+        for (let i = 0; i < n; i++) {
+          const h = 6 + env * (0.25 + 0.75 * Math.abs(noise(i * 0.37 + t * 7, 4))) * 300 * Math.sin(Math.PI * (i + 0.5) / n);
+          ctx.fillRect(x0 + i * (span / n), 560 - h / 2, span / n * 0.55, h);
+        }
+        const tp = win(t, tN - 0.05, 0.3);
+        if (tp > 0) {
+          const k = lerp(1.5, 1, tp);
+          ctx.save();
+          ctx.translate(960, 560);
+          ctx.scale(k, k);
+          ctx.globalAlpha = tp;
+          ctx.fillStyle = T.red;
+          ctx.fillRect(-250, -80, 500, 160);
+          ctx.font = F(900, 92);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = T.paper;
+          ctx.fillText('借来的', 0, 32);
+          ctx.restore();
+        }
+      },
+    },
+    {
+      // the script of this video, every line of it his; the words light up in order
+      id: 'mine', ch: 6, tail: 1.1, energy: 0.55,
+      draw(ctx, s) {
+        const t = s.t;
+        const tE = s.when('每一个字', 1.9), tM = s.when('我自己的', 3.1);
+        const lines = Object.entries(window.CV_NARRATION?.segments || {}).filter(([id]) => id !== 'ask' && id !== 'wait').map(([, g]) => g.text);
+        label(ctx, '旁白稿  第 7 稿', X0, 200, T.ink);
+        ctx.font = F(500, 26);
+        const per = Math.ceil(lines.length / 2);
+        let idx = 0;
+        const total = lines.reduce((a, l) => a + Array.from(l).length, 0);
+        lines.forEach((ln, i) => {
+          const col = Math.floor(i / per), row = i % per;
+          const x = X0 + col * 760, y = 280 + row * 50;
+          const ap = win(t, 0.1 + i * 0.03, 0.3);
+          if (ap <= 0) { idx += Array.from(ln).length; return; }
+          let cx = x;
+          for (const ch of Array.from(ln)) {
+            const lit = clamp((t - tE - (idx / total) * 1.4) / 0.12);
+            ctx.fillStyle = color.mix(T.mute, T.ink, lit);
+            ctx.globalAlpha = ap;
+            ctx.fillText(ch, cx, y + (1 - ap) * 20);
+            cx += ctx.measureText(ch).width;
+            idx++;
+          }
+        });
+        ctx.globalAlpha = 1;
+        slam(ctx, '— 阿哲', W - M, 950, 64, win(t, tM - 0.05, 0.35), 0, { w: 700, fam: T.serif, col: T.red, align: 'right' });
+      },
+    },
+    {
+      // the end card: the title, and the caret, waiting
+      id: 'end', ch: 6, tail: 2.4, energy: 0.5, captions: 'file',
+      sfx: [{ at: (s) => s.when('慢慢说', 2.2), type: 'chime', gain: 0.6 }],
+      draw(ctx, s) {
+        const t = s.t;
+        const tS = s.when('慢慢说', 2.2);
+        grid(ctx, 1, color.rgba(T.ink, 0.07));
+        ctx.save();
+        ctx.font = F(700, 64);
+        ctx.fillStyle = T.ink;
+        fx.wordReveal(ctx, '如果你也有话卡在心里，', X0, 330, t, { sync: s, dur: 0.3, rise: 0.2 });
+        ctx.restore();
+        const track = lerp(-6, 48, ease.inOutSine(clamp((t - tS) / 4)));
+        const tw = slam(ctx, '慢慢说', X0, 700, 300, win(t, tS - 0.08, 0.45), 0, { track });
+        const solid = t > s.dur - 1.3;
+        if (t > tS + 0.4) {
+          const on = solid || ((s.beat % 1) + 1) % 1 < 0.55;
+          if (on) { ctx.fillStyle = T.red; ctx.fillRect(X0 + tw + 30, 700 - 250, 28, 290); }
+        }
+        ctx.save();
+        ctx.font = F(500, 56);
+        ctx.fillStyle = T.ink;
+        fx.wordReveal(ctx, '总会有人愿意等你。', X0, 860, t, { sync: s, dur: 0.35, rise: 0.2 });
+        ctx.restore();
+      },
+    },
+  ],
+});
+
+// the classroom from above (drawn by `class` and `count`): `reader` is the desk reading now
+function classroom(ctx, s, reader, p) {
+  const t = s.t;
+  ctx.fillStyle = T.ink;
+  const bw = DESK.cols * DESK.w + (DESK.cols - 1) * DESK.gx;
+  ctx.fillRect(DESK.x0, 180, bw * win(t, 0, 0.5), 12);
+  ctx.globalAlpha = s.id === 'class' ? win(t, 0.3, 0.3) : 0;
+  label(ctx, '讲台', DESK.x0, 160, T.ink, 'left', 22);
+  ctx.globalAlpha = 1;
+  for (let i = 0; i < DESK.cols * DESK.rows; i++) {
+    const { x, y } = deskPos(i);
+    const c = i % DESK.cols, r = Math.floor(i / DESK.cols);
+    const q = s.id === 'class' ? win(t, s.onBeat(0) + (r + c) * 0.05, 0.35) : 1;
+    if (q <= 0) continue;
+    const me = i === DESK.me, reading = i === reader, done = i < reader;
+    ctx.save();
+    ctx.translate(x + DESK.w / 2, y + DESK.h / 2);
+    ctx.scale(lerp(0.6, 1, q), lerp(0.6, 1, q));
+    ctx.globalAlpha = q;
+    if (me) {
+      ctx.fillStyle = T.red;
+      ctx.fillRect(-DESK.w / 2, -DESK.h / 2, DESK.w, DESK.h);
+      ctx.font = F(900, 44);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = T.paper;
+      ctx.fillText('我', 0, 16);
+    } else if (reading) {
+      ctx.fillStyle = T.ink;
+      ctx.fillRect(-DESK.w / 2, -DESK.h / 2, DESK.w, DESK.h);
+    } else {
+      ctx.strokeStyle = done ? T.mute : T.ink;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(-DESK.w / 2, -DESK.h / 2, DESK.w, DESK.h);
+    }
+    ctx.restore();
+  }
+}
+</script>
+</body>
+</html>

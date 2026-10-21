@@ -129,9 +129,47 @@ def best_window(audio: np.ndarray, sr: int, seconds: float = 12.0) -> tuple[floa
     w = int(seconds / 0.05)
     score = np.convolve(loud.astype(float) - 2 * clipped, np.ones(w), mode="valid")
     start = int(np.argmax(score))
-    # snap both ends to the quietest frame nearby (within 0.5 s), so no word is cut
-    def quiet_near(i):
-        lo, hi = max(0, i - 10), min(n - 1, i + 10)
-        return lo + int(np.argmin(db[lo:hi + 1]))
-    s, e = quiet_near(start), quiet_near(min(n - 1, start + w))
-    return round(s * 0.05, 2), round(e * 0.05, 2)
+    fine = frame_db(audio, sr, 0.01)  # the edges are placed in 10 ms steps
+    s, e = pause_near(fine, start * 5), pause_near(fine, min(len(fine) - 1, (start + w) * 5))
+    return round(s * 0.01, 2), round(e * 0.01, 2)
+
+
+def frame_db(audio: np.ndarray, sr: int, hop_s: float) -> np.ndarray:
+    hop = max(1, int(hop_s * sr))
+    n = len(audio) // hop
+    frames = audio[: n * hop].reshape(n, hop).astype(np.float64)
+    return 20 * np.log10(np.sqrt((frames ** 2).mean(axis=1)) + 1e-9)
+
+
+def pause_near(db: np.ndarray, i: int, hop_s: float = 0.01, reach_s: float = 1.5) -> int:
+    """The frame of `db` (one per hop_s) to cut at near frame i: the middle of the nearest real pause within
+    reach_s. A pause is at least 70 ms of quiet that also gets really quiet somewhere. The closure of a stop
+    consonant ("d", "t", "k") is quiet too, but shorter and shallower, and cutting there leaves half a word, which
+    cloning models then finish before the script ("plati-ca|do" -> "…cado, desde las calles"). Both levels follow
+    the recording's own loudness and noise floor. With no pause in reach, the quietest frame nearby."""
+    n = len(db)
+    if n == 0:
+        return 0
+    i = min(max(i, 0), n - 1)
+    loud, floor = np.percentile(db, 95), np.percentile(db, 5)
+    quiet_level, deep_level = max(floor + 8, loud - 35), max(floor + 3, loud - 45)
+    need = max(1, int(round(0.07 / hop_s)))
+    lo, hi = max(0, i - int(reach_s / hop_s)), min(n - 1, i + int(reach_s / hop_s))
+    best, k = None, lo
+    while k <= hi:
+        if db[k] < quiet_level:
+            j = k
+            while j + 1 < n and db[j + 1] < quiet_level:
+                j += 1
+            if j - k + 1 >= need and db[k:j + 1].min() <= deep_level:
+                mid = (k + j) // 2
+                if best is None or abs(mid - i) < abs(best - i):
+                    best = mid
+            k = j + 1
+        else:
+            k += 1
+    if best is not None:
+        return best
+    r = int(0.5 / hop_s)
+    lo2, hi2 = max(0, i - r), min(n - 1, i + r)
+    return lo2 + int(np.argmin(db[lo2:hi2 + 1]))

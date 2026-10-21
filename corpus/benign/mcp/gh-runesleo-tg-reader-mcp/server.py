@@ -1,0 +1,1048 @@
+#!/usr/bin/env python3
+"""
+TG Reader MCP Server
+
+Telegram MCP server for reading plus guarded write actions. Read/search tools remain
+read-only; send_message and join_chat are explicit remote-write tools with idempotency guards.
+
+Security notes:
+- All network I/O goes to Telegram's official API via Telethon.
+- The .session file stays local. Nothing is transmitted elsewhere.
+- Each process gets its own temporary session copy to avoid SQLite contention
+  between concurrent MCP clients.
+"""
+
+import os
+import re
+import sys
+import json
+import stat
+import uuid
+import time
+import atexit
+import signal
+import asyncio
+import shutil
+import tempfile
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
+# MCP SDK
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, ToolAnnotations, TextContent
+
+# Telethon
+try:
+    from telethon import TelegramClient
+    from telethon.tl.types import Message
+    from telethon.tl.functions.users import GetFullUserRequest
+    from telethon.tl.functions.channels import JoinChannelRequest
+    from telethon.tl.functions.messages import ImportChatInviteRequest
+    from telethon.errors import UserAlreadyParticipantError
+except ImportError:
+    print("Install telethon first: pip install telethon", file=sys.stderr)
+    sys.exit(1)
+
+# ============ Config ============
+# Defaults are Telegram Desktop's public API credentials — safe to use.
+# Override with TG_API_ID / TG_API_HASH for your own (see https://my.telegram.org).
+API_ID = os.getenv('TG_API_ID', '94575')
+API_HASH = os.getenv('TG_API_HASH', 'a3406de8d171bb422bb6ddf3bbd800e2')
+TG_PROXY_URL = os.getenv('TG_PROXY_URL', '').strip()
+
+# Session file path (user's login credential).
+# Preferred: set TG_SESSION_PATH env var to the absolute path of your .session file.
+# Fallback: sibling ../tg-reader/ directory (for backward compatibility).
+_env_session = os.getenv('TG_SESSION_PATH')
+if _env_session:
+    _raw = Path(_env_session).expanduser()
+    # Refuse symlinks on the env-var path itself.
+    if _raw.is_symlink():
+        raise RuntimeError(
+            "TG_SESSION_PATH must not be a symlink. Point it at the real .session file."
+        )
+    SESSION_PATH = _raw.resolve()
+    if SESSION_PATH.suffix == '.session':
+        SESSION_PATH = SESSION_PATH.with_suffix('')
+    TG_READER_DIR = SESSION_PATH.parent
+
+    # Best-effort permission check on the session file itself.
+    _session_file = SESSION_PATH.with_suffix('.session')
+    # Also refuse symlinks at the actual .session file (TG_SESSION_PATH=/dir/tg_session
+    # with a symlinked /dir/tg_session.session would otherwise slip through).
+    if _session_file.exists() and _session_file.is_symlink():
+        raise RuntimeError(
+            "The .session file must not be a symlink. Point TG_SESSION_PATH at the real file."
+        )
+    if _session_file.exists():
+        try:
+            _st = _session_file.stat()
+            if _st.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+                print(
+                    f"[tg-reader-mcp] Warning: {_session_file} is readable by group/others. "
+                    "Recommend `chmod 600`.",
+                    file=sys.stderr,
+                )
+            if hasattr(os, 'geteuid') and _st.st_uid != os.geteuid():
+                print(
+                    f"[tg-reader-mcp] Warning: {_session_file} not owned by current user.",
+                    file=sys.stderr,
+                )
+        except OSError:
+            pass
+else:
+    TG_READER_DIR = Path(__file__).parent.parent / 'tg-reader'
+    SESSION_PATH = TG_READER_DIR / 'tg_session'
+# ==============================
+
+# Track the per-process session copy for atexit cleanup.
+# Lock guards first-access race and prevents atexit double-registration.
+_PID_SESSION_COPY: Path | None = None
+_PID_LOCK = threading.Lock()
+_ATEXIT_REGISTERED = False
+_PREV_HANDLERS: dict[int, Any] = {}
+
+# Initialize the MCP server.
+server = Server("tg-reader-mcp")
+
+REMOTE_WRITE_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
+
+
+def _get_pid_session_path() -> str:
+    """Create a per-process session copy to avoid SQLite contention across MCP clients.
+
+    Uses a UUID suffix (not just PID) to prevent PID-reuse collisions, and writes
+    atomically via tempfile+rename. Copy is cleaned up on normal interpreter exit.
+    Guarded by a lock so concurrent first-access calls don't create two copies.
+    """
+    global _PID_SESSION_COPY, _ATEXIT_REGISTERED
+    with _PID_LOCK:
+        # Reuse the same copy across multiple get_client calls within this process.
+        if _PID_SESSION_COPY is not None and _PID_SESSION_COPY.exists():
+            return str(_PID_SESSION_COPY.with_suffix(''))
+
+        src = SESSION_PATH.with_suffix('.session')
+        unique_stem = f'tg_session_mcp_{os.getpid()}_{uuid.uuid4().hex[:8]}'
+        target = TG_READER_DIR / f'{unique_stem}.session'
+
+        # Atomic copy: write to temp, then rename into place.
+        fd, tmp_path = tempfile.mkstemp(
+            prefix='.tg_session_', suffix='.tmp', dir=str(TG_READER_DIR)
+        )
+        os.close(fd)
+        try:
+            shutil.copy2(str(src), tmp_path)
+            os.replace(tmp_path, str(target))
+        except Exception:
+            # Clean up temp file on any failure during copy/rename.
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        _PID_SESSION_COPY = target
+        if not _ATEXIT_REGISTERED:
+            atexit.register(_cleanup_pid_session)
+            _install_signal_cleanup()
+            _ATEXIT_REGISTERED = True
+            # Backstop for copies orphaned by SIGKILL / crashes in earlier runs.
+            n = _sweep_stale_session_copies()
+            if n:
+                print(f"[tg-reader-mcp] Swept {n} stale session file(s).", file=sys.stderr)
+        return str(target.with_suffix(''))
+
+
+def _cleanup_pid_session() -> None:
+    """Remove the per-process session copy on interpreter exit."""
+    if _PID_SESSION_COPY is None:
+        return
+    for suffix in ('.session', '.session-journal'):
+        p = _PID_SESSION_COPY.with_suffix(suffix)
+        try:
+            if p.exists():
+                p.unlink()
+        except OSError:
+            pass
+
+
+def _install_signal_cleanup() -> None:
+    """Run the atexit cleanup on SIGTERM/SIGINT too.
+
+    atexit only fires on a *normal* interpreter exit. MCP clients shut the server
+    down with SIGTERM, which Python does not handle by default -- the process dies
+    without ever running the atexit hook, leaking one session copy per shutdown.
+    Chaining to any previously installed handler keeps us a good citizen.
+    """
+    def _handler(signum, frame):
+        _cleanup_pid_session()
+        prev = _PREV_HANDLERS.get(signum)
+        if callable(prev):
+            prev(signum, frame)
+            return
+        # Restore default disposition and re-raise so the exit status is honest.
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            _PREV_HANDLERS[sig] = signal.getsignal(sig)
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            # Not on the main thread, or platform refuses -- sweep still covers us.
+            pass
+
+
+def _sweep_stale_session_copies(max_age_seconds: int = 3600) -> int:
+    """Delete session copies left behind by processes that are already gone.
+
+    Signal handlers cannot cover SIGKILL or a hard crash, so this is the real
+    backstop: on every startup, drop any `tg_session_mcp_<pid>_<uuid>.session`
+    whose PID no longer exists. The age floor guards against PID reuse and
+    against racing a sibling process that just created its copy.
+
+    Returns the number of files removed. Never raises -- cleanup must not
+    prevent the server from starting.
+    """
+    removed = 0
+    pattern = re.compile(r'^tg_session_mcp_(\d+)_[0-9a-f]+$')
+    now = time.time()
+    try:
+        candidates = list(TG_READER_DIR.glob('tg_session_mcp_*.session'))
+    except OSError:
+        return 0
+
+    for path in candidates:
+        m = pattern.match(path.stem)
+        if not m:
+            continue                                  # unrecognised name: leave it alone
+        pid = int(m.group(1))
+        if pid == os.getpid():
+            continue
+        try:
+            if now - path.stat().st_mtime < max_age_seconds:
+                continue                              # too fresh: may be a live sibling
+        except OSError:
+            continue
+        try:
+            os.kill(pid, 0)                           # signal 0 = liveness probe only
+            continue                                  # still running: not ours to remove
+        except ProcessLookupError:
+            pass                                      # owner is gone -> stale
+        except PermissionError:
+            continue                                  # exists under another user
+        except OSError:
+            continue
+        for suffix in ('.session', '.session-journal'):
+            p = path.with_suffix(suffix)
+            try:
+                if p.exists():
+                    p.unlink()
+                    removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+def _telethon_proxy():
+    """Return a Telethon proxy tuple from TG_PROXY_URL, or None for direct I/O."""
+    if not TG_PROXY_URL:
+        return None
+
+    parsed = urlparse(TG_PROXY_URL)
+    if parsed.username or parsed.password:
+        raise RuntimeError("TG_PROXY_URL authentication is not supported; use a local unauthenticated proxy")
+    if not parsed.hostname:
+        raise RuntimeError("TG_PROXY_URL must include a proxy hostname")
+
+    scheme = parsed.scheme.lower()
+    try:
+        from python_socks import ProxyType
+    except ImportError as exc:
+        raise RuntimeError(
+            "TG_PROXY_URL is set but python-socks is missing; install python-socks[asyncio]"
+        ) from exc
+
+    proxy_types = {
+        'http': ProxyType.HTTP,
+        'socks5': ProxyType.SOCKS5,
+        'socks4': ProxyType.SOCKS4,
+    }
+    proxy_type = proxy_types.get(scheme)
+    if proxy_type is None:
+        raise RuntimeError("TG_PROXY_URL scheme must be http, socks5, or socks4")
+
+    default_port = 80 if scheme == 'http' else 1080
+    return (proxy_type, parsed.hostname, parsed.port or default_port)
+
+
+async def get_client():
+    """Return a connected Telethon client for this process."""
+    if not API_ID or not API_HASH:
+        raise Exception("TG_API_ID and TG_API_HASH are not set")
+
+    _session_file = SESSION_PATH.with_suffix('.session')
+    if not _session_file.exists():
+        # Log the full path to stderr for the operator; return a generic message to the MCP client.
+        print(f"[tg-reader-mcp] Session file missing: {_session_file}", file=sys.stderr)
+        raise Exception(
+            "Session file not found. Check TG_SESSION_PATH and log in once with Telethon (see README)."
+        )
+
+    session_path = _get_pid_session_path()
+    client = TelegramClient(session_path, int(API_ID), API_HASH, proxy=_telethon_proxy())
+
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            raise Exception("Telegram session is not authorized. Re-run the Telethon login.")
+        # Catch up to sync latest messages (fixes stale data issue).
+        await client.catch_up()
+    except Exception:
+        # Release connection resources on any setup failure.
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise
+
+    return client
+
+
+@server.list_tools()
+async def list_tools() -> list[Tool]:
+    """Return the list of available MCP tools."""
+    return [
+        Tool(
+            name="download_media",
+            description="Download the media (photo/image/video/document) attached to one Telegram message and return a local file path that can be read directly. Read-only on the remote side.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string", "description": "Channel or group username or full title."},
+                    "message_id": {"type": "integer", "description": "The message id carrying the media (from read_channel / search_channel)."},
+                    "out_dir": {"type": "string", "description": "Optional output directory. Defaults to ~/.cache/tg-media."},
+                },
+                "required": ["channel", "message_id"],
+            },
+        ),
+        Tool(
+            name="list_dialogs",
+            description="List all Telegram dialogs (channels, groups, DMs). Supports combined filters like `unread_dm` (unread private chats only), `unread_channel`, `unread_group`, or any free-text keyword.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "description": "Optional filter. Combine tokens: unread / dm / channel / group (e.g. `unread_dm`). Any other string is matched against dialog name and username.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max number of dialogs to return (default 50).",
+                        "default": 50,
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="read_channel",
+            description="Read recent messages from a Telegram channel or group. Use `since` (ISO timestamp) to return only messages after that time, or `offset_date` (ISO timestamp) to paginate backwards.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "channel": {
+                        "type": "string",
+                        "description": "Channel or group username (e.g. `durov`) or full title.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max messages to return (default 20, cap 100).",
+                        "default": 20,
+                    },
+                    "since": {
+                        "type": "string",
+                        "description": "ISO timestamp. Only messages strictly after this time are returned (e.g. `2026-04-13T00:00:00+08:00`).",
+                    },
+                    "offset_date": {
+                        "type": "string",
+                        "description": "ISO timestamp. Paginate backwards from this time (feed in the `date` of the last message from a previous page).",
+                    },
+                },
+                "required": ["channel"],
+            },
+        ),
+        Tool(
+            name="search_channel",
+            description="Keyword search inside a single Telegram channel or group.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "channel": {
+                        "type": "string",
+                        "description": "Channel or group username.",
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "Keyword to search for.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max matching messages to return (default 20).",
+                        "default": 20,
+                    },
+                },
+                "required": ["channel", "keyword"],
+            },
+        ),
+        Tool(
+            name="send_message",
+            description="Send one Telegram message to a DM, group, or channel using the existing authenticated session. Exact-text dedupe is enabled by default to prevent accidental double sends.",
+            annotations=REMOTE_WRITE_ANNOTATIONS,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "channel": {
+                        "type": "string",
+                        "description": "DM username, group/channel username, numeric id, or full dialog title.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Plain-text message to send. Telegram formatting is disabled to preserve exact text.",
+                    },
+                    "reply_to": {
+                        "type": "integer",
+                        "description": "Optional message id to reply to.",
+                    },
+                    "dedupe_window_seconds": {
+                        "type": "integer",
+                        "description": "Skip sending if the same outgoing text exists in this dialog within this many seconds. Default 600; set 0 to disable.",
+                        "default": 600,
+                    },
+                },
+                "required": ["channel", "text"],
+            },
+        ),
+        Tool(
+            name="join_chat",
+            description="Join a Telegram group/channel using an invite link or public username, reusing the existing authenticated session. Idempotent when already joined.",
+            annotations=REMOTE_WRITE_ANNOTATIONS,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Invite URL (https://t.me/+..., t.me/joinchat/...) or public username/link.",
+                    },
+                },
+                "required": ["target"],
+            },
+        ),
+        Tool(
+            name="mark_read",
+            description="Mark a Telegram dialog (channel, group, or DM) as read.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "channel": {
+                        "type": "string",
+                        "description": "Channel, group, or DM username or full title.",
+                    },
+                },
+                "required": ["channel"],
+            },
+        ),
+        Tool(
+            name="get_contact",
+            description="Read one user's contact-level details: first_name, last_name, username, phone, bio, note (the user-private contact note set in TG client), is_contact, common_groups_count, last_seen. Works for any resolvable user; contact-only fields (phone, note) require is_contact=true.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "description": "Username (without @) or user id.",
+                    },
+                },
+                "required": ["username"],
+            },
+        ),
+        Tool(
+            name="list_contacts_matching",
+            description="Scan DM dialogs and return full contact details (same shape as get_contact) for users whose first_name or last_name contains `pattern` (case-insensitive). With match_note=true also matches the user's note field at the cost of one FullUser call per scanned dialog. Use to bulk-query structured tags like `VIP` or `BSC` encoded anywhere inside the contact display name. Network cost is O(N) FullUser calls when match_note=true — keep limit small.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Substring to match against first_name (case-insensitive). Example: `VIP`, `BSC`, `alpha`.",
+                    },
+                    "match_note": {
+                        "type": "boolean",
+                        "description": "If true, also match pattern against the note field (requires one FullUser call per dialog, slower). Default false.",
+                        "default": False,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max contacts to return (default 30, cap 100).",
+                        "default": 30,
+                    },
+                    "dialog_scan_limit": {
+                        "type": "integer",
+                        "description": "How many DM dialogs to scan before stopping (default 500).",
+                        "default": 500,
+                    },
+                },
+                "required": ["pattern"],
+            },
+        ),
+    ]
+
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    """Dispatch an MCP tool call to its implementation."""
+    try:
+        if name == "list_dialogs":
+            result = await list_dialogs_impl(
+                filter_keyword=arguments.get("filter"),
+                limit=arguments.get("limit", 50),
+            )
+        elif name == "download_media":
+            result = await download_media_impl(
+                arguments["channel"], int(arguments["message_id"]), arguments.get("out_dir")
+            )
+        elif name == "read_channel":
+            result = await read_channel_impl(
+                channel=arguments["channel"],
+                limit=min(arguments.get("limit", 20), 100),
+                since=arguments.get("since"),
+                offset_date=arguments.get("offset_date"),
+            )
+        elif name == "search_channel":
+            result = await search_channel_impl(
+                channel=arguments["channel"],
+                keyword=arguments["keyword"],
+                limit=arguments.get("limit", 20),
+            )
+        elif name == "send_message":
+            result = await send_message_impl(
+                channel=arguments["channel"],
+                text=arguments["text"],
+                reply_to=arguments.get("reply_to"),
+                dedupe_window_seconds=int(arguments.get("dedupe_window_seconds", 600)),
+            )
+        elif name == "join_chat":
+            result = await join_chat_impl(
+                target=arguments["target"],
+            )
+        elif name == "mark_read":
+            result = await mark_read_impl(
+                channel=arguments["channel"],
+            )
+        elif name == "get_contact":
+            result = await get_contact_impl(
+                username=arguments["username"],
+            )
+        elif name == "list_contacts_matching":
+            result = await list_contacts_matching_impl(
+                pattern=arguments["pattern"],
+                match_note=bool(arguments.get("match_note", False)),
+                limit=min(arguments.get("limit", 30), 100),
+                dialog_scan_limit=arguments.get("dialog_scan_limit", 500),
+            )
+        else:
+            result = {"error": f"Unknown tool: {name}"}
+
+        return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=json.dumps({"error": str(e)}, ensure_ascii=False))]
+
+
+async def list_dialogs_impl(filter_keyword: str | None = None, limit: int = 50) -> dict:
+    """List dialogs, optionally filtered by type / unread / keyword."""
+    client = await get_client()
+
+    try:
+        dialogs = []
+        count = 0
+
+        async for dialog in client.iter_dialogs():
+            if count >= limit:
+                break
+
+            if dialog.is_channel:
+                dtype = "channel"
+            elif dialog.is_group:
+                dtype = "group"
+            else:
+                dtype = "dm"
+            username = getattr(dialog.entity, 'username', None)
+
+            # Filter: supports combinations like "unread_dm" = unread + direct messages.
+            if filter_keyword:
+                fk = filter_keyword.lower()
+                want_unread = "unread" in fk
+                want_dm = "dm" in fk
+                want_channel = "channel" in fk
+                want_group = "group" in fk
+                has_type_filter = want_dm or want_channel or want_group
+
+                if want_unread and not dialog.unread_count:
+                    continue
+                if has_type_filter:
+                    type_match = (
+                        (want_dm and dtype == "dm") or
+                        (want_channel and dtype == "channel") or
+                        (want_group and dtype == "group")
+                    )
+                    if not type_match:
+                        continue
+                if not want_unread and not has_type_filter:
+                    # Plain name/username substring match.
+                    name_match = fk in dialog.name.lower()
+                    username_match = username and fk in username.lower()
+                    if not name_match and not username_match:
+                        continue
+
+            dialogs.append({
+                "type": dtype,
+                "name": dialog.name,
+                "username": username,
+                "unread_count": dialog.unread_count or 0,
+            })
+            count += 1
+
+        return {"dialogs": dialogs, "count": len(dialogs)}
+
+    finally:
+        await client.disconnect()
+
+
+def _sender_fields(message) -> dict:
+    """谁发的 —— 2026-08-18 加。
+
+    为什么存在：read_channel / search_channel 原本只返回 id/date/text，
+    调用方（含 Claude）无法区分 Leo 自己的话与对方的话，只能靠上下文推断，
+    实测多次推错（把 Leo 说的归给对方，反之亦然），且错误会一路写进档案。
+
+    `out` 是 Telethon 直接给的布尔，零成本、不会错，是唯一可定死方向的字段。
+    `sender` 走已缓存的 entity（property，不是 coroutine，不会额外发请求），
+    取不到就留 None —— 群里判断「谁说的」需要它，DM 里有 from_me 就够。
+    """
+    fields = {
+        "from_me": bool(getattr(message, 'out', False)),
+        "sender_id": getattr(message, 'sender_id', None),
+        "sender": None,
+    }
+    try:
+        s = message.sender
+        if s is not None:
+            name = ' '.join(filter(None, [getattr(s, 'first_name', None),
+                                          getattr(s, 'last_name', None)])).strip()
+            fields["sender"] = (getattr(s, 'username', None)
+                                or name
+                                or getattr(s, 'title', None))
+    except Exception:
+        pass
+    return fields
+
+
+def _media_kind(message) -> str | None:
+    """返回媒体类型；无媒体返回 None。纯文本消息不受影响。"""
+    m = getattr(message, "media", None)
+    if not m:
+        return None
+    if getattr(message, "photo", None):
+        return "photo"
+    doc = getattr(message, "document", None)
+    if doc:
+        mime = getattr(doc, "mime_type", "") or ""
+        if mime.startswith("image/"):
+            return "image"
+        if mime.startswith("video/"):
+            return "video"
+        return f"document:{mime or 'unknown'}"
+    return type(m).__name__
+
+
+async def download_media_impl(channel: str, message_id: int, out_dir: str | None = None) -> dict:
+    """把指定消息的媒体下载到本地，返回可直接 Read 的路径。只读远端，不改任何消息。"""
+    import os
+    from pathlib import Path
+    out = Path(out_dir or os.environ.get("TG_MEDIA_DIR")
+               or (Path.home() / ".cache" / "tg-media"))
+    out.mkdir(parents=True, exist_ok=True)
+    client = await get_client()
+    try:
+        entity = await client.get_entity(channel)
+        msg = await client.get_messages(entity, ids=message_id)
+        if msg is None:
+            return {"ok": False, "error": f"message {message_id} not found"}
+        if not getattr(msg, "media", None):
+            return {"ok": False, "error": f"message {message_id} has no media",
+                    "text": (msg.text or "")[:500]}
+        path = await client.download_media(msg, file=str(out))
+        return {
+            "ok": True,
+            "message_id": message_id,
+            "media": _media_kind(msg),
+            "path": str(path),
+            "caption": (msg.text or "")[:500],
+            "date": msg.date.isoformat(),
+        }
+    finally:
+        await client.disconnect()
+
+
+async def read_channel_impl(
+    channel: str,
+    limit: int = 20,
+    since: str | None = None,
+    offset_date: str | None = None,
+) -> dict:
+    """Read messages from a channel/group, with optional since/offset_date paging."""
+    client = await get_client()
+
+    try:
+        # Resolve the channel/group entity.
+        try:
+            entity = await client.get_entity(channel)
+            title = getattr(entity, 'title', channel)
+        except Exception as e:
+            return {"error": f"Unable to resolve channel {channel}: {e}"}
+
+        # Parse time-window parameters.
+        iter_kwargs: dict = {"limit": limit}
+        since_dt = None
+
+        if offset_date:
+            dt = datetime.fromisoformat(offset_date)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            iter_kwargs["offset_date"] = dt
+
+        if since:
+            since_dt = datetime.fromisoformat(since)
+            if since_dt.tzinfo is None:
+                since_dt = since_dt.replace(tzinfo=timezone.utc)
+            # Under `since` mode, loosen the fetch cap and rely on time cutoff.
+            if not offset_date:
+                iter_kwargs["limit"] = min(limit * 5, 500)
+
+        # Iterate and collect messages.
+        messages = []
+        async for message in client.iter_messages(entity, **iter_kwargs):
+            if not isinstance(message, Message):
+                continue
+            if not (message.text or message.media):
+                continue
+            # iter_messages is reverse-chronological, so a message older than
+            # `since` means we've passed the window and can stop early.
+            if since_dt and message.date < since_dt:
+                break
+            _m = {
+                "id": message.id,
+                "date": message.date.isoformat(),
+                "text": (message.text or "")[:2000],
+                "views": message.views,
+                **_sender_fields(message),
+            }
+            _mt = _media_kind(message)
+            if _mt:
+                _m["media"] = _mt
+                _m["media_hint"] = f"download_media(channel=…, message_id={message.id})"
+            messages.append(_m)
+            if since_dt and len(messages) >= limit:
+                break
+
+        has_more = len(messages) == limit
+        result: dict = {
+            "channel": title,
+            "messages": messages,
+            "count": len(messages),
+        }
+        if has_more and messages:
+            result["next_offset_date"] = messages[-1]["date"]
+
+        return result
+
+    finally:
+        await client.disconnect()
+
+
+async def search_channel_impl(channel: str, keyword: str, limit: int = 20) -> dict:
+    """Keyword-search messages inside a single channel/group."""
+    client = await get_client()
+
+    try:
+        entity = await client.get_entity(channel)
+        title = getattr(entity, 'title', channel)
+
+        messages = []
+        async for message in client.iter_messages(entity, search=keyword, limit=limit):
+            if isinstance(message, Message) and (message.text or message.media):
+                messages.append({
+                    "id": message.id,
+                    "date": message.date.isoformat(),
+                    "text": (message.text or "")[:2000],
+                    **_sender_fields(message),
+                })
+
+        return {
+            "channel": title,
+            "keyword": keyword,
+            "messages": messages,
+            "count": len(messages),
+        }
+
+    finally:
+        await client.disconnect()
+
+
+async def _resolve_dialog_entity(client, channel: str):
+    """Resolve username/id/link first; fall back to exact dialog title."""
+    try:
+        return await client.get_entity(channel)
+    except Exception as first_error:
+        wanted = str(channel).strip().lstrip('@').casefold()
+        async for dialog in client.iter_dialogs():
+            username = (getattr(dialog.entity, 'username', None) or '').casefold()
+            title = (dialog.name or '').strip().casefold()
+            if wanted and wanted in {username, title}:
+                return dialog.entity
+        raise first_error
+
+
+async def send_message_impl(
+    channel: str,
+    text: str,
+    reply_to: int | None = None,
+    dedupe_window_seconds: int = 600,
+) -> dict:
+    """Send exact plain text with a recent exact-text dedupe guard."""
+    text = str(text or '')
+    if not text.strip():
+        raise ValueError('text must be non-empty')
+    if len(text) > 4096:
+        raise ValueError('text exceeds Telegram 4096-character message limit')
+    dedupe_window_seconds = max(0, min(int(dedupe_window_seconds), 86400))
+    client = await get_client()
+    try:
+        entity = await _resolve_dialog_entity(client, channel)
+        name = (getattr(entity, 'title', None) or getattr(entity, 'first_name', None)
+                or getattr(entity, 'username', None) or str(channel))
+        if dedupe_window_seconds:
+            cutoff = datetime.now(timezone.utc).timestamp() - dedupe_window_seconds
+            async for msg in client.iter_messages(entity, limit=50):
+                if msg.date and msg.date.timestamp() < cutoff:
+                    break
+                if getattr(msg, 'out', False) and (msg.raw_text or '') == text:
+                    return {
+                        'success': True, 'deduped': True, 'channel': name,
+                        'message_id': msg.id,
+                        'date': msg.date.isoformat() if msg.date else None,
+                        'text': text,
+                    }
+        sent = await client.send_message(
+            entity, text, reply_to=reply_to, parse_mode=None, link_preview=False,
+        )
+        return {
+            'success': True, 'deduped': False, 'channel': name,
+            'message_id': sent.id,
+            'date': sent.date.isoformat() if sent.date else None,
+            'text': sent.raw_text or text,
+        }
+    finally:
+        await client.disconnect()
+
+
+def _telegram_invite_hash(target: str) -> str | None:
+    target = str(target or '').strip()
+    m = re.search(r'(?:https?://)?t\.me/(?:joinchat/|\+)([A-Za-z0-9_-]+)', target)
+    return m.group(1) if m else None
+
+
+async def join_chat_impl(target: str) -> dict:
+    """Join private invite or public channel/group, idempotently."""
+    target = str(target or '').strip()
+    if not target:
+        raise ValueError('target must be non-empty')
+    client = await get_client()
+    try:
+        invite_hash = _telegram_invite_hash(target)
+        if invite_hash:
+            try:
+                updates = await client(ImportChatInviteRequest(invite_hash))
+            except UserAlreadyParticipantError:
+                return {'success': True, 'already_joined': True, 'target': target}
+            chats = getattr(updates, 'chats', None) or []
+            chat = chats[0] if chats else None
+            return {
+                'success': True, 'already_joined': False, 'target': target,
+                'chat_id': getattr(chat, 'id', None), 'title': getattr(chat, 'title', None),
+            }
+        public_target = re.sub(r'^(?:https?://)?t\.me/', '', target).strip('/').lstrip('@')
+        entity = await client.get_entity(public_target)
+        try:
+            await client(JoinChannelRequest(entity))
+        except UserAlreadyParticipantError:
+            return {
+                'success': True, 'already_joined': True, 'target': target,
+                'chat_id': getattr(entity, 'id', None), 'title': getattr(entity, 'title', None),
+            }
+        return {
+            'success': True, 'already_joined': False, 'target': target,
+            'chat_id': getattr(entity, 'id', None), 'title': getattr(entity, 'title', None),
+        }
+    finally:
+        await client.disconnect()
+
+
+async def mark_read_impl(channel: str) -> dict:
+    """Mark a dialog (channel/group/DM) as read."""
+    client = await get_client()
+
+    try:
+        try:
+            entity = await client.get_entity(channel)
+            name = getattr(entity, 'title', None) or getattr(entity, 'first_name', channel)
+        except Exception as e:
+            return {"error": f"Unable to resolve dialog {channel}: {e}"}
+
+        await client.send_read_acknowledge(entity)
+        return {"success": True, "channel": name, "message": f"Marked {name} as read"}
+
+    finally:
+        await client.disconnect()
+
+
+def _status_to_iso(status) -> str | None:
+    """Best-effort extract of a last-seen timestamp from a Telethon UserStatus."""
+    if status is None:
+        return None
+    was_online = getattr(status, 'was_online', None)
+    if was_online is not None:
+        return was_online.isoformat()
+    return type(status).__name__
+
+
+async def _build_contact_dict(client, entity) -> dict:
+    """Resolve FullUser for a user entity and flatten into a plain dict."""
+    try:
+        full_resp = await client(GetFullUserRequest(entity))
+        fu = full_resp.full_user
+    except Exception as e:
+        fu = None
+        fu_err = str(e)
+    else:
+        fu_err = None
+
+    note = getattr(fu, 'note', None) if fu else None
+    return {
+        "id": entity.id,
+        "username": getattr(entity, 'username', None),
+        "first_name": getattr(entity, 'first_name', None),
+        "last_name": getattr(entity, 'last_name', None),
+        "phone": getattr(entity, 'phone', None),
+        "is_contact": bool(getattr(entity, 'contact', False)),
+        "is_mutual_contact": bool(getattr(entity, 'mutual_contact', False)),
+        "bio": getattr(fu, 'about', None) if fu else None,
+        "note": getattr(note, 'text', None) if note else None,
+        "common_groups_count": getattr(fu, 'common_chats_count', None) if fu else None,
+        "last_seen": _status_to_iso(getattr(entity, 'status', None)),
+        "full_user_error": fu_err,
+    }
+
+
+async def get_contact_impl(username: str) -> dict:
+    """Return contact-level details (first/last name, phone, bio, note, etc.) for one user."""
+    client = await get_client()
+    try:
+        try:
+            entity = await client.get_entity(username)
+        except Exception as e:
+            return {"error": f"Unable to resolve user {username}: {e}"}
+
+        # get_entity may return a Channel/Chat if the handle is ambiguous — guard against it.
+        if not hasattr(entity, 'first_name'):
+            return {"error": f"{username} is not a user (got {type(entity).__name__})"}
+
+        return await _build_contact_dict(client, entity)
+    finally:
+        await client.disconnect()
+
+
+async def list_contacts_matching_impl(
+    pattern: str,
+    match_note: bool = False,
+    limit: int = 30,
+    dialog_scan_limit: int = 500,
+) -> dict:
+    """Scan DM dialogs and return full contact details for users whose first_name / last_name (and optionally note) contains `pattern`."""
+    pattern = (pattern or "").strip()
+    if not pattern:
+        raise ValueError("pattern must be a non-empty string")
+    client = await get_client()
+    try:
+        pat_lower = pattern.lower()
+        contacts: list[dict] = []
+        scanned = 0
+
+        async for dialog in client.iter_dialogs():
+            if scanned >= dialog_scan_limit or len(contacts) >= limit:
+                break
+            # Only DMs count toward the scan budget; channels and groups are skipped for free.
+            if dialog.is_channel or dialog.is_group:
+                continue
+            scanned += 1
+            entity = dialog.entity
+            first = getattr(entity, 'first_name', '') or ''
+            last = getattr(entity, 'last_name', '') or ''
+            name_hit = pat_lower in first.lower() or pat_lower in last.lower()
+
+            if name_hit:
+                contacts.append(await _build_contact_dict(client, entity))
+                continue
+
+            if match_note:
+                # Pay the FullUser cost only when caller opted in.
+                detail = await _build_contact_dict(client, entity)
+                note_text = (detail.get("note") or "").lower()
+                if pat_lower in note_text:
+                    contacts.append(detail)
+
+        return {
+            "pattern": pattern,
+            "match_note": match_note,
+            "dialogs_scanned": scanned,
+            "contacts": contacts,
+            "count": len(contacts),
+            "truncated": len(contacts) >= limit,
+        }
+    finally:
+        await client.disconnect()
+
+
+async def main():
+    """Run the MCP server over stdio."""
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
+
+
+def cli() -> None:
+    """Synchronous entry point for the `tg-reader-mcp` console script."""
+    asyncio.run(main())
+
+
+if __name__ == "__main__":
+    cli()

@@ -621,7 +621,7 @@ function fillCreateSelects() {
   $('language').innerHTML = languageOptions(keepLang, createModel());  // only what this model speaks
   $('model-license').innerHTML = (m ? licenseBadge(m) : '') + (m?.tags ? '<span class="tag-hint">This model follows <b>[tags]</b> in the text: <code>[whisper]</code>, <code>[excited]</code>, <code>[sad]</code>, <code>[low voice]</code>, or any short instruction in square brackets. Subtitles leave them out. <a href="#help/writing-scripts/emotion-tags-s2-pro">More</a></span>' : '');
   $('voice-help').innerHTML = !S.voices.length ? 'Add a voice first: <a href="#voices">Voices → Add a voice</a> (a 6–15 second clip), or find a new one there.'
-    : (v?.advice?.length ? `${icon('alert')} ${esc(v.advice[0])}` : '');
+    : (v?.advice?.length && v.source !== 'kokoro' ? `${icon('alert')} ${esc(v.advice[0])}` : '');
   if (!$('pause-paragraph').value) $('pause-paragraph').value = s.pause_paragraph ?? 0.7;
   if (!$('loudness').dataset.touched && s.loudness != null) {
     const val = String(Math.round(s.loudness));
@@ -1034,11 +1034,11 @@ function renderVoiceCards() {
   const def = S.settings?.default_voice;
   const html = S.voices.length ? S.voices.map((v) => `
     <section class="card vcard${v.id === def ? ' default' : ''}" data-id="${esc(v.id)}">
-      <div class="top">${avatar(v.name)}<div class="who"><span class="name">${esc(v.name)}</span><span class="lang">${esc(langName(v.language))}</span></div>${v.id === def ? '<span class="chip accent">Default</span>' : ''}${v.source === 'found' ? '<span class="chip">Found</span>' : ''}</div>
+      <div class="top">${avatar(v.name)}<div class="who"><span class="name">${esc(v.name)}</span><span class="lang">${esc(langName(v.language))}</span></div>${v.id === def ? '<span class="chip accent">Default</span>' : ''}${v.source === 'found' ? '<span class="chip">Found</span>' : ''}${v.source === 'kokoro' ? '<span class="chip">Kokoro</span>' : ''}</div>
       <div class="meta"><span>${v.seconds} s clip</span>${v.denoised ? '<span>noise reduced</span>' : ''}<span>${fmtWhen(v.created)}</span></div>
       ${v.notes ? `<div class="notes">${esc(v.notes)}</div>` : ''}
       ${player(`/api/voices/${encodeURIComponent(v.id)}/clip?v=${encodeURIComponent(v.seconds + '-' + v.denoised)}`)}
-      ${v.advice?.length ? `<ul class="tips">${v.advice.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+      ${v.advice?.length && v.source !== 'kokoro' ? `<ul class="tips">${v.advice.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
       <div class="preview-slot"></div>
       <div class="acts">
         <button class="btn sm accent" data-v="preview">${icon('speaker')} Hear it speak</button>
@@ -1112,14 +1112,17 @@ $('voice-cards').addEventListener('click', run(async (e) => {
     await api(`/api/voices/${encodeURIComponent(id)}`, { method: 'DELETE' });
     S.settings = await api('/api/settings'); await loadVoices();
   } else if (b.dataset.v === 'edit') {
-    const s2Ready = (S.state?.models || []).some((m) => m.runtime === 's2' && m.installed);
+    // S2 Pro, OmniVoice and MOSS-TTS Nano copy a voice from its clip and the words it says
+    const cloners = [...new Set((S.state?.models || []).filter((m) => m.words && m.installed)
+      .map((m) => (m.runtime === 's2' ? 'S2 Pro' : m.label.split(' · ')[0])))].join(', ').replace(/, ([^,]*)$/, ' and $1');
+    const s2Ready = !!cloners;
     const r = await editDialog({
       title: `Edit “${v.name}”`, name: v.name, nameLabel: 'Name', text: null, ok: 'Save',
       extra: `<div class="pair"><div class="field"><label class="label">Language</label><div class="select-wrap"><select class="select" name="language">${languageOptions(v.language)}</select>${icon('chevron')}</div></div></div>
         <div class="field"><label class="label">Notes</label><input class="input" name="notes" value="${esc(v.notes || '')}"></div>
-        ${s2Ready ? `<div class="field"><label class="label">What the clip says <span class="opt">— for S2 Pro</span></label>
-          <textarea class="paste" name="transcript" rows="3" style="min-height:70px" placeholder="Heard by Whisper the first time S2 Pro uses this voice">${esc(v.transcript || '')}</textarea>
-          <p class="help">S2 Pro copies a voice from the clip and these words. Fix any word Whisper got wrong; leave it empty to have it heard again.</p></div>` : ''}
+        ${s2Ready ? `<div class="field"><label class="label">What the clip says <span class="opt">— for ${cloners}</span></label>
+          <textarea class="paste" name="transcript" rows="3" style="min-height:70px" placeholder="Heard by Whisper the first time ${cloners} uses this voice">${esc(v.transcript || '')}</textarea>
+          <p class="help">${cloners} copies a voice from the clip and these words. Fix any word Whisper got wrong; leave it empty to have it heard again.</p></div>` : ''}
         <hr style="border:0;border-top:1px solid var(--line);width:100%">
         <p class="help">Prepare the clip again from the original file (${v.trimmed_from ?? v.seconds} s):</p>
         <label class="check"><input type="checkbox" name="denoise" ${v.denoised ? 'checked' : ''}> Reduce background noise</label>
@@ -1187,7 +1190,7 @@ async function loadModels() {
   const group = (kind, title, help, extra = '') => `<div class="group-title">${title}</div><p class="help" style="margin:-6px 0 12px">${help}</p>${extra}`
     + models.filter((m) => m.kind === kind).map(modelCard).join('');
   const [tools, wg] = await Promise.all([api('/api/tools'), api('/api/whisper-gpu').catch(() => null)]);
-  setHtml($('models-list'), group('voice', 'Voice models', 'Speak your scripts. Qwen3-TTS runs on every engine chosen on the Setup page; S2 Pro on the NVIDIA · CUDA or AMD / Intel · Vulkan engine.')
+  setHtml($('models-list'), group('voice', 'Voice models', 'Speak your scripts. Qwen3-TTS, OmniVoice and the audio.cpp models (Chatterbox, VoxCPM2, CosyVoice 3, Kokoro, MOSS-TTS Nano) run on every engine chosen on the Setup page; S2 Pro on the NVIDIA · CUDA or AMD / Intel · Vulkan engine.')
     + group('subtitles', 'Subtitles and transcripts', 'Time the SRT subtitles of every finished script, and power the Transcribe page and the transcription API. They run on your graphics card with a CUDA or Vulkan engine, otherwise on the processor.', whisperWhere(wg, models.some((m) => m.kind === 'subtitles' && m.installed)))
     + group('separation', 'Voice separator', 'Takes a voice out of music or background sound when you add a voice from a video or a song.')
     + `<div class="group-title">Tools</div><p class="help" style="margin:-6px 0 12px">Programs the app uses for some file types.</p>`
@@ -1243,7 +1246,7 @@ document.addEventListener('click', run(async (e) => {
   setTimeout(loadModels, 300);
 }));
 
-// Voice models to pick from: all of them (S2 Pro shows its own limits on Models and when it can't run).
+// Voice models to pick from: all of them (S2 Pro and OmniVoice show their own limits on Models and when they can't run).
 const speakable = (m) => m.kind === 'voice';
 function modelCard(m) {
   const busy = m.job && ['downloading', 'checking', 'installing'].includes(m.job.status);
@@ -1254,15 +1257,15 @@ function modelCard(m) {
     + `<button class="btn sm" data-m="remove" data-key="${m.key}">Remove</button>`;
   else if (m.installed && m.runtime_job && ['downloading', 'checking', 'installing'].includes(m.runtime_job.status)) acts = dlBox(m.runtime_job, 0, 0, 'm', m.key);
   else if (m.installed) acts = `<span class="chip ok">${icon('check')} Downloaded</span><button class="btn sm" data-m="remove" data-key="${m.key}">Remove</button>`;
-  else if (!m.engine_ok) acts = `<span class="help" style="max-width:240px;text-align:right">Needs the NVIDIA · CUDA or AMD / Intel · Vulkan engine (<a href="#setup">Setup</a>)</span>`;
+  else if (!m.engine_ok) acts = `<span class="help" style="max-width:240px;text-align:right">${m.runtime === 's2' ? 'Needs the NVIDIA · CUDA or AMD / Intel · Vulkan engine (<a href="#setup">Setup</a>)' : `${esc(m.engine_note)} (<a href="#setup">Setup</a>)`}</span>`;
   else if (m.partial) acts = `<button class="btn sm accent" data-m="download" data-key="${m.key}">${icon('download')} Resume (${fmtSize(m.partial)} done)</button><button class="text-btn red" data-m="discard" data-key="${m.key}">Discard</button>`;
   else acts = `<button class="btn sm accent" data-m="download" data-key="${m.key}">${icon('download')} Download ${fmtSize(m.to_download)}</button>`;
   return `<div class="card mcard"><div class="main">
       <div class="name">${esc(m.label)} ${licenseBadge(m)}${m.default ? '<span class="chip accent">Default</span>' : ''}${m.recommended && !m.installed ? '<span class="chip dark">Recommended</span>' : ''}</div>
       <div class="about">${esc(m.about)}</div>
-      <div class="meta"><span>${fmtSize(m.size)}</span>${m.shared?.length ? `<span>shares ${plural(m.shared.length, 'file')} with other models (downloaded once)</span>` : ''}<a href="${esc(m.page)}" target="_blank" rel="noopener">Model page ↗</a>${m.fit && !['fits', 'cpu', 'unsupported'].includes(m.fit) ? `<span style="color:var(--warn)">${m.fit === 'tight' ? 'tight fit for your GPU' : 'too big for your GPU'}</span>` : ''}${m.engines?.length && S.state?.engine?.engine === 'vulkan' ? '<span style="color:var(--warn)">slower on Vulkan (about 1.5× slower than real time)</span>' : ''}</div>
-      ${m.installed && !m.runtime_ready && m.engine_ok && !(m.runtime_job && ['downloading', 'checking', 'installing'].includes(m.runtime_job.status)) ? `<div class="err-note">${m.runtime_job?.status === 'failed' ? `Its engine part didn't download: ${esc(m.runtime_job.error || '')}` : 'Its engine part for this graphics card is missing.'} <button class="btn xs" data-m="download" data-key="${m.key}">${icon('download')} Get it</button></div>` : ''}
-      ${m.installed && !m.engine_ok ? '<div class="err-note">Needs the NVIDIA · CUDA or AMD / Intel · Vulkan engine: switch to one on Setup.</div>' : ''}
+      <div class="meta"><span>${fmtSize(m.size)}</span>${m.shared?.length ? `<span>shares ${plural(m.shared.length, 'file')} with other models (downloaded once)</span>` : ''}<a href="${esc(m.page)}" target="_blank" rel="noopener">Model page ↗</a>${m.fit && !['fits', 'cpu', 'unsupported'].includes(m.fit) ? `<span style="color:var(--warn)">${m.fit === 'tight' ? 'tight fit for your GPU' : 'too big for your GPU'}</span>` : ''}${m.runtime === 's2' && S.state?.engine?.engine === 'vulkan' ? '<span style="color:var(--warn)">slower on Vulkan (about 1.5× slower than real time)</span>' : ''}${m.runtime === 'omni' && S.state?.engine?.engine === 'cpu' ? '<span style="color:var(--warn)">on the processor: 2–3× slower than real time</span>' : ''}${m.key === 'chatterbox' && S.state?.engine?.engine === 'cpu' ? '<span style="color:var(--warn)">on the processor: about 10× slower than real time</span>' : ''}</div>
+      ${m.installed && !m.runtime_ready && m.engine_ok && !(m.runtime_job && ['downloading', 'checking', 'installing'].includes(m.runtime_job.status)) ? `<div class="err-note">${m.runtime_job?.status === 'failed' ? `Its ${m.runtime_part || 'engine'} part didn't download: ${esc(m.runtime_job.error || '')}` : m.runtime_part === 'pronunciation' ? 'Its pronunciation part (eSpeak NG) is missing.' : 'Its engine part for this graphics card is missing.'} <button class="btn xs" data-m="download" data-key="${m.key}">${icon('download')} Get it</button></div>` : ''}
+      ${m.installed && !m.engine_ok ? (m.runtime === 's2' ? '<div class="err-note">Needs the NVIDIA · CUDA or AMD / Intel · Vulkan engine: switch to one on Setup.</div>' : `<div class="err-note">${esc(m.engine_note)}: switch to another engine on Setup.</div>`) : ''}
       ${m.job?.status === 'failed' ? `<div class="err-note">${esc(m.job.error)}</div>` : ''}
     </div><div class="acts">${acts}</div></div>`;
 }

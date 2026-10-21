@@ -1,0 +1,1295 @@
+"""Attachment management tools for EWS MCP Server."""
+
+from typing import Any, Dict, List
+import base64
+import io
+import os
+import re
+from pathlib import Path
+
+from exchangelib import Body, FileAttachment, HTMLBody, ItemAttachment, Message
+
+from .base import BaseTool
+from ..exceptions import ToolExecutionError, ValidationError
+from ..utils import format_success_response, safe_get, find_message_across_folders, find_message_for_account
+
+
+# Download jail for attachment file writes. Default: ./downloads inside the
+# project working directory (created on first use). Operators can override via
+# EWS_DOWNLOAD_DIR. download_attachment(save_path=...) is interpreted relative
+# to this directory; absolute paths, "..", and symlinks that escape the jail
+# are rejected.
+_DEFAULT_DOWNLOAD_DIR = Path(os.environ.get("EWS_DOWNLOAD_DIR", "downloads"))
+
+
+def _is_traversal_path(name: str) -> bool:
+    """True iff ``name`` contains anything that escapes a single filename.
+
+    Rejects absolute paths, "..", "./", leading slashes, UNC roots, and
+    NUL bytes. Used to make save_path a *safe-or-rejected* field: either
+    it's a simple filename we can honour, or the caller hears about it.
+    """
+    if not isinstance(name, str) or not name:
+        return False
+    if "\x00" in name:
+        return True
+    if os.path.isabs(name):
+        return True
+    # Normalise both slash flavours.
+    unified = name.replace("\\", "/")
+    if unified.startswith("/") or unified.startswith("~"):
+        return True
+    parts = [p for p in unified.split("/") if p]
+    for p in parts:
+        if p == "..":
+            return True
+    # "./foo" — the "." element is technically safe, but require a plain
+    # filename with no separators at all for simplicity.
+    return "/" in unified or "\\" in name
+
+
+def _safe_basename(name: str) -> str:
+    """Strip directory traversal / path separators from a user-supplied name."""
+    if not name:
+        return "attachment"
+    name = os.path.basename(name)
+    # Collapse any remaining path-like characters
+    name = re.sub(r"[\\/]+", "_", name).strip()
+    return name or "attachment"
+
+
+def resolve_download_path(
+    save_path: Any,
+    default_name: str,
+    *,
+    strict: bool = False,
+) -> Path:
+    """Resolve a save_path into a safe, jailed absolute Path.
+
+    - If ``save_path`` is None/empty, use ``default_name`` inside the jail.
+    - If ``save_path`` contains directory components or parent refs and
+      ``strict=True``, raise :class:`ValidationError` (HTTP 400).
+    - If ``strict=False`` (legacy mode), only the basename is kept.
+    - The returned path is always inside the jail; symlink tricks that
+      would escape raise :class:`ToolExecutionError`.
+    """
+    jail = _DEFAULT_DOWNLOAD_DIR.resolve()
+    jail.mkdir(parents=True, exist_ok=True)
+
+    if save_path and _is_traversal_path(str(save_path)):
+        if strict:
+            raise ValidationError(
+                f"Invalid save_path {save_path!r}: must be a plain filename "
+                f"with no directory components or '..' refs. Files are "
+                f"written under {jail}"
+            )
+        # Back-compat: strip to basename.
+        save_path = _safe_basename(str(save_path))
+
+    filename = (
+        _safe_basename(str(save_path)) if save_path else _safe_basename(default_name)
+    )
+    candidate = (jail / filename).resolve()
+
+    # Verify the resolved path is still inside the jail (defence against
+    # symlink tricks or unusual basename behaviour).
+    try:
+        candidate.relative_to(jail)
+    except ValueError as exc:
+        raise ToolExecutionError(
+            "Invalid save_path: resolved outside the download directory"
+        ) from exc
+
+    return candidate
+
+
+def extract_attachment_id(attachment) -> str:
+    """Extract a plain attachment ID from exchangelib attachment variants."""
+    att_id = safe_get(attachment, 'attachment_id', '')
+    if hasattr(att_id, 'id'):
+        return att_id.id
+    if isinstance(att_id, dict):
+        return att_id.get('id', '')
+    return str(att_id) if att_id else ''
+
+
+def build_embedded_message(account, source_message):
+    """Create a detached message payload suitable for ItemAttachment."""
+    body_value = safe_get(source_message, "body", None)
+    if hasattr(body_value, "body") and body_value.body:
+        body = HTMLBody(body_value.body)
+    elif isinstance(body_value, str) and "<" in body_value and ">" in body_value:
+        body = HTMLBody(body_value)
+    else:
+        body = Body(str(body_value or safe_get(source_message, "text_body", "") or ""))
+
+    kwargs = {
+        "account": account,
+        "subject": safe_get(source_message, "subject", "") or "Attached email",
+        "body": body,
+        "to_recipients": list(safe_get(source_message, "to_recipients", []) or []),
+        "cc_recipients": list(safe_get(source_message, "cc_recipients", []) or []),
+        "bcc_recipients": list(safe_get(source_message, "bcc_recipients", []) or []),
+    }
+
+    mime_content = safe_get(source_message, "mime_content", None)
+    if mime_content:
+        kwargs["mime_content"] = mime_content
+    if safe_get(source_message, "sender", None):
+        kwargs["sender"] = source_message.sender
+    if safe_get(source_message, "author", None):
+        kwargs["author"] = source_message.author
+
+    return Message(**kwargs)
+
+
+class ListAttachmentsTool(BaseTool):
+    """Tool for listing email attachments."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "list_attachments",
+            "description": "List attachments for an email message.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Email message ID"
+                    },
+                    "include_inline": {
+                        "type": "boolean",
+                        "description": "Include inline attachments (images embedded in email)",
+                        "default": True
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["message_id"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """List attachments for an email."""
+        message_id = kwargs.get("message_id")
+        include_inline = kwargs.get("include_inline", True)
+        target_mailbox = kwargs.get("target_mailbox")
+
+        if not message_id:
+            raise ToolExecutionError("message_id is required")
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Find message across all folders (including custom subfolders)
+            message = find_message_for_account(account, message_id)
+
+            # List attachments
+            attachments = []
+            if hasattr(message, 'attachments') and message.attachments:
+                for attachment in message.attachments:
+                    # Check if it's inline and whether to include it
+                    is_inline = safe_get(attachment, 'is_inline', False)
+
+                    if not include_inline and is_inline:
+                        continue
+
+                    attachment_info = {
+                        "id": extract_attachment_id(attachment),
+                        "name": safe_get(attachment, 'name', 'unnamed'),
+                        "size": safe_get(attachment, 'size', 0),
+                        "content_type": safe_get(attachment, 'content_type', 'application/octet-stream'),
+                        "is_inline": is_inline,
+                        "content_id": safe_get(attachment, 'content_id'),
+                        "attachment_type": attachment.__class__.__name__
+                    }
+                    attachments.append(attachment_info)
+
+            self.logger.info(f"Found {len(attachments)} attachment(s) for message {message_id}")
+
+            return format_success_response(
+                f"Found {len(attachments)} attachment(s)",
+                message_id=message_id,
+                attachments=attachments,
+                count=len(attachments),
+                mailbox=mailbox
+            )
+
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to list attachments: {e}")
+            raise ToolExecutionError(f"Failed to list attachments: {e}")
+
+
+class DownloadAttachmentTool(BaseTool):
+    """Tool for downloading email attachments."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "download_attachment",
+            "description": (
+                "Download an attachment. Provide ``attachment_id`` (from "
+                "list_attachments) OR ``attachment_name`` (exact file name, "
+                "case-insensitive)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Email message ID"
+                    },
+                    "attachment_id": {
+                        "type": "string",
+                        "description": "Attachment ID (preferred; from list_attachments)"
+                    },
+                    "attachment_name": {
+                        "type": "string",
+                        "description": (
+                            "Attachment file name (fallback when "
+                            "attachment_id isn't known). Case-insensitive "
+                            "exact match. Errors if multiple attachments "
+                            "share the same name — use attachment_id in "
+                            "that case."
+                        )
+                    },
+                    "return_as": {
+                        "type": "string",
+                        "enum": ["base64", "file_path"],
+                        "description": "Return format: base64 encoded string or file path",
+                        "default": "base64"
+                    },
+                    "save_path": {
+                        "type": "string",
+                        "description": "File path to save attachment (required if return_as is 'file_path')"
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                # Only message_id is strictly required; at least one of
+                # attachment_id / attachment_name must be supplied — the
+                # execute path enforces that with a ValidationError.
+                "required": ["message_id"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Download an attachment."""
+        message_id = kwargs.get("message_id")
+        attachment_id = kwargs.get("attachment_id")
+        attachment_name = kwargs.get("attachment_name")
+        return_as = kwargs.get("return_as", "base64")
+        save_path = kwargs.get("save_path")
+        target_mailbox = kwargs.get("target_mailbox")
+
+        if not message_id:
+            raise ValidationError("message_id is required")
+
+        if not attachment_id and not attachment_name:
+            raise ValidationError(
+                "Either attachment_id or attachment_name is required"
+            )
+
+        if return_as == "file_path" and not save_path:
+            raise ValidationError(
+                "save_path is required when return_as is 'file_path'"
+            )
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Find message across all folders (including custom subfolders)
+            message = find_message_for_account(account, message_id)
+
+            # Find the attachment. Prefer attachment_id (stable). Fall
+            # back to case-insensitive name match and raise if it's
+            # ambiguous.
+            attachment = None
+            attachments = list(
+                getattr(message, "attachments", None) or []
+            )
+            if attachment_id:
+                for att in attachments:
+                    if str(extract_attachment_id(att)) == str(attachment_id):
+                        attachment = att
+                        break
+            if attachment is None and attachment_name:
+                wanted = str(attachment_name).strip().lower()
+                name_matches = [
+                    att for att in attachments
+                    if (safe_get(att, "name", "") or "").strip().lower() == wanted
+                ]
+                if len(name_matches) > 1:
+                    raise ValidationError(
+                        f"Multiple attachments named {attachment_name!r} "
+                        f"on this message; use attachment_id to disambiguate."
+                    )
+                if name_matches:
+                    attachment = name_matches[0]
+
+            if not attachment:
+                ident = attachment_id or attachment_name
+                raise ValidationError(f"Attachment not found: {ident!r}")
+
+            # Get attachment content
+            content = safe_get(attachment, 'content', b'')
+            if not content:
+                raise ToolExecutionError("Attachment content is empty")
+
+            attachment_name = safe_get(attachment, 'name', 'attachment')
+
+            # Return based on format
+            if return_as == "base64":
+                # Encode content as base64
+                content_b64 = base64.b64encode(content).decode('utf-8')
+
+                self.logger.info(f"Downloaded attachment {attachment_name} ({len(content)} bytes)")
+
+                # file_path is always present in the response so callers
+                # can key off a stable field regardless of return_as (null
+                # when no file was written). Bug ATT-010.
+                return format_success_response(
+                    "Attachment downloaded successfully",
+                    message_id=message_id,
+                    attachment_id=attachment_id,
+                    name=attachment_name,
+                    size=len(content),
+                    content_type=safe_get(attachment, 'content_type', 'application/octet-stream'),
+                    content_base64=content_b64,
+                    file_path=None,
+                    saved_path=None,
+                    mailbox=mailbox
+                )
+
+            elif return_as == "file_path":
+                # Save to file, jailed under EWS_DOWNLOAD_DIR.
+                #
+                # ``strict=True`` converts traversal-style save_paths
+                # ("../../etc/passwd", "/tmp/x", "C:\\...", NUL bytes)
+                # into ValidationError -> HTTP 400. Previously the path
+                # was silently reduced to its basename — callers thought
+                # the tool had honoured their request, but it had jailed
+                # it quietly. Bug #6.
+                file_path = resolve_download_path(
+                    save_path, attachment_name, strict=True
+                )
+
+                with open(file_path, 'wb') as f:
+                    f.write(content)
+
+                self.logger.info(
+                    f"Saved attachment {attachment_name} to {file_path}"
+                )
+
+                return format_success_response(
+                    "Attachment saved successfully",
+                    message_id=message_id,
+                    attachment_id=attachment_id,
+                    name=attachment_name,
+                    size=len(content),
+                    content_type=safe_get(
+                        attachment, 'content_type', 'application/octet-stream'
+                    ),
+                    # ``file_path`` is the historical field name; ``saved_path``
+                    # is a more descriptive alias. Both present = no caller
+                    # surprises regardless of which they read (Bug ATT-010).
+                    file_path=str(file_path),
+                    saved_path=str(file_path),
+                    mailbox=mailbox
+                )
+
+        except (ValidationError, ToolExecutionError):
+            raise
+        except Exception as e:
+            self.logger.exception(f"Failed to download attachment: {e}")
+            raise ToolExecutionError(f"Failed to download attachment: {e}")
+
+
+class AddAttachmentTool(BaseTool):
+    """Tool for adding attachments to draft or existing emails."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "add_attachment",
+            "description": "Add an attachment to a draft or existing email.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Email message ID to add attachment to"
+                    },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Local file path to attach"
+                    },
+                    "file_content": {
+                        "type": "string",
+                        "description": "Base64 encoded file content (alternative to file_path)"
+                    },
+                    "file_name": {
+                        "type": "string",
+                        "description": "File name for the attachment (required if using file_content)"
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "description": "MIME content type (e.g., 'application/pdf')",
+                        "default": "application/octet-stream"
+                    },
+                    "is_inline": {
+                        "type": "boolean",
+                        "description": "Whether attachment is inline (embedded in body)",
+                        "default": False
+                    },
+                    "content_id": {
+                        "type": "string",
+                        "description": "Content-ID for inline references (e.g. 'logo123' to be cited as cid:logo123 from HTML body). Required for inline images to render."
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["message_id"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Add attachment to email."""
+        message_id = kwargs.get("message_id")
+        file_path = kwargs.get("file_path")
+        file_content_b64 = kwargs.get("file_content")
+        file_name = kwargs.get("file_name")
+        content_type = kwargs.get("content_type", "application/octet-stream")
+        is_inline = kwargs.get("is_inline", False)
+        content_id = kwargs.get("content_id")
+        target_mailbox = kwargs.get("target_mailbox")
+
+        if not message_id:
+            raise ToolExecutionError("message_id is required")
+
+        if not file_path and not file_content_b64:
+            raise ToolExecutionError("Either file_path or file_content is required")
+
+        if file_content_b64 and not file_name:
+            raise ToolExecutionError("file_name is required when using file_content")
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Find the message in Drafts folder (most common use case)
+            message = None
+            folders_to_search = [
+                account.drafts,
+                account.inbox,
+                account.sent
+            ]
+
+            for folder in folders_to_search:
+                try:
+                    message = folder.get(id=message_id)
+                    if message:
+                        break
+                except Exception:
+                    continue
+
+            if not message:
+                raise ToolExecutionError(f"Message not found: {message_id}")
+
+            # Get file content and name
+            if file_path:
+                path = Path(file_path)
+                if not path.exists():
+                    raise ToolExecutionError(f"File not found: {file_path}")
+
+                with open(path, 'rb') as f:
+                    file_content = f.read()
+
+                if not file_name:
+                    file_name = path.name
+            else:
+                # Decode base64 content
+                file_content = base64.b64decode(file_content_b64)
+
+            # Create attachment. content_id is required for inline images so the
+            # message body can reference them via `cid:<content_id>`.
+            attachment_kwargs = {
+                "name": file_name,
+                "content": file_content,
+                "content_type": content_type,
+                "is_inline": is_inline,
+            }
+            if content_id:
+                attachment_kwargs["content_id"] = content_id
+            attachment = FileAttachment(**attachment_kwargs)
+
+            # Persist via CreateAttachment. `Item.attach(...)` issues the
+            # EWS call and mutates `attachment.attachment_id` in place — the
+            # earlier `attachments.append(...) + message.save()` pattern
+            # only mutated the local list and never reached the server, so
+            # subsequent list_attachments calls returned an empty list.
+            message.attach(attachment)
+
+            attachment_id = extract_attachment_id(attachment)
+
+            self.logger.info(f"Added attachment '{file_name}' to message {message_id}")
+
+            response_extras = {}
+            if content_id:
+                response_extras["content_id"] = content_id
+            return format_success_response(
+                f"Attachment '{file_name}' added successfully",
+                message_id=message_id,
+                attachment_id=attachment_id,
+                attachment_name=file_name,
+                attachment_size=len(file_content),
+                content_type=content_type,
+                is_inline=is_inline,
+                mailbox=mailbox,
+                **response_extras,
+            )
+
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to add attachment: {e}")
+            raise ToolExecutionError(f"Failed to add attachment: {e}")
+
+
+class DeleteAttachmentTool(BaseTool):
+    """Tool for removing attachments from email messages."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "delete_attachment",
+            "description": "Remove an attachment from an email.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Email message ID containing the attachment"
+                    },
+                    "attachment_id": {
+                        "type": "string",
+                        "description": "Attachment ID to remove"
+                    },
+                    "attachment_name": {
+                        "type": "string",
+                        "description": "Attachment name to remove (alternative to attachment_id)"
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["message_id"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Delete attachment from email."""
+        message_id = kwargs.get("message_id")
+        attachment_id = kwargs.get("attachment_id")
+        attachment_name = kwargs.get("attachment_name")
+        target_mailbox = kwargs.get("target_mailbox")
+
+        if not message_id:
+            raise ToolExecutionError("message_id is required")
+
+        if not attachment_id and not attachment_name:
+            raise ToolExecutionError("Either attachment_id or attachment_name is required")
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Find the message
+            message = None
+            folders_to_search = [
+                account.drafts,
+                account.inbox,
+                account.sent
+            ]
+
+            for folder in folders_to_search:
+                try:
+                    message = folder.get(id=message_id)
+                    if message:
+                        break
+                except Exception:
+                    continue
+
+            if not message:
+                raise ToolExecutionError(f"Message not found: {message_id}")
+
+            # Find the attachment to delete
+            if not hasattr(message, 'attachments') or not message.attachments:
+                raise ToolExecutionError("Message has no attachments")
+
+            attachment_to_delete = None
+            deleted_name = None
+
+            for att in message.attachments:
+                # Check by ID
+                if attachment_id:
+                    if str(extract_attachment_id(att)) == str(attachment_id):
+                        attachment_to_delete = att
+                        deleted_name = safe_get(att, 'name', 'Unknown')
+                        break
+
+                # Check by name
+                elif attachment_name:
+                    att_name = safe_get(att, 'name', '')
+                    if att_name == attachment_name:
+                        attachment_to_delete = att
+                        deleted_name = att_name
+                        break
+
+            if not attachment_to_delete:
+                raise ToolExecutionError(f"Attachment not found")
+
+            # Persist via DeleteAttachment. Same reason as add_attachment:
+            # mutating the local list and saving the parent item does not
+            # send DeleteAttachment to EWS.
+            message.detach(attachment_to_delete)
+
+            self.logger.info(f"Deleted attachment '{deleted_name}' from message {message_id}")
+
+            return format_success_response(
+                f"Attachment '{deleted_name}' deleted successfully",
+                message_id=message_id,
+                attachment_name=deleted_name,
+                mailbox=mailbox
+            )
+
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to delete attachment: {e}")
+            raise ToolExecutionError(f"Failed to delete attachment: {e}")
+
+
+class ReadAttachmentTool(BaseTool):
+    """Tool for reading and extracting text content from email attachments."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "read_attachment",
+            "description": (
+                "Extract text content from attachments. "
+                "Supported: PDF, DOCX, XLSX, PPTX (incl. speaker notes), "
+                "MSG (Outlook compound-file — full thread envelope + body + "
+                "nested attachment listing), EML (RFC-822), HTML (RTL-safe), "
+                "CSV, TXT, LOG, JSON, XML, MD."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Email message ID"
+                    },
+                    "attachment_name": {
+                        "type": "string",
+                        "description": "Name of the attachment to read"
+                    },
+                    "extract_tables": {
+                        "type": "boolean",
+                        "description": "Extract tables from documents (PDF, DOCX, XLSX)",
+                        "default": False
+                    },
+                    "max_pages": {
+                        "type": "integer",
+                        "description": "Maximum number of pages to extract (for PDFs)",
+                        "default": 50
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["message_id", "attachment_name"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Read and extract text from attachment."""
+        message_id = kwargs.get("message_id")
+        attachment_name = kwargs.get("attachment_name")
+        extract_tables = kwargs.get("extract_tables", False)
+        max_pages = kwargs.get("max_pages", 50)
+        target_mailbox = kwargs.get("target_mailbox")
+
+        if not message_id:
+            raise ToolExecutionError("message_id is required")
+
+        if not attachment_name:
+            raise ToolExecutionError("attachment_name is required")
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Find message across all folders (including custom subfolders)
+            message = find_message_for_account(account, message_id)
+
+            # Find the attachment by name
+            attachment = None
+            if hasattr(message, 'attachments') and message.attachments:
+                for att in message.attachments:
+                    if safe_get(att, 'name', '') == attachment_name:
+                        attachment = att
+                        break
+
+            if not attachment:
+                raise ToolExecutionError(f"Attachment '{attachment_name}' not found")
+
+            # Get attachment content
+            content = safe_get(attachment, 'content', b'')
+            if not content:
+                raise ToolExecutionError("Attachment content is empty")
+
+            # Determine file type from extension
+            file_ext = attachment_name.lower().split('.')[-1] if '.' in attachment_name else ''
+
+            # Extract text based on file type
+            extracted_text = ""
+            file_type = file_ext
+
+            if file_ext == 'pdf':
+                extracted_text = self._read_pdf(content, extract_tables, max_pages)
+            elif file_ext == 'docx':
+                extracted_text = self._read_docx(content, extract_tables)
+            elif file_ext in ['xlsx', 'xls']:
+                extracted_text = self._read_excel(content)
+            elif file_ext == 'pptx':
+                # v4.0 — PowerPoint slide-by-slide text extraction.
+                extracted_text = self._read_pptx(content)
+            elif file_ext == 'msg':
+                # v4.0 — Outlook .msg compound-file (CFB) parser. Reads
+                # an entire forwarded email thread as a single attachment
+                # and returns the from / to / cc / subject envelope plus
+                # the body and a recursive listing of nested attachments.
+                extracted_text = self._read_msg(content)
+            elif file_ext in ('eml',):
+                # Bonus: RFC-822 .eml — same shape as .msg, different
+                # container. Many users export forwarded threads as .eml
+                # rather than .msg, especially from non-Outlook clients.
+                extracted_text = self._read_eml(content)
+            elif file_ext in ('html', 'htm'):
+                # v4.0 — HTML attachments (incl. RTL Arabic) routed through
+                # the same markdownify pipeline used for email body
+                # conversion, so the LLM gets clean GFM markdown instead
+                # of raw MSO-style HTML.
+                extracted_text = self._read_html(content)
+            elif file_ext == 'csv':
+                # v4.0 — light CSV reading (utf-8 / utf-16 BOM-aware), no
+                # external dependency. Returns the file as-is, decoded.
+                extracted_text = self._read_text_decoded(content)
+            elif file_ext in ('txt', 'log', 'json', 'xml', 'md'):
+                extracted_text = self._read_text_decoded(content)
+            else:
+                raise ToolExecutionError(
+                    f"Unsupported file type: {file_ext}. Supported: "
+                    f"PDF, DOCX, XLSX, PPTX, MSG, EML, HTML, CSV, TXT, LOG, JSON, XML, MD."
+                )
+
+            self.logger.info(
+                f"Extracted {len(extracted_text)} characters from {attachment_name}"
+            )
+
+            return format_success_response(
+                "Text extracted successfully",
+                message_id=message_id,
+                file_name=attachment_name,
+                file_type=file_type,
+                file_size=len(content),
+                content_length=len(extracted_text),
+                content=extracted_text,
+                supports_arabic=True,  # UTF-8 encoding supports Arabic
+                mailbox=mailbox
+            )
+
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to read attachment: {e}")
+            raise ToolExecutionError(f"Failed to read attachment: {e}")
+
+    def _read_pdf(self, content: bytes, extract_tables: bool, max_pages: int) -> str:
+        """Extract text from PDF using pdfplumber."""
+        try:
+            import pdfplumber
+        except ImportError:
+            raise ToolExecutionError(
+                "pdfplumber not installed. Run: pip install pdfplumber>=0.10.0"
+            )
+
+        text_parts = []
+        pdf_bytes = io.BytesIO(content)
+
+        try:
+            with pdfplumber.open(pdf_bytes) as pdf:
+                total_pages = len(pdf.pages)
+                pages_to_process = min(total_pages, max_pages)
+
+                for page_num in range(pages_to_process):
+                    page = pdf.pages[page_num]
+                    text_parts.append(f"--- Page {page_num + 1} of {total_pages} ---")
+
+                    # Extract text (supports UTF-8/Arabic)
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_parts.append(page_text)
+
+                    # Extract tables if requested
+                    if extract_tables:
+                        tables = page.extract_tables()
+                        for table_num, table in enumerate(tables, 1):
+                            text_parts.append(f"\n[Table {table_num}]")
+                            for row in table:
+                                row_text = " | ".join(str(cell) if cell else "" for cell in row)
+                                text_parts.append(row_text)
+
+                if total_pages > max_pages:
+                    text_parts.append(f"\n... (truncated at {max_pages} pages, {total_pages - max_pages} pages omitted)")
+
+            return "\n\n".join(text_parts)
+
+        except Exception as e:
+            raise ToolExecutionError(f"Failed to read PDF: {str(e)}")
+
+    def _read_docx(self, content: bytes, extract_tables: bool) -> str:
+        """Extract text from DOCX using python-docx."""
+        try:
+            from docx import Document
+        except ImportError:
+            raise ToolExecutionError(
+                "python-docx not installed. Run: pip install python-docx>=1.0.0"
+            )
+
+        text_parts = []
+        docx_bytes = io.BytesIO(content)
+
+        try:
+            doc = Document(docx_bytes)
+
+            # Extract paragraphs (supports UTF-8/Arabic)
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    text_parts.append(para.text)
+
+            # Extract tables if requested
+            if extract_tables:
+                for table_num, table in enumerate(doc.tables, 1):
+                    text_parts.append(f"\n[Table {table_num}]")
+                    for row in table.rows:
+                        row_text = " | ".join(cell.text.strip() for cell in row.cells)
+                        if row_text.strip():
+                            text_parts.append(row_text)
+
+            return "\n\n".join(text_parts)
+
+        except Exception as e:
+            raise ToolExecutionError(f"Failed to read DOCX: {str(e)}")
+
+    def _read_excel(self, content: bytes) -> str:
+        """Extract data from Excel using openpyxl."""
+        try:
+            import openpyxl
+        except ImportError:
+            raise ToolExecutionError(
+                "openpyxl not installed. Run: pip install openpyxl>=3.1.0"
+            )
+
+        text_parts = []
+        excel_bytes = io.BytesIO(content)
+
+        try:
+            # Load workbook (data_only=True to get calculated values)
+            workbook = openpyxl.load_workbook(excel_bytes, data_only=True)
+
+            for sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+                text_parts.append(f"--- Sheet: {sheet_name} ---")
+
+                # Extract all rows
+                for row in sheet.iter_rows(values_only=True):
+                    # Skip empty rows
+                    if any(cell is not None for cell in row):
+                        row_text = " | ".join(
+                            str(cell) if cell is not None else ""
+                            for cell in row
+                        )
+                        text_parts.append(row_text)
+
+                text_parts.append("")  # Empty line between sheets
+
+            return "\n".join(text_parts)
+
+        except Exception as e:
+            raise ToolExecutionError(f"Failed to read Excel: {str(e)}")
+
+    def _read_pptx(self, content: bytes) -> str:
+        """Extract slide-by-slide text from a PowerPoint .pptx file.
+
+        v4.0 — closes the gap where the MCP only handled PDF/DOCX/XLSX/TXT.
+        Uses ``python-pptx`` (already in requirements). Each slide is
+        emitted with a header so the LLM can reason about position.
+        """
+        try:
+            from pptx import Presentation
+        except ImportError:
+            raise ToolExecutionError(
+                "python-pptx not installed. Run: pip install python-pptx>=0.6.21"
+            )
+        try:
+            buf = io.BytesIO(content)
+            prs = Presentation(buf)
+            parts = []
+            for i, slide in enumerate(prs.slides, 1):
+                parts.append(f"--- Slide {i} ---")
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for para in shape.text_frame.paragraphs:
+                            t = "".join(run.text for run in para.runs).strip()
+                            if t:
+                                parts.append(t)
+                    # Tables embedded in slides
+                    if getattr(shape, "has_table", False) and shape.has_table:
+                        for row in shape.table.rows:
+                            row_text = " | ".join(
+                                (cell.text or "").strip() for cell in row.cells
+                            )
+                            if row_text.strip():
+                                parts.append(row_text)
+                # Speaker notes if present
+                notes = getattr(slide, "notes_slide", None)
+                if notes and notes.notes_text_frame:
+                    nt = notes.notes_text_frame.text.strip()
+                    if nt:
+                        parts.append(f"[notes] {nt}")
+                parts.append("")
+            return "\n".join(parts).strip()
+        except Exception as e:
+            raise ToolExecutionError(f"Failed to read PPTX: {str(e)}")
+
+    def _read_html(self, content: bytes) -> str:
+        """Convert an HTML attachment to GFM markdown.
+
+        v4.0 — for HTML files attached to emails (status reports, exported
+        web pages, signed RFP excerpts in HTML). Routed through the same
+        markdownify pipeline used by ``get_email_details(format=markdown)``,
+        which strips Outlook MSO/Word junk and preserves Arabic / RTL
+        text correctly.
+        """
+        from ..body_format import render_body
+        text = self._read_text_decoded(content)
+        md, _actual = render_body(html=text, plain="", fmt="markdown")
+        return md
+
+    @staticmethod
+    def _read_text_decoded(content: bytes) -> str:
+        """Decode a bytes payload as text — BOM-aware (UTF-8 / UTF-16),
+        fall back to UTF-8 with replacement on unknown bytes.
+
+        Used by .txt / .csv / .log / .json / .xml / .md / the inner step of .html.
+        """
+        if not content:
+            return ""
+        # UTF-16 LE / BE BOM
+        if content[:2] in (b"\xff\xfe", b"\xfe\xff"):
+            try:
+                return content.decode("utf-16")
+            except UnicodeDecodeError:
+                pass
+        # UTF-8 BOM
+        if content.startswith(b"\xef\xbb\xbf"):
+            return content[3:].decode("utf-8", errors="replace")
+        return content.decode("utf-8", errors="replace")
+
+    def _read_msg(self, content: bytes) -> str:
+        """Extract envelope + body + nested-attachment listing from an
+        Outlook ``.msg`` compound-file (CFB) attachment.
+
+        v4.0 — Real users get full forwarded email threads as ``.msg``
+        attachments. Without this branch the only thing the agent sees is
+        a base64 blob it can't reason about. We use ``extract_msg``
+        (pure-Python, MIT) to parse the envelope and unwind nested
+        attachments, then return a readable text rendering plus a
+        markdown-converted body if HTML is present.
+        """
+        try:
+            import extract_msg
+        except ImportError:
+            raise ToolExecutionError(
+                "extract-msg not installed. Run: pip install extract-msg>=0.50.0"
+            )
+
+        # extract_msg can read directly from a path or BytesIO. Use a
+        # tempfile to avoid loading-into-memory edge cases on huge MSGs.
+        import tempfile
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".msg", delete=False) as tf:
+                tf.write(content)
+                tmp_path = tf.name
+            try:
+                msg = extract_msg.openMsg(tmp_path)
+            finally:
+                # The Message object holds the file open; we'll close +
+                # cleanup the temp file at the end of the with block below.
+                pass
+
+            parts: List[str] = []
+            parts.append(f"Subject: {(msg.subject or '').strip()}")
+            parts.append(f"From: {(msg.sender or '').strip()}")
+            if getattr(msg, "to", None):
+                parts.append(f"To: {msg.to}")
+            if getattr(msg, "cc", None):
+                parts.append(f"Cc: {msg.cc}")
+            if getattr(msg, "bcc", None):
+                parts.append(f"Bcc: {msg.bcc}")
+            sent_date = getattr(msg, "date", None) or getattr(msg, "delivered_at", None)
+            if sent_date:
+                parts.append(f"Date: {sent_date}")
+            parts.append("")  # blank line separator
+
+            # Body — prefer HTML (convert to markdown via the same pipeline
+            # used elsewhere in v4) then text body, then RTF as last resort.
+            html_body = getattr(msg, "htmlBody", None) or getattr(msg, "bodyHTML", None)
+            text_body = getattr(msg, "body", None) or ""
+            rtf_body = getattr(msg, "rtfBody", None)
+
+            if html_body:
+                if isinstance(html_body, bytes):
+                    html_body = html_body.decode("utf-8", errors="replace")
+                from ..body_format import render_body
+                md, _ = render_body(html=html_body, plain=text_body or "", fmt="markdown")
+                parts.append(md.strip())
+            elif text_body:
+                parts.append(text_body.strip() if isinstance(text_body, str)
+                             else text_body.decode("utf-8", errors="replace").strip())
+            elif rtf_body:
+                # RTF rendering is heavy; just note its presence.
+                parts.append("[RTF body present — text/HTML body absent. "
+                             "Use a separate RTF→text path if needed.]")
+
+            # Nested attachment summary (don't recurse into nested .msg
+            # to keep the response bounded; just list them).
+            atts = list(getattr(msg, "attachments", []) or [])
+            if atts:
+                parts.append("")
+                parts.append(f"--- Nested attachments ({len(atts)}) ---")
+                for i, att in enumerate(atts, 1):
+                    name = getattr(att, "longFilename", None) or getattr(att, "shortFilename", None) or f"attachment_{i}"
+                    size = len(getattr(att, "data", b"") or b"")
+                    parts.append(f"  {i}. {name}  ({size} bytes)")
+
+            return "\n".join(parts).strip()
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            raise ToolExecutionError(f"Failed to read MSG: {str(e)}")
+        finally:
+            try:
+                import os as _os
+                _os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    def _read_eml(self, content: bytes) -> str:
+        """Parse an RFC-822 ``.eml`` attachment (stdlib only).
+
+        Variant of ``_read_msg`` for non-Outlook exports. Pulls envelope,
+        body (HTML→markdown if present), and lists nested parts.
+        """
+        from email import policy
+        from email.parser import BytesParser
+
+        try:
+            msg = BytesParser(policy=policy.default).parsebytes(content)
+        except Exception as e:
+            raise ToolExecutionError(f"Failed to parse EML: {str(e)}")
+
+        parts = [
+            f"Subject: {msg.get('Subject', '')}",
+            f"From: {msg.get('From', '')}",
+            f"To: {msg.get('To', '')}",
+        ]
+        if msg.get("Cc"):
+            parts.append(f"Cc: {msg.get('Cc')}")
+        if msg.get("Date"):
+            parts.append(f"Date: {msg.get('Date')}")
+        parts.append("")
+
+        # Walk parts: prefer HTML, fall back to text/plain.
+        html_body = ""
+        text_body = ""
+        attachments = []
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            disp = part.get("Content-Disposition", "") or ""
+            if "attachment" in disp.lower():
+                fn = part.get_filename() or "(unnamed)"
+                payload = part.get_payload(decode=True) or b""
+                attachments.append((fn, len(payload)))
+                continue
+            if ctype == "text/html" and not html_body:
+                try:
+                    html_body = part.get_content()
+                except Exception:
+                    html_body = part.get_payload(decode=True).decode("utf-8", errors="replace")
+            elif ctype == "text/plain" and not text_body:
+                try:
+                    text_body = part.get_content()
+                except Exception:
+                    text_body = part.get_payload(decode=True).decode("utf-8", errors="replace")
+
+        if html_body:
+            from ..body_format import render_body
+            md, _ = render_body(html=html_body, plain=text_body, fmt="markdown")
+            parts.append(md.strip())
+        elif text_body:
+            parts.append(text_body.strip())
+
+        if attachments:
+            parts.append("")
+            parts.append(f"--- Nested attachments ({len(attachments)}) ---")
+            for i, (fn, size) in enumerate(attachments, 1):
+                parts.append(f"  {i}. {fn}  ({size} bytes)")
+
+        return "\n".join(parts).strip()
+
+
+class GetEmailMimeTool(BaseTool):
+    """Tool for retrieving raw MIME content for an email."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "get_email_mime",
+            "description": "Return the raw RFC822 MIME content for an email as base64.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Email message ID to export as MIME"
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["message_id"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        message_id = kwargs.get("message_id")
+        target_mailbox = kwargs.get("target_mailbox")
+
+        if not message_id:
+            raise ToolExecutionError("message_id is required")
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+            message = find_message_for_account(account, message_id)
+            mime_content = safe_get(message, "mime_content", None)
+            if not mime_content:
+                raise ToolExecutionError("MIME content is not available for this message")
+
+            if isinstance(mime_content, str):
+                mime_bytes = mime_content.encode("utf-8")
+            else:
+                mime_bytes = bytes(mime_content)
+
+            return format_success_response(
+                "Email MIME retrieved successfully",
+                message_id=message_id,
+                subject=safe_get(message, "subject", ""),
+                mime_content_base64=base64.b64encode(mime_bytes).decode("utf-8"),
+                mailbox=mailbox
+            )
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to get email MIME: {e}")
+            raise ToolExecutionError(f"Failed to get email MIME: {e}")
+
+
+class AttachEmailToDraftTool(BaseTool):
+    """Tool for attaching an existing email as an embedded message to a draft."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "attach_email_to_draft",
+            "description": "Attach an existing email as an embedded message to a draft in the Drafts folder.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "draft_id": {
+                        "type": "string",
+                        "description": "Draft message ID that should receive the embedded email"
+                    },
+                    "source_message_id": {
+                        "type": "string",
+                        "description": "Existing message ID to embed as an email attachment"
+                    },
+                    "attachment_name": {
+                        "type": "string",
+                        "description": "Optional display name for the embedded email attachment"
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["draft_id", "source_message_id"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        draft_id = kwargs.get("draft_id")
+        source_message_id = kwargs.get("source_message_id")
+        attachment_name = kwargs.get("attachment_name")
+        target_mailbox = kwargs.get("target_mailbox")
+
+        if not draft_id:
+            raise ToolExecutionError("draft_id is required")
+        if not source_message_id:
+            raise ToolExecutionError("source_message_id is required")
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+            draft_message = find_message_for_account(account, draft_id)
+            source_message = find_message_for_account(account, source_message_id)
+
+            embedded_message = build_embedded_message(account, source_message)
+            embedded_name = attachment_name or f"{safe_get(source_message, 'subject', 'attached-email')}.eml"
+            item_attachment = ItemAttachment(name=embedded_name, item=embedded_message)
+            draft_message.attach(item_attachment)
+
+            return format_success_response(
+                "Email attached to draft successfully",
+                draft_id=draft_id,
+                source_message_id=source_message_id,
+                attachment_name=embedded_name,
+                attachment_id=extract_attachment_id(item_attachment),
+                mailbox=mailbox
+            )
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to attach email to draft: {e}")
+            raise ToolExecutionError(f"Failed to attach email to draft: {e}")

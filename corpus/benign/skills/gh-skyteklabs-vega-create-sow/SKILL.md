@@ -24,7 +24,7 @@ The input is `$ARGUMENTS`, or whatever file the user named.
 
 | Input | How to read it |
 |---|---|
-| `*.sow.json` | Skip to step 5 with that file. It renders as the next version. |
+| `*.sow.json` | Skip to step 4 with that file, which renders as the next version. Step 4 confirms its pricing. |
 | `.pdf` | Read tool; pass `pages` in chunks of up to 20 for long files |
 | `.docx` | `uv run ${CLAUDE_SKILL_DIR}/scripts/extract_docx.py <file>` |
 | `.txt`, `.md` | Read tool |
@@ -42,7 +42,7 @@ Done when you have the RFP's full text, every page included.
 Fill a draft JSON with every field the RFP answers. Record each field's origin in `_sources`:
 - `rfp`: stated in the RFP.
 - `inferred`: your reading of something the RFP implies, such as in-scope items from a requirements table.
-- `default`: a vendor setting or a schema `default`.
+- `default`: a vendor setting or a schema `default`. Never valid for a pricing field.
 - `user`: an answer from step 3.
 
 Dates are `YYYY-MM-DD` wherever the source gives a real date, and free text ("Week 4") otherwise. `sow_date` defaults to today.
@@ -56,6 +56,8 @@ The `payment_schedule` amounts must sum to the total cost (package/effort subtot
 All other sections are the same for both. `fees` holds optional extra lines on top, such as a discount (negative) or third-party costs.
 
 Pricing, package items, mandays, day rates, currency, payment schedule, payment terms, tax treatment and governing law come only from the RFP or the user. A budget ceiling in an RFP is context, not the fee.
+
+`render_sow.py` enforces this: each of these fields needs `rfp` or `user` in `_sources`, or the render exits 2. Checked: `package_items` (package) or `effort` (professional services), `currency`, `pricing_model`, `payment_schedule`, `payment_terms`, `tax_treatment`, and `fees` and `governing_law` when they are not empty. `default`, `inferred` and no entry all fail. Confirm an `inferred` pricing value with the user and record it as `user`.
 
 Write tasks with action verbs (design, configure, migrate, test) and make deliverables and success criteria measurable: state counts, components or environments. Avoid "up to" for quantities. Mandays and rates go only in `effort`, never in vendor roles.
 
@@ -76,6 +78,8 @@ Done when every required field has a value.
 ## 4. Review
 
 Show a compact table of every field, its value (trim long text), and its source. Mark `inferred` values for the user to check. Then wait. The user approves or corrects; apply each correction as a `user` source.
+
+For a `*.sow.json` input, show only these pricing fields with their values and ask the user to confirm them: `package_items` (package) or `effort` (professional services), `currency`, `pricing_model`, `payment_schedule`, `payment_terms`, `tax_treatment`, and `fees` and `governing_law` when they are not empty. Files saved before 0.8.0 have no pricing sources. Record each confirmed field as `user` in `_sources`; the render rejects the file otherwise.
 
 Done when the user approves.
 

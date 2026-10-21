@@ -1,0 +1,51 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: windows-2022
+    timeout-minutes: 13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+      - name: Create isolated Python environment
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          & python @('-m', 'venv', '--copies', '.venv')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: dependencies
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          PYTHONNOUSERSITE: '1'
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          PIP_CONFIG_FILE: '${{ runner.os == ''Windows'' && ''NUL'' || ''/dev/null'' }}'
+          PIP_DISABLE_PIP_VERSION_CHECK: '1'
+          NPM_CONFIG_USERCONFIG: '${{ runner.temp }}/empty-npmrc'
+        run: |
+          & node @('.github/ci/portfolio-ci.mjs', 'dependencies', '--python', './.venv/Scripts/python.exe')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: unit
+        timeout-minutes: 3
+        shell: pwsh
+        env:
+          PYTHONNOUSERSITE: '1'
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          PIP_CONFIG_FILE: '${{ runner.os == ''Windows'' && ''NUL'' || ''/dev/null'' }}'
+          PIP_DISABLE_PIP_VERSION_CHECK: '1'
+          NPM_CONFIG_USERCONFIG: '${{ runner.temp }}/empty-npmrc'
+        run: |
+          & node @('.github/ci/portfolio-ci.mjs', 'unit', '--python', './.venv/Scripts/python.exe')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

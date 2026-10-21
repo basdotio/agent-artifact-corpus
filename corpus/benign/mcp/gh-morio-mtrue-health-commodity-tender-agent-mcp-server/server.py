@@ -13,9 +13,19 @@ def register_case(request: dict) -> dict:
 
 
 @mcp.tool()
-def compile_evaluation_plan(case_id: str, model: str = "") -> dict:
-    """Create a sourced draft plan. A named human must lock it before bid evaluation."""
-    return service.compile_evaluation_plan(case_id, model)
+def compile_evaluation_plan(case_id: str, model: str = "", feedback: str = "") -> dict:
+    """Create a sourced draft plan. A named human must lock it before bid evaluation.
+    feedback: the validator's rejection of a previous attempt, passed back to the local model to correct."""
+    return service.compile_evaluation_plan(case_id, model, feedback)
+
+
+@mcp.tool()
+def search_award_history(ocid: str = "", query: str = "", buyer: str = "", limit: int = 10, case_id: str = "") -> dict:
+    """Search published Kenya OCDS award history by exact OCID or title keywords (optionally filtered by buyer).
+    Returns contract-level awards with data-quality flags and a file/line/JSON-pointer citation for each value.
+    With case_id, saves the result to the case as a cited annex and compares the declared closing date with the
+    published one. Never produces a unit-price benchmark or a finding against a supplier."""
+    return service.search_award_history(ocid=ocid, query=query, buyer=buyer, limit=limit, case_id=case_id)
 
 
 @mcp.tool()

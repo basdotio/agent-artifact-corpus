@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit raw little/big endian float texture data; never treat a PNG as numeric input."""
 import argparse, hashlib, json, math, struct
-from pathlib import Path
+from grea.host.paths import Path
 
 def audit(path,width,height,channels,dtype,endian,candidate=None):
     if min(width,height,channels)<=0 or channels>4: raise ValueError('Invalid dimensions/channels')

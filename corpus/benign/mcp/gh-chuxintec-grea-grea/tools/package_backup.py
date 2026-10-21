@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Snapshot installed non-builtin UPM packages and prepare verified offline install plans."""
 import argparse,hashlib,json,tarfile,tempfile,os,re
-from pathlib import Path
+from grea.host.paths import Path
 from grea.safe_paths import disjoint, relative_name
 
 def sha(p,private_markers=()):
@@ -23,22 +23,22 @@ def snapshot(projects,dest):
  if dest.exists():raise ValueError('Output must be a new directory')
  # Validate every identity before creating any archives.
  for project in projects:
-  lock=json.loads((project/'Packages/packages-lock.json').read_text())['dependencies']
+  lock=json.loads((project/'Packages/packages-lock.json').read_text(encoding='utf-8'))['dependencies']
   for name in lock:
    if not re.fullmatch(r'[a-z][a-z0-9._-]+',name):raise ValueError('Invalid package name')
   for base in [project/'Library/PackageCache',project/'Packages']:
    for metadata in base.glob('*/package.json'):
-    pkg=json.loads(metadata.read_text())
+    pkg=json.loads(metadata.read_text(encoding='utf-8'))
     if not re.fullmatch(r'[a-z][a-z0-9._-]+',pkg['name']) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?',pkg['version']):raise ValueError('Invalid package identity')
  dest.mkdir(parents=True);(dest/'archives').mkdir();items={};inventories=[];missing=[]
  for source_index,project in enumerate(projects,1):
   private_markers=tuple(str(x).encode() for x in (project.resolve(),Path.home()) if len(str(x))>3)
-  lock=json.loads((project/'Packages/packages-lock.json').read_text())['dependencies'];candidates={}
+  lock=json.loads((project/'Packages/packages-lock.json').read_text(encoding='utf-8'))['dependencies'];candidates={}
   for base in [project/'Library/PackageCache',project/'Packages']:
    if base.exists():
     for p in base.iterdir():
      if p.is_dir() and (p/'package.json').is_file():
-      d=json.loads((p/'package.json').read_text());candidates[(d.get('name'),d.get('version'))]=(p,d)
+      d=json.loads((p/'package.json').read_text(encoding='utf-8'));candidates[(d.get('name'),d.get('version'))]=(p,d)
   source_id='source-'+str(source_index)
   inv={'project':source_id,'packages':[]}
   for name,meta in lock.items():
@@ -80,7 +80,7 @@ def snapshot(projects,dest):
  print(json.dumps({'archives':len(items),'missing':missing}));return 1 if missing else 0
 
 def plan(backup,requested,output):
- d=json.loads((backup/'catalog.json').read_text());byid={};byname={}
+ d=json.loads((backup/'catalog.json').read_text(encoding='utf-8'));byid={};byname={}
  for x in d['packages']:byid.setdefault(x['id'],[]).append(x);byname.setdefault(x['name'],[]).append(x)
  queue=list(requested);selected={}
  while queue:

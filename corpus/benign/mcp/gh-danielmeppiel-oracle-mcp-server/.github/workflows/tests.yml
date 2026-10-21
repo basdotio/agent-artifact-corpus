@@ -1,0 +1,123 @@
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+      - name: Install dependencies (uv)
+        run: |
+          uv sync --extra dev
+      - name: Run unit tests
+        run: uv run pytest -q tests/unit
+
+  integration-tests:
+    name: Integration Tests (PR only)
+    if: github.event_name == 'pull_request'
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services: {}
+    env:
+      # Multi-arch or amd64-friendly tag preferred; adjust if needed. If you set a tag ending with -arm64, QEMU will be enabled.
+      ORACLE_IMAGE: container-registry.oracle.com/database/free:23.6.0.0
+      ORACLE_SID: FREE
+      ORACLE_PDB: FREEPDB1
+      ORACLE_PWD: Welcome123
+      ORACLE_CHARACTERSET: AL32UTF8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable QEMU for ARM image (conditional)
+        if: endsWith(env.ORACLE_IMAGE, '-arm64')
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start Oracle Database (docker-compose)
+        run: |
+          echo "Using ORACLE_IMAGE=${ORACLE_IMAGE}"
+          docker compose -f test/db/docker-compose.yml up -d
+          echo "Containers started"
+          docker ps -a
+
+      - name: Show Oracle startup logs (background)
+        run: |
+          # Tail logs for debugging (first 400 lines max to avoid log flood)
+          docker logs -f oracle_free &
+          echo "Started tailing logs..."
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+
+      - name: Install dependencies (uv)
+        run: |
+          uv sync --extra dev
+
+      - name: Wait for Oracle readiness
+        env:
+          ORACLE_CONN: testuser/testpass@localhost:1521/FREEPDB1
+        run: |
+          uv run python - <<'PY'
+          import time, sys, os
+          import oracledb
+
+          conn_str = os.environ['ORACLE_CONN']
+          # Allow a bit more time for first start, especially under emulation
+          max_attempts = 20
+          delay = 15
+          for attempt in range(1, max_attempts + 1):
+              try:
+                  with oracledb.connect(conn_str) as con:
+                      with con.cursor() as cur:
+                          cur.execute('SELECT 1 FROM dual')
+                          print('Database is ready!')
+                          break
+              except Exception as e:
+                  print(f'[{attempt}/{max_attempts}] Waiting for DB to be ready: {e}')
+                  time.sleep(delay)
+          else:
+              print('Oracle DB did not become ready in time', file=sys.stderr)
+              sys.exit(1)
+          PY
+
+      - name: Run integration tests
+        env:
+          ORACLE_CONNECTION_STRING: testuser/testpass@localhost:1521/FREEPDB1
+          TARGET_SCHEMA: testuser
+        run: |
+          uv run pytest -q tests/integration
+
+      - name: Upload pytest results (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-logs
+          path: .
+          if-no-files-found: ignore

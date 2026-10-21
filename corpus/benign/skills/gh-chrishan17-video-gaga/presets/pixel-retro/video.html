@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>隐藏关卡 · 像素短片（video-gaga · Pixel Retro）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Noto+Sans+SC:wght@700&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   PIXEL RETRO — an 8-bit console game, played straight.
+   Every scene paints into a low-resolution buffer (one cell = T.px design px)
+   that is locked to a 12-colour palette, with an optional 4×4 ordered dither for
+   gradients, and blown up with nearest-neighbour sampling. Nothing is ever
+   smoother than a cell: positions snap to the grid, motion moves in whole cells,
+   sprites animate on eighth notes, and type is rasterised to 1-bit pixels (Latin
+   in Press Start 2P, Chinese thresholded from Noto Sans SC).
+   Colour is a story device: `mono` drains any part of the frame to the palette's
+   five night→ink tones, `keep` lets one colour survive it, and `reveal` floods a
+   second, full-colour world in through a dithered edge.
+   Rhythm: things happen on the beat the way a game reacts to a button press:
+   a hit, a bump, a hard punch-in, never a soft fade.
+   ============================================================================= */
+const { ease, clamp, lerp, fx, color, rand, text } = CV;
+
+// === THEME ===================================================================
+const T = {
+  px: 5, // one art pixel = 5 design px (a 384×216 grid at 1920×1080, 216×384 at 9:16)
+  // the whole frame is locked to these colours (lockPalette)
+  pal: {
+    night: '#16122B', shade: '#2C2554', dusk: '#4B3F86', dim: '#8C85BD',
+    ink: '#FFF3D6', sky: '#5FA8E8', mint: '#57C98A', leaf: '#2E8A5C',
+    gold: '#FFC93C', coral: '#F25F5C', rust: '#A3473A', sand: '#E8B07A',
+  },
+  bg: '#16122B',
+  latin: '"Press Start 2P"', // an 8 px grid font: use sizes 8, 16, 24 … (grid px)
+  cjk: '"Noto Sans SC"', // thresholded to 1-bit: 12 px minimum, 16 px for titles
+};
+// font at a size in GRID px (inside pixelFrame), e.g. F(8) or F(12, T.cjk)
+const F = (size, fam = T.latin) => `${fam === T.cjk ? 700 : 400} ${size}px ${fam}`;
+
+// === KIT: the pixel frame ====================================================
+// pixelFrame(ctx, s, paint, opts): paint(g, w, h) draws in grid cells on a w×h
+// buffer. Anything drawn (circles, gradients, rotated shapes) is snapped to the
+// palette afterwards, so smooth drawing calls still come out as pixel art.
+//   dither  4×4 ordered dither (true, or an amount) so gradients become bands
+//   mono    true, or (x, y) => bool: those cells drop to the five night→ink tones
+//   keep    palette names that keep their colour where mono applies (the one
+//           thing that matters in a drained world)
+//   zoom    { z, x, y }: a hard camera punch-in. The grid is cropped around cell
+//           (x, y) and blown up z×, so the cells themselves get bigger.
+let LO = null;
+const PAL_NAMES = Object.keys(T.pal);
+const PAL = Object.values(T.pal).map((c) => color.parse(c));
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16 - 0.5);
+const bayer = (x, y) => BAYER[(y & 3) * 4 + (x & 3)];
+const NEAREST = new Map();
+function nearest(r, g, b) {
+  const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+  let k = NEAREST.get(key);
+  if (k !== undefined) return k;
+  let best = 1e9;
+  PAL.forEach(([pr, pg, pb], i) => {
+    const d = 2 * (r - pr) ** 2 + 4 * (g - pg) ** 2 + 3 * (b - pb) ** 2;
+    if (d < best) { best = d; k = i; }
+  });
+  NEAREST.set(key, k);
+  return k;
+}
+// luminance → the nearest of the five ramp tones, as a 256-entry lookup
+const RAMP = ['night', 'shade', 'dusk', 'dim', 'ink'].map((n) => PAL_NAMES.indexOf(n));
+const lum = ([r, g, b]) => 0.299 * r + 0.587 * g + 0.114 * b;
+const MONO = Array.from({ length: 256 }, (_, l) => RAMP.reduce((a, k) => (Math.abs(lum(PAL[k]) - l) < Math.abs(lum(PAL[a]) - l) ? k : a), RAMP[0]));
+function lockPalette(g, w, h, dither, mono, keep) {
+  const img = g.getImageData(0, 0, w, h), d = img.data;
+  const amt = dither === true ? 44 : dither || 0;
+  const kept = new Set((keep || []).map((n) => PAL_NAMES.indexOf(n)));
+  for (let y = 0, i = 0; y < h; y++) for (let x = 0; x < w; x++, i += 4) {
+    const o = amt ? bayer(x, y) * amt : 0;
+    const r = clamp(d[i] + o, 0, 255) | 0, gg = clamp(d[i + 1] + o, 0, 255) | 0, b = clamp(d[i + 2] + o, 0, 255) | 0;
+    let k = nearest(r, gg, b);
+    if (mono && !kept.has(k) && (mono === true || mono(x, y))) k = MONO[clamp(lum([d[i], d[i + 1], d[i + 2]]) + o * 0.6, 0, 255) | 0];
+    const c = PAL[k];
+    d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+}
+function pixelFrame(ctx, s, paint, { dither = false, bg = T.bg, mono = false, keep = null, zoom = null } = {}) {
+  const w = Math.round(s.W / T.px), h = Math.round(s.H / T.px);
+  if (!LO || LO.width !== w || LO.height !== h) {
+    LO = document.createElement('canvas');
+    LO.width = w; LO.height = h;
+  }
+  const g = LO.getContext('2d', { willReadFrequently: true });
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalAlpha = 1;
+  g.imageSmoothingEnabled = false;
+  g.fillStyle = bg;
+  g.fillRect(0, 0, w, h);
+  g.save();
+  paint(g, w, h);
+  g.restore();
+  lockPalette(g, w, h, dither, mono, keep);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  if (zoom && zoom.z > 1) {
+    const sw = Math.round(w / zoom.z), sh = Math.round(h / zoom.z);
+    const sx = clamp(Math.round(zoom.x - sw / 2), 0, w - sw), sy = clamp(Math.round(zoom.y - sh / 2), 0, h - sh);
+    ctx.drawImage(LO, sx, sy, sw, sh, 0, 0, s.W, s.H);
+  } else ctx.drawImage(LO, 0, 0, s.W, s.H);
+  ctx.restore();
+}
+// Two worlds in one frame: paintNew(g2, w, h) draws a second world, which is
+// copied over the cells where inside(x, y). Pair it with a dithered circle
+// (`inCircle`) to flood one world into another; pass the opposite test as the
+// frame's `mono` to keep the old world drained.
+let LO2 = null;
+function reveal(g, w, h, paintNew, inside) {
+  if (!LO2 || LO2.width !== w || LO2.height !== h) {
+    LO2 = document.createElement('canvas');
+    LO2.width = w; LO2.height = h;
+  }
+  const g2 = LO2.getContext('2d', { willReadFrequently: true });
+  g2.setTransform(1, 0, 0, 1, 0, 0);
+  g2.imageSmoothingEnabled = false;
+  g2.fillStyle = T.bg;
+  g2.fillRect(0, 0, w, h);
+  g2.save();
+  paintNew(g2, w, h);
+  g2.restore();
+  const a = g.getImageData(0, 0, w, h), b = g2.getImageData(0, 0, w, h).data;
+  for (let y = 0, i = 0; y < h; y++) for (let x = 0; x < w; x++, i += 4) if (inside(x, y)) {
+    a.data[i] = b[i]; a.data[i + 1] = b[i + 1]; a.data[i + 2] = b[i + 2];
+  }
+  g.putImageData(a, 0, 0);
+}
+// a circle with an ordered-dither edge `soft` cells wide: (x, y) => bool
+const inCircle = (cx, cy, r, soft = 10) => (x, y) => Math.hypot(x - cx, y - cy) < r + bayer(x, y) * soft;
+
+// === KIT: pixel type =========================================================
+// Text rasterised once per (string, font) and thresholded to 1-bit, so glyph
+// edges are hard cells. Cached; the key includes whether the webfont is ready.
+const GLYPHS = new Map();
+function bits(str, font) {
+  const key = `${font}\u0001${str}\u0001${document.fonts.check(font, str) ? 1 : 0}`;
+  let e = GLYPHS.get(key);
+  if (e) return e;
+  const c = document.createElement('canvas');
+  let g = c.getContext('2d', { willReadFrequently: true });
+  g.font = font;
+  const m = g.measureText(str);
+  const asc = Math.ceil(m.fontBoundingBoxAscent), w = Math.max(1, Math.ceil(m.width)), h = Math.max(1, asc + Math.ceil(m.fontBoundingBoxDescent));
+  c.width = w; c.height = h;
+  g = c.getContext('2d', { willReadFrequently: true });
+  g.font = font;
+  g.fillStyle = '#fff';
+  g.fillText(str, 0, asc);
+  const a = g.getImageData(0, 0, w, h).data, on = new Uint8Array(w * h);
+  for (let i = 0; i < on.length; i++) on[i] = a[i * 4 + 3] >= 120 ? 1 : 0;
+  // the inked rows only, so block type can be placed by its visible extent
+  let top = h, bottom = 0;
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (on[j * w + i]) { top = Math.min(top, j); bottom = Math.max(bottom, j); }
+  e = { w, h, asc, on, top, bottom, tint: new Map() };
+  GLYPHS.set(key, e);
+  return e;
+}
+function tinted(b, col) {
+  let c = b.tint.get(col);
+  if (c) return c;
+  c = document.createElement('canvas');
+  c.width = b.w; c.height = b.h;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  const img = g.createImageData(b.w, b.h), [r, gg, bb] = color.parse(col);
+  for (let i = 0; i < b.on.length; i++) if (b.on[i]) img.data.set([r, gg, bb, 255], i * 4);
+  g.putImageData(img, 0, 0);
+  b.tint.set(col, c);
+  return c;
+}
+// Draws at (x, baseline y) in grid cells; returns the width. shadow: a colour
+// stamped one cell down-right first (the classic drop shadow).
+function pixelText(g, str, x, y, { font = F(8), color: col = T.pal.ink, align = 'left', shadow = null } = {}) {
+  if (!str) return 0;
+  const b = bits(str, font);
+  const x0 = Math.round(align === 'center' ? x - b.w / 2 : align === 'right' ? x - b.w : x), y0 = Math.round(y - b.asc);
+  if (shadow) g.drawImage(tinted(b, shadow), x0 + 1, y0 + 1);
+  g.drawImage(tinted(b, col), x0, y0);
+  return b.w;
+}
+// Wrap text to a width in cells (CJK-aware, via CV.text.wrap).
+function wrapCells(g, str, font, maxW) {
+  g.font = font;
+  return str.split('\n').flatMap((p) => text.wrap(g, p, maxW));
+}
+// Block type: every 1-bit cell of `str` becomes a cell×cell block with a hard
+// shadow, centred on x with its inked top at y. land(u, v) (u, v = 0..1 across
+// and down the word) gives the local time a block lands; it drops `fall` cells
+// on the way in. colour(u, v) can paint a glint or a gradient through it.
+function blockText(g, s, str, font, x, y, cell, { colour = () => T.pal.ink, shade = T.pal.dusk, land = null, fall = 80 } = {}) {
+  const b = bits(str, font), x0 = Math.round(x - (b.w * cell) / 2), y0 = Math.round(y - b.top * cell);
+  for (let j = 0; j < b.h; j++) for (let i = 0; i < b.w; i++) {
+    if (!b.on[j * b.w + i]) continue;
+    const u = i / b.w, v = (j - b.top) / Math.max(1, b.bottom - b.top);
+    let dy = 0;
+    if (land) {
+      const k = clamp((s.t - land(u, v) + 0.2) / 0.2);
+      if (k <= 0) continue;
+      dy = -Math.round((1 - k * k) * fall);
+    }
+    const px = x0 + i * cell, py = y0 + j * cell + dy;
+    g.fillStyle = shade; g.fillRect(px + 1, py + 1, cell, cell);
+    g.fillStyle = colour(u, v); g.fillRect(px, py, cell, cell);
+  }
+  return { w: b.w * cell, h: (b.bottom - b.top + 1) * cell, x0 };
+}
+
+// === KIT: sprites ============================================================
+// Sprite art as rows of characters; `colours` maps a character to a colour
+// ('.' and unmapped characters are transparent). Cached per art and colours.
+const SPRITES = new Map();
+function sprite(g, art, x, y, colours, { flip = false, scale = 1 } = {}) {
+  const key = `${art.join('/')}|${JSON.stringify(colours)}|${flip}`;
+  let c = SPRITES.get(key);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = art[0].length; c.height = art.length;
+    const sg = c.getContext('2d', { willReadFrequently: true });
+    art.forEach((row, j) => Array.from(row).forEach((ch, i) => {
+      if (!colours[ch]) return;
+      sg.fillStyle = colours[ch];
+      sg.fillRect(flip ? row.length - 1 - i : i, j, 1, 1);
+    }));
+    SPRITES.set(key, c);
+  }
+  g.imageSmoothingEnabled = false;
+  g.drawImage(c, Math.round(x), Math.round(y), c.width * scale, c.height * scale);
+}
+
+// === KIT: windows, meters, prompts, bubbles ==================================
+// An RPG window: a dark rim, a light edge, cut corners. open: 0..1 grows the
+// height in 4 steps from the top (a menu opening), the way consoles did it.
+function win(g, x, y, w, h, { open = 1, fill = T.pal.shade, edge = T.pal.ink, rim = T.pal.night } = {}) {
+  if (open <= 0) return false;
+  const hh = Math.max(4, Math.round(h * steps(open, 4)));
+  g.fillStyle = rim;
+  g.fillRect(x, y + 1, w, hh - 2); g.fillRect(x + 1, y, w - 2, hh);
+  g.fillStyle = edge;
+  g.fillRect(x + 1, y + 2, w - 2, hh - 4); g.fillRect(x + 2, y + 1, w - 4, hh - 2);
+  g.fillStyle = fill;
+  g.fillRect(x + 2, y + 2, w - 4, hh - 4);
+  return hh >= h;
+}
+// A segmented meter (HP, EXP, loading). value 0..1 is quantised to segments.
+// outline: draw empty segments as hollow frames in that colour instead.
+function meter(g, x, y, w, h, value, { segments = 10, gap = 1, fill = T.pal.gold, empty = T.pal.night, outline = null } = {}) {
+  const sw = (w - gap * (segments - 1)) / segments, on = Math.round(clamp(value) * segments);
+  for (let i = 0; i < segments; i++) {
+    const sx = Math.round(x + i * (sw + gap)), ww = Math.round(sw);
+    if (i >= on && outline) {
+      g.fillStyle = outline;
+      g.fillRect(sx, y, ww, 1); g.fillRect(sx, y + h - 1, ww, 1); g.fillRect(sx, y, 1, h); g.fillRect(sx + ww - 1, y, 1, h);
+      continue;
+    }
+    g.fillStyle = i < on ? fill : empty;
+    g.fillRect(sx, y, ww, h);
+  }
+}
+// The advance prompt: a ▼ that blinks on the beat (on for the first half).
+function prompt(g, s, x, y, col = T.pal.gold) {
+  if (s.beatLen && s.beat % 1 >= 0.5) return;
+  g.fillStyle = col;
+  [[0, 5], [1, 3], [2, 1]].forEach(([r, w]) => g.fillRect(x - (w >> 1), y + r, w, 1));
+}
+// A menu cursor: a solid triangle pointing right (or 'up'), drawn cell by cell.
+function cursor(g, x, y, col = T.pal.gold, dir = 'right') {
+  g.fillStyle = col;
+  for (let k = 0; k < 4; k++) dir === 'up' ? g.fillRect(x - k, y + k, 2 * k + 1, 1) : g.fillRect(x + k, y + k, 1, 7 - 2 * k);
+}
+// A dialogue box: `str` types at `cps` characters per second from local time
+// `t0`, wrapped to the box; the prompt blinks once the line is complete.
+// Returns the local time the line finishes typing.
+// cps that finishes typing str as the narrator finishes saying it
+const voiceCps = (s, str, from = s.voiceStart, to = s.voiceEnd) => Array.from(str.replace(/\s/g, '')).length / Math.max(0.5, to - from);
+function dialogue(g, s, str, x, y, w, h, t0, { cps = 14, font = F(12, T.cjk), lineH = 16, open = 1 } = {}) {
+  if (!win(g, x, y, w, h, { open })) return t0 + Array.from(str).length / cps;
+  const lines = wrapCells(g, str, font, w - 16);
+  const total = lines.reduce((n, l) => n + Array.from(l).length, 0);
+  let left = Math.floor(clamp((s.t - t0) * cps, 0, total));
+  lines.forEach((l, i) => {
+    const n = Math.min(left, Array.from(l).length);
+    left -= n;
+    pixelText(g, fx.typewriter(l, n / Math.max(1, Array.from(l).length)), x + 8, y + 6 + lineH * (i + 1) - 4, { font });
+  });
+  const done = t0 + total / cps;
+  if (s.t >= done) prompt(g, s, x + w - 10, y + h - 8);
+  return done;
+}
+// A speech bubble with rounded cell corners and a stepped tail down to
+// (tx, y + h + 4). open: 0..1 pops it in 3 steps out of the tail.
+function bubble(g, x, y, w, h, tx, { open = 1, fill = T.pal.ink, edge = T.pal.night, tail = 'down' } = {}) {
+  if (open <= 0) return false;
+  const k = steps(open, 3), ty = y + h;
+  const bw = Math.max(6, Math.round(w * k)), bh = Math.max(4, Math.round(h * k));
+  const bx = Math.round(lerp(tx, x, k)), by = Math.round(lerp(ty - 4, y, k));
+  g.fillStyle = edge;
+  g.fillRect(bx + 1, by - 1, bw - 2, bh + 2); g.fillRect(bx - 1, by + 1, bw + 2, bh - 2); g.fillRect(bx, by, bw, bh);
+  // the tail: three rows narrowing toward the speaker
+  const dir = tail === 'down-left' ? -1 : 1;
+  [[0, 5], [1, 4], [2, 3], [3, 2], [4, 1]].forEach(([r, ww]) => g.fillRect(tx + (dir < 0 ? -r : r) - 1, by + bh + r, ww + 2, 1));
+  g.fillStyle = fill;
+  g.fillRect(bx + 1, by, bw - 2, bh); g.fillRect(bx, by + 1, bw, bh - 2);
+  [[0, 4], [1, 3], [2, 2], [3, 1]].forEach(([r, ww]) => g.fillRect(tx + (dir < 0 ? -r : r), by + bh - 1 + r, ww, 1));
+  return k >= 1;
+}
+// An ellipsis drawn as square dots (fonts thin them out at 1-bit): n dots of
+// sz cells, `gap` apart, left-aligned at (x, middle y). Returns the width.
+function dots(g, x, y, n, { col = T.pal.night, sz = 2, gap = 2 } = {}) {
+  g.fillStyle = col;
+  for (let i = 0; i < n; i++) g.fillRect(x + i * (sz + gap), Math.round(y - sz / 2), sz, sz);
+  return n * (sz + gap) - gap;
+}
+
+// === KIT: pixel motion =======================================================
+// Quantised progress: n equal steps (like CSS steps()). Moves hop, never glide.
+const steps = (p, n) => Math.floor(clamp(p) * n + 1e-6) / n;
+// A jump arc in whole cells: 0 → height → 0 over `dur` from `t0`.
+const jump = (t, t0, dur, height) => { const u = (t - t0) / dur; return u <= 0 || u >= 1 ? 0 : Math.round(4 * height * u * (1 - u)); };
+// An impact jolt in whole cells: a few frames of alternating offset, then still.
+const JOLT = [2, -2, 1, -1, 1, 0];
+const jolt = (s, at, amt = 1) => { const k = Math.floor((s.t - at) * s.fps); return k >= 0 && k < JOLT.length ? JOLT[k] * amt : 0; };
+// Two-frame cycles (walk, flicker) that advance on eighth notes.
+const cycle = (s, n = 2, per = 0.5) => Math.floor((s.beatLen ? s.beat : s.T * 4) / per) % n;
+// A value held in steps between keyframes [[t, v], …]: hops from one to the next
+// over `n` steps in `dur` seconds, rounded to whole cells.
+const hop = (t, keys, n = 4, dur = 0.2) => {
+  let v = keys[0][1];
+  for (let i = 1; i < keys.length; i++) v = lerp(v, keys[i][1], steps((t - keys[i][0]) / dur, n));
+  return Math.round(v);
+};
+// Debris from an impact at local time `at`: seeded cells thrown up and out,
+// falling under gravity, animated on twos (15 fps) like hand-made sprite FX.
+function debris(g, s, at, x, y, { n = 16, seed = 1, cols = [T.pal.ink], speed = 60, up = 60, grav = 260, life = 1, size = 2 } = {}) {
+  const dt = Math.floor((s.t - at) * 15) / 15;
+  if (dt < 0 || dt > life) return;
+  const r = rand(seed);
+  for (let i = 0; i < n; i++) {
+    const vx = (r() - 0.5) * 2 * speed, vy = -(0.3 + r() * 0.7) * up, sz = 1 + Math.floor(r() * size), c = cols[Math.floor(r() * cols.length)];
+    g.fillStyle = c;
+    g.fillRect(Math.round(x + vx * dt), Math.round(y + vy * dt + 0.5 * grav * dt * dt), sz, sz);
+  }
+}
+
+// === KIT: tile-wipe transition ===============================================
+// A staircase of square tiles closes over the old frame along the diagonal,
+// then opens on the new one: the console screen change. cols: tiles across.
+function tileWipe(ctx, A, B, p, o = {}) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const tile = W / (o.cols ?? 16), cols = Math.ceil(W / tile), rows = Math.ceil(H / tile);
+  const maxD = cols + rows - 2, cover = p < 0.5;
+  ctx.drawImage(cover ? A : B, 0, 0);
+  ctx.fillStyle = o.color ?? T.pal.dusk;
+  const q = cover ? p * 2 : (p - 0.5) * 2;
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const d = (i + j) / maxD;
+    const k = cover ? steps((q - d * 0.6) / 0.4, 4) : 1 - steps((q - d * 0.6) / 0.4, 4);
+    if (k <= 0) continue;
+    const sz = Math.ceil(tile * k);
+    ctx.fillRect(Math.floor(i * tile + (tile - sz) / 2), Math.floor(j * tile + (tile - sz) / 2), sz, sz);
+  }
+}
+
+// === EXAMPLE: the story ======================================================
+// 《隐藏关卡》: a drained, grey main quest (alarm, subway, punch clock, repeat),
+// a status screen where one meter is empty, words that collapse into "……",
+// one step left where everyone runs right, a wall that breaks, colour flooding
+// in, everything you make turning into bricks, and the empty meter filling.
+const BEAT = 60 / 108;
+// the player: 16×24, facing right. k outline · h hair · s skin · e eye · c hoodie ·
+// r its shade · i drawstring · d trousers
+const HERO_TOP = [
+  '.....kkkkkk.....',
+  '...kkhhhhhhkk...',
+  '..khhhhhhhhhhk..',
+  '.khhhhhhhhhhhhk.',
+  '.khhhhhhhhhssshk',
+  'khhhhhhhhsssssk.',
+  'khhhhhhsssssesk.',
+  'khhhhhsssssseskk',
+  '.khhhhssssssssck',
+  '.khhhssssscssk..',
+  '..khhhssssssk...',
+  '...kkkssssskk...',
+  '....kkkkkkkk....',
+  '...kccccicck....',
+  '..kccccciccck...',
+  '.kccccccccccssk.',
+  '.krcccccccccck..',
+  '.ksrcccccccck...',
+  '..krrccccccck...',
+  '..kdddddddddk...',
+];
+const HERO_LEGS = {
+  stand: ['..kdddk.kdddk...', '..kdddk.kdddk...', '..kkkkk.kkkkkk..', '................'],
+  a: ['.kdddk....kdddk.', 'kdddk......kddk.', 'kkkk.......kkkkk', '................'],
+  b: ['....kdddddk.....', '....kddkddk.....', '....kkkkkkkkk...', '................'],
+  jump: ['..kdddk..kdddk..', '.kdddk....kddk..', '.kkkk.....kkkk..', '................'],
+};
+const HERO_COLOURS = { k: T.pal.night, h: T.pal.shade, s: T.pal.sand, e: T.pal.night, c: T.pal.coral, r: T.pal.rust, i: T.pal.ink, d: T.pal.dusk };
+// other people: the same body, other colours
+const NPC_COLOURS = [
+  { ...HERO_COLOURS, h: T.pal.rust, c: T.pal.sky, r: T.pal.dusk, d: T.pal.shade },
+  { ...HERO_COLOURS, h: T.pal.night, c: T.pal.mint, r: T.pal.leaf },
+  { ...HERO_COLOURS, h: T.pal.dusk, c: T.pal.gold, r: T.pal.rust, d: T.pal.shade },
+  { ...HERO_COLOURS, h: T.pal.rust, c: T.pal.dim, r: T.pal.dusk, d: T.pal.night },
+];
+// the grey world: everyone drawn in the ramp's tones, so a kept colour never lands on a person
+const GREY = [
+  { ...HERO_COLOURS, h: T.pal.shade, s: T.pal.dim, c: T.pal.dusk, r: T.pal.shade, i: T.pal.dim, d: T.pal.shade },
+  { ...HERO_COLOURS, h: T.pal.night, s: T.pal.dim, c: T.pal.shade, r: T.pal.night, i: T.pal.dusk, d: T.pal.dusk },
+];
+const HERO_GREY = { ...HERO_COLOURS, s: T.pal.ink, c: T.pal.dim, r: T.pal.dusk, i: T.pal.ink };
+// (x, y) = the middle of the feet on the ground; legs: stand | a | b | jump
+function person(g, x, y, { legs = 'stand', flip = false, scale = 2, colours = HERO_COLOURS } = {}) {
+  sprite(g, [...HERO_TOP, ...HERO_LEGS[legs]], x - 8 * scale, y - 23 * scale, colours, { flip, scale });
+}
+const runLegs = (s, per = 0.5) => (cycle(s, 2, per) ? 'a' : 'b');
+// the player's face, 16×16, for the dialogue box and the ending. mouth: shut | open | smile
+const FACE = [
+  '....kkkkkkkk....',
+  '..kkhhhhhhhhkk..',
+  '.khhhhhhhhhhhhk.',
+  'khhhhhhhhhhhhhhk',
+  'khhhhshhhhhshhhk',
+  'khhsssshhhsssshk',
+  'khssssssssssssk.',
+  'khsseessssseesk.',
+  'khsseessssseesk.',
+  '.ksssssssssssk..',
+  '.kscsssssssscsk.',
+  '.kssssssssssssk.',
+  '..ksssssssssk...',
+  '...kkssssskk....',
+  '..kkcccicccckk..',
+  '.kccccciccccccck',
+];
+const MOUTHS = { shut: [[6, 11, 3, 1]], open: [[6, 10, 3, 2], [7, 12, 1, 1]], smile: [[5, 10, 1, 1], [6, 11, 3, 1], [9, 10, 1, 1]] };
+function face(g, x, y, scale, mouth = 'shut', colours = HERO_COLOURS) {
+  sprite(g, FACE, x, y, colours, { scale });
+  g.fillStyle = T.pal.night;
+  MOUTHS[mouth].forEach(([mx, my, mw, mh]) => g.fillRect(x + mx * scale, y + my * scale, mw * scale, mh * scale));
+}
+// props of the main quest, 10×10
+const PROPS = {
+  alarm: { art: ['.k......k.', 'kkk.kk.kkk', '.kkiiiikk.', 'kiiiikiiik', 'kiiiikiiik', 'kiiikkiiik', 'kiiiiiiiik', '.kiiiiiik.', '..kkkkkk..', '.k......k.'], c: { k: T.pal.night, i: T.pal.ink } },
+  gate: { art: ['kkkkkkkkkk', 'kiiiiiiiik', 'kikikkikik', 'kikiikikik', 'kiiiiiiiik', 'kkkkkkkkkk', '..kk..kk..', '..kk..kk..', '..kk..kk..', 'kkkkkkkkkk'], c: { k: T.pal.night, i: T.pal.dim } },
+  clock: { art: ['kkkkkkkkkk', 'kiiiiiiiik', 'kiikkkkiik', 'kiiiiiiiik', 'kkkkkkkkkk', 'k.kiiiik.k', 'k.kiiiik.k', 'k.kkkkkk.k', 'kiiiiiiiik', 'kkkkkkkkkk'], c: { k: T.pal.night, i: T.pal.dim } },
+};
+// what the player makes, 8×8: a pencil, a pen nib over a page, a note
+const MADE = [
+  { art: ['......kk', '.....kgk', '....kgk.', '...kgk..', '..kgk...', '.kck....', 'kck.....', 'kk......'], c: { k: T.pal.night, g: T.pal.gold, c: T.pal.coral }, brick: T.pal.coral },
+  { art: ['kkkkkkk.', 'kiiiiik.', 'kikkkik.', 'kiiiiik.', 'kikkiik.', 'kiiiiikk', 'kkkkkkkk', '........'], c: { k: T.pal.night, i: T.pal.ink }, brick: T.pal.sky },
+  { art: ['....kkkk', '....kkkk', '....k..k', '....k..k', '..kkk.kk', '.kkkkkkk', '.kkk.kk.', '........'], c: { k: T.pal.night }, brick: T.pal.mint },
+];
+const HEART = ['.kk.kk.', 'kcckcck', 'kcccccc', '.kccck.', '..kck..', '...k...'];
+// a brick of something made, 16×12: its colour and its little pictogram
+function brick(g, x, y, kind, { w = 16, h = 12 } = {}) {
+  const m = MADE[kind % MADE.length];
+  g.fillStyle = T.pal.night; g.fillRect(x - 1, y - 1, w + 2, h + 2);
+  g.fillStyle = m.brick; g.fillRect(x, y, w, h);
+  g.fillStyle = T.pal.ink; g.fillRect(x, y, w, 1); g.fillRect(x, y, 1, h);
+  g.fillStyle = T.pal.night;
+  if (kind % 3 === 0) [[4, 6], [6, 4], [8, 7], [10, 3], [12, 6]].forEach(([dx, dy]) => g.fillRect(x + dx, y + dy, 2, 2)); // a doodle
+  else if (kind % 3 === 1) [3, 6, 9].forEach((dy) => g.fillRect(x + 3, y + dy, dy === 9 ? 6 : 10, 1)); // lines of writing
+  else { g.fillRect(x + 6, y + 3, 1, 6); g.fillRect(x + 10, y + 2, 1, 6); g.fillRect(x + 6, y + 2, 5, 1); g.fillRect(x + 4, y + 8, 3, 2); g.fillRect(x + 8, y + 7, 3, 2); } // a note
+}
+
+// --- the grey city (the main quest), drawn at a camera offset ---
+const TOWERS = (() => { const r = rand(31); return Array.from({ length: 14 }, (_, i) => ({ x: i * 40 + Math.floor(r() * 10), w: 26 + Math.floor(r() * 12), h: 50 + Math.floor(r() * 70) })); })();
+function city(g, w, h, cam, ground, s) {
+  const sky = g.createLinearGradient(0, 0, 0, ground);
+  sky.addColorStop(0, T.pal.night); sky.addColorStop(1, T.pal.dusk);
+  g.fillStyle = sky; g.fillRect(0, 0, w, ground);
+  // far towers at 1/4 speed, near ones at 1/2, windows lit in a fixed seeded pattern
+  [[4, T.pal.shade, 0.75, T.pal.dusk], [2, T.pal.night, 1, T.pal.dim]].forEach(([div, body, k, lit], layer) => {
+    TOWERS.forEach((tw, i) => {
+      const x = ((tw.x - Math.round(cam / div)) % 560 + 560) % 560 - 40, th = Math.round(tw.h * k) + layer * 10;
+      g.fillStyle = body; g.fillRect(x, ground - th, tw.w, th);
+      g.fillStyle = lit;
+      for (let wy = ground - th + 6; wy < ground - 6; wy += 8) for (let wx = x + 4; wx < x + tw.w - 4; wx += 6) if ((wx * 7 + wy * 3 + i) % 5 < 2) g.fillRect(wx, wy, 2, 3);
+    });
+  });
+  g.fillStyle = T.pal.dim; g.fillRect(0, ground, w, 2);
+  g.fillStyle = T.pal.shade; g.fillRect(0, ground + 2, w, h - ground);
+  g.fillStyle = T.pal.dusk;
+  for (let y = ground + 6, r = 0; y < h; y += 7, r++) for (let x = -((cam + r * 9) % 18); x < w; x += 18) g.fillRect(x, y, 12, 1);
+}
+
+// --- the hidden stage: a dawn sky, a big sun, floating islands ---
+const STARS = (() => { const r = rand(7); return Array.from({ length: 90 }, () => ({ x: r(), y: r() * 0.55, ph: r() })); })();
+function stars(g, w, h, s, col = T.pal.ink) {
+  STARS.forEach((st) => {
+    if ((Math.floor(s.beat + st.ph * 4) % 4) === 0) return; // each star blinks once every 4 beats
+    g.fillStyle = col;
+    g.fillRect(Math.round(st.x * w), Math.round(st.y * h), 1, 1);
+  });
+}
+function hidden(g, w, h, s, { camY = 0, ground = 176, sunR = 54, rays = 0 } = {}) {
+  const far = Math.round(camY * 0.3); // the sky and the sun sit far away: they move a third as much
+  const sky = g.createLinearGradient(0, far, 0, ground + far);
+  sky.addColorStop(0, T.pal.night); sky.addColorStop(0.45, T.pal.dusk); sky.addColorStop(0.78, T.pal.coral); sky.addColorStop(1, T.pal.gold);
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  stars(g, w, h * 0.5, s);
+  const sx = w / 2, sy = ground - 12 + far;
+  if (rays) { // light rays turning one step per beat
+    const turn = Math.floor(s.beat) * (Math.PI / 24);
+    g.fillStyle = T.pal.sand;
+    for (let i = 0; i < 16; i++) {
+      const a = turn + (i * Math.PI) / 8;
+      g.beginPath(); g.moveTo(sx, sy);
+      g.lineTo(sx + Math.cos(a) * 500, sy + Math.sin(a) * 500); g.lineTo(sx + Math.cos(a + 0.1 * rays) * 500, sy + Math.sin(a + 0.1 * rays) * 500);
+      g.fill();
+    }
+  }
+  g.fillStyle = T.pal.sand; g.beginPath(); g.arc(sx, sy, sunR + 6, 0, 7); g.fill();
+  g.fillStyle = T.pal.ink; g.beginPath(); g.arc(sx, sy, sunR, 0, 7); g.fill();
+  // the sun's stripes (sky colour cut through its lower half)
+  g.fillStyle = T.pal.gold;
+  for (let k = 0; k < 5; k++) g.fillRect(sx - sunR - 8, sy + 8 + k * 9, 2 * sunR + 16, 2 + (k >> 1));
+  // floating islands drift a cell per beat
+  [[60, 70, 30], [312, 52, 24], [210, 30, 14]].forEach(([ix, iy, iw], i) => {
+    const y = iy + Math.round(camY * 0.6) + ((Math.floor(s.beat / 2) + i) % 2);
+    g.fillStyle = T.pal.rust; g.fillRect(ix - iw / 2 + 3, y + 4, iw - 6, 5); g.fillRect(ix - iw / 2 + 7, y + 9, iw - 14, 3);
+    g.fillStyle = T.pal.mint; g.fillRect(ix - iw / 2, y, iw, 4);
+    g.fillStyle = T.pal.leaf; g.fillRect(ix - iw / 2, y + 3, iw, 1);
+  });
+  // hills and the ground
+  const gy = ground + camY;
+  [[40, 60, T.pal.leaf], [150, 46, T.pal.mint], [270, 64, T.pal.leaf], [370, 40, T.pal.mint]].forEach(([hx, r, c]) => {
+    g.fillStyle = T.pal.night; g.beginPath(); g.arc(hx, gy + 4, r + 1, Math.PI, 0); g.fill();
+    g.fillStyle = c; g.beginPath(); g.arc(hx, gy + 4, r, Math.PI, 0); g.fill();
+  });
+  g.fillStyle = T.pal.mint; g.fillRect(0, gy, w, 3);
+  g.fillStyle = T.pal.leaf; g.fillRect(0, gy + 3, w, 2);
+  g.fillStyle = T.pal.rust; g.fillRect(0, gy + 5, w, h);
+  g.fillStyle = T.pal.sand;
+  for (let y = gy + 9, r = 0; y < h; y += 8, r++) for (let x = -(r * 8) % 16; x < w; x += 16) g.fillRect(x, y, 14, 1);
+}
+// the end of the street the player turns back to: a wall nobody looks at
+function wall(g, x, top, ground, crack = 0) {
+  g.fillStyle = T.pal.night; g.fillRect(x - 40, top, 40 + 30, ground - top);
+  g.fillStyle = T.pal.shade;
+  for (let y = top + 2, r = 0; y < ground; y += 8, r++) for (let bx = x - 40 + (r % 2) * 7; bx < x + 28; bx += 14) g.fillRect(bx, y, 12, 6);
+  if (!crack) return;
+  // the crack grows in steps; gold light leaks through it
+  const path = [[28, 96], [22, 104], [26, 112], [18, 120], [24, 130], [16, 140], [22, 150]];
+  const n = Math.ceil(path.length * crack);
+  g.fillStyle = T.pal.gold;
+  for (let i = 0; i < n - 1; i++) {
+    const [ax, ay] = path[i], [bx, by] = path[i + 1];
+    for (let k = 0; k <= 8; k++) g.fillRect(x - 30 + Math.round(lerp(ax, bx, k / 8)), Math.round(lerp(ay, by, k / 8)), 2, 2);
+  }
+}
+
+// === VIDEO ===================================================================
+const wipe = { type: tileWipe, duration: 0.6, ease: ease.linear, sfx: 'swish' };
+
+CV.create({
+  width: 1920, height: 1080, fps: 30,
+  background: T.bg,
+  lang: 'zh-CN',
+  fonts: [F(8), F(12, T.cjk)],
+  // the score designed for this story: wistful and stuck in a loop, then a door
+  // bursts open. E dorian for the grey main quest (a square-wave arp ticking like
+  // a clock over a felt piano), the relative G major from the moment the wall
+  // breaks, IV–V–I to land. Chiptune leads on real drums and a synth bass.
+  music: {
+    bpm: 108, seed: 7, key: 'E', mode: 'dorian', progression: [0, 3, 0, 6], kit: 'electronic', duck: -13, gap: 7,
+    layers: [
+      { name: 'square arp', inst: 'lead', saw: 0, notes: [0, 1, 2, 1], pattern: 'XxXxXxXx', gate: 0.55, vel: [0.05, 0.08], cutoff: 3600 },
+      { name: 'felt piano', inst: 'felt', notes: 'chord', pattern: 'X...X.x.', gate: 1.6, vel: [0.08, 0.12] },
+      { name: 'synth bass', inst: 'bass', kind: 'synth', notes: ['root', 'root', 'fifth', 'root^'], octave: -1, pattern: 'X..xX.x.', vel: 0.24, from: 0.35 },
+      { name: 'kick', inst: 'kick', pattern: 'X...X...X...X.x.', vel: 0.27, from: 0.4 },
+      { name: 'clap', inst: 'clap', pattern: '....X.......X...', vel: 0.12, from: 0.4 },
+      { name: 'hats', inst: 'hat', pattern: 'xXxXxXxXxXxXxXxX', vel: 0.04, from: 0.55 },
+      { name: 'brass stabs', inst: 'synthbrass', notes: 'chord', pattern: 'X..X..X.', gate: 0.5, vel: 0.1, from: 0.75 },
+      { name: 'sixteenth arp', inst: 'lead', saw: 0, octave: 1, notes: [0, 1, 2, 3], pattern: 'XXXXXXXXXXXXXXXX', gate: 0.4, vel: 0.04, cutoff: 5000, from: 0.8 },
+    ],
+    lead: { inst: 'lead', saw: 0.2, range: [71, 86], rhythm: 'melodic', vel: 0.1, echo: 0.2 },
+    parts: {
+      found: { key: 'G', mode: 'major', progression: [0, 4, 5, 3], seed: 4 },
+      home: { key: 'G', mode: 'major', progression: [3, 4, 0, 0], lead: { rhythm: 'sparse' } },
+    },
+  },
+  transition: wipe,
+  subtitles: {
+    maxChars: 16,
+    style: { font: `700 46px ${T.cjk}`, color: T.pal.ink, highlight: T.pal.gold, box: T.pal.night, radius: 0, padX: 22, padY: 12, y: 0.9 },
+  },
+  scenes: [
+    // --- 1. Cold open: a screen powers on; the player's box holds only "……" ---
+    {
+      id: 'hook', voiceDelay: 4 * BEAT, tail: 0.7, energy: 0.3,
+      sfx: [{ at: 0.05, type: 'click' }, ...[0, 1, 2].map((k) => ({ at: (s) => s.onBeat(2 + k * 0.5), type: 'type', gain: 0.5 }))],
+      draw(ctx, s) {
+        const b = (k) => s.onBeat(k), speak = s.when('想说的话', 2.2);
+        // one hard punch-in on the face as the narrator reaches 想说的话
+        const z = s.t >= speak ? 1.6 : 1;
+        pixelFrame(ctx, s, (g, w, h) => {
+          // the power-on: a line across the middle, then the picture opens vertically
+          const on = s.at(0, 0.4, ease.linear);
+          if (on < 1) {
+            g.fillStyle = T.pal.night; g.fillRect(0, 0, w, h);
+            const lw = Math.round(w * steps(on * 2, 6)), lh = Math.max(1, Math.round(h * steps(on * 2 - 1, 4)));
+            g.fillStyle = on < 0.5 ? T.pal.ink : T.pal.shade;
+            g.fillRect((w - lw) >> 1, (h - lh) >> 1, lw, lh);
+            return;
+          }
+          // a faint scan of the dark: every other row a shade lighter
+          g.fillStyle = T.pal.night; g.fillRect(0, 0, w, h);
+          const close = 1, open = clamp((s.t - b(1)) / (BEAT * 0.5));
+          const x = 32, y = 60, ww = 320, hh = 92;
+          if (s.t >= b(0.5) && close > 0) { // the name tab opens first
+            win(g, x, y - 16, 40, 18, { open: Math.min(clamp((s.t - b(0.5)) / (BEAT * 0.5)), close), fill: T.pal.night });
+            if (s.t >= b(1)) pixelText(g, 'YOU', x + 8, y - 4, { color: T.pal.dim });
+          }
+          if (!win(g, x, y, ww, hh, { open })) return;
+          // the face, in its own frame
+          g.fillStyle = T.pal.night; g.fillRect(x + 8, y + 8, 76, 76);
+          const trying = s.t >= speak && s.t < speak + 0.45;
+          face(g, x + 14, y + 14 + (trying ? -1 : 0), 4, trying ? 'open' : 'shut', HERO_GREY);
+          // the line: dots appear one per half beat, then the advance prompt blinks
+          const n = clamp(Math.floor((s.t - b(2)) / (BEAT * 0.5)) + 1, 0, 6);
+          const shake = jolt(s, speak + 0.4, 2);
+          dots(g, x + 104 + shake, y + 48, n, { col: T.pal.ink, sz: 5, gap: 7 });
+          if (n >= 6) prompt(g, s, x + ww - 14, y + hh - 12);
+        }, { mono: true, zoom: { z, x: 120, y: 106 } });
+      },
+    },
+    // --- 2. Title: 隐藏关卡 drops in as blocks, a glint, PRESS START -------------
+    {
+      id: 'title', narration: false, beats: 8, energy: 0.45,
+      sfx: [0, 1, 2, 3].map((k) => ({ at: (s) => s.onBeat(k), type: 'tick', gain: 0.6 })).concat([{ at: (s) => s.onBeat(4), type: 'shimmer', gain: 0.6 }, { at: (s) => s.onBeat(7), type: 'click' }]),
+      draw(ctx, s) {
+        const b = (k) => s.onBeat(k);
+        pixelFrame(ctx, s, (g, w, h) => {
+          city(g, w, h, 0, 184, s);
+          g.fillStyle = 'rgba(22,18,43,0.55)'; g.fillRect(0, 0, w, 184);
+          // columns land left to right over four beats, on sixteenths
+          const glint = (s.t - b(4)) / (BEAT * 0.75);
+          blockText(g, s, '隐藏关卡', F(16, T.cjk), w / 2, 34, 4, {
+            land: (u, v) => b(steps(u, 16) * 3.75) + 0.05 * (1 - v),
+            colour: (u, v) => (glint > 0 && glint < 1.4 && [0, 0.12].some((o) => Math.abs(u * 1.2 - v * 0.25 - glint + o) < 0.03) ? T.pal.gold : v < 0.5 ? T.pal.ink : T.pal.dim),
+            shade: T.pal.dusk,
+          });
+          if (s.t >= b(4.5)) pixelText(g, fx.typewriter('HIDDEN STAGE', steps((s.t - b(4.5)) / (BEAT * 0.75), 12)), w / 2, 140, { color: T.pal.gold, align: 'center', shadow: T.pal.night });
+          const pressed = s.t >= b(7);
+          if (s.t >= b(5.5) && (pressed || s.beat % 1 < 0.5)) pixelText(g, 'PRESS START', w / 2, 168, { color: pressed ? T.pal.gold : T.pal.ink, align: 'center', shadow: T.pal.night });
+          person(g, 64, 184, { scale: 3, colours: HERO_GREY });
+        }, { mono: true, keep: ['gold'] });
+      },
+    },
+    // --- 3. The main quest: alarm, subway, punch clock, alarm again ------------
+    // the quest log ticks each task as it is said; on 再起床 it resets and the days roll on
+    {
+      id: 'grind', tail: 0.8, energy: 0.5,
+      sfx: [['起床', 'tick'], ['地铁', 'tick'], ['打卡', 'tick'], ['再起床', 'click']].map(([at, type]) => ({ at, type, gain: 0.7 })),
+      draw(ctx, s) {
+        const v = 80, cam = Math.round(s.t * v), G = 178, heroX = 120;
+        const hits = [s.when('起床', 1.8), s.when('地铁', 2.8), s.when('打卡', 3.6), s.when('再起床', 4.5)];
+        const loop = hits[3];
+        pixelFrame(ctx, s, (g, w, h) => {
+          city(g, w, h, cam, G, s);
+          // everybody else, on a back lane, running the same way
+          [14, 60, 200, 262, 330].forEach((x, i) => person(g, x, G - 8, { legs: runLegs(s, 0.5), scale: 2, colours: GREY[i % 2] }));
+          // the props arrive under the player exactly on their words
+          ['alarm', 'gate', 'clock', 'alarm'].forEach((k, i) => {
+            const x = heroX + Math.round((hits[i] - s.t) * v) - 15;
+            if (x < -24 || x > w) return;
+            const ring = k === 'alarm' && Math.abs(s.t - hits[i]) < 0.5 ? (cycle(s, 2, 0.25) ? 1 : -1) : 0;
+            sprite(g, PROPS[k].art, x + ring, G - 30, PROPS[k].c, { scale: 3 });
+          });
+          const air = hits.reduce((a, t) => a + jump(s.t, t - 0.3, 0.6, 44), 0);
+          person(g, heroX, G - air, { legs: air ? 'jump' : runLegs(s, 0.5), scale: 3, colours: HERO_GREY });
+          debris(g, s, hits[0] + 0.28, heroX, G, { n: 6, seed: 3, cols: [T.pal.dim], speed: 20, up: 16, life: 0.35, size: 1 });
+          // HUD: the day counter, and the quest log
+          const close = 1 - steps(s.out(0.35, ease.linear, 0.1), 4);
+          const day = s.t < loop ? 1 : 2 + Math.floor(steps((s.t - loop - 0.3) / Math.max(0.5, s.dur - loop - 0.9), 24) * 363);
+          if (win(g, 8, 8, 104, 22, { open: Math.min(clamp(s.t / (BEAT * 0.5)), close), fill: T.pal.night })) {
+            pixelText(g, 'DAY', 16, 24, { color: T.pal.dim });
+            pixelText(g, String(day).padStart(4, '0'), 104, 24, { color: T.pal.ink, align: 'right' });
+          }
+          const reset = jolt(s, loop, 2);
+          if (win(g, 244 + reset, 8, 132, 74, { open: Math.min(clamp((s.t - 0.2) / (BEAT * 0.5)), close) })) {
+            pixelText(g, '主线任务', 254 + reset, 25, { font: F(12, T.cjk), color: T.pal.dim });
+            ['起床', '挤地铁', '打卡'].forEach((task, i) => {
+              const y = 44 + i * 14, done = s.t >= hits[i] && s.t < loop;
+              g.fillStyle = T.pal.ink; g.fillRect(256 + reset, y - 8, 8, 8);
+              g.fillStyle = T.pal.shade; g.fillRect(257 + reset, y - 7, 6, 6);
+              if (done) { g.fillStyle = T.pal.ink; [[0, 3], [1, 4], [2, 5], [3, 4], [4, 3], [5, 2], [6, 1]].forEach(([dx, dy]) => g.fillRect(257 + reset + dx, y - 8 + dy, 1, 2)); }
+              pixelText(g, task, 270 + reset, y, { font: F(12, T.cjk), color: done ? T.pal.dim : T.pal.ink });
+            });
+          }
+        }, { mono: true, dither: 30 });
+      },
+    },
+    // --- 4. The status screen: HP full, gold rising, one meter empty -----------
+    // the empty 声音 meter is the only colour in the grey world; a punch-in on 空
+    {
+      id: 'stats', tail: 1.0, energy: 0.4, transition: { type: 'pixelate', size: 40, duration: 0.4 },
+      sfx: [{ at: '血条', type: 'tick' }, { at: '金币', type: 'tick' }, { at: '只有', type: 'click' }, { at: '空', type: 'pop', gain: 0.8 }],
+      draw(ctx, s) {
+        const tHp = s.when('血条', 0.6), tG = s.when('金币', 1.6), tOne = s.when('只有', 2.6), tEmpty = s.when('空', 4);
+        const z = s.t >= tEmpty ? 2 : 1;
+        pixelFrame(ctx, s, (g, w, h) => {
+          // the paused game behind, as a dithered dark field
+          g.fillStyle = T.pal.shade; g.fillRect(0, 0, w, h);
+          g.fillStyle = T.pal.night;
+          for (let y = 0; y < h; y++) for (let x = (y & 1); x < w; x += 2) g.fillRect(x, y, 1, 1);
+          if (!win(g, 16, 10, 352, 166, { open: s.t / (BEAT * 0.5) })) return;
+          pixelText(g, 'STATUS', 30, 28, { color: T.pal.dim });
+          pixelText(g, 'LV 28', 354, 28, { color: T.pal.ink, align: 'right' });
+          g.fillStyle = T.pal.night; g.fillRect(28, 38, 92, 126);
+          person(g, 74, 158, { scale: 3, legs: 'stand', colours: HERO_GREY });
+          const rows = [tHp, tG, tOne];
+          const row = s.t >= tOne ? 2 : s.t >= tG ? 1 : s.t >= tHp ? 0 : -1;
+          if (row >= 0) cursor(g, 134, [52, 86, 120][row] + (cycle(s, 2, 0.5) ? 1 : 0));
+          // 体力: fills in steps as it is said
+          pixelText(g, '体力', 146, 60, { font: F(12, T.cjk) });
+          meter(g, 182, 50, 128, 10, steps((s.t - tHp) / 0.5, 20), { segments: 20, fill: T.pal.ink, empty: T.pal.night });
+          pixelText(g, s.t >= tHp + 0.5 ? '100' : '', 356, 59, { align: 'right' });
+          // 金币: counts up
+          pixelText(g, '金币', 146, 94, { font: F(12, T.cjk) });
+          pixelText(g, 'G ' + fx.countUp(steps((s.t - tG) / 0.9, 14), 0, 12800, { sep: ',' }), 182, 93, { color: T.pal.ink });
+          if (s.t >= tG + 0.9) cursor(g, 290, 85 - (cycle(s, 2, 0.5) ? 1 : 0), T.pal.ink, 'up');
+          // 声音: appears on 只有一格, empty; its outline blinks coral
+          if (s.t >= tOne) {
+            pixelText(g, '声音', 146, 128, { font: F(12, T.cjk), color: T.pal.ink });
+            const blink = s.t < tEmpty || s.beat % 1 < 0.5;
+            meter(g, 182, 118, 128, 10, 0, { segments: 10, gap: 3, outline: blink ? T.pal.coral : T.pal.dusk });
+            pixelText(g, '0', 356, 127, { color: T.pal.coral, align: 'right' });
+          }
+          void rows;
+        }, { mono: true, keep: ['coral'], zoom: { z, x: 238, y: 120 } });
+      },
+    },
+    // --- 5. Words at the tip of the tongue collapse into dots ------------------
+    {
+      id: 'mute', tail: 1.0, energy: 0.3,
+      sfx: [{ at: (s) => s.voiceStart, type: 'type', gain: 0.5 }, { at: '省略号', type: 'click' }],
+      draw(ctx, s) {
+        const t0 = s.voiceStart - 0.2, tTurn = s.when('都变成', 1.6), tDots = s.when('省略号', 2.2);
+        pixelFrame(ctx, s, (g, w, h) => {
+          city(g, w, h, 900, 176, s);
+          // the crowd behind, standing still; their bubbles fill with dots after
+          [24, 52, 300, 332, 362].forEach((x, i) => {
+            person(g, x, 168, { scale: 1, colours: GREY[i % 2], flip: i > 1 });
+            const at = tDots + 0.35 + i * BEAT * 0.25;
+            if (bubble(g, x - 11, 128 - (i % 2) * 8, 22, 11, x, { open: (s.t - at) / 0.12, edge: T.pal.night, fill: T.pal.dim })) dots(g, x - 7, 134 - (i % 2) * 8, 3, { sz: 2, gap: 3 });
+          });
+          // the two of them, face to face
+          person(g, 112, 182, { scale: 4, colours: HERO_GREY });
+          person(g, 286, 182, { scale: 4, flip: true, colours: GREY[1] });
+          // the player's bubble types 其实我想说, then each word gives way to a dot
+          const out = 1 - steps(s.out(0.35, ease.linear), 3);
+          const say = '其实我想说', n = Array.from(say).length;
+          const typed = Math.floor(clamp((s.t - t0) / 0.9) * n), gone = Math.round(steps((s.t - tTurn) / Math.max(0.3, tDots - tTurn), n) * n);
+          const sh = jolt(s, tDots, 2);
+          if (bubble(g, 64 + sh, 38, 128, 40, 132, { open: Math.min((s.t - t0 + 0.1) / 0.15, out) })) {
+            if (s.t < tDots) {
+              const shown = Array.from(say).slice(0, Math.max(0, typed - gone)).join('');
+              const wpx = pixelText(g, shown, 76, 66, { font: F(16, T.cjk), color: T.pal.night });
+              if (gone) dots(g, 76 + wpx + 4, 60, gone, { sz: 4, gap: 4 });
+            } else dots(g, 82 + sh, 58, 6, { sz: 5, gap: 5 });
+          }
+          // and the other side answers with the same
+          if (bubble(g, 236, 64, 64, 24, 268, { open: Math.min((s.t - tDots - 0.2) / 0.15, out), tail: 'down-left' })) dots(g, 248, 76, 3, { sz: 4, gap: 5 });
+        }, { mono: true });
+      },
+    },
+    // --- 6. Everyone runs right; one step left --------------------------------
+    // the crowd streams past once the player stops; a punch-in on the turn; the
+    // camera pans back to a wall nobody looks at, and on 一步 it cracks
+    {
+      id: 'left', tail: 0.5, energy: 0.55,
+      sfx: [{ at: '左', type: 'click' }, { at: '一步', type: 'tick' }],
+      draw(ctx, s) {
+        const v = 72, G = 172;
+        const tStop = s.when('那天', 2.3), tTurn = s.when('左', 3.4), tStep = s.when('一步', 3.9);
+        const pan = steps((s.t - tTurn - 0.35) / 0.5, 10);
+        const P = 100, cam = Math.round(Math.min(s.t, tStop) * v) - Math.round(pan * P);
+        const z = s.t >= tTurn && s.t < tTurn + 0.35 ? 2 : 1;
+        pixelFrame(ctx, s, (g, w, h) => {
+          // the street ends where the next scene begins: the city's camera arrives at 0
+          city(g, w, h, cam - (Math.round(tStop * v) - P), G, s);
+          // the wall sits just off the left edge until the camera turns back to it
+          wall(g, 50 - P + Math.round(pan * P), 40, G, s.t >= tStep ? steps((s.t - tStep) / 0.3, 7) : 0);
+          // the crowd: before the stop they run with the player; after it, they stream past
+          // after the turn nobody comes round again: they run on and off the right edge
+          [-60, 30, 110, 260, 330, 400].forEach((x0, i) => {
+            const sp = v + 6 + (i % 3) * 4, wrapAt = Math.min(s.t, tTurn);
+            const base = ((x0 + Math.round(wrapAt * sp) - Math.round(Math.min(wrapAt, tStop) * v)) % 480 + 480) % 480 - 40;
+            const x = base + Math.round(Math.max(0, s.t - tTurn) * sp * 1.6) + Math.round(pan * P);
+            if (x > w + 30) return;
+            person(g, x, G + (i % 2) * 2, { legs: runLegs(s, 0.5), scale: 2, colours: GREY[i % 2] });
+          });
+          const heroX = 110 + Math.round(pan * P) - (s.t >= tStep ? steps((s.t - tStep) / 0.2, 2) * 8 : 0);
+          const moving = s.t < tStop || (s.t >= tStep && s.t < tStep + 0.2);
+          person(g, heroX, G + 4, { scale: 3, legs: moving ? runLegs(s, 0.5) : 'stand', flip: s.t >= tTurn, colours: HERO_GREY });
+          // the HUD's arrow insists: GO →
+          if (s.out(0.3) < 1) {
+            const fast = s.t >= tTurn ? 0.25 : 0.5;
+            if (cycle(s, 2, fast) === 0) {
+              pixelText(g, 'GO', 300, 34, { font: F(16), color: T.pal.ink, shadow: T.pal.night });
+              g.fillStyle = T.pal.ink;
+              for (let k = 0; k < 8; k++) g.fillRect(340 + k, 22 + k, 1, 17 - 2 * k);
+              g.fillRect(332, 28, 8, 5);
+            }
+          }
+        }, { mono: true, keep: ['gold'], zoom: { z, x: 110, y: 130 } });
+      },
+    },
+    // --- 7. The wall breaks; colour floods in from the hole (music only) -------
+    {
+      id: 'found', narration: false, beats: 8, energy: 0.9, part: 'found', transition: 'cut',
+      sfx: [{ at: (s) => s.onBeat(0), type: 'hit' }, { at: (s) => s.onBeat(2.5), type: 'shimmer' }, { at: (s) => s.onBeat(4), type: 'pop' }, { at: (s) => s.onBeat(5), type: 'pop' }],
+      draw(ctx, s) {
+        const b = (k) => s.onBeat(k), G = 172;
+        // the frame continues the last one exactly: the wall at x 46, the player at 210 facing it
+        const r = s.t < b(0) ? 0 : (0.06 + steps((s.t - b(0)) / (b(3) - b(0)), 14) * 0.94) * 480;
+        const flood = inCircle(40, 110, r, 16);
+        const shake = jolt(s, b(0), 3);
+        pixelFrame(ctx, s, (g, w, h) => {
+          g.translate(shake, 0);
+          city(g, w, h, 0, G, s);
+          if (s.t < b(0)) wall(g, 50, 40, G, 1);
+          reveal(g, w, h, (g2) => {
+            g2.translate(shake, 0);
+            hidden(g2, w, h, s, { ground: G + 4 });
+          }, flood);
+          // the wall goes up as debris, in its own colours and the light behind it
+          debris(g, s, b(0), 50, 100, { n: 40, seed: 5, cols: [T.pal.shade, T.pal.night, T.pal.gold, T.pal.dusk], speed: 160, up: 140, grav: 300, life: 1.6, size: 4 });
+          // the player: knocked back a step by the blast, then a jump of joy on beat 6
+          const back = s.t >= b(0) ? steps((s.t - b(0)) / 0.15, 2) * 6 : 0;
+          const hop6 = jump(s.t, b(6), BEAT, 22);
+          person(g, 202 + back, G + 4 - hop6, { scale: 3, flip: s.t < b(3.5), legs: hop6 ? 'jump' : 'stand' });
+          // the banner: HIDDEN STAGE, then the line under it
+          if (win(g, 84, 26, 216, 60, { open: (s.t - b(4)) / (BEAT * 0.5) })) {
+            pixelText(g, 'HIDDEN STAGE', w / 2, 46, { color: T.pal.gold, align: 'center', shadow: T.pal.night });
+            if (s.t >= b(5)) pixelText(g, '隐藏关卡 · 已发现', w / 2, 74, { font: F(16, T.cjk), align: 'center', shadow: T.pal.night });
+          }
+        }, { dither: true, mono: (x, y) => !flood(x, y), keep: ['gold'] });
+      },
+    },
+    // --- 8. Everything you make becomes a brick --------------------------------
+    // the player heads three ? blocks on 画 · 写 · 哼; on 变成一块砖 they drop and stack
+    {
+      id: 'make', tail: 0.8, energy: 0.65, transition: 'cut',
+      sfx: [{ at: '画', type: 'pop' }, { at: '写', type: 'pop' }, { at: '哼', type: 'pop' }, { at: '砖', type: 'tick' }],
+      draw(ctx, s) {
+        const G = 176, BY = 92, xs = [124, 196, 268];
+        const hits = [s.when('画', 1.3), s.when('写', 2.4), s.when('哼', 3.7)], tDrop = s.when('变成', 5.3), tLand = s.when('砖', 5.8);
+        pixelFrame(ctx, s, (g, w, h) => {
+          hidden(g, w, h, s, { ground: G });
+          // the player runs under each block and heads it at the top of the jump
+          const keys = [[0, 60], [hits[0] - 0.5, 60], [hits[1] - 0.5, xs[0] + 6], [hits[2] - 0.5, xs[1] + 6], [tDrop + 0.2, xs[2] + 6]];
+          const hx = hop(s.t, [[0, 60], [hits[0] - 0.5, xs[0] + 8], [hits[1] - 0.5, xs[1] + 8], [hits[2] - 0.5, xs[2] + 8], [tLand + 0.3, 226]], 6, 0.36);
+          void keys;
+          const air = hits.reduce((a, t) => a + jump(s.t, t - 0.24, 0.48, 40), 0);
+          // the blocks: ? until headed, then the thing it holds pops out and the block becomes its brick
+          xs.forEach((x, i) => {
+            const t = hits[i], m = MADE[i];
+            const fall = s.t >= tDrop ? steps((s.t - tDrop) / Math.max(0.2, tLand - tDrop), 6) : 0;
+            const stack = [[278, G - 13], [296, G - 13], [296, G - 26]][i];
+            const bx = Math.round(lerp(x - 8, stack[0], fall)), by = Math.round(lerp(BY, stack[1], fall));
+            const bump = s.t >= t && s.t < t + 0.12 ? 3 : 0;
+            if (s.t < t) {
+              g.fillStyle = T.pal.night; g.fillRect(bx - 1, by - 1, 18, 14);
+              g.fillStyle = T.pal.gold; g.fillRect(bx, by, 16, 12);
+              g.fillStyle = T.pal.ink; g.fillRect(bx, by, 16, 1);
+              pixelText(g, '?', bx + 4, by + 11 - (cycle(s, 2, 1) ? 1 : 0), { color: T.pal.ink, shadow: T.pal.rust });
+            } else brick(g, bx, by - bump, i);
+            // the item rises and hangs over its brick until the bricks drop
+            if (s.t >= t && s.t < tDrop) {
+              const up = steps((s.t - t) / 0.3, 6) * 22;
+              sprite(g, m.art, x - 12, BY - 28 - up, m.c, { scale: 3 });
+            }
+            debris(g, s, t, x, BY, { n: 10, seed: 11 + i, cols: [T.pal.gold, T.pal.ink, m.brick], speed: 50, up: 70, life: 0.7 });
+          });
+          debris(g, s, tLand, 296, G, { n: 12, seed: 21, cols: [T.pal.sand, T.pal.ink], speed: 50, up: 30, life: 0.5, size: 1 });
+          person(g, hx, G - air, { scale: 2, legs: air ? 'jump' : s.t < tLand + 0.6 ? runLegs(s, 0.5) : 'stand' });
+        }, { dither: true });
+      },
+    },
+    // --- 9. The bricks become a stair; the dots below start answering ----------
+    {
+      id: 'climb', tail: 1.0, energy: 0.8, transition: 'cut',
+      sfx: [{ at: '省略号', type: 'tick' }, { at: '回音', type: 'shimmer', gain: 0.7 }],
+      draw(ctx, s) {
+        const G = 176, tDots = s.when('省略号', 1.6), tEcho = s.when('回音', 3);
+        // a brick lands every half beat; the player hops onto each one right after
+        const per = BEAT / 2, landed = Math.floor(s.t / per) + 3;
+        const stepAt = (i) => (i - 2) * per + 0.12;
+        const pos = (i) => [96 + i * 20, G - 13 - i * 13]; // a stair climbing up and to the right
+        const onStep = clamp(Math.floor((s.t - 0.12) / per) + 2, 2, 30);
+        // the camera rises in whole cells to keep the player in the upper middle
+        const camY = Math.max(0, (onStep - 4) * 13), camX = Math.max(0, (onStep - 5) * 20);
+        pixelFrame(ctx, s, (g, w, h) => {
+          hidden(g, w, h, s, { ground: G, camY });
+          for (let i = 0; i < Math.min(landed, 30); i++) {
+            const [x, y] = pos(i), at = (i - 3) * per;
+            const drop = i < 3 ? 0 : Math.round((1 - steps((s.t - at) / 0.15, 3)) * 30);
+            brick(g, x - camX, y + camY - drop, i, { w: 20 });
+          }
+          // the people below, and what rises from them: dots at first, then answers
+          [-20, 14, 48, 82].forEach((x, i) => person(g, x - camX, G + camY, { scale: 2, colours: NPC_COLOURS[i % 4], flip: false }));
+          const ECHO = ['我也是', '再来一首', '♥', '好看！', '原来你会画画', '♥', '加油'];
+          ECHO.forEach((word, i) => {
+            const at = tDots + i * per * 0.75;
+            if (s.t < at) return;
+            const rise = Math.floor((s.t - at) * 30), x = [20, 120, 214, 64, 160, 290, 28][i], y = 150 - rise;
+            if (y < -20) return;
+            const answer = s.t >= tEcho + i * 0.08;
+            if (!answer) { bubble(g, x, y, 26, 12, x + 8, { open: (s.t - at) / 0.1, fill: T.pal.dim }); dots(g, x + 5, y + 6, 3, { sz: 2, gap: 3 }); return; }
+            if (word === '♥') { sprite(g, HEART, x + 4, y, { k: T.pal.night, c: T.pal.coral }, { scale: 2 }); return; }
+            const tw = bits(word, F(12, T.cjk)).w;
+            bubble(g, x, y, tw + 10, 16, x + 8, { open: 1 });
+            pixelText(g, word, x + 5, y + 13, { font: F(12, T.cjk), color: T.pal.night });
+          });
+          const [px, py] = pos(onStep);
+          const hopUp = jump(s.t, stepAt(onStep), per * 0.9, 8);
+          person(g, px + 10 - camX, py + camY - hopUp, { scale: 2, legs: hopUp ? 'jump' : 'stand' });
+        }, { dither: true });
+      },
+    },
+    // --- 10. At the top: the empty meter fills, one segment per word ----------
+    {
+      id: 'voice', tail: 1.2, energy: 0.85, transition: 'cut',
+      sfx: ['原来', '没话说', '只是', '找到', '出口'].map((at) => ({ at, type: 'tick', gain: 0.4 })).concat([{ at: '地方', type: 'shimmer' }]),
+      draw(ctx, s) {
+        const G = 176, tFull = s.when('地方', 3.4);
+        const words = s.voice ? s.voice.words : [];
+        const said = words.filter((wd) => s.t >= s.voiceStart + wd.start).length;
+        const fill = s.t >= tFull ? 1 : words.length ? Math.floor((said / words.length) * 9) / 10 : 0;
+        pixelFrame(ctx, s, (g, w, h) => {
+          hidden(g, w, h, s, { ground: G + 20, sunR: 64, rays: 1 });
+          // the top brick under the player, the stair falling away below
+          [[176, 160], [158, 173], [194, 173], [140, 186]].forEach(([x, y], i) => brick(g, x, y, i));
+          person(g, 192, 162, { scale: 3, legs: 'stand' });
+          // the 声音 meter from the status screen, filling
+          if (win(g, 40, 14, 304, 44, { open: s.t / (BEAT * 0.5), fill: T.pal.night })) {
+            pixelText(g, '声音', 54, 44, { font: F(16, T.cjk), color: T.pal.ink });
+            meter(g, 100, 28, 196, 16, fill, { segments: 10, gap: 3, fill: T.pal.gold, outline: T.pal.coral });
+            if (s.t >= tFull) pixelText(g, 'MAX', 332, 42, { color: cycle(s, 2, 0.25) ? T.pal.gold : T.pal.ink, align: 'right', shadow: T.pal.rust });
+            else pixelText(g, String(Math.round(fill * 10)), 332, 42, { color: T.pal.coral, align: 'right' });
+          }
+          debris(g, s, tFull, 198, 36, { n: 24, seed: 41, cols: [T.pal.gold, T.pal.ink, T.pal.coral], speed: 120, up: 80, life: 1.1 });
+        }, { dither: true });
+      },
+    },
+    // --- 11. Music only: the player opens their mouth and the bubble fills the screen
+    {
+      id: 'max', narration: false, beats: 6, energy: 0.95, transition: 'cut',
+      sfx: [{ at: (s) => s.onBeat(2), type: 'riser', dur: 1.2 }, ...[3, 3.5, 4].map((k) => ({ at: (s) => s.onBeat(k), type: 'tick' }))],
+      draw(ctx, s) {
+        const b = (k) => s.onBeat(k), G = 176;
+        const grow = steps((s.t - b(0.5)) / (b(2) - b(0.5)), 8);
+        pixelFrame(ctx, s, (g, w, h) => {
+          hidden(g, w, h, s, { ground: G + 20, sunR: 64, rays: 1 });
+          [[176, 160], [158, 173], [194, 173], [140, 186]].forEach(([x, y], i) => brick(g, x, y, i));
+          const up = jump(s.t, b(0), BEAT, 10);
+          person(g, 192, 160 - up, { scale: 3, legs: up ? 'jump' : 'stand' });
+          // the bubble inflates from the player's mouth to the whole screen, in steps
+          if (s.t >= b(0.5)) {
+            const bx = Math.round(lerp(196, 12, grow)), by = Math.round(lerp(104, 10, grow));
+            const bw = Math.round(lerp(14, w - 24, grow)), bh = Math.round(lerp(10, 150, grow));
+            bubble(g, bx, by, bw, bh, Math.round(lerp(198, 186, grow)), { open: 1 });
+            // the things made burst inside it
+            debris(g, s, b(2), w / 2, 90, { n: 36, seed: 51, cols: [T.pal.coral, T.pal.sky, T.pal.mint, T.pal.gold], speed: 150, up: 120, grav: 200, life: 1.4, size: 3 });
+          }
+          // 我想说 lands one character per half beat
+          if (s.t >= b(3)) blockText(g, s, '我想说', F(16, T.cjk), w / 2, 46, 4, { land: (u) => b(3 + steps(u, 3) * 1.5), colour: () => T.pal.night, shade: T.pal.dim, fall: 30 });
+        }, { dither: true });
+      },
+    },
+    // --- 12. The callback: the box that held only dots now holds your line -----
+    {
+      id: 'end', part: 'home', tail: 2.4, energy: 0.55, transition: 'cut', voiceDelay: 2 * BEAT,
+      sfx: [{ at: '开始', type: 'chime' }],
+      draw(ctx, s) {
+        const tStart = s.when('开始', 2.6), settled = s.t >= s.dur - 1.3;
+        pixelFrame(ctx, s, (g, w, h) => {
+          hidden(g, w, h, s, { ground: 196, sunR: 64, rays: 1 });
+          bubble(g, 12, 10, w - 24, 150, 186, { open: 1 });
+          const t = blockText(g, s, '我想说', F(16, T.cjk), w / 2 - 16, 46, 4, { colour: () => T.pal.night, shade: T.pal.dim });
+          // the colon and a block cursor, blinking on the beat: the rest is yours
+          g.fillStyle = T.pal.night;
+          const cx = t.x0 + t.w + 8;
+          g.fillRect(cx, 66, 6, 6); g.fillRect(cx, 90, 6, 6);
+          if (settled || s.beat % 1 < 0.5) { g.fillStyle = T.pal.coral; g.fillRect(cx + 14, 50, 14, 50); }
+          if (s.t >= tStart && (settled || cycle(s, 2, 0.5) === 0)) {
+            cursor(g, 104, 128, T.pal.coral);
+            pixelText(g, 'PRESS START', 118, 142, { font: F(16), color: T.pal.coral });
+          }
+          face(g, 30, 104, 3, 'smile');
+        }, { dither: true });
+      },
+    },
+  ],
+  // an LCD cell grid over everything: the pixels read as a screen, not a blur
+  overlay(ctx, g) {
+    const { W, H } = g;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.13)';
+    for (let x = T.px - 1; x < W; x += T.px) ctx.fillRect(x, 0, 1, H);
+    for (let y = T.px - 1; y < H; y += T.px) ctx.fillRect(0, y, W, 1);
+    ctx.restore();
+  },
+});
+</script>
+</body>
+</html>

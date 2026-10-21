@@ -1,0 +1,97 @@
+# Core ontology: what every qualitative method shares.
+# A method (qls/methods/<name>/schema.tql) adds concrete subtypes of `code` and `category`
+# and its own grouping relations. TypeDB checks every rule here at commit time,
+# so no harness, prompt or agent can store an analysis that breaks them.
+#
+# The graph is the *current* analysis of one run. Its history (who changed what, and why)
+# is the run's append-only event log; a run is replayed or forked from that log.
+# Every role is @card(1..1): a relation never survives with an empty slot.
+
+define
+
+  # -- attributes ------------------------------------------------------------
+  attribute id, value string;
+  attribute label, value string;
+  attribute description, value string;
+  attribute body, value string;                 # memo text
+  attribute reason, value string;
+  attribute actor, value string;                # agent:NAME | human:NAME
+  attribute event, value integer;               # event that created or last changed it
+  attribute version, value integer;
+  attribute codebook-version, value integer;    # codebook in force when a code was made
+  attribute start-offset, value integer;
+  attribute end-offset, value integer;
+  attribute unit, value string;                 # segment id, e.g. P01:s014
+  attribute status, value string @values("active", "proposed");
+  attribute memo-kind, value string @values("meaning", "informant", "surprise", "uncertainty", "residual",
+                                             "method", "negative-case", "summary", "reflexive");
+  attribute memo-level, value string @values("note", "interview", "batch", "corpus");
+  attribute inclusion, value string;
+  attribute exclusion, value string;
+  attribute research-question, value string;
+  attribute method-name, value string;
+  attribute stance, value string;
+  attribute sensitizing, value string;
+  attribute prior-research, value string;
+
+  # -- intent: the only predefined content -------------------------------------
+  # One per run: what the study asks and how. Findings are expected to depend on it.
+  entity intent,
+    owns id @key, owns research-question, owns method-name, owns stance, owns sensitizing, owns prior-research, owns description,
+    plays answering:question, plays about:target;
+
+  # -- evidence: sources and verified quotes -----------------------------------
+  # A quote is a pointer into an immutable source version; the server only creates
+  # one after checking the words are in the source. It is never typed in by a model.
+  entity source,
+    owns id @key, owns label, owns version,
+    plays quoting:source, plays about:target, plays assignment:source;
+
+  entity quote,
+    owns id @key, owns start-offset, owns end-offset, owns unit,
+    plays quoting:quote @card(1..1),
+    plays evidence:quote, plays exemplar:quote;
+
+  # -- interpretation: what the method builds ----------------------------------
+  # code: a claim made directly from the data (Gioia: 1st-order concept). Needs a quote.
+  entity code @abstract,
+    owns id @key, owns label, owns description, owns actor, owns event, owns codebook-version,
+    plays evidence:claim @card(1..),
+    plays about:target;
+
+  # category: a claim made from other claims (Gioia: theme, dimension).
+  entity category @abstract,
+    owns id @key, owns label, owns description, owns actor, owns event,
+    plays about:target, plays answering:answer;
+
+  relation quoting, relates source @card(1..1), relates quote @card(1..1);
+  relation evidence, relates claim @card(1..1), relates quote @card(1..1),
+    owns reason @card(1..1), owns actor, owns event;
+  relation answering, relates answer @card(1..1), relates question @card(1..1),
+    owns reason @card(1..1), owns actor, owns event;
+
+  # -- memory ------------------------------------------------------------------
+  # memo: the scholar's notes. Always about something; higher levels cite lower ones.
+  entity memo,
+    owns id @key, owns memo-kind, owns memo-level, owns body, owns actor, owns event,
+    plays about:memo @card(1..),
+    plays citation:citing, plays citation:cited, plays about:target;
+
+  # codebook entry: long-term memory that outlives any context window. Agents propose
+  # (status "proposed"); a researcher approves (status "active", with a version).
+  entity codebook-entry,
+    owns id @key, owns label, owns description, owns inclusion, owns exclusion,
+    owns version, owns status, owns actor, owns event,
+    plays exemplar:entry, plays about:target;
+
+  relation about, relates memo @card(1..1), relates target @card(1..1);
+  relation citation, relates citing @card(1..1), relates cited @card(1..1);
+  relation exemplar, relates entry @card(1..1), relates quote @card(1..1), owns reason;
+
+  # -- scholars ----------------------------------------------------------------
+  # Several scholars (agents or people) can share one analysis: each writes its own
+  # memos, all share the codebook. Assignment records who read which source.
+  entity scholar,
+    owns id @key, owns label,
+    plays assignment:scholar;
+  relation assignment, relates scholar @card(1..1), relates source @card(1..1), owns event;

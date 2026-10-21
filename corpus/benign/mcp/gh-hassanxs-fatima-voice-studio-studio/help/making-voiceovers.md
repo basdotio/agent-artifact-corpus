@@ -32,7 +32,7 @@ For full scripts: one 20-minute episode, or fifty short ones.
    name on disk; you can rename it later.
 3. Add your scripts, in any of the three ways below.
 4. Pick the **Voice** and **Language** for the batch, and the **Voice model** under *Output and pauses* if you
-   want S2 Pro instead of Qwen3-TTS. The language list shows what the chosen model speaks.
+   want S2 Pro or OmniVoice instead of Qwen3-TTS. The language list shows what the chosen model speaks.
 5. Click **Start batch**.
 
 The batch's own page opens and you can watch it being spoken part by part. You can leave the page, start more

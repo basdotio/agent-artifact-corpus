@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 import string
 import random
+import difflib
 from mcp.server.fastmcp import FastMCP
 
 # Initialize the server
@@ -97,6 +98,43 @@ def _get_valid_matches(content: str, search_string: str, allow_critic: bool = Fa
         start = pos + 1
     return matches
 
+def _diff_to_critic(old_text: str, new_text: str) -> str:
+    """
+    Minimizes the diff between old_text and new_text at the word level.
+    Only words that actually changed are wrapped in CriticMarkup; unchanged 
+    context words remain plain text.
+    """
+    tokens_old = re.findall(r'\S+|\s+', old_text)
+    tokens_new = re.findall(r'\S+|\s+', new_text)
+
+    matcher = difflib.SequenceMatcher(None, tokens_old, tokens_new)
+    parts = []
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        chunk_old = "".join(tokens_old[i1:i2])
+        chunk_new = "".join(tokens_new[j1:j2])
+
+        if tag == 'equal':
+            parts.append(chunk_old)
+        elif tag == 'replace':
+            parts.append(f"{{~~{chunk_old}~>{chunk_new}~~}}")
+        elif tag == 'delete':
+            core = chunk_old.strip()
+            if not core:
+                continue
+            leading_ws = re.match(r'^\s*', chunk_old).group()
+            trailing_ws = re.search(r'\s*$', chunk_old).group()
+            parts.append(f"{leading_ws}{{--{core}--}}{trailing_ws}")
+        elif tag == 'insert':
+            core = chunk_new.strip()
+            if not core:
+                parts.append(chunk_new)
+                continue
+            leading_ws = re.match(r'^\s*', chunk_new).group()
+            trailing_ws = re.search(r'\s*$', chunk_new).group()
+            parts.append(f"{leading_ws}{{++{core}++}}{trailing_ws}")
+
+    return "".join(parts)
 
 def _apply_single_change(content: str, search_string: str, replacement_string: str) -> str:
     """
@@ -138,10 +176,7 @@ def _apply_single_change(content: str, search_string: str, replacement_string: s
         )
 
     # Core CriticMarkup formatting: deletion if replacement is empty, substitution otherwise
-    if not clean_replacement:
-        critic_body = f"{{--{clean_search}--}}"
-    else:
-        critic_body = f"{{~~{clean_search}~>{clean_replacement}~~}}"
+    critic_body = _diff_to_critic(clean_search, clean_replacement)
 
     # Slide original anchors outward so they wrap around the edit cleanly
     prefix_anchors = "".join(start_anchors)

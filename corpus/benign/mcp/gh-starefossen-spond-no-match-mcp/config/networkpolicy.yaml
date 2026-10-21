@@ -1,0 +1,65 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: spond
+  namespace: mcp
+spec:
+  description: "Allow spond MCP traffic from Kourier, to Spond API"
+  endpointSelector:
+    matchLabels:
+      serving.knative.dev/service: spond
+
+  ingress:
+    # Allow traffic from Kourier (Knative ingress)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kourier-system
+            app: 3scale-kourier-gateway
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+
+    # Allow traffic from Knative activator (health probes & scale-from-zero)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: knative-serving
+            app: activator
+      toPorts:
+        - ports:
+            - port: "8012"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+
+    # Allow metrics scraping from Knative autoscaler (required for scale-to-zero)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: knative-serving
+            app: autoscaler
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+
+  egress:
+    # Allow DNS resolution
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+
+    # Allow HTTPS to Spond API
+    - toFQDNs:
+        - matchName: "api.spond.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

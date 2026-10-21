@@ -3,7 +3,7 @@
 import argparse
 import json
 import struct
-from pathlib import Path
+from grea.host.paths import Path
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog='Addresses must be link-time ELF virtual addresses. Subtract any analysis-tool rebase or runtime load bias explicitly. No code is executed.')

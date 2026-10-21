@@ -1,0 +1,903 @@
+import { spawn, ChildProcess } from 'node:child_process';
+import {
+  closeSync,
+  openSync,
+  readSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
+import { hostBootstrapScript } from './translator.js';
+import {
+  POWERSHELL_ARGS,
+  PowerShellSelection,
+  powerShellMissingMessage,
+  resolvePowerShell,
+} from './powershell.js';
+
+type NativeSpoolWriter = (fd: number, buffer: Buffer, offset: number, length: number) => number;
+
+class NativeStderrSpoolError extends Error {
+  constructor(operation: 'open' | 'write', spoolPath: string | undefined, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+    super(
+      'fauxnix: native stderr spool ' +
+        operation +
+        ' failed' +
+        (code ? ' (' + code + ')' : '') +
+        (spoolPath ? ' for ' + spoolPath : '') +
+        ': ' +
+        detail,
+    );
+    this.name = 'NativeStderrSpoolError';
+  }
+}
+
+// First-ready-line budget. 30s covers every dev machine measured; contended CI
+// runners cold-booting powershell.exe under full test parallelism have exceeded it,
+// so FAUXNIX_HOST_READY_TIMEOUT_MS (milliseconds, minimum 1000) widens the budget
+// without changing the default.
+const READY_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.FAUXNIX_HOST_READY_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 1000 ? raw : 30_000;
+})();
+
+export const DEFAULT_STDOUT_LIMIT = 8_388_608;
+export const DEFAULT_STDERR_LIMIT = 1_048_576;
+
+export interface HostInvokeResult {
+  stdout: Buffer;
+  /** UTF-8 stderr captured inside the JSON-framed host protocol. */
+  stderr: Buffer;
+  /** Bytes written directly to the PowerShell process stderr OS pipe. */
+  nativeStderr?: Buffer;
+  exitCode: number;
+  timedOut: boolean;
+  cancelled: boolean;
+  truncated: boolean;
+  /** The framed stdout source crossed its capture limit. */
+  stdoutTruncated?: boolean;
+  /** Framed or native stderr crossed the shared stderr capture limit. */
+  stderrTruncated?: boolean;
+  spawnError?: 'ENOENT' | 'START';
+  spawnMessage?: string;
+  infrastructureError?: boolean;
+  stdoutSpool?: string;
+  stderrSpool?: string;
+  nativeStderrSpool?: string;
+}
+
+export type HostStreamMode = 'capture' | 'spool' | 'discard';
+
+export interface HostOutputLimits {
+  stdoutLimit?: number;
+  stderrLimit?: number;
+  stdoutMode?: HostStreamMode;
+  stderrMode?: HostStreamMode;
+  stdoutSpoolPath?: string;
+  stderrSpoolPath?: string;
+  nativeStderrSpoolPath?: string;
+}
+
+export interface HostRequestEnv {
+  [key: string]: string;
+}
+
+export function encodeHostRequest(
+  id: string,
+  script: string,
+  env: HostRequestEnv,
+  opts?: { v?: number } & HostOutputLimits,
+): string {
+  const body: Record<string, unknown> = {
+    id,
+    scriptB64: Buffer.from(script, 'utf8').toString('base64'),
+    env,
+  };
+  if (opts?.v === 2) {
+    body.v = 2;
+    body.type = 'run';
+    body.stdoutLimit = opts.stdoutLimit ?? DEFAULT_STDOUT_LIMIT;
+    body.stderrLimit = opts.stderrLimit ?? DEFAULT_STDERR_LIMIT;
+    body.stdoutMode = opts.stdoutMode ?? 'capture';
+    body.stderrMode = opts.stderrMode ?? 'capture';
+    if (opts.stdoutSpoolPath) body.stdoutSpoolPath = opts.stdoutSpoolPath;
+    if (opts.stderrSpoolPath) body.stderrSpoolPath = opts.stderrSpoolPath;
+  }
+  return JSON.stringify(body);
+}
+
+export type HostV2Frame =
+  | { v: 2; type: 'ready'; capabilities?: { cancel?: boolean; maxChunkBytes?: number; stderrMarker?: boolean } }
+  | { v: 2; type: 'stdout' | 'stderr'; id: string; seq: number; dataB64: string }
+  | {
+      v: 2;
+      type: 'end';
+      id: string;
+      exitCode: number;
+      timedOut?: boolean;
+      cancelled?: boolean;
+      truncated?: boolean;
+      stdoutTruncated?: boolean;
+      stderrTruncated?: boolean;
+    };
+
+export function parseHostLine(line: string): {
+  v1Ready?: boolean;
+  v2?: HostV2Frame;
+  v1?: ReturnType<typeof decodeHostResponse>;
+} {
+  const j = JSON.parse(line) as Record<string, unknown>;
+  if (j && j.v === 2 && typeof j.type === 'string') return { v2: j as unknown as HostV2Frame };
+  if (j && j.ready === true) return { v1Ready: true };
+  return { v1: decodeHostResponse(line) };
+}
+
+export function decodeHostResponse(line: string): {
+  id: string;
+  stdout: Buffer;
+  stderr: Buffer;
+  exitCode: number;
+  ready?: boolean;
+} {
+  const j = JSON.parse(line) as {
+    id?: string;
+    stdoutB64?: string;
+    stderrB64?: string;
+    exitCode?: number;
+    ready?: boolean;
+  };
+  const n = Number(j.exitCode);
+  return {
+    id: j.id ?? '',
+    stdout: Buffer.from(j.stdoutB64 ?? '', 'base64'),
+    stderr: Buffer.from(j.stderrB64 ?? '', 'base64'),
+    exitCode: Number.isFinite(n) ? n : 0,
+    ready: j.ready === true,
+  };
+}
+
+/**
+ * One resident selected PowerShell process. Frames are UTF-8 JSON lines;
+ * command stdout/stderr come back as base64 so Windows PowerShell 5.1's
+ * UTF-16LE pipe encoding cannot scramble the payload.
+ */
+export class PowerShellHost {
+  private proc: ChildProcess | null = null;
+  private stdoutBuf = Buffer.alloc(0);
+  private queuedLines: string[] = [];
+  private waiters: Array<{
+    resolve: (line: string) => void;
+    reject: (err: Error) => void;
+  }> = [];
+  private stderrChunks: Buffer[] = [];
+  private nativeCapture: {
+    id: string;
+    needle: Buffer;
+    mode: HostStreamMode;
+    limit: number;
+    tail: Buffer;
+    spoolPath?: string;
+    spoolFd?: number;
+    bytesWritten: number;
+    bytesSeen: number;
+    ioError?: NativeStderrSpoolError;
+    resolve: (value: { bytesSeen: number }) => void;
+    reject: (reason: Error) => void;
+    timer: NodeJS.Timeout;
+  } | null = null;
+  private closeCode: number | null | undefined;
+  private closeErr: Error | null = null;
+  private closed = false;
+  private startLock: Promise<void> | null = null;
+  private invokeLock: Promise<unknown> = Promise.resolve();
+  protocol: 1 | 2 = 1;
+
+  constructor(
+    private readonly hostFile: string,
+    private readonly envFn: () => NodeJS.ProcessEnv,
+    private readonly powerShell: PowerShellSelection = resolvePowerShell(),
+    private readonly nativeSpoolWrite: NativeSpoolWriter = (fd, buffer, offset, length) =>
+      writeSync(fd, buffer, offset, length),
+  ) {}
+
+  /** Start the resident process and wait for the ready handshake (B1 prewarm). */
+  async ready(): Promise<HostInvokeResult | null> {
+    return this.ensureStarted();
+  }
+
+  async invoke(
+    script: string,
+    env: HostRequestEnv,
+    timeoutMs: number,
+    signal?: AbortSignal,
+    limits?: HostOutputLimits,
+  ): Promise<HostInvokeResult> {
+    const run = this.invokeLock.then(() =>
+      this.invokeSerial(script, env, timeoutMs, signal, limits),
+    );
+    this.invokeLock = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  drainNativeStderr(): Buffer {
+    if (!this.stderrChunks.length) return Buffer.alloc(0);
+    const b = Buffer.concat(this.stderrChunks);
+    this.stderrChunks = [];
+    return b;
+  }
+
+  async stop(): Promise<void> {
+    this.cancelNativeCapture();
+    const proc = this.proc;
+    this.proc = null;
+    this.closed = true;
+    this.failWaiters(new Error('fauxnix: PowerShell host stopped'));
+    if (!proc) return;
+    try {
+      proc.stdin?.end();
+    } catch {
+      /* ignore */
+    }
+    try {
+      proc.kill();
+    } catch {
+      /* ignore */
+    }
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, 2000);
+      proc.once('close', () => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+  }
+
+  private cancelledResult(): HostInvokeResult {
+    return {
+      stdout: Buffer.alloc(0),
+      stderr: Buffer.alloc(0),
+      exitCode: 130,
+      timedOut: false,
+      cancelled: true,
+      truncated: false,
+    };
+  }
+
+  private async invokeSerial(
+    script: string,
+    env: HostRequestEnv,
+    timeoutMs: number,
+    signal?: AbortSignal,
+    limits?: HostOutputLimits,
+  ): Promise<HostInvokeResult> {
+    if (signal?.aborted) {
+      await this.stop();
+      return this.cancelledResult();
+    }
+
+    // Startup is part of the caller's deadline. A cold host must not send a
+    // command after its caller has already cancelled or exhausted its budget.
+    const deadline = Date.now() + timeoutMs;
+    let startupTimer: NodeJS.Timeout | undefined;
+    let onStartupAbort: (() => void) | undefined;
+    const interrupted = new Promise<'cancelled' | 'timed_out'>((resolve) => {
+      startupTimer = setTimeout(() => resolve('timed_out'), Math.max(0, timeoutMs));
+      onStartupAbort = () => resolve('cancelled');
+      signal?.addEventListener('abort', onStartupAbort, { once: true });
+      if (signal?.aborted) resolve('cancelled');
+    });
+    let started: HostInvokeResult | null | 'cancelled' | 'timed_out';
+    try {
+      started = await Promise.race([this.ensureStarted(), interrupted]);
+    } finally {
+      clearTimeout(startupTimer);
+      if (onStartupAbort) signal?.removeEventListener('abort', onStartupAbort);
+    }
+    if (started === 'cancelled' || signal?.aborted) {
+      await this.stop();
+      return this.cancelledResult();
+    }
+    if (started === 'timed_out' || Date.now() >= deadline) {
+      await this.stop();
+      return {
+        stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), exitCode: 124,
+        timedOut: true, cancelled: false, truncated: false,
+      };
+    }
+    if (started) return { ...started, cancelled: false, truncated: false };
+
+    const id = 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const resolvedLimits: HostOutputLimits = { ...limits };
+    if (resolvedLimits.stdoutMode === 'spool') {
+      resolvedLimits.stdoutSpoolPath = this.hostFile + '.' + id + '.stdout';
+    }
+    if (resolvedLimits.stderrMode === 'spool') {
+      resolvedLimits.stderrSpoolPath = this.hostFile + '.' + id + '.stderr';
+    }
+    if (resolvedLimits.stderrMode !== 'discard') {
+      resolvedLimits.nativeStderrSpoolPath = this.hostFile + '.' + id + '.native-stderr';
+    }
+    const nativeSpoolDir = this.hostFile + '.' + id + '.native';
+    const requestEnv = { ...env, FAUXNIX_NATIVE_SPOOL_DIR: nativeSpoolDir };
+    const line = encodeHostRequest(
+      id,
+      script,
+      requestEnv,
+      this.protocol === 2
+        ? {
+            v: 2,
+            ...resolvedLimits,
+          }
+        : undefined,
+    );
+    try {
+      this.proc!.stdin!.write(line + '\n');
+    } catch (e) {
+      await this.deadRestart();
+      rmSync(nativeSpoolDir, { recursive: true, force: true });
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: Buffer.from('fauxnix: powershell host exited unexpectedly\n', 'utf8'),
+        exitCode: 1,
+        timedOut: false,
+        cancelled: false,
+        truncated: false,
+        spawnMessage: (e as Error).message,
+        infrastructureError: true,
+      };
+    }
+
+    let cancelled = false;
+    const onAbort = () => {
+      cancelled = true;
+      void this.stop();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      if (this.protocol === 2) {
+        return await this.collectV2(id, Math.max(0, deadline - Date.now()), resolvedLimits);
+      }
+      const raw = await this.nextJsonLine(Math.max(0, deadline - Date.now()), id);
+      const msg = decodeHostResponse(raw);
+      const native = this.drainNativeStderr();
+      return {
+        stdout: msg.stdout,
+        stderr: msg.stderr,
+        nativeStderr: native,
+        exitCode: msg.exitCode,
+        timedOut: false,
+        cancelled: false,
+        truncated: false,
+      };
+    } catch (e) {
+      const timedOut = (e as { timedOut?: boolean }).timedOut === true;
+      const wasCancelled = cancelled || signal?.aborted === true;
+      const nativeSpoolError = e instanceof NativeStderrSpoolError ? e : null;
+      await this.stop();
+      this.drainNativeStderr();
+      this.removeRequestSpools(resolvedLimits);
+      if (wasCancelled) return this.cancelledResult();
+      if (timedOut) {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr: Buffer.alloc(0),
+          exitCode: 124,
+          timedOut: true,
+          cancelled: false,
+          truncated: false,
+        };
+      }
+      if (nativeSpoolError) {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr: Buffer.from(nativeSpoolError.message + '\n', 'utf8'),
+          infrastructureError: true,
+          exitCode: 1,
+          timedOut: false,
+          cancelled: false,
+          truncated: false,
+        };
+      }
+      if (this.closeErr && (this.closeErr as NodeJS.ErrnoException).code === 'ENOENT') {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr: Buffer.from(powerShellMissingMessage(this.powerShell), 'utf8'),
+          exitCode: 127,
+          timedOut: false,
+          cancelled: false,
+          truncated: false,
+          spawnError: 'ENOENT',
+        };
+      }
+      const code = this.closeCode ?? 1;
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: Buffer.from(
+          'fauxnix: powershell host exited unexpectedly' +
+            (code !== 1 ? ' (exit ' + String(code) + ')' : '') +
+            '\n',
+          'utf8',
+        ),
+        exitCode: code === 0 ? 1 : code,
+        infrastructureError: true,
+        timedOut: false,
+        cancelled: false,
+        truncated: false,
+      };
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+      try {
+        rmSync(nativeSpoolDir, { recursive: true, force: true });
+      } catch {
+        /* best effort; never mask the request result */
+      }
+    }
+  }
+
+  private async ensureStarted(): Promise<HostInvokeResult | null> {
+    if (this.powerShell.error) {
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: Buffer.from(this.powerShell.error + '\n', 'utf8'),
+        exitCode: 127,
+        timedOut: false,
+        cancelled: false,
+        truncated: false,
+        spawnError: 'START',
+        spawnMessage: this.powerShell.error,
+      };
+    }
+    if (this.proc && !this.closed) return null;
+    if (!this.startLock) this.startLock = this.start();
+    try {
+      await this.startLock;
+      return null;
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr: Buffer.from(powerShellMissingMessage(this.powerShell), 'utf8'),
+          exitCode: 127,
+          timedOut: false,
+          cancelled: false,
+          truncated: false,
+          spawnError: 'ENOENT',
+        };
+      }
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: Buffer.from(
+          'fauxnix: failed to start ' + this.powerShell.executable + ': ' + err.message + '\n',
+          'utf8',
+        ),
+        exitCode: 127,
+        timedOut: false,
+        cancelled: false,
+        truncated: false,
+        spawnError: 'START',
+        spawnMessage: err.message,
+      };
+    } finally {
+      this.startLock = null;
+    }
+  }
+
+  private async deadRestart(): Promise<void> {
+    await this.stop();
+    this.closed = false;
+    this.closeCode = undefined;
+    this.closeErr = null;
+    this.stdoutBuf = Buffer.alloc(0);
+    this.queuedLines = [];
+    this.stderrChunks = [];
+  }
+
+  private async start(): Promise<void> {
+    await this.deadRestart();
+    this.closed = false;
+    writeFileSync(this.hostFile, '\ufeff' + hostBootstrapScript(), 'utf8');
+    const child = spawn(this.powerShell.executable, [...POWERSHELL_ARGS, '-File', this.hostFile], {
+      env: this.envFn(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    this.proc = child;
+    child.stdin!.on('error', (e) => {
+      // A closed host input pipe reports EPIPE asynchronously; write()'s
+      // try/catch cannot contain it. Fail this request through the normal
+      // dead-host path and leave the next invocation free to start again.
+      if (this.proc !== child) return;
+      this.closeErr = e;
+      this.closed = true;
+      this.failWaiters(e);
+      this.cancelNativeCapture();
+    });
+    child.stdout!.on('data', (d: Buffer) => {
+      if (this.proc !== child) return;
+      this.onStdout(d);
+    });
+    child.stderr!.on('data', (d: Buffer) => {
+      if (this.proc !== child) return;
+      this.onNativeStderr(d);
+    });
+    child.on('error', (e) => {
+      if (this.proc !== child) return;
+      this.closeErr = e;
+      this.closed = true;
+      this.failWaiters(e);
+      this.cancelNativeCapture();
+    });
+    child.on('close', (c) => {
+      if (this.proc !== child) return;
+      this.closeCode = c;
+      this.closed = true;
+      this.proc = null;
+      this.failWaiters(new Error('fauxnix: powershell host closed'));
+      this.cancelNativeCapture();
+    });
+    try {
+      const readyLine = await this.nextReadyLine(READY_TIMEOUT_MS);
+      const parsed = parseHostLine(readyLine);
+      if (parsed.v2?.type === 'ready') this.protocol = 2;
+      else if (parsed.v1Ready || decodeHostResponse(readyLine).ready) this.protocol = 1;
+      else throw new Error('fauxnix: powershell host handshake failed');
+    } catch (e) {
+      await this.stop();
+      throw e;
+    }
+  }
+
+  private onStdout(chunk: Buffer): void {
+    this.stdoutBuf = Buffer.concat([this.stdoutBuf, chunk]);
+    while (true) {
+      const i = this.stdoutBuf.indexOf(0x0a);
+      if (i < 0) break;
+      let line = this.stdoutBuf.subarray(0, i);
+      this.stdoutBuf = this.stdoutBuf.subarray(i + 1);
+      if (line.length && line[line.length - 1] === 0x0d) line = line.subarray(0, line.length - 1);
+      const s = line.toString('utf8').replace(/^\uFEFF/, '');
+      const w = this.waiters.shift();
+      if (w) w.resolve(s);
+      else this.queuedLines.push(s);
+    }
+  }
+
+  private nextLine(timeoutMs: number): Promise<string> {
+    if (this.queuedLines.length) return Promise.resolve(this.queuedLines.shift()!);
+    if (this.closed) {
+      return Promise.reject(this.closeErr ?? new Error('fauxnix: powershell host closed'));
+    }
+    return new Promise<string>((resolve, reject) => {
+      const waiter = {
+        resolve: (line: string) => {
+          clearTimeout(timer);
+          resolve(line);
+        },
+        reject: (err: Error) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      };
+      const timer = setTimeout(() => {
+        const idx = this.waiters.indexOf(waiter);
+        if (idx >= 0) this.waiters.splice(idx, 1);
+        const err = new Error('fauxnix: powershell host timed out') as Error & { timedOut: boolean };
+        err.timedOut = true;
+        reject(err);
+      }, timeoutMs);
+      this.waiters.push(waiter);
+    });
+  }
+
+  private async nextReadyLine(timeoutMs: number): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const line = await this.nextLine(Math.max(1, deadline - Date.now()));
+      if (!line.trim()) continue;
+      try {
+        const parsed = parseHostLine(line);
+        if (parsed.v2?.type === 'ready' || parsed.v1Ready) return line;
+        if (parsed.v1?.ready) return line;
+      } catch {
+        /* skip PS boot noise */
+      }
+    }
+    const err = new Error('fauxnix: powershell host handshake timed out') as Error & {
+      timedOut: boolean;
+    };
+    err.timedOut = true;
+    throw err;
+  }
+
+  private async nextJsonLine(timeoutMs: number, id: string): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const line = await this.nextLine(Math.max(1, deadline - Date.now()));
+      if (!line.trim()) continue;
+      try {
+        const msg = decodeHostResponse(line);
+        if (msg.ready) continue;
+        if (msg.id === id) return line;
+      } catch {
+        /* skip noise */
+      }
+    }
+    const err = new Error('fauxnix: powershell host timed out') as Error & { timedOut: boolean };
+    err.timedOut = true;
+    throw err;
+  }
+
+  private async collectV2(
+    id: string,
+    timeoutMs: number,
+    limits?: HostOutputLimits,
+  ): Promise<HostInvokeResult> {
+    const deadline = Date.now() + timeoutMs;
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let outSeq = 0;
+    let errSeq = 0;
+    let end: Extract<HostV2Frame, { type: 'end' }> | null = null;
+    const nativePromise = this.beginNativeCapture(
+      id,
+      limits?.stderrMode ?? 'capture',
+      limits?.stderrLimit ?? DEFAULT_STDERR_LIMIT,
+      limits?.nativeStderrSpoolPath,
+      timeoutMs,
+    );
+    // collectV2 can leave through a frame timeout before it reaches the await
+    // below. Attach a handler immediately so teardown never reports a stray
+    // promise rejection; the awaited path still receives the same failure.
+    void nativePromise.catch(() => undefined);
+    while (!end) {
+      const line = await this.nextLine(Math.max(1, deadline - Date.now()));
+      if (!line.trim()) continue;
+      let parsed: ReturnType<typeof parseHostLine>;
+      try {
+        parsed = parseHostLine(line);
+      } catch {
+        continue;
+      }
+      const f = parsed.v2;
+      if (!f) continue;
+      if (f.type === 'stdout' && f.id === id) {
+        if (f.seq !== outSeq) throw new Error('fauxnix: host stdout seq gap');
+        out.push(Buffer.from(f.dataB64 ?? '', 'base64'));
+        outSeq++;
+      } else if (f.type === 'stderr' && f.id === id) {
+        if (f.seq !== errSeq) throw new Error('fauxnix: host stderr seq gap');
+        err.push(Buffer.from(f.dataB64 ?? '', 'base64'));
+        errSeq++;
+      } else if (f.type === 'end' && f.id === id) {
+        end = f;
+      }
+    }
+    // The end frame and native marker arrive on independent pipes. Finishing
+    // stdout does not complete the request: cancellation, pipe failure and
+    // the original deadline still apply while native stderr is pending.
+    // Let invokeSerial handle failures so it also removes partial spools.
+    const { bytesSeen: nativeBytes } = await nativePromise;
+    const capturedErr = Buffer.from(Buffer.concat(err));
+    let native = Buffer.alloc(0);
+    let nativeTruncated = false;
+    const nativeSpool = limits?.nativeStderrSpoolPath;
+    if ((limits?.stderrMode ?? 'capture') === 'capture' && nativeSpool && nativeBytes > 0) {
+      const remaining = Math.max(
+        0,
+        (limits?.stderrLimit ?? DEFAULT_STDERR_LIMIT) - capturedErr.length,
+      );
+      const clipped = this.readUtf8Prefix(nativeSpool, remaining, nativeBytes);
+      native = Buffer.from(clipped.data);
+      nativeTruncated = clipped.truncated;
+      rmSync(nativeSpool, { force: true });
+    }
+    const n = Number(end.exitCode);
+    return {
+      stdout: Buffer.from(Buffer.concat(out)),
+      stderr: capturedErr,
+      nativeStderr: native,
+      exitCode: Number.isFinite(n) ? n : 0,
+      timedOut: end.timedOut === true,
+      cancelled: end.cancelled === true,
+      truncated: end.truncated === true || nativeTruncated,
+      stdoutTruncated: end.stdoutTruncated === true,
+      stderrTruncated: end.stderrTruncated === true || nativeTruncated,
+      stdoutSpool: limits?.stdoutSpoolPath,
+      stderrSpool: limits?.stderrSpoolPath,
+      nativeStderrSpool:
+        limits?.stderrMode === 'spool' && nativeBytes > 0 ? nativeSpool : undefined,
+    };
+  }
+
+  private beginNativeCapture(
+    id: string,
+    mode: HostStreamMode,
+    limit: number,
+    spoolPath: string | undefined,
+    timeoutMs: number,
+  ): Promise<{ bytesSeen: number }> {
+    this.cancelNativeCapture();
+    return new Promise<{ bytesSeen: number }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.nativeCapture?.id !== id) return;
+        const state = this.nativeCapture;
+        const failure = state.ioError ?? Object.assign(
+          new Error('fauxnix: native stderr marker timed out'),
+          { timedOut: true },
+        );
+        this.closeNativeSpool(state);
+        this.nativeCapture = null;
+        reject(failure);
+      }, timeoutMs);
+      this.nativeCapture = {
+        id,
+        needle: Buffer.from('FAUXNIX_ERR_END:' + id + '\n', 'utf8'),
+        mode,
+        limit: Math.max(0, limit),
+        tail: Buffer.alloc(0),
+        spoolPath,
+        bytesWritten: 0,
+        bytesSeen: 0,
+        resolve,
+        reject,
+        timer,
+      };
+      if (this.stderrChunks.length) {
+        const pending = Buffer.concat(this.stderrChunks);
+        this.stderrChunks = [];
+        this.onNativeStderr(pending);
+      }
+    });
+  }
+
+  private appendNativePayload(
+    state: NonNullable<PowerShellHost['nativeCapture']>,
+    data: Buffer,
+  ): void {
+    if (!data.length) return;
+    state.bytesSeen += data.length;
+    if (state.ioError || state.mode === 'discard') return;
+    let retained = data;
+    if (state.mode === 'capture') {
+      const remaining = Math.max(0, state.limit + 3 - state.bytesWritten);
+      retained = data.subarray(0, remaining);
+    }
+    if (!retained.length) return;
+    if (state.spoolFd === undefined) {
+      if (!state.spoolPath) return;
+      try {
+        state.spoolFd = openSync(state.spoolPath, 'w');
+      } catch (e) {
+        state.ioError = new NativeStderrSpoolError('open', state.spoolPath, e);
+        return;
+      }
+    }
+    try {
+      let offset = 0;
+      while (offset < retained.length) {
+        const remaining = retained.length - offset;
+        const written = this.nativeSpoolWrite(state.spoolFd, retained, offset, remaining);
+        if (!Number.isInteger(written) || written <= 0 || written > remaining) {
+          throw new Error('short write to native stderr spool');
+        }
+        offset += written;
+        state.bytesWritten += written;
+      }
+    } catch (e) {
+      state.ioError = new NativeStderrSpoolError('write', state.spoolPath, e);
+      this.closeNativeSpool(state);
+    }
+  }
+
+  private onNativeStderr(chunk: Buffer): void {
+    const state = this.nativeCapture;
+    if (!state) {
+      // Startup/teardown noise is diagnostic only. Keep a bounded tail so a
+      // noisy host cannot grow the resident Node process indefinitely.
+      const max = DEFAULT_STDERR_LIMIT;
+      const combined = Buffer.concat([...this.stderrChunks, chunk]);
+      this.stderrChunks = [Buffer.from(combined.subarray(Math.max(0, combined.length - max)))];
+      return;
+    }
+    const combined = state.tail.length ? Buffer.concat([state.tail, chunk]) : chunk;
+    const idx = combined.indexOf(state.needle);
+    if (idx >= 0) {
+      this.appendNativePayload(state, combined.subarray(0, idx));
+      const after = combined.subarray(idx + state.needle.length);
+      const ioError = state.ioError;
+      clearTimeout(state.timer);
+      this.closeNativeSpool(state);
+      this.nativeCapture = null;
+      if (after.length) this.onNativeStderr(after);
+      if (ioError) state.reject(ioError);
+      else state.resolve({ bytesSeen: state.bytesSeen });
+      return;
+    }
+    const keep = Math.min(state.needle.length - 1, combined.length);
+    const emit = combined.length - keep;
+    if (emit > 0) this.appendNativePayload(state, combined.subarray(0, emit));
+    state.tail = Buffer.from(combined.subarray(emit));
+  }
+
+  private cancelNativeCapture(): void {
+    const state = this.nativeCapture;
+    if (!state) return;
+    clearTimeout(state.timer);
+    this.appendNativePayload(state, state.tail);
+    const ioError = state.ioError;
+    this.closeNativeSpool(state);
+    this.nativeCapture = null;
+    state.reject(ioError ?? new Error('fauxnix: native stderr capture cancelled'));
+  }
+
+  private closeNativeSpool(state: NonNullable<PowerShellHost['nativeCapture']>): void {
+    if (state.spoolFd === undefined) return;
+    try {
+      closeSync(state.spoolFd);
+    } catch {
+      /* already closed */
+    }
+    state.spoolFd = undefined;
+  }
+
+  private readUtf8Prefix(
+    file: string,
+    limit: number,
+    totalBytes = statSync(file).size,
+  ): { data: Buffer; truncated: boolean } {
+    const size = statSync(file).size;
+    const wanted = Math.min(size, Math.max(0, limit) + 3);
+    const buf = Buffer.alloc(wanted);
+    if (wanted > 0) {
+      const fd = openSync(file, 'r');
+      try {
+        let offset = 0;
+        while (offset < wanted) {
+          const n = readSync(fd, buf, offset, wanted - offset, offset);
+          if (n <= 0) break;
+          offset += n;
+        }
+      } finally {
+        closeSync(fd);
+      }
+    }
+    let use = Math.min(limit, buf.length);
+    if (use < buf.length && use > 0 && (buf[use] & 0xc0) === 0x80) {
+      while (use > 0 && (buf[use] & 0xc0) === 0x80) use--;
+    }
+    return { data: Buffer.from(buf.subarray(0, use)), truncated: totalBytes > use };
+  }
+
+  private removeRequestSpools(limits: HostOutputLimits): void {
+    for (const file of [
+      limits.stdoutSpoolPath,
+      limits.stderrSpoolPath,
+      limits.nativeStderrSpoolPath,
+    ]) {
+      if (!file) continue;
+      try {
+        rmSync(file, { force: true });
+      } catch {
+        /* best effort; preserve the original transport error */
+      }
+    }
+  }
+
+  private failWaiters(err: Error): void {
+    const ws = this.waiters.splice(0);
+    for (const w of ws) {
+      try {
+        w.reject(err);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}

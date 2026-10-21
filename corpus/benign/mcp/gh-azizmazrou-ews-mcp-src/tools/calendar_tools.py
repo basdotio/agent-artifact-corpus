@@ -1,0 +1,1075 @@
+"""Calendar operation tools for EWS MCP Server."""
+
+import logging
+from typing import Any, Dict, Optional
+from datetime import datetime, timedelta
+from exchangelib import CalendarItem, Mailbox, Attendee, EWSTimeZone
+
+from .base import BaseTool
+from ..models import CreateAppointmentRequest, MeetingResponse
+from ..exceptions import ToolExecutionError, ValidationError
+from ..utils import format_success_response, safe_get, parse_datetime_tz_aware, make_tz_aware, format_datetime, ews_id_to_str, attach_inline_files, INLINE_ATTACHMENTS_SCHEMA, get_timezone as get_configured_timezone
+
+
+def build_free_busy_accounts(email_addresses):
+    """Build exchangelib free/busy account tuples."""
+    return [(email, "Required", False) for email in email_addresses]
+
+
+def _extract_merged(busy_info: Any) -> Optional[str]:
+    """Return the merged free/busy string for a FreeBusyView.
+
+    exchangelib's ``FreeBusyView`` exposes the merged string under ``.merged``.
+    Some earlier code (and callers) used the attribute name
+    ``merged_free_busy`` which is never populated by exchangelib; reading it
+    directly returns ``None`` and makes every slot look unavailable. We
+    accept both attributes here so behaviour stays correct if exchangelib
+    adds or renames an attribute upstream.
+    """
+    if busy_info is None:
+        return None
+    merged = safe_get(busy_info, "merged", None)
+    if merged:
+        return merged
+    # Fall back to the legacy/alternate name some external code may expose.
+    merged_alt = safe_get(busy_info, "merged_free_busy", None)
+    return merged_alt or None
+
+
+def get_timezone():
+    """Compatibility shim retained for older tests."""
+    return None
+
+
+def format_free_busy_datetime(dt):
+    """Format free/busy datetimes in the configured local timezone.
+
+    Exchange free/busy responses may contain naive UTC datetimes. Convert those
+    explicitly so user-facing output matches the requested mailbox timezone.
+    """
+    if dt is None:
+        return None
+    if getattr(dt, "tzinfo", None) is None:
+        dt = dt.replace(tzinfo=EWSTimeZone("UTC"))
+    return dt.astimezone(get_configured_timezone()).isoformat()
+
+
+FREE_BUSY_LABELS = {
+    "0": "Free",
+    "1": "Tentative",
+    "2": "Busy",
+    "3": "OutOfOffice",
+    "4": "NoData",
+}
+
+
+def build_slot_summaries(start_time, interval_minutes, merged_free_busy):
+    """Expand merged free/busy codes into explicit local-time slots."""
+    slots = []
+    current = start_time
+    for code in merged_free_busy or "":
+        slot_end = current + timedelta(minutes=interval_minutes)
+        label = FREE_BUSY_LABELS.get(code, "Unknown")
+        slots.append({
+            "start": current.isoformat(),
+            "end": slot_end.isoformat(),
+            "code": code,
+            "label": label,
+            "is_blocking": code in {"2", "3", "4"},
+        })
+        current = slot_end
+    return slots
+
+
+def parse_display_datetime(dt_str):
+    """Parse the raw user-supplied datetime while preserving its explicit offset."""
+    return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+
+
+def summarize_availability(merged_free_busy, calendar_events):
+    """Return a compact summary that is easier for LLMs and clients to interpret."""
+    codes = set(merged_free_busy or "")
+    busy_types = {str(safe_get(event, "busy_type", "")) for event in calendar_events or []}
+
+    if "3" in codes:
+        primary = "out_of_office"
+    elif "2" in codes:
+        primary = "busy"
+    elif "4" in codes:
+        primary = "no_data"
+    elif "WorkingElsewhere" in busy_types:
+        primary = "working_elsewhere"
+    elif "1" in codes:
+        primary = "tentative"
+    else:
+        primary = "free"
+
+    return {
+        "primary_status": primary,
+        "is_fully_free": codes <= {"0"} if merged_free_busy is not None else False,
+        "has_busy": "2" in codes,
+        "has_tentative": "1" in codes,
+        "has_out_of_office": "3" in codes,
+        "has_no_data": "4" in codes,
+        "has_working_elsewhere": "WorkingElsewhere" in busy_types,
+    }
+
+
+class CreateAppointmentTool(BaseTool):
+    """Tool for creating calendar appointments."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "create_appointment",
+            "description": "Create a calendar appointment or meeting with attendees.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject": {
+                        "type": "string",
+                        "description": "Appointment subject"
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "Start time (ISO 8601 format)"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "End time (ISO 8601 format)"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Meeting location (optional)"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Appointment body (optional)"
+                    },
+                    "attendees": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Attendee email addresses (optional)"
+                    },
+                    "is_all_day": {
+                        "type": "boolean",
+                        "description": "All day event (optional)",
+                        "default": False
+                    },
+                    "reminder_minutes": {
+                        "type": "integer",
+                        "description": "Reminder minutes before (optional)",
+                        "default": 15
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Outlook categories to attach to the appointment "
+                            "(Issue #114). Strings; matched case-insensitively "
+                            "against the user's category list."
+                        )
+                    },
+                    **INLINE_ATTACHMENTS_SCHEMA,
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["subject", "start_time", "end_time"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Create calendar appointment."""
+        # Parse datetime strings as timezone-aware
+        kwargs["start_time"] = parse_datetime_tz_aware(kwargs["start_time"])
+        kwargs["end_time"] = parse_datetime_tz_aware(kwargs["end_time"])
+
+        # Validate input
+        request = self.validate_input(CreateAppointmentRequest, **kwargs)
+
+        try:
+            target_mailbox = kwargs.get("target_mailbox")
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Create calendar item
+            item = CalendarItem(
+                account=account,
+                folder=account.calendar,
+                subject=request.subject,
+                start=request.start_time,
+                end=request.end_time,
+                is_all_day=request.is_all_day
+            )
+
+            # Set optional fields
+            if request.location:
+                item.location = request.location
+
+            if request.body:
+                item.body = request.body
+
+            if request.reminder_minutes is not None:
+                item.reminder_is_set = True
+                item.reminder_minutes_before_start = request.reminder_minutes
+
+            # Add attendees
+            if request.attendees:
+                item.required_attendees = [
+                    Attendee(mailbox=Mailbox(email_address=email))
+                    for email in request.attendees
+                ]
+
+            # Issue #114 — Outlook categories on the appointment.
+            cats = kwargs.get("categories")
+            if cats:
+                item.categories = list(cats)
+
+            # Add inline (base64) attachments if provided
+            inline_count = attach_inline_files(item, kwargs.get("inline_attachments", []))
+            if inline_count > 0:
+                self.logger.info(f"Added {inline_count} inline (base64) attachment(s) to appointment")
+
+            # Save the appointment
+            item.save()
+
+            self.logger.info(f"Created appointment: {request.subject}")
+
+            return format_success_response(
+                "Appointment created successfully",
+                item_id=ews_id_to_str(item.id) if hasattr(item, "id") else None,
+                subject=request.subject,
+                start_time=request.start_time.isoformat(),
+                end_time=request.end_time.isoformat(),
+                mailbox=mailbox
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to create appointment: {e}")
+            raise ToolExecutionError(f"Failed to create appointment: {e}")
+
+
+class GetCalendarTool(BaseTool):
+    """Tool for retrieving calendar events."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "get_calendar",
+            "description": "Retrieve calendar events for a date range.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date (ISO 8601 format, optional, defaults to today)"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date (ISO 8601 format, optional, overrides days_ahead)"
+                    },
+                    "days_ahead": {
+                        "type": "integer",
+                        "description": "Number of days ahead to retrieve (default: 7, max: 90)",
+                        "default": 7,
+                        "minimum": 1,
+                        "maximum": 90
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of events to retrieve",
+                        "default": 50,
+                        "maximum": 1000
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                }
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Get calendar events."""
+        try:
+            target_mailbox = kwargs.get("target_mailbox")
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Parse dates as timezone-aware
+            start_date = kwargs.get("start_date")
+            if start_date:
+                start_date = parse_datetime_tz_aware(start_date)
+            else:
+                start_date = make_tz_aware(datetime.now())
+
+            end_date_raw = kwargs.get("end_date")
+            if end_date_raw:
+                end_date = parse_datetime_tz_aware(end_date_raw)
+                # If the caller supplied a date-only string (no 'T'), treat it
+                # as "the whole of that day" by extending through the next
+                # midnight. Previously we did this whenever the parsed time
+                # happened to be exactly 00:00:00, which over-collected events
+                # whenever someone deliberately requested a midnight boundary.
+                if end_date is not None and isinstance(end_date_raw, str) and "T" not in end_date_raw:
+                    end_date = end_date + timedelta(days=1)
+            else:
+                # Use days_ahead parameter (default: 7, max: 90)
+                days_ahead = kwargs.get("days_ahead", 7)
+                # Enforce maximum of 90 days
+                days_ahead = min(max(1, days_ahead), 90)
+                end_date = start_date + timedelta(days=days_ahead)
+
+            max_results = kwargs.get("max_results", 50)
+
+            # Query calendar - use only() to fetch specific fields and avoid timezone parsing warnings
+            items = account.calendar.view(
+                start=start_date,
+                end=end_date
+            ).only(
+                'id', 'subject', 'start', 'end', 'location',
+                'organizer', 'is_all_day', 'required_attendees'
+            ).order_by('start')
+
+            # Format events
+            events = []
+            for item in items[:max_results]:
+                # Get organizer email safely
+                organizer = safe_get(item, "organizer", None)
+                organizer_email = ""
+                if organizer and hasattr(organizer, "email_address"):
+                    organizer_email = organizer.email_address or ""
+
+                # Get attendees safely - filter out None values
+                required_attendees = safe_get(item, "required_attendees", []) or []
+                attendee_emails = [
+                    att.mailbox.email_address
+                    for att in required_attendees
+                    if att and hasattr(att, "mailbox") and att.mailbox and hasattr(att.mailbox, "email_address") and att.mailbox.email_address
+                ]
+
+                event_data = {
+                    "item_id": ews_id_to_str(safe_get(item, "id", None)) or "unknown",
+                    "subject": safe_get(item, "subject", "") or "",
+                    "start": safe_get(item, "start", datetime.now()).isoformat(),
+                    "end": safe_get(item, "end", datetime.now()).isoformat(),
+                    "location": safe_get(item, "location", "") or "",
+                    "organizer": organizer_email,
+                    "is_all_day": safe_get(item, "is_all_day", False),
+                    "attendees": attendee_emails
+                }
+                events.append(event_data)
+
+            self.logger.info(f"Retrieved {len(events)} calendar events")
+
+            return format_success_response(
+                f"Retrieved {len(events)} events",
+                events=events,
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+                mailbox=mailbox
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to get calendar: {e}")
+            raise ToolExecutionError(f"Failed to get calendar: {e}")
+
+
+class UpdateAppointmentTool(BaseTool):
+    """Tool for updating calendar appointments."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "update_appointment",
+            "description": "Update an existing calendar appointment.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item_id": {
+                        "type": "string",
+                        "description": "Appointment item ID"
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "New subject (optional)"
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "New start time (ISO 8601 format, optional)"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "New end time (ISO 8601 format, optional)"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "New location (optional)"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "New body (optional)"
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Replace the appointment's Outlook categories with "
+                            "this list (Issue #114). Pass an empty list to clear."
+                        )
+                    },
+                    **INLINE_ATTACHMENTS_SCHEMA,
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["item_id"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Update appointment."""
+        item_id = kwargs.get("item_id")
+
+        try:
+            target_mailbox = kwargs.get("target_mailbox")
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Get the appointment
+            item = account.calendar.get(id=item_id)
+
+            # Update fields
+            if "subject" in kwargs:
+                item.subject = kwargs["subject"]
+
+            if "start_time" in kwargs:
+                item.start = parse_datetime_tz_aware(kwargs["start_time"])
+
+            if "end_time" in kwargs:
+                item.end = parse_datetime_tz_aware(kwargs["end_time"])
+
+            if "location" in kwargs:
+                item.location = kwargs["location"]
+
+            if "body" in kwargs:
+                item.body = kwargs["body"]
+
+            # Issue #114 — replace categories with the supplied list.
+            if "categories" in kwargs:
+                item.categories = list(kwargs["categories"] or [])
+
+            # Add inline (base64) attachments if provided
+            inline_count = attach_inline_files(item, kwargs.get("inline_attachments", []))
+            if inline_count > 0:
+                self.logger.info(f"Added {inline_count} inline (base64) attachment(s) to appointment")
+
+            # Save changes
+            item.save()
+
+            self.logger.info(f"Updated appointment {item_id}")
+
+            return format_success_response(
+                "Appointment updated successfully",
+                item_id=item_id,
+                mailbox=mailbox
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to update appointment: {e}")
+            raise ToolExecutionError(f"Failed to update appointment: {e}")
+
+
+class DeleteAppointmentTool(BaseTool):
+    """Tool for deleting calendar appointments."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "delete_appointment",
+            "description": "Delete a calendar appointment.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item_id": {
+                        "type": "string",
+                        "description": "Appointment item ID to delete"
+                    },
+                    "send_cancellation": {
+                        "type": "boolean",
+                        "description": "Send cancellation to attendees (for meetings)",
+                        "default": True
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["item_id"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Delete appointment."""
+        item_id = kwargs.get("item_id")
+        send_cancellation = kwargs.get("send_cancellation", True)
+
+        try:
+            target_mailbox = kwargs.get("target_mailbox")
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Get and delete the appointment
+            item = account.calendar.get(id=item_id)
+
+            # Check if we should send cancellation
+            required_attendees = safe_get(item, "required_attendees", []) or []
+            has_attendees = len(required_attendees) > 0
+
+            if send_cancellation and has_attendees:
+                item.cancel()
+            else:
+                item.delete()
+
+            self.logger.info(f"Deleted appointment {item_id}")
+
+            return format_success_response(
+                "Appointment deleted successfully",
+                item_id=item_id,
+                mailbox=mailbox
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to delete appointment: {e}")
+            raise ToolExecutionError(f"Failed to delete appointment: {e}")
+
+
+class RespondToMeetingTool(BaseTool):
+    """Tool for responding to meeting invitations."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "respond_to_meeting",
+            "description": "Respond to a meeting invitation (accept, tentative, or decline).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item_id": {
+                        "type": "string",
+                        "description": "Meeting invitation item ID"
+                    },
+                    "response": {
+                        "type": "string",
+                        "enum": ["Accept", "Tentative", "Decline"],
+                        "description": "Response type"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Optional response message"
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["item_id", "response"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Respond to meeting invitation."""
+        item_id = kwargs.get("item_id")
+        response = kwargs.get("response")
+        message = kwargs.get("message", "")
+
+        try:
+            target_mailbox = kwargs.get("target_mailbox")
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Get the meeting request
+            item = account.calendar.get(id=item_id)
+
+            # Send response
+            if response == "Accept":
+                item.accept(body=message)
+                action = "accepted"
+            elif response == "Tentative":
+                item.tentatively_accept(body=message)
+                action = "tentatively accepted"
+            elif response == "Decline":
+                item.decline(body=message)
+                action = "declined"
+            else:
+                raise ToolExecutionError(f"Invalid response: {response}")
+
+            self.logger.info(f"Meeting {item_id} {action}")
+
+            return format_success_response(
+                f"Meeting {action}",
+                item_id=item_id,
+                response=response,
+                mailbox=mailbox
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to respond to meeting: {e}")
+            raise ToolExecutionError(f"Failed to respond to meeting: {e}")
+
+
+class CheckAvailabilityTool(BaseTool):
+    """Tool for checking free/busy availability."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "check_availability",
+            "description": "Check free/busy availability for users in a time range.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "email_addresses": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of email addresses to check"
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "Start time (ISO 8601 format)"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "End time (ISO 8601 format)"
+                    },
+                    "interval_minutes": {
+                        "type": "integer",
+                        "description": "Time slot granularity in minutes",
+                        "default": 30,
+                        "minimum": 15,
+                        "maximum": 1440
+                    },
+                    "include_self": {
+                        "type": "boolean",
+                        "description": "Include the current mailbox/user in the availability check, similar to Outlook Scheduling Assistant",
+                        "default": True
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["email_addresses", "start_time", "end_time"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Check availability for users."""
+        email_addresses = kwargs.get("email_addresses", [])
+        start_time_str = kwargs.get("start_time")
+        end_time_str = kwargs.get("end_time")
+        interval_minutes = kwargs.get("interval_minutes", 30)
+        include_self = kwargs.get("include_self", True)
+
+        # Caller errors — raise ValidationError so the SSE adapter maps
+        # these to HTTP 400. Previously a missing/invalid param fell
+        # through to ToolExecutionError which surfaces as 500 (Bug #2).
+        if not email_addresses:
+            raise ValidationError("email_addresses is required and cannot be empty")
+
+        if not start_time_str or not end_time_str:
+            raise ValidationError("start_time and end_time are required")
+
+        # Parse datetimes up front and with explicit error handling so
+        # bad ISO strings don't leak through as opaque 500s.
+        try:
+            start_time = parse_datetime_tz_aware(start_time_str)
+            end_time = parse_datetime_tz_aware(end_time_str)
+            display_start_time = parse_display_datetime(start_time_str)
+        except ValueError as exc:
+            raise ValidationError(
+                f"Invalid datetime format: {exc}. Use ISO 8601 "
+                f"(e.g. '2026-04-18T08:00:00+00:00')."
+            ) from exc
+
+        if not start_time or not end_time:
+            raise ValidationError(
+                "Invalid datetime format. Use ISO 8601 "
+                "(e.g. '2026-04-18T08:00:00+00:00')."
+            )
+
+        if end_time <= start_time:
+            raise ValidationError("end_time must be after start_time")
+
+        try:
+            target_mailbox = kwargs.get("target_mailbox")
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+            normalized_emails = []
+            seen_emails = set()
+            for email in email_addresses:
+                if not email or not isinstance(email, str):
+                    continue
+                normalized = email.strip().lower()
+                if not normalized or normalized in seen_emails:
+                    continue
+                seen_emails.add(normalized)
+                normalized_emails.append(email)
+
+            current_mailbox = (
+                target_mailbox
+                if target_mailbox
+                else safe_get(account, "primary_smtp_address", None)
+            )
+            # Guard: ``primary_smtp_address`` can be None on freshly-
+            # constructed accounts or when exchangelib hasn't completed
+            # autodiscover. ``.lower()`` on None would raise AttributeError
+            # and surface as an opaque 500.
+            if include_self and isinstance(current_mailbox, str) and current_mailbox:
+                current_mailbox_normalized = current_mailbox.lower()
+                if current_mailbox_normalized not in seen_emails:
+                    seen_emails.add(current_mailbox_normalized)
+                    normalized_emails.insert(0, current_mailbox)
+
+            free_busy_accounts = build_free_busy_accounts(normalized_emails)
+            availability_data = list(account.protocol.get_free_busy_info(
+                accounts=free_busy_accounts,
+                start=start_time,
+                end=end_time,
+                merged_free_busy_interval=interval_minutes
+            ))
+
+            # exchangelib FreeBusyView exposes view_type / merged / calendar_events.
+            # Older attribute names such as free_busy_view_type or merged_free_busy
+            # are not populated, which would incorrectly make busy users appear free.
+            availability_results = []
+            for email_address, busy_info in zip(normalized_emails, availability_data):
+                result = {
+                    "email": email_address,
+                    "view_type": str(safe_get(busy_info, "view_type", None) or "DetailedMerged"),
+                    "calendar_events": []
+                }
+
+                # Add calendar event information if available
+                calendar_events = safe_get(busy_info, "calendar_events", None) or []
+                if calendar_events:
+                    for event in calendar_events:
+                        result["calendar_events"].append({
+                            "start": format_free_busy_datetime(event.start) if hasattr(event, 'start') else None,
+                            "end": format_free_busy_datetime(event.end) if hasattr(event, 'end') else None,
+                            "busy_type": str(event.busy_type) if hasattr(event, 'busy_type') else "Busy",
+                            "details": safe_get(event, 'details')
+                        })
+
+                # Add merged free/busy string if available
+                merged_free_busy = safe_get(busy_info, "merged", None)
+                if merged_free_busy is not None:
+                    result["merged_free_busy"] = merged_free_busy
+                    result["free_busy_legend"] = FREE_BUSY_LABELS
+                    result["slot_summaries"] = build_slot_summaries(
+                        start_time=display_start_time,
+                        interval_minutes=interval_minutes,
+                        merged_free_busy=merged_free_busy,
+                    )
+                    result["blocking_slots"] = [
+                        slot for slot in result["slot_summaries"] if slot["is_blocking"]
+                    ]
+                    result["non_free_slots"] = [
+                        slot for slot in result["slot_summaries"] if slot["code"] != "0"
+                    ]
+
+                result["availability_summary"] = summarize_availability(
+                    merged_free_busy=merged_free_busy,
+                    calendar_events=result["calendar_events"],
+                )
+
+                availability_results.append(result)
+
+            self.logger.info(f"Retrieved availability for {len(normalized_emails)} users")
+
+            # Extract tz offset suffix defensively — a naive datetime's
+            # isoformat() has no ``+00:00`` tail, so the old ``[-6:]``
+            # slice returned garbage. Fall back to empty string.
+            response_tz = ""
+            try:
+                iso = display_start_time.isoformat()
+                if "+" in iso[10:] or iso.endswith(("Z",)):
+                    response_tz = iso[-6:] if iso.endswith(("+00:00", "-00:00")) or "+" in iso[-6:] or "-" in iso[-6:] else ""
+            except Exception:
+                response_tz = ""
+
+            return format_success_response(
+                f"Availability retrieved for {len(normalized_emails)} user(s)",
+                availability=availability_results,
+                checked_email_addresses=normalized_emails,
+                include_self=include_self,
+                response_timezone=response_tz,
+                time_range={
+                    "start": start_time_str,
+                    "end": end_time_str,
+                    "interval_minutes": interval_minutes
+                },
+                mailbox=mailbox
+            )
+
+        except (ValidationError, ToolExecutionError):
+            raise
+        except Exception as e:
+            # Log the full exception with traceback so operators can
+            # diagnose the real upstream cause. Re-raise as
+            # ToolExecutionError (HTTP 500) — this branch is for genuine
+            # server-side failures; caller errors are handled above.
+            self.logger.exception(
+                f"check_availability failed: {type(e).__name__}: {e}"
+            )
+            raise ToolExecutionError(f"Failed to check availability: {e}")
+
+
+class FindMeetingTimesTool(BaseTool):
+    """Tool for finding optimal meeting times using AI-powered scheduling."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "find_meeting_times",
+            "description": "Find optimal meeting times based on attendee availability.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "attendees": {
+                        "type": "array",
+                        "description": "List of attendee email addresses",
+                        "items": {"type": "string"}
+                    },
+                    "duration_minutes": {
+                        "type": "integer",
+                        "description": "Meeting duration in minutes",
+                        "default": 60,
+                        "minimum": 15,
+                        "maximum": 480
+                    },
+                    "date_range_start": {
+                        "type": "string",
+                        "description": "Start of date range to search (ISO 8601 format)"
+                    },
+                    "date_range_end": {
+                        "type": "string",
+                        "description": "End of date range to search (ISO 8601 format)"
+                    },
+                    "max_suggestions": {
+                        "type": "integer",
+                        "description": "Maximum number of time suggestions",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 20
+                    },
+                    "preferences": {
+                        "type": "object",
+                        "description": "Scheduling preferences",
+                        "properties": {
+                            "prefer_morning": {"type": "boolean", "default": False},
+                            "prefer_afternoon": {"type": "boolean", "default": False},
+                            "avoid_back_to_back": {"type": "boolean", "default": True},
+                            "working_hours_only": {"type": "boolean", "default": True},
+                            "min_break_minutes": {"type": "integer", "default": 15},
+                            "earliest_hour": {"type": "integer", "default": 9, "minimum": 0, "maximum": 23},
+                            "latest_hour": {"type": "integer", "default": 17, "minimum": 0, "maximum": 23}
+                        }
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to operate on (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["attendees", "date_range_start", "date_range_end"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Find optimal meeting times."""
+        attendees = kwargs.get("attendees", [])
+        duration_minutes = kwargs.get("duration_minutes", 60)
+        date_range_start_str = kwargs.get("date_range_start")
+        date_range_end_str = kwargs.get("date_range_end")
+        max_suggestions = kwargs.get("max_suggestions", 5)
+        preferences = kwargs.get("preferences", {})
+
+        if duration_minutes < 15 or duration_minutes > 480:
+            raise ToolExecutionError("duration_minutes must be between 15 and 480")
+
+        if not attendees:
+            raise ToolExecutionError("attendees list is required")
+
+        if not date_range_start_str or not date_range_end_str:
+            raise ToolExecutionError("date_range_start and date_range_end are required")
+
+        try:
+            target_mailbox = kwargs.get("target_mailbox")
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            # Parse dates
+            start_date = parse_datetime_tz_aware(date_range_start_str)
+            end_date = parse_datetime_tz_aware(date_range_end_str)
+
+            if not start_date or not end_date:
+                raise ToolExecutionError("Invalid date format. Use ISO 8601 format.")
+
+            if end_date <= start_date:
+                raise ToolExecutionError("date_range_end must be after date_range_start")
+
+            # Extract preferences
+            prefer_morning = preferences.get("prefer_morning", False)
+            prefer_afternoon = preferences.get("prefer_afternoon", False)
+            avoid_back_to_back = preferences.get("avoid_back_to_back", True)
+            working_hours_only = preferences.get("working_hours_only", True)
+            min_break_minutes = preferences.get("min_break_minutes", 15)
+            earliest_hour = preferences.get("earliest_hour", 9)
+            latest_hour = preferences.get("latest_hour", 17)
+
+            free_busy_accounts = build_free_busy_accounts(attendees)
+            availability_data = list(account.protocol.get_free_busy_info(
+                accounts=free_busy_accounts,
+                start=start_date,
+                end=end_date,
+                merged_free_busy_interval=15  # 15-minute intervals
+            ))
+
+            # Diagnostic context useful when debugging bad suggestion output.
+            # Keep it compact so we don't flood logs at INFO.
+            if self.logger.isEnabledFor(logging.DEBUG):
+                sample_lens = [
+                    len(_extract_merged(info) or "") for info in availability_data[:3]
+                ]
+                self.logger.debug(
+                    "find_meeting_times: start=%s end=%s tz=%s attendees=%d "
+                    "availability_data=%d merged_lens_sample=%s",
+                    start_date, end_date, getattr(start_date, "tzinfo", None),
+                    len(attendees), len(availability_data), sample_lens,
+                )
+
+            # Analyze availability and find open slots
+            suggestions = []
+            current_time = start_date
+
+            while current_time < end_date and len(suggestions) < max_suggestions:
+                # Skip to next day boundary if we're past working hours
+                if working_hours_only:
+                    if current_time.hour < earliest_hour:
+                        current_time = current_time.replace(hour=earliest_hour, minute=0, second=0)
+                    elif current_time.hour >= latest_hour:
+                        current_time = (current_time + timedelta(days=1)).replace(hour=earliest_hour, minute=0, second=0)
+                        continue
+
+                # Check if this time slot works for all attendees
+                slot_end = current_time + timedelta(minutes=duration_minutes)
+
+                # Make sure we don't go past end_date or working hours
+                if slot_end > end_date:
+                    break
+
+                if working_hours_only and slot_end.hour > latest_hour:
+                    current_time = (current_time + timedelta(days=1)).replace(hour=earliest_hour, minute=0, second=0)
+                    continue
+
+                # Check if all attendees are available for the full slot.
+                # Treat missing data (slot past end of merged_free_busy) or
+                # attendees without a merged free/busy response as BUSY so we
+                # never surface a slot we couldn't actually verify.
+                all_available = True
+                buffer_available = True
+                for busy_info in availability_data:
+                    # exchangelib's FreeBusyView exposes `.merged`; older code
+                    # in this file (and some external references) used the
+                    # string `merged_free_busy`. Accept both so we don't
+                    # silently fail when the attribute shape changes.
+                    merged = _extract_merged(busy_info)
+                    if not merged:
+                        all_available = False
+                        break
+
+                    minutes_from_start = int((current_time - start_date).total_seconds() / 60)
+                    interval_index = minutes_from_start // 15
+                    intervals_needed = (duration_minutes + 14) // 15  # Round up
+
+                    # Slot must fit entirely within the returned data.
+                    if interval_index + intervals_needed > len(merged):
+                        all_available = False
+                        break
+
+                    for i in range(intervals_needed):
+                        status = merged[interval_index + i]
+                        # 0=Free, 1=Tentative, 2=Busy, 3=OOF, 4=NoData
+                        if status in ('2', '3', '4'):
+                            all_available = False
+                            break
+
+                    if not all_available:
+                        break
+
+                    # Buffer check (only used for scoring, not for filtering).
+                    if avoid_back_to_back:
+                        buffer_intervals = max(1, min_break_minutes // 15)
+                        pre_start = max(0, interval_index - buffer_intervals)
+                        post_end = min(len(merged), interval_index + intervals_needed + buffer_intervals)
+                        for i in range(pre_start, post_end):
+                            if merged[i] in ('2', '3'):
+                                buffer_available = False
+                                break
+
+                if all_available:
+                    score = 100
+
+                    if prefer_morning and current_time.hour < 12:
+                        score += 20
+                    if prefer_afternoon and current_time.hour >= 13:
+                        score += 20
+
+                    if current_time.hour < 9 or current_time.hour > 16:
+                        score -= 10
+
+                    if avoid_back_to_back and buffer_available:
+                        score += 10
+
+                    suggestions.append({
+                        "start_time": format_datetime(current_time),
+                        "end_time": format_datetime(slot_end),
+                        "duration_minutes": duration_minutes,
+                        "score": score,
+                        "day_of_week": current_time.strftime("%A"),
+                        "time_of_day": "Morning" if current_time.hour < 12 else "Afternoon" if current_time.hour < 17 else "Evening"
+                    })
+
+                    # Advance past the accepted slot (plus buffer) so we don't
+                    # emit N overlapping suggestions at 15-minute offsets of
+                    # the same hour.
+                    advance = timedelta(
+                        minutes=duration_minutes + (min_break_minutes if avoid_back_to_back else 0)
+                    )
+                    current_time = current_time + advance
+                else:
+                    # Keep scanning in 15-minute steps.
+                    current_time += timedelta(minutes=15)
+
+            # Sort suggestions by score (highest first)
+            suggestions.sort(key=lambda x: x['score'], reverse=True)
+
+            # Limit to max_suggestions
+            suggestions = suggestions[:max_suggestions]
+
+            self.logger.info(f"Found {len(suggestions)} meeting time suggestions for {len(attendees)} attendees")
+
+            return format_success_response(
+                f"Found {len(suggestions)} optimal meeting times",
+                suggestions=suggestions,
+                attendees=attendees,
+                duration_minutes=duration_minutes,
+                date_range={
+                    "start": date_range_start_str,
+                    "end": date_range_end_str
+                },
+                preferences=preferences,
+                mailbox=mailbox
+            )
+
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to find meeting times: {e}")
+            raise ToolExecutionError(f"Failed to find meeting times: {e}")

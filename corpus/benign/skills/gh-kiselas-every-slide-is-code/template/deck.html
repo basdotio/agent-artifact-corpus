@@ -1,0 +1,2290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck title</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif&display=block">
+<style id="deck-kit-css">
+/*! deck-kit runtime styles · MIT. Mechanics only: the look of a deck lives in its own <style>. */
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--dk-letterbox, #000); }
+.deck { position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden; contain: layout paint; }
+.dk-stage { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.dk-layer { position: absolute; inset: 0; display: none; z-index: 0; backface-visibility: hidden; }
+.dk-layer.is-on { display: block; }
+.slide { position: absolute; inset: 0; box-sizing: border-box; overflow: hidden; display: none; contain: layout paint style; }
+.dk-layer.is-on > .slide { display: block; }
+.slide > .notes { display: none !important; }
+.slide [data-anim], .slide [data-step], .slide [data-stagger] > * { transform-box: fill-box; transform-origin: center; }
+.slide [data-anim="count"] { font-variant-numeric: tabular-nums; }
+.dk-mask-i { display: inline-block; will-change: transform; }
+.dk-caret::after { content: ''; display: inline-block; width: .07em; height: .95em; margin-left: .05em; vertical-align: -.1em; background: currentColor; }
+.dk-highlight { background-image: linear-gradient(transparent 56%, var(--dk-mark, #ffe066) 56%, var(--dk-mark, #ffe066) 90%, transparent 90%);
+  background-repeat: no-repeat; background-size: 0 100%; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.dk-strike { background-image: linear-gradient(transparent 50%, var(--dk-strike, currentColor) 50%, var(--dk-strike, currentColor) calc(50% + .08em), transparent calc(50% + .08em));
+  background-repeat: no-repeat; background-size: 0 100%; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+
+/* kinetic text: chars, tracking, scramble (characters in nowrap words), flip (split-flap). Metrics are fixed in init; nothing reflows. */
+.dk-w { display: inline-block; white-space: nowrap; }
+.dk-c { display: inline-block; white-space: pre; }
+.dk-scr .dk-c { text-align: center; }
+.dk-flip { display: inline-block; position: relative; white-space: nowrap; vertical-align: baseline; }
+.dk-fl { position: absolute; left: 0; right: 0; top: 0; visibility: hidden; transform-origin: 50% 50%; backface-visibility: hidden; }
+.dk-fl-t { clip-path: inset(-40% -10% 50% -10%); }
+.dk-fl-b { clip-path: inset(50% -10% -40% -10%); }
+.dk-fl-h { top: 50%; height: 0; border-top: 2px solid currentColor; clip-path: none; }
+
+/* statements: data-say="Setup:|*payoff*" (or Deck.say). The element's font size is the payoff; theme with the custom properties. */
+.dk-say { text-wrap: balance; }
+.dk-say .say-s { display: block; margin: 0 0 var(--dk-say-gap, .16em); font-size: max(var(--dk-say-setup-size, .36em), 26px); line-height: 1.2;
+  font-weight: var(--dk-say-setup-weight, inherit); letter-spacing: var(--dk-say-setup-tracking, .02em); text-transform: var(--dk-say-setup-transform, none);
+  font-family: var(--dk-say-setup-font, inherit); color: var(--dk-say-setup, var(--muted, inherit)); }
+.dk-say .pay { display: block; font-style: normal; font-size: var(--dk-say-pay-size, 1em); line-height: var(--dk-say-pay-lh, 1.02);
+  font-weight: var(--dk-say-pay-weight, inherit); color: var(--dk-say-pay, var(--accent, currentColor)); }
+/* the small caption under a claim: a source or the arithmetic behind it */
+.proof { margin: .9em 0 0; max-width: var(--dk-proof-width, 62ch); font-size: var(--dk-proof-size, 26px); line-height: 1.35; letter-spacing: .01em;
+  font-family: var(--dk-proof-font, inherit); color: var(--dk-proof, var(--muted, inherit)); font-variant-numeric: tabular-nums; }
+
+.dk-fx { position: absolute; inset: 0; z-index: 51; display: none; pointer-events: none; }
+.dk-morph { position: absolute; inset: 0; z-index: 40; pointer-events: none; }
+.dk-morph > * { will-change: transform, opacity; }
+.dk-veil { position: absolute; inset: 0; z-index: 50; pointer-events: none; opacity: 0; }
+.dk-blackout { position: absolute; inset: 0; z-index: 90; background: #000; opacity: 0; pointer-events: none; transition: opacity .3s; }
+.dk-blackout.is-on { opacity: 1; }
+.dk-progress { position: absolute; left: 0; bottom: 0; width: 100%; height: 6px; z-index: 60; transform-origin: 0 50%;
+  background: var(--dk-progress, currentColor); opacity: .5; transform: scaleX(0); }
+.dk-number { position: absolute; right: 56px; bottom: 36px; z-index: 60; font: 500 20px/1 var(--dk-number-font, ui-monospace, monospace);
+  color: var(--dk-number, currentColor); opacity: .55; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.dk-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+.dk-mode-live.dk-idle, .dk-mode-live.dk-idle * { cursor: none !important; }
+.dk-mode-render *, .dk-mode-embed * { cursor: none !important; }
+
+/* overview */
+.dk-overview .deck { background: var(--dk-overview-bg, #1b1b1b) !important; }
+.dk-overview .dk-stage, .dk-overview .dk-progress, .dk-overview .dk-number { display: none; }
+.dk-overview .dk-layer { cursor: pointer; outline: 2px solid rgba(255,255,255,.08); }
+.dk-overview .dk-layer.dk-ov-sel { outline: 14px solid var(--dk-ov-accent, #ffd23f); z-index: 2; }
+
+/* help */
+.dk-help { position: fixed; inset: 0; z-index: 100; display: none; place-items: center; background: rgba(0,0,0,.55);
+  font: 15px/1.5 ui-sans-serif, system-ui, sans-serif; color: #111; }
+.dk-help.is-on { display: grid; }
+.dk-help > div { background: #fff; padding: 24px 30px 18px; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.3); max-width: min(760px, 92vw); }
+.dk-help h3 { margin: 0 0 12px; font-size: 18px; }
+.dk-help-cols { display: flex; flex-wrap: wrap; gap: 8px 36px; }
+.dk-help caption { text-align: left; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #888; padding-bottom: 4px; }
+.dk-help td { padding: 3px 14px 3px 0; vertical-align: top; } .dk-help td:first-child { color: #555; white-space: nowrap; }
+.dk-help p { margin: 14px 0 0; color: #666; font-size: 13px; }
+kbd { display: inline-block; min-width: 1.4em; padding: 0 .35em; border: 1px solid rgba(127,127,127,.45); border-bottom-width: 2px; border-radius: 4px;
+  font: 600 .85em/1.5 ui-monospace, monospace; text-align: center; }
+
+/* on-screen controls (live mode). Theme with --dk-ui-bg / --dk-ui-fg / --dk-ui-accent. */
+.dk-ui { position: fixed; left: 50%; bottom: 18px; z-index: 80; transform: translate(-50%, 12px); opacity: 0; pointer-events: none;
+  transition: opacity .25s, transform .25s; font: 500 14px/1 ui-sans-serif, system-ui, sans-serif; color: var(--dk-ui-fg, #f4f4f4);
+  width: min(760px, calc(100vw - 32px)); padding: 6px 6px 6px; box-sizing: border-box; border-radius: 16px;
+  background: var(--dk-ui-bg, rgba(22,22,24,.88)); box-shadow: 0 10px 30px rgba(0,0,0,.25); backdrop-filter: blur(8px); }
+.dk-ui-on .dk-ui { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.dk-scrub { display: flex; gap: 3px; height: 16px; align-items: center; padding: 0 6px 2px; }
+.dk-seg { flex: 1; height: 16px; padding: 6px 0; border: 0; background: none; cursor: pointer; position: relative; }
+.dk-seg::before { content: ''; position: absolute; left: 0; right: 0; top: 6px; height: 4px; border-radius: 2px; background: var(--dk-ui-track, rgba(255,255,255,.28)); }
+.dk-seg i { position: absolute; left: 0; right: 0; top: 6px; height: 4px; border-radius: 2px; background: var(--dk-ui-accent, #ffd23f); transform-origin: 0 50%; transform: scaleX(0); }
+.dk-seg:hover::before { background: rgba(255,255,255,.6); }
+.dk-bar { display: flex; align-items: center; gap: 4px; }
+.dk-b { position: relative; width: 40px; height: 40px; flex: none; border: 0; border-radius: 10px; background: none; color: inherit; cursor: pointer;
+  display: grid; place-items: center; font: 600 17px/1 ui-sans-serif, system-ui, sans-serif; }
+.dk-b svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dk-b:hover { background: rgba(255,255,255,.12); } .dk-b:disabled { opacity: .3; cursor: default; background: none; }
+.dk-b-next { background: rgba(255,255,255,.14); }
+.dk-where { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 8px; }
+.dk-num { font-variant-numeric: tabular-nums; opacity: .7; flex: none; }
+.dk-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dk-steps { display: flex; gap: 5px; flex: none; }
+.dk-steps i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid currentColor; opacity: .55; }
+.dk-steps i.on { background: currentColor; opacity: 1; }
+.dk-sep { width: 1px; height: 24px; background: rgba(255,255,255,.2); margin: 0 4px; }
+[data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  white-space: nowrap; padding: 6px 9px; border-radius: 7px; background: #111; color: #fff; font: 500 13px/1 ui-sans-serif, system-ui, sans-serif; pointer-events: none; }
+.dk-seg[data-tip]:hover::after { bottom: 18px; }
+.dk-edge { position: fixed; top: 50%; z-index: 70; width: 52px; height: 52px; margin-top: -26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--dk-ui-bg, rgba(22,22,24,.7)); color: var(--dk-ui-fg, #fff); opacity: 0; transition: opacity .2s; pointer-events: none; }
+.dk-edge svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.dk-edge-l { left: 18px; } .dk-edge-r { right: 18px; }
+.dk-edge-l-on .dk-edge-l, .dk-edge-r-on .dk-edge-r { opacity: .8; }
+.dk-edge-l-on, .dk-edge-r-on { cursor: pointer; }
+.dk-hint { position: fixed; left: 50%; top: 22px; z-index: 81; transform: translate(-50%, -8px); opacity: 0; transition: opacity .4s, transform .4s;
+  padding: 10px 16px; border-radius: 10px; background: var(--dk-ui-bg, rgba(22,22,24,.86)); color: var(--dk-ui-fg, #f4f4f4);
+  font: 500 14px/1.4 ui-sans-serif, system-ui, sans-serif; pointer-events: none; white-space: nowrap; }
+.dk-hint.is-on { opacity: 1; transform: translate(-50%, 0); }
+.dk-toast { position: fixed; left: 50%; top: 50%; z-index: 90; transform: translate(-50%, -50%) scale(.96); opacity: 0; transition: opacity .2s, transform .2s;
+  padding: 12px 18px; border-radius: 10px; background: var(--dk-ui-bg, rgba(22,22,24,.9)); color: var(--dk-ui-fg, #fff);
+  font: 600 16px/1.3 ui-sans-serif, system-ui, sans-serif; pointer-events: none; }
+.dk-toast.is-on { opacity: 1; transform: translate(-50%, -50%); }
+.dk-hud { position: fixed; left: 8px; top: 8px; z-index: 99; padding: 5px 8px; border-radius: 6px; background: rgba(0,0,0,.75); color: #9f9;
+  font: 12px/1.2 ui-monospace, monospace; pointer-events: none; }
+.dk-idle .dk-ui, .dk-idle .dk-edge { opacity: 0 !important; pointer-events: none; }
+.dk-warm .dk-layer { visibility: hidden !important; }
+.dk-ov-hint { position: fixed; left: 50%; top: 16px; z-index: 81; transform: translateX(-50%); color: rgba(255,255,255,.7);
+  font: 500 14px/1.4 ui-sans-serif, system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
+.dk-ov-cap { position: absolute; z-index: 3; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: rgba(255,255,255,.75);
+  font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 500; line-height: 1.2; pointer-events: none; }
+.dk-overview .dk-ui { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .dk-ui, .dk-hint, .dk-toast, .dk-edge { transition: none; } }
+
+/* live annotation (D H L E): created on first use, live and presenter windows only, never in an export. Theme: --dk-pen-1..4, --dk-laser.
+   The canvas sits above the slide and its chrome and under the black screen; the pad that catches the pointer sits under the control bar. */
+.dk-ann { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 65; pointer-events: none; }
+.dk-ann-laser { position: absolute; left: 0; top: 0; width: 44px; height: 44px; z-index: 66; pointer-events: none; opacity: 0;
+  background: radial-gradient(circle, #fff 0 10%, var(--dk-laser, #ff2b2b) 24%, transparent 70%); }
+.dk-ann-laser.is-on { opacity: 1; }
+.dk-ann-laser.is-on.is-fade { opacity: 0; transition: opacity .4s linear; }
+.dk-ann-cap { position: fixed; inset: 0; z-index: 75; display: none; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.dk-annotating .dk-ann-cap { display: block; }
+.dk-ann-cap.is-laser { cursor: none; }
+.dk-ann-tools { position: fixed; left: 50%; top: 18px; z-index: 82; transform: translate(-50%, -12px); opacity: 0; pointer-events: none; display: none; align-items: center; gap: 4px;
+  padding: 6px; border-radius: 16px; box-sizing: border-box; max-width: calc(100vw - 32px); transition: opacity .25s, transform .25s;
+  font: 500 14px/1 ui-sans-serif, system-ui, sans-serif; color: var(--dk-ui-fg, #f4f4f4);
+  background: var(--dk-ui-bg, rgba(22,22,24,.88)); box-shadow: 0 10px 30px rgba(0,0,0,.25); backdrop-filter: blur(8px); }
+.dk-annotating .dk-ann-tools { display: flex; }
+.dk-annotating.dk-ui-on .dk-ann-tools { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.dk-idle .dk-ann-tools { opacity: 0 !important; pointer-events: none; }
+.dk-ann-tools[data-mode=laser] .dk-sw { display: none; }
+.dk-ann-tools [data-tip]:hover::after { bottom: auto; top: calc(100% + 10px); }
+.dk-b.is-on { background: rgba(255,255,255,.24); }
+.dk-sw { position: relative; flex: none; width: 30px; height: 30px; margin: 5px 3px; padding: 0; border-radius: 50%; cursor: pointer; background: var(--c, #fff);
+  border: 2px solid rgba(255,255,255,.55); box-sizing: border-box; }
+.dk-sw.is-on { border-color: #fff; box-shadow: 0 0 0 3px var(--dk-ui-accent, #ffd23f); }
+.dk-pv-cap { position: absolute; inset: 0; z-index: 2; cursor: none; touch-action: none; }
+.dk-pv-cap[hidden] { display: none; }
+.dk-pv-cap::after { content: 'Laser: move over the slide · L or Esc to stop'; position: absolute; left: 10px; bottom: 8px; padding: 4px 8px; border-radius: 6px;
+  background: rgba(0,0,0,.6); color: #fff; font: 500 13px/1.2 ui-sans-serif, system-ui, sans-serif; }
+.dk-overview .dk-ann, .dk-overview .dk-ann-laser { display: none; }
+@media print { .dk-ann-cap, .dk-ann-tools { display: none !important; } }
+
+/* presenter view */
+body.dk-presenter { background: #111; color: #eee; overflow: hidden; }
+.dk-presenter .deck { display: none; }
+.dk-pv { position: fixed; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); --pv-fs: 26px; font: 16px/1.45 ui-sans-serif, system-ui, sans-serif; }
+.dk-pv header { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; padding: 12px 22px; border-bottom: 1px solid #2a2a2a; }
+.dk-pv-timer { flex: none; font: 600 34px/1 ui-monospace, monospace; cursor: pointer; font-variant-numeric: tabular-nums; }
+.dk-pv-pos { flex: 1 1 200px; min-width: 0; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dk-pv-pos b { color: #eee; font-weight: 600; margin-right: .8em; font-variant-numeric: tabular-nums; }
+.dk-pv-dots { display: flex; gap: 6px; flex: none; } .dk-pv-dots i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #666; box-sizing: border-box; } .dk-pv-dots i.on { background: #f0b429; border-color: #f0b429; }
+.dk-pv-fs { display: flex; gap: 4px; flex: none; }
+.dk-pv header button { flex: none; background: #262626; color: #eee; border: 1px solid #3a3a3a; border-radius: 8px; padding: 9px 16px; cursor: pointer;
+  font: 600 15px/1 ui-sans-serif, system-ui, sans-serif; } .dk-pv header button:hover { background: #333; } .dk-pv-fs button { padding: 9px 11px; }
+.dk-pv-clock { flex: none; font: 500 22px/1 ui-monospace, monospace; color: #aaa; }
+.dk-pv main { display: grid; grid-template-columns: minmax(0, 38fr) minmax(0, 62fr); gap: 22px; padding: 16px 22px 22px; min-height: 0; }
+.dk-pv-left { display: grid; align-content: start; gap: 12px; min-height: 0; min-width: 0; }
+.dk-pv-right { display: grid; grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; min-height: 0; min-width: 0; }
+.dk-pv-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.dk-pv label { display: block; color: #888; font-size: 13px; text-transform: uppercase; letter-spacing: .12em; margin-bottom: 5px; }
+.dk-pv-frame { position: relative; aspect-ratio: 16 / 9; width: min(100%, calc((100vh - 235px) / 2 * 16 / 9)); background: #000; border-radius: 6px; overflow: hidden; }
+.dk-pv-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
+.dk-pv-notes { position: relative; flex: 1; min-height: 0; overflow: auto; font-size: var(--pv-fs); line-height: 1.45; color: #f2f2f2; padding-right: 10px; }
+.dk-pv-after { font-size: calc(var(--pv-fs) * .74); color: #b5b5b5; }
+.dk-pv-notes p { margin: 0 0 .65em; } .dk-pv-notes em, .dk-pv-none { color: #777; font-style: normal; }
+.dk-pv-seg { padding: .3em .7em .05em; margin: 0 0 .55em; border-left: 4px solid transparent; border-radius: 4px; }
+.dk-pv-seg.on { border-left-color: #f0b429; background: #1a1a1a; color: #fff; }
+.dk-pv-seg.done { opacity: .38; }
+.dk-pv-seg.todo { opacity: .78; }
+.dk-pv-tag { display: block; margin-bottom: .15em; font: 700 max(12px, .5em) ui-sans-serif, system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: #f0b429; }
+.dk-pv-seg.done .dk-pv-tag, .dk-pv-seg.todo .dk-pv-tag { color: #999; }
+@media (max-width: 900px) { .dk-pv main { grid-template-columns: minmax(0, 1fr); overflow: auto; } .dk-pv-right { grid-template-rows: none; } .dk-pv-notes { max-height: 60vh; } .dk-pv-frame { width: 100%; } }
+
+/* print (vector PDF export) */
+.dk-printing, .dk-printing body { height: auto; overflow: visible; background: #fff; }
+.dk-printing .deck:not(.dk-print), .dk-printing .dk-help { display: none !important; }
+.deck.dk-print { position: static; transform: none; width: auto; height: auto; overflow: visible; contain: none; background: none; }
+.dk-page { position: relative; overflow: hidden; break-after: page; page-break-after: always; }
+.dk-page:last-child { break-after: auto; page-break-after: auto; }
+.dk-page > .dk-page-stage { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dk-page > .dk-layer { display: block; }
+@media print { html, body { overflow: visible !important; height: auto !important; } }
+</style>
+<!-- Optional plugin, off by default: code slides (Shiki highlighting, magic move, line focus, diffs). To enable, add a style slot for the plugin CSS right after the runtime style above and a script slot for the plugin JS right after the runtime script below, exactly as 14-code-slides.md shows, then run node scripts/sync-runtime.mjs. -->
+<style>
+/* ── Theme: tokens first, then a handful of layout primitives. Replace the palette per deck (04-slide-design.md). */
+:root {
+  --bg: #f4f2ee; --ink: #16161a; --muted: #6f6b63; --line: #d8d3c9; --accent: #2b4fe0; --accent-soft: #dde3fb;
+  --display: 'Instrument Serif', Georgia, serif; --text: 'Instrument Sans', system-ui, sans-serif;
+  --dk-mark: var(--accent-soft); --dk-letterbox: #0e0e10; --dk-progress: var(--accent);
+}
+.deck { background: var(--bg); color: var(--ink); font-family: var(--text); }
+.slide { padding: 120px 150px; }
+.kicker { font: 600 22px/1 var(--text); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); margin: 0 0 36px; }
+h1 { font: 400 168px/.92 var(--display); letter-spacing: -.02em; margin: 0; }
+h2 { font: 400 88px/1 var(--display); letter-spacing: -.01em; margin: 0 0 48px; max-width: 1450px; }
+.lede { font: 400 38px/1.35 var(--text); color: var(--muted); max-width: 1150px; margin: 0; }
+.foot { position: absolute; left: 150px; bottom: 90px; font: 500 22px/1 var(--text); color: var(--muted); }
+.list { list-style: none; padding: 0; margin: 0; display: grid; gap: 34px; max-width: 1300px; }
+.list li { font: 400 44px/1.2 var(--text); display: grid; grid-template-columns: 90px 1fr; }
+.list li b { font: 400 44px/1.2 var(--display); color: var(--accent); }
+.big { font: 400 360px/.85 var(--display); letter-spacing: -.03em; color: var(--accent); margin: 40px 0 30px; }
+.chart text { font: 500 24px var(--text); fill: var(--muted); }
+.chart .val { font: 600 28px var(--text); fill: var(--ink); }
+.chart .axis { stroke: var(--line); stroke-width: 2; }
+.node rect { fill: #fff; stroke: var(--ink); stroke-width: 2.5; }
+.node text { font: 500 30px var(--text); fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
+.edge { fill: none; stroke: var(--ink); stroke-width: 2.5; }
+.flow { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 2 34; }
+.card { position: absolute; background: var(--accent); color: #fff; border-radius: 28px; }
+.card span { position: absolute; left: 44px; bottom: 36px; font: 400 64px/1 var(--display); }
+</style>
+</head>
+<body>
+<!-- data-transition sets the default; each slide can override how it ENTERS. See 06-transitions.md -->
+<div class="deck" data-transition="push" data-chrome="progress,number">
+
+  <section class="slide" id="title" data-transition="fade">
+    <p class="kicker" data-anim="fade">Kicker · Month 2026</p>
+    <h1 data-anim="mask">A title that<br>makes a claim</h1>
+    <p class="lede" style="margin-top:56px" data-anim="rise" data-delay=".5">One line that says why the audience should care, in their words.</p>
+    <p class="foot" data-anim="fade" data-delay=".9">Presenter name · Team</p>
+    <aside class="notes"><p>Speaker notes live here. They show in presenter view (P) and go into the PPTX notes.</p></aside>
+  </section>
+
+  <section class="slide" id="agenda">
+    <p class="kicker">The argument</p>
+    <h2 data-fit="2">Three things to decide today</h2>
+    <!-- data-stagger animates children in order; each li gets its own step and dims when the next one arrives -->
+    <ol class="list">
+      <li data-step="1" data-dim="2"><b>01</b>The problem is bigger than it looks</li>
+      <li data-step="2" data-dim="3"><b>02</b>What we tried, and what worked</li>
+      <li data-step="3"><b>03</b>What we need from this room</li>
+    </ol>
+    <aside class="notes"><p>Reveal one point per click. The previous point dims so the room reads the current one.</p><p data-step="1">First click: why the problem is bigger than it looks.</p><p data-step="2">Second click: what we tried, and what worked.</p><p data-step="3">Third click: what we need from this room. Presenter view lights the passage of the click you are on.</p></aside>
+  </section>
+
+  <section class="slide" id="number" data-title="38% of onboarding time is re-entered data" data-transition="zoom" data-origin="960 560">
+    <p class="kicker">The headline number</p>
+    <div class="big" data-anim="count">38%</div>
+    <p class="lede" data-anim="rise" data-delay=".6">of onboarding time goes to <span data-step="1" data-anim="highlight">re-entering data we already have</span>.</p>
+    <aside class="notes"><p>Let the number land before the sentence. Click once more to highlight the cause.</p></aside>
+  </section>
+
+  <section class="slide" id="bars">
+    <p class="kicker">Comparison</p>
+    <h2 data-fit="2">Team C closes tickets twice as fast</h2>
+    <svg class="chart" width="1620" height="560" viewBox="0 0 1620 560"></svg>
+    <aside class="notes"><p>Bars grow on entry. Step 1 fades the others and leaves the winner lit.</p></aside>
+  </section>
+
+  <section class="slide" id="line">
+    <p class="kicker">Trend</p>
+    <h2 data-fit="2">Costs flattened after the switch</h2>
+    <svg class="chart" width="1620" height="580" viewBox="0 0 1620 580"></svg>
+    <aside class="notes"><p>The line draws itself; the annotation arrives on the click.</p></aside>
+  </section>
+
+  <section class="slide" id="flow" data-transition="wipe">
+    <p class="kicker">How it works</p>
+    <h2 data-fit="2">Three steps, one loop</h2>
+    <svg class="chart" width="1620" height="520" viewBox="0 0 1620 520"></svg>
+    <aside class="notes"><p>Nodes pop in, edges draw, then the flow starts moving.</p></aside>
+  </section>
+
+  <section class="slide" id="morph-a" data-transition="fade">
+    <p class="kicker">Morph</p>
+    <h2 style="max-width:900px">Same object, new role</h2>
+    <div class="card" data-morph="card" style="left:1110px; top:300px; width:660px; height:520px"><span>Before</span></div>
+    <aside class="notes"><p>The card flies to its new place on the next slide (data-morph).</p></aside>
+  </section>
+
+  <section class="slide" id="morph-b" data-title="Elements with the same data-morph key travel between slides" data-transition="morph">
+    <div class="card" data-morph="card" style="left:150px; top:150px; width:1620px; height:640px; background:var(--ink)"><span>After</span></div>
+    <p class="lede" style="position:absolute; left:150px; top:840px" data-anim="rise" data-delay=".5">Elements with the same data-morph key travel between slides.</p>
+    <aside class="notes"><p>Magic move. Use it when the object is the same thing in both slides.</p></aside>
+  </section>
+
+  <section class="slide" id="close" data-transition="dip">
+    <p class="kicker">The ask</p>
+    <h1 data-anim="mask" style="font-size:150px">Approve the pilot<br>by 14 October</h1>
+    <aside class="notes"><p>End on the decision, not on "Questions?".</p></aside>
+  </section>
+
+</div>
+
+<script id="deck-kit-js">
+/*! deck-kit runtime · every slide is code · MIT
+ * The whole deck is a pure function of (slide, step, t): no animation state is
+ * accumulated between frames. That gives exact rest frames for PDF/PPTX, a
+ * frame-exact video timeline, and a live mode that can jump anywhere.
+ * Reference: 01-runtime.md */
+(function () {
+'use strict';
+
+/* ───────────────────────── math ───────────────────────── */
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const seg = (t, a, b) => (b <= a ? (t >= a ? 1 : 0) : clamp((t - a) / (b - a)));
+const ease = {
+  linear: p => p,
+  inQuad: p => p * p,
+  outQuad: p => 1 - (1 - p) * (1 - p),
+  inOutSine: p => -(Math.cos(Math.PI * p) - 1) / 2,
+  inCubic: p => p * p * p,
+  outCubic: p => 1 - (1 - p) ** 3,
+  inOutCubic: p => (p < .5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2),
+  outQuart: p => 1 - (1 - p) ** 4,
+  inOutQuart: p => (p < .5 ? 8 * p ** 4 : 1 - (-2 * p + 2) ** 4 / 2),
+  inExpo: p => (p <= 0 ? 0 : 2 ** (10 * p - 10)),
+  outExpo: p => (p >= 1 ? 1 : 1 - 2 ** (-10 * p)),
+  inOutExpo: p => (p <= 0 ? 0 : p >= 1 ? 1 : p < .5 ? 2 ** (20 * p - 10) / 2 : (2 - 2 ** (-20 * p + 10)) / 2),
+  outBack: (p, s = 1.70158) => 1 + (s + 1) * (p - 1) ** 3 + s * (p - 1) ** 2,
+};
+// Closed-form damped spring: deterministic, no integration. zeta < 1 overshoots.
+function spring(t, zeta = .5, omega = 16) {
+  if (t <= 0) return 0;
+  if (!isFinite(t)) return 1;
+  const wd = omega * Math.sqrt(1 - zeta * zeta);
+  return 1 - Math.exp(-zeta * omega * t) * (Math.cos(wd * t) + (zeta * omega / wd) * Math.sin(wd * t));
+}
+function rng(seed = 1) {
+  let a = seed | 0;
+  return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+// Stateless integer hash → 0..1: the same (a, b, c) always gives the same number, in any order of calls.
+function ihash(a, b = 0, c = 0) {
+  let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(c | 0, 2246822519);
+  h = Math.imul(h ^ h >>> 13, 1274126177);
+  return ((h ^ h >>> 16) >>> 0) / 4294967296;
+}
+
+/* ───────────────────────── config ───────────────────────── */
+const deckEl = document.querySelector('.deck');
+if (!deckEl) throw new Error('deck-kit: no .deck element');
+const W = +deckEl.dataset.w || 1920, H = +deckEl.dataset.h || 1080;
+const Q = new URLSearchParams(location.search);
+const MODE = Q.has('render') ? 'render' : Q.has('presenter') ? 'presenter' : Q.has('embed') ? 'embed' : 'live';
+const reduced = MODE === 'live' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const DIM = +(deckEl.dataset.dim || .28);
+const html = document.documentElement;
+html.classList.add('dk-mode-' + MODE);
+// Live annotation (D, H, L, E): off for exports, for the "next" preview and for kiosks (data-annotate="off").
+const ANN_ON = deckEl.dataset.annotate !== 'off' && MODE !== 'render' && !(MODE === 'embed' && Q.has('rest'));
+deckEl.style.width = W + 'px';
+deckEl.style.height = H + 'px';
+const CLOCK0 = performance.now();
+const now = () => (performance.now() - CLOCK0) / 1000;
+
+const hooks = {}, ANIMS = {}, TRANSITIONS = {};
+let stageSpec = null;
+
+/* ───────────────────────── build animations ─────────────────────────
+ * f(el, e, info) returns {opacity, transform, filter, clip}; e is eased 0..1.
+ * info = {raw, lt, leaving, b}. Anims may also mutate the element directly. */
+function anim(name, spec) { ANIMS[name] = spec; }
+const tr = (x, y) => `translate(${x}px, ${y}px)`;
+anim('fade',  { dur: .5, curve: ease.outCubic, f: (el, e) => ({ opacity: e }) });
+anim('rise',  { dur: .7, curve: ease.outExpo,  f: (el, e) => ({ opacity: e, transform: tr(0, (1 - e) * 44) }) });
+anim('drop',  { dur: .7, curve: ease.outExpo,  f: (el, e) => ({ opacity: e, transform: tr(0, (e - 1) * 44) }) });
+anim('left',  { dur: .7, curve: ease.outExpo,  f: (el, e) => ({ opacity: e, transform: tr((e - 1) * 64, 0) }) });
+anim('right', { dur: .7, curve: ease.outExpo,  f: (el, e) => ({ opacity: e, transform: tr((1 - e) * 64, 0) }) });
+anim('scale', { dur: .7, curve: ease.outExpo,  f: (el, e) => ({ opacity: e, transform: `scale(${.88 + .12 * e})` }) });
+anim('pop', { dur: .9, curve: ease.outBack, f(el, e, i) {
+  const s = i.leaving || !isFinite(i.lt) ? e : spring(Math.max(0, i.lt), .42, 15);
+  return { opacity: clamp(i.raw * 5), transform: `scale(${Math.max(0, s)})` };
+} });
+anim('blur', { dur: .8, curve: ease.outCubic, f: (el, e) => ({
+  opacity: e, filter: e < 1 ? `blur(${(1 - e) * 18}px)` : '', transform: tr(0, (1 - e) * 14) }) });
+anim('wipe',      { dur: .8, curve: ease.inOutCubic, f: (el, e) => ({ clip: `inset(0 ${(1 - e) * 100}% 0 0)` }) });
+anim('wipe-left', { dur: .8, curve: ease.inOutCubic, f: (el, e) => ({ clip: `inset(0 0 0 ${(1 - e) * 100}%)` }) });
+anim('wipe-up',   { dur: .8, curve: ease.inOutCubic, f: (el, e) => ({ clip: `inset(${(1 - e) * 100}% 0 0 0)` }) });
+anim('wipe-down', { dur: .8, curve: ease.inOutCubic, f: (el, e) => ({ clip: `inset(0 0 ${(1 - e) * 100}% 0)` }) });
+anim('none', { dur: 0, f: (el, e) => ({ opacity: e > 0 ? 1 : 0 }) });
+// Line of text rises out from under an invisible edge. The runtime wraps the content.
+anim('mask', { dur: .9, curve: ease.outExpo,
+  init(el) {
+    const inner = document.createElement('span');
+    inner.className = 'dk-mask-i';
+    while (el.firstChild) inner.append(el.firstChild);
+    el.append(inner);
+    return inner;
+  },
+  f(el, e, i) { i.b.data.style.transform = `translateY(${(1 - e) * 115}%)`; return { clip: 'inset(-40% -8% 0 -8%)' }; } });
+// SVG strokes draw themselves. Works on a geometry element or on a group.
+anim('draw', { dur: 1.2, curve: ease.inOutCubic,
+  init(el) {
+    const g = el instanceof SVGGeometryElement ? [el] : [...el.querySelectorAll('path,line,polyline,polygon,circle,ellipse,rect')];
+    for (const x of g) { x.setAttribute('pathLength', '1'); x.style.strokeDasharray = '1 1'; }
+    return g;
+  },
+  f(el, e, i) {
+    const done = i.raw >= 1;   // finished strokes drop the dash so print and PDF see a plain line
+    for (const x of i.b.data) { x.style.strokeDasharray = done ? '' : '1 1'; x.style.strokeDashoffset = done ? '' : String(1 - e); }
+    return { opacity: i.raw > 0 ? 1 : 0 };
+  } });
+// Number counts up to the value written in the markup, so the rest frame is the authored text.
+anim('count', { dur: 1.6, curve: ease.outExpo,
+  init(el) {
+    const m = el.textContent.trim().match(/^([^\d\-−]*)([-−]?[\d,]*\.?\d+)([\s\S]*)$/);
+    if (!m) return null;
+    return { pre: m[1], suf: m[3], to: parseFloat(m[2].replace(/,/g, '').replace('−', '-')), dec: (m[2].split('.')[1] || '').length,
+      comma: m[2].includes(','), from: parseFloat(String(el.dataset.from || 0).replace('−', '-')), last: '' };
+  },
+  f(el, e, i) {
+    const c = i.b.data;
+    if (c) {
+      const s = c.pre + fmtNum(lerp(c.from, c.to, e), c.dec, c.comma) + c.suf;
+      if (s !== c.last) { el.textContent = s; c.last = s; }
+    }
+    return { opacity: i.raw > 0 || el.dataset.from != null ? 1 : 0 };
+  } });
+anim('type', { dur: el => Math.max(.3, el.textContent.length * .035), curve: ease.linear,
+  init: el => ({ text: el.textContent, last: -1 }),
+  f(el, e, i) {
+    const d = i.b.data, n = Math.round(e * d.text.length);
+    if (n !== d.last) { el.textContent = d.text.slice(0, n); d.last = n; }
+    el.classList.toggle('dk-caret', e > 0 && e < 1);
+    return { opacity: i.raw > 0 ? 1 : 0 };
+  } });
+// Emphasis on an element that is already visible: a marker sweeps behind the text.
+anim('highlight', { dur: .6, curve: ease.inOutCubic,
+  init(el) { el.classList.add('dk-highlight'); },
+  f(el, e) { el.style.backgroundSize = `${e * 100}% 100%`; return {}; } });
+anim('strike', { dur: .5, curve: ease.inOutCubic,
+  init(el) { el.classList.add('dk-strike'); },
+  f(el, e) { el.style.backgroundSize = `${e * 100}% 100%`; return {}; } });
+
+/* ───────────────────────── kinetic text: chars, tracking, scramble, flip ─────────────────────────
+ * The text is split once in init (measured there, never inside a frame). The real sentence goes to
+ * aria-label and every character is aria-hidden; at rest the inline styles are gone and the layout is the authored one.
+ * Anims with `stagger: true` handle data-stagger themselves (it is the gap between characters, not a group of children). */
+function splitText(node) {
+  const k = fitKLive(), text = node.textContent.replace(/\s+/g, ' ').trim(), nodes = [], tw = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  for (let n; (n = tw.nextNode());) if (n.nodeValue.trim()) nodes.push(n);
+  const rg = document.createRange();
+  const before = nodes.map(n => {                     // the natural box of every character, before it gets its own span
+    const out = []; let i = 0;
+    for (const ch of n.nodeValue) { rg.setStart(n, i); rg.setEnd(n, i + ch.length); const r = rg.getBoundingClientRect(); out.push({ l: r.left / k, t: r.top / k }); i += ch.length; }
+    return out;
+  });
+  const chars = [];
+  nodes.forEach((n, ni) => {
+    const frag = document.createDocumentFragment(); let ci = 0;
+    for (const tok of n.nodeValue.split(/(\s+)/)) {
+      if (!tok) continue;
+      if (/^\s+$/.test(tok)) { frag.append(tok); ci += [...tok].length; continue; }
+      const w = document.createElement('span'); w.className = 'dk-w'; let prev = null;
+      for (const ch of tok) {
+        const s = document.createElement('span'); s.className = 'dk-c'; s.setAttribute('aria-hidden', 'true'); s.textContent = ch; w.append(s);
+        const c = { el: s, ch, r0: before[ni][ci++], next: null, first: !prev }; if (prev) prev.next = c; prev = c; chars.push(c);
+      }
+      frag.append(w);
+    }
+    n.replaceWith(frag);
+  });
+  for (const c of chars) c.w = c.el.getBoundingClientRect().width / k;
+  for (const c of chars) {                            // separate boxes lose kerning: give the pair back its natural advance
+    const n = c.next; if (!n || Math.abs(n.r0.t - c.r0.t) > 4) continue;
+    const d = (n.r0.l - c.r0.l) - c.w; if (Math.abs(d) > .1) c.el.style.marginRight = d.toFixed(2) + 'px';
+  }
+  // ...and across the space: a pair like "space + T" is kerned too. Whatever drift is left at the start of a word is taken out there.
+  const pos = chars.map(c => c.el.getBoundingClientRect());
+  let pd = 0, pt = null;
+  chars.forEach((c, j) => {
+    const d = pos[j].left / k - c.r0.l, same = pt !== null && Math.abs(pos[j].top / k - pt) < 4;
+    if (c.first && same && Math.abs(d - pd) > .1) c.el.style.marginLeft = (pd - d).toFixed(2) + 'px';
+    pd = d; pt = pos[j].top / k;
+  });
+  node.setAttribute('aria-label', text);
+  return { chars, text };
+}
+function rankOf(n, order, seed) {                     // position of every character in the stagger order
+  const idx = Array.from({ length: n }, (_, i) => i);
+  if (order === 'reverse') idx.reverse();
+  else if (order === 'center') { const c = (n - 1) / 2; idx.sort((a, b) => Math.abs(a - c) - Math.abs(b - c) || a - b); }
+  else if (order === 'random') { const r = rng(seed), key = idx.map(() => r()); idx.sort((a, b) => key[a] - key[b]); }
+  const rank = []; idx.forEach((ci, r) => { rank[ci] = r; });
+  return rank;
+}
+const putc = (c, op, tf) => {                         // write a character's style only when it changed
+  if (c.o !== op) { c.o = op; c.el.style.opacity = op; }
+  if (c.tf !== tf) { c.tf = tf; c.el.style.transform = tf; }
+};
+const nChars = node => node.textContent.replace(/\s+/g, '').length;
+const gapOf = (node, d) => num(node.dataset.stagger, d) || d;
+
+// Per-character reveal, each character rising 0.42 em; data-stagger is the gap (default .03 s), data-order the order.
+anim('chars', { dur: node => (nChars(node) - 1) * gapOf(node, .03) + .55, curve: ease.outExpo, stagger: true,
+  init(node) {
+    const d = splitText(node), n = d.chars.length;
+    d.gap = gapOf(node, .03); d.cd = .55; d.nat = (n - 1) * d.gap + d.cd; d.rank = rankOf(n, node.dataset.order, n * 31 + 7);
+    return d;
+  },
+  f(node, e, i) {
+    const d = i.b.data;
+    if (reduced) { for (const c of d.chars) putc(c, '', ''); return { opacity: e }; }
+    const u = i.raw * d.nat;
+    d.chars.forEach((c, j) => {
+      const q = i.raw >= 1 ? 1 : i.b.curve(seg(u, d.rank[j] * d.gap, d.rank[j] * d.gap + d.cd));
+      q >= 1 ? putc(c, '', '') : putc(c, String(+q.toFixed(3)), `translateY(${((1 - q) * .42).toFixed(3)}em)`);
+    });
+    return {};
+  } });
+
+// Letters spread from tight to loose: every character starts pulled towards the centre of its line (data-spread, default .2).
+anim('tracking', { dur: 1.8, curve: ease.outCubic,
+  init(node) {
+    const d = splitText(node), k = fitKLive(), rects = d.chars.map(c => c.el.getBoundingClientRect()), lines = new Map();
+    const key = r => Math.round(r.top / k / 8);
+    for (const r of rects) { const L = lines.get(key(r)) || { a: 1e9, b: -1e9 }; L.a = Math.min(L.a, r.left / k); L.b = Math.max(L.b, r.right / k); lines.set(key(r), L); }
+    d.chars.forEach((c, j) => { const L = lines.get(key(rects[j])); c.off = (rects[j].left + rects[j].right) / 2 / k - (L.a + L.b) / 2; });
+    d.spread = num(node.dataset.spread, .2);
+    return d;
+  },
+  f(node, e, i) {
+    const d = i.b.data;
+    if (reduced) { for (const c of d.chars) putc(c, '', ''); return { opacity: e }; }
+    const o = String(+clamp(e * 2.4).toFixed(3));
+    for (const c of d.chars) e >= 1 ? putc(c, '', '') : putc(c, o, `translateX(${(-c.off * d.spread * (1 - e)).toFixed(2)}px)`);
+    return { opacity: i.raw > 0 ? 1 : 0 };
+  } });
+
+// Characters settle from seeded noise into the real text, left to right with jitter. Cells keep their natural width, so the line never reflows.
+const NOISE = { A: 'ABCDEFGHJKLNPRSTUVXYZ', a: 'abcdeghknopqsuvxyz', 0: '0123456789', '#': '#%&*+=?/<>' };
+anim('scramble', { dur: node => Math.min(1.8, .8 + nChars(node) * .03), curve: ease.linear, stagger: true,
+  init(node) {
+    const d = splitText(node), n = d.chars.length, r = rng(n * 17 + 3), rank = rankOf(n, node.dataset.order, n * 13 + 5);
+    node.classList.add('dk-scr');
+    for (const c of d.chars) c.el.style.width = c.w + 'px';
+    d.cls = d.chars.map(c => /[.,:;!?'"’“”()\-–—…·]/.test(c.ch) ? '' : /[A-Z]/.test(c.ch) ? 'A' : /[a-z]/.test(c.ch) ? 'a' : /\d/.test(c.ch) ? '0' : /\p{L}/u.test(c.ch) ? 'a' : '#');
+    d.settle = d.chars.map((c, j) => .1 + .74 * rank[j] / Math.max(1, n - 1) + .16 * r());
+    return d;
+  },
+  f(node, e, i) {
+    const d = i.b.data, frame = Math.floor(i.raw * i.b.dur * 22);
+    d.chars.forEach((c, j) => {
+      const done = reduced || i.raw >= d.settle[j] || !d.cls[j], s = done ? c.ch : NOISE[d.cls[j]][Math.floor(ihash(j, frame, 7) * NOISE[d.cls[j]].length)];
+      if (c.s !== s) { c.s = s; c.el.textContent = s; }
+      putc(c, done ? '' : '.55', '');
+    });
+    return { opacity: reduced ? e : i.raw > 0 ? 1 : 0 };
+  } });
+
+// Split-flap word swap: data-words="one|two|three" shows one word per step, starting at data-step. The width of the widest
+// word is reserved, so the sentence around it never moves. The authored text is only the fallback.
+const FLIP_P = 'perspective(900px)';
+const flipSet = (x, vis, op, tf) => {
+  const c = x._c || (x._c = {});
+  if (c.v !== vis) { c.v = vis; x.style.visibility = vis ? '' : 'hidden'; }
+  if (op != null && c.o !== op) { c.o = op; x.style.opacity = op; }
+  if (tf != null && c.t !== tf) { c.t = tf; x.style.transform = tf; }
+};
+anim('flip', { dur: .6, curve: ease.linear,
+  steps: b => (b.data ? b.data.words.length - 1 : 0),
+  init(node) {
+    const words = (node.dataset.words || node.textContent).split('|').map(s => s.trim()).filter(Boolean), k = fitKLive();
+    const probe = el('span', { style: { position: 'absolute', visibility: 'hidden', whiteSpace: 'nowrap' } });
+    node.textContent = ''; node.append(probe);
+    let W = 0; for (const w of words) { probe.textContent = w; W = Math.max(W, probe.getBoundingClientRect().width / k); }
+    probe.remove();
+    const wrap = el('span', { class: 'dk-flip', 'aria-hidden': 'true', style: { minWidth: Math.ceil(W) + 'px' } }, node);
+    const base = el('span', { class: 'dk-fl-base' }, wrap), mk = c => el('span', { class: 'dk-fl ' + c }, wrap);
+    const L = { bt: mk('dk-fl-t'), ab: mk('dk-fl-b'), at: mk('dk-fl-t'), bb: mk('dk-fl-b'), hinge: mk('dk-fl-h') };
+    return { words, base, L, key: -1 };
+  },
+  f(node, e, i) {
+    const d = i.b.data, st = i.st, b = i.b, K = d.words.length, { L } = d;
+    const j = clamp(st.step - b.step, 0, K - 1), lt = j === 0 ? i.lt : stepLT(b.step + j, st, 0);
+    if (j > 0 && st.step === b.step + j) st._end = Math.max(st._end, b.dur);
+    const q = reduced ? 1 : seg(lt, 0, b.dur), w = d.words[j], a = j ? d.words[j - 1] : '';
+    if (d.key !== j) {
+      d.key = j; d.base.textContent = w; node.setAttribute('aria-label', w);
+      L.bt.textContent = L.bb.textContent = w; L.ab.textContent = L.at.textContent = a;
+    }
+    const u = seg(q, 0, .5), v = seg(q, .5, 1), done = q >= 1;
+    flipSet(d.base, done);
+    flipSet(L.hinge, !done, String(.3));
+    flipSet(L.bt, !done, String(+(q < .5 ? seg(u, .3, .9) : 1).toFixed(3)));
+    flipSet(L.ab, !done, String(+(q < .5 ? 1 : 1 - seg(v, .15, .7)).toFixed(3)));
+    flipSet(L.at, !done && q < .5, '', `${FLIP_P} rotateX(${(-90 * ease.inQuad(u)).toFixed(2)}deg)`);
+    flipSet(L.bb, !done && q >= .5, '', `${FLIP_P} rotateX(${(90 * (1 - ease.outCubic(v))).toFixed(2)}deg)`);
+    return { opacity: i.leaving ? i.raw : st.step < b.step || (j === 0 && i.raw <= 0) ? 0 : 1 };
+  } });
+
+/* ───────────────────────── statements: "Setup:|*payoff*" ─────────────────────────
+ * data-say (or Deck.say(el, text)) turns the string into <span class="say-s">setup</span> <em class="pay">payoff</em>.
+ * `|` splits setup from payoff (in the payoff, `|` is a line break); the asterisks around the payoff are optional. At most 8 words. */
+function say(node, text) {
+  const t = String(text ?? node.textContent).replace(/\s+/g, ' ').trim();
+  let setup = '', pay = t;
+  const bar = t.indexOf('|');
+  if (bar >= 0) { setup = t.slice(0, bar).trim(); pay = t.slice(bar + 1).trim(); }
+  else { const m = /^([^*]*)\*(.+?)\*$/.exec(t); if (m) { setup = m[1].trim(); pay = m[2]; } }
+  pay = pay.replace(/^\*+|\*+$/g, '').trim();
+  const words = (setup + ' ' + pay).split(/\s+/).filter(Boolean).length;
+  if (words > 8) console.warn(`deck-kit: a statement should have at most 8 words, this one has ${words}: "${t}"`);
+  node.classList.add('dk-say'); node.textContent = '';
+  if (setup) node.append(el('span', { class: 'say-s', text: setup }), ' ');
+  const em = el('em', { class: 'pay' }, node);
+  pay.split('|').forEach((line, n) => { if (n) em.append(document.createElement('br')); em.append(line.trim()); });
+  return node;
+}
+
+/* ───────────────────────── transitions ─────────────────────────
+ * fn(A, B, p, o): A = outgoing layer, B = incoming layer, p = 0..1.
+ * o.sign is +1 going forward, -1 going back. Layers are reset every frame. */
+function transition(name, spec) { TRANSITIONS[name] = spec; }
+const DIRS = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
+const dirOf = (o, def) => { const v = DIRS[o.dir] || DIRS[def]; return [v[0] * o.sign, v[1] * o.sign]; };
+const origin = o => o.origin || [W / 2, H / 2];
+
+transition('none', { dur: 0, fn: A => { A.style.visibility = 'hidden'; } });
+transition('fade', { dur: .6, fn(A, B, p) {
+  const e = ease.inOutSine(p); A.style.opacity = 1 - e; B.style.opacity = e; } });
+transition('dip', { dur: .9, fn(A, B, p, o) {       // through a colour: black = time passes
+  (p < .5 ? B : A).style.visibility = 'hidden';
+  o.veil.style.background = o.color || '#000';
+  o.veil.style.opacity = 1 - Math.abs(p * 2 - 1); } });
+transition('push', { dur: .8, dir: 'left', fn(A, B, p, o) {
+  const e = ease.inOutQuart(p), [dx, dy] = dirOf(o, 'left');
+  A.style.transform = tr(dx * e * W, dy * e * H);
+  B.style.transform = tr(-dx * (1 - e) * W, -dy * (1 - e) * H); } });
+transition('cover', { dur: .8, dir: 'left', opaque: true, fn(A, B, p, o) {
+  const e = ease.inOutQuart(p), [dx, dy] = dirOf(o, 'left');
+  if (o.sign > 0) {           // B slides over A
+    B.style.transform = tr(-dx * (1 - e) * W, -dy * (1 - e) * H);
+    B.style.boxShadow = `0 0 80px rgba(0,0,0,${(.25 * e).toFixed(3)})`;
+    A.style.transform = tr(dx * e * W * .25, dy * e * H * .25);
+    A.style.filter = `brightness(${1 - .25 * e})`;
+  } else {                     // going back: the top card slides away
+    A.style.zIndex = 2;
+    A.style.transform = tr(dx * e * W, dy * e * H);
+    A.style.boxShadow = `0 0 80px rgba(0,0,0,${(.25 * (1 - e)).toFixed(3)})`;
+    B.style.transform = tr(-dx * (1 - e) * W * .25, -dy * (1 - e) * H * .25);
+    B.style.filter = `brightness(${.75 + .25 * e})`;
+  } } });
+transition('zoom', { dur: .9, fn(A, B, p, o) {      // zoom-through: dive into a point of A
+  const [x, y] = origin(o), fwd = o.sign > 0;
+  A.style.transformOrigin = B.style.transformOrigin = `${x}px ${y}px`;
+  const a = seg(p, 0, .6), b = seg(p, .35, 1);
+  A.style.transform = `scale(${fwd ? 1 + ease.inExpo(a) * 2.2 : 1 - ease.inCubic(a) * .3})`;
+  A.style.opacity = 1 - ease.inCubic(a);
+  A.style.filter = a > 0 ? `blur(${a * 10}px)` : '';
+  const ob = (1 - 2 ** (-10 * b)) / (1 - 2 ** -10);      // outExpo rescaled to reach exactly 1 (the stock curve stops 0.1% short)
+  B.style.transform = `scale(${fwd ? .72 + .28 * ob : 3.2 - 2.2 * ob})`;
+  B.style.opacity = ease.outCubic(b); } });
+transition('iris', { dur: .9, fn(A, B, p, o) {
+  const [x, y] = origin(o), R = Math.hypot(Math.max(x, W - x), Math.max(y, H - y)) + 2;
+  const e = ease.inOutCubic(p);
+  if (o.sign > 0) {
+    const r = e * R;
+    if (r < .5) { B.style.visibility = 'hidden'; return; }
+    B.style.clipPath = `circle(${r}px at ${x}px ${y}px)`;
+    A.style.maskImage = `radial-gradient(circle at ${x}px ${y}px, transparent ${r}px, #000 ${r + 1}px)`;
+  } else {
+    const r = (1 - e) * R;
+    if (r < .5) { A.style.visibility = 'hidden'; return; }
+    A.style.zIndex = 2;
+    A.style.clipPath = `circle(${r}px at ${x}px ${y}px)`;
+    B.style.maskImage = `radial-gradient(circle at ${x}px ${y}px, transparent ${r}px, #000 ${r + 1}px)`;
+  } } });
+transition('wipe', { dur: .9, dir: 'right', fn(A, B, p, o) {
+  const ang = { right: 90, left: 270, down: 180, up: 0 }[o.dir || 'right'] + (o.sign < 0 ? 180 : 0);
+  const f = 14, a = ease.inOutCubic(p) * (100 + f) - f, b = a + f;
+  B.style.maskImage = `linear-gradient(${ang}deg, #000 ${a}%, transparent ${b}%)`;
+  A.style.maskImage = `linear-gradient(${ang}deg, transparent ${a}%, #000 ${b}%)`; } });
+transition('blinds', { dur: 1, fn(A, B, p, o) {
+  const n = +(o.data.count || 12), w = W / n, e = ease.inOutCubic(p) * w;
+  B.style.maskImage = `repeating-linear-gradient(90deg, #000 0 ${e}px, transparent ${e}px ${w}px)`;
+  A.style.maskImage = `repeating-linear-gradient(90deg, transparent 0 ${e}px, #000 ${e}px ${w}px)`; } });
+transition('cube', { dur: 1.1, opaque: true, fn(A, B, p, o) {
+  const e = ease.inOutCubic(p), s = o.sign, P = `perspective(${W * 1.8}px) translateZ(${-W / 2 - Math.sin(Math.PI * e) * 260}px)`;
+  A.style.transform = `${P} rotateY(${-90 * e * s}deg) translateZ(${W / 2}px)`;
+  B.style.transform = `${P} rotateY(${90 * (1 - e) * s}deg) translateZ(${W / 2}px)`;
+  A.style.filter = `brightness(${1 - .45 * e})`;
+  B.style.filter = `brightness(${.55 + .45 * e})`; } });
+transition('flip', { dur: 1, opaque: true, fn(A, B, p, o) {
+  const e = ease.inOutCubic(p), s = o.sign, P = `perspective(${W * 2}px) translateZ(${-Math.sin(Math.PI * e) * 420}px)`;
+  A.style.transform = `${P} rotateY(${-180 * e * s}deg)`;
+  B.style.transform = `${P} rotateY(${180 * (1 - e) * s}deg)`; } });
+// The outgoing slide is torn off along a zigzag edge and lifted away.
+let _teeth;
+const teeth = () => _teeth || (_teeth = (() => {
+  const pts = ['0 0', `${W}px 0`], tw = 26, th = 16;
+  for (let x = W, k = 0; x >= 0; x -= tw / 2, k++) pts.push(`${Math.max(0, x)}px ${H - (k % 2 ? th : 0)}px`);
+  return `polygon(${pts.join(',')})`;
+})());
+transition('tear', { dur: 1, opaque: true, fn(A, B, p, o) {
+  const top = o.sign > 0 ? A : B, under = o.sign > 0 ? B : A;
+  const e = o.sign > 0 ? ease.inCubic(p) : 1 - ease.outCubic(p);
+  top.style.zIndex = 2;
+  top.style.clipPath = e > 0 ? teeth() : '';
+  top.style.transformOrigin = '100% 100%';
+  // travel = the height plus the corner that the tilt swings down, so the sheet is fully off the canvas at p = 1
+  top.style.transform = `translateY(${-e * (H + W * Math.sin(5 * Math.PI / 180) + 40)}px) rotate(${-5 * e}deg)`;
+  top.style.boxShadow = e > 0 ? '0 30px 60px rgba(0,0,0,.18)' : '';
+  under.style.transform = `scale(${.965 + .035 * e})`;
+  under.style.filter = `brightness(${.93 + .07 * e})`; } });
+// Noise dissolve through an SVG filter; the two layers get complementary alpha.
+transition('dissolve', { dur: 1.1, fn(A, B, p) {
+  if (p <= 0) { B.style.visibility = 'hidden'; return; }      // the noise never reaches 0 or 1, so the ends are explicit
+  if (p >= 1) { A.style.visibility = 'hidden'; return; }
+  const th = lerp(-.12, 1.12, ease.inOutSine(p)), S = 14;      // the threshold sweeps past both ends of the noise range
+  dsv.inA.setAttribute('slope', -S); dsv.inA.setAttribute('intercept', S * th);
+  dsv.outA.setAttribute('slope', S); dsv.outA.setAttribute('intercept', 1 - S * th);
+  B.style.filter = 'url(#dk-dsv-in)'; A.style.filter = 'url(#dk-dsv-out)'; } });
+// Magic move: elements with the same data-morph key fly from their place on A to their place on B.
+transition('morph', { dur: 1, fn(A, B, p, o) {
+  const e = ease.inOutCubic(p);
+  A.style.opacity = 1 - ease.outCubic(seg(p, 0, .45));
+  B.style.opacity = ease.inOutSine(seg(p, .35, 1));
+  for (const m of o.morph || []) {
+    const { a, b, ca, cb } = m, x = lerp(a.x, b.x, e), y = lerp(a.y, b.y, e), w = lerp(a.w, b.w, e), h = lerp(a.h, b.h, e);
+    ca.style.transform = `${tr(x, y)} scale(${w / a.w}, ${h / a.h})`;
+    cb.style.transform = `${tr(x, y)} scale(${w / b.w}, ${h / b.h})`;
+    const f = seg(e, .15, .85);
+    ca.style.opacity = 1 - f; cb.style.opacity = f;
+  } } });
+// Camera flies across one continuous world; slides sit at data-pos.
+transition('camera', { dur: 1.3, fn(A, B, p, o) {
+  const e = ease.inOutCubic(p), a = o.from.pos, b = o.to.pos;
+  const dist = Math.hypot(b.x - a.x, b.y - a.y) / Math.max(a.s, b.s);
+  const cs = lerp(a.s, b.s, e) * (1 + Math.min(1.6, dist * .32) * (o.lift ?? 1) * Math.sin(Math.PI * e));
+  const cx = lerp(a.x + a.s / 2, b.x + b.s / 2, e), cy = lerp(a.y + a.s / 2, b.y + b.s / 2, e);
+  const cam = { x: cx - cs / 2, y: cy - cs / 2, s: cs };
+  o.cam = cam;
+  for (const [L, s] of [[A, o.from], [B, o.to]]) {
+    L.style.transformOrigin = '0 0';
+    // rounded: cx - cs/2 leaves float dust (575.9999999999 px), and a raster that floors it moves the text a whole pixel at p = 0 and p = 1
+    const r3 = v => Math.round(v * 1000) / 1000;
+    L.style.transform = `${tr(r3((s.pos.x - cam.x) / cam.s * W), r3((s.pos.y - cam.y) / cam.s * H))} scale(${Math.round(s.pos.s / cam.s * 1e5) / 1e5})`;
+  } } });
+
+/* Cinematic set, ported from the film runtime (every-frame-is-code). Same rule as everything else: each one is a pure
+ * function of p, and at p = 1 every style it wrote is neutral, so the last frame equals the rest frame.
+ * `init` (optional) runs once at load, only if a slide uses the transition. */
+const fxKids = new Map();
+function fxLayer(name) {                     // a full-canvas overlay above the veil, created on first use, hidden again every frame
+  let e = fxKids.get(name);
+  if (!e) { e = el('div', { class: 'dk-fx' }, deckEl); fxKids.set(name, e); }
+  return e;
+}
+function resetFx() { for (const e of fxKids.values()) if (e.style.cssText) e.style.cssText = ''; }
+const rgbOf = (c, d = '255,255,255') => (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c || '') ? hex(c).join(',') : d);
+
+// Seeded speed lines: n wedges, one per sector, so they never overlap. Built once per (origin, colour), scaled and faded per frame.
+function raysBg(ox, oy, rgb, seed, n = 64) {
+  const r = rng(seed), sec = 360 / n, st = [];
+  for (let k = 0; k < n; k++) {
+    const w = sec * (.06 + r() * .5), a0 = k * sec + r() * (sec - w), al = (.25 + r() * .75).toFixed(2), f = Math.min(w / 3, .25);
+    st.push(`transparent ${(a0 - f).toFixed(2)}deg`, `rgba(${rgb},${al}) ${a0.toFixed(2)}deg`, `rgba(${rgb},${al}) ${(a0 + w).toFixed(2)}deg`, `transparent ${(a0 + w + f).toFixed(2)}deg`);
+  }
+  return `conic-gradient(from 0deg at ${ox}px ${oy}px, ${st.join(',')})`;
+}
+function rays(o, col, a, scale, seed) {
+  if (a <= .003) return;
+  const box = fxLayer('rays'), [ox, oy] = origin(o), key = `${ox}|${oy}|${col}|${seed}`;
+  const inner = box.firstElementChild || el('div', { style: { position: 'absolute', inset: '0' } }, box);
+  if (inner.dataset.k !== key) {
+    inner.dataset.k = key;
+    inner.style.background = raysBg(ox, oy, rgbOf(col), seed);
+    inner.style.maskImage = `radial-gradient(circle at ${ox}px ${oy}px, transparent 90px, #000 420px)`;
+  }
+  Object.assign(box.style, { display: 'block', opacity: a.toFixed(3), transformOrigin: `${ox}px ${oy}px`, transform: `scale(${scale.toFixed(3)})` });
+}
+
+// The old slide burns to white (or data-color); the new one comes out of the light with rays. Meaning: the moment it happened.
+transition('flash', { dur: 1, init: () => fxLayer('rays'), fn(A, B, p, o) {
+  const col = o.color || '#fff', v = o.veil.style;
+  v.background = col;
+  if (p < .5) { B.style.visibility = 'hidden'; v.opacity = ease.inExpo(p * 2); return; }
+  const q = (p - .5) * 2;
+  A.style.visibility = 'hidden';
+  v.opacity = 1 - ease.outCubic(q);
+  rays(o, col, (1 - q) * .85, 1 + q * .55, 3);
+} });
+
+// A hard cut on the beat: the old slide leans in, the new one lands 7% too big and settles, the old one lingers as a ghost.
+// Meaning: an accent, one per section at most.
+transition('punch', { dur: .5, fn(A, B, p, o) {
+  const CUT = .16, [ox, oy] = origin(o), org = `${ox}px ${oy}px`;
+  A.style.transformOrigin = B.style.transformOrigin = org;
+  if (p < CUT) { A.style.transform = `scale(${1 + .03 * ease.inQuad(p / CUT)})`; B.style.visibility = 'hidden'; return; }
+  const q = (p - CUT) / (1 - CUT), k = 1 - ease.outCubic(q), g = .3 * (1 - ease.outQuad(seg(q, 0, .6)));
+  if (k > 1e-3) B.style.transform = `scale(${1 + .07 * k})`;
+  if (g > .004) { A.style.opacity = g; A.style.transform = `scale(${1.03 + .06 * ease.outCubic(q)})`; } else A.style.visibility = 'hidden';
+  o.veil.style.background = o.color || '#fff'; o.veil.style.opacity = .14 * k * k;
+} });
+
+// A fast pan with horizontal motion blur: one SVG blur whose strength follows the speed of the pan (zero at both ends, so
+// nothing is filtered at rest). Meaning: "and meanwhile", the next place, the pace picks up.
+const whip = {};
+transition('whip', { dur: .7, dir: 'left',
+  init() {
+    if (whip.blur) return;
+    const holder = el('div', { class: 'dk-defs', html: `<svg width="0" height="0" aria-hidden="true"><filter id="dk-whip" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="0 0"/></filter></svg>` }, document.body);
+    whip.blur = holder.querySelector('feGaussianBlur');
+  },
+  fn(A, B, p, o) {
+    // inOutExpo rescaled to hit 0 and 1 exactly (the stock curve stops 0.05% short: a 1 px jump at p = 1)
+    const [dx, dy] = dirOf(o, 'left'), k = 2 ** -10, n = 1 - k, ex = p < .5 ? 2 ** (20 * p - 10) : 2 ** (10 - 20 * p);
+    const e = p <= 0 ? 0 : p >= 1 ? 1 : p < .5 ? (ex - k) / 2 / n : 1 - (ex - k) / 2 / n;
+    const v = p <= 0 || p >= 1 ? 0 : Math.LN2 * 10 * ex / n;   // d(e)/dp
+    const sg = Math.min(56, 7.5 * v);
+    A.style.transform = tr(dx * e * W, dy * e * H);
+    B.style.transform = tr(-dx * (1 - e) * W, -dy * (1 - e) * H);
+    if (sg > .8) {
+      whip.blur.setAttribute('stdDeviation', dx ? `${sg.toFixed(1)} 0` : `0 ${(sg * .56).toFixed(1)}`);
+      A.style.filter = B.style.filter = 'url(#dk-whip)';
+    }
+  } });
+
+// Offset stripes, seeded by the frame index (20 states per second), so the same p always draws the same glitch.
+// The base slide has the stripes cut out of it; the other one shows only inside them, pushed sideways (the gap shows the stage);
+// now and then they swap. Layers stay transparent, so the last frame is exactly the rest frame. Meaning: something is broken or corrupt.
+transition('glitch', { dur: .7, fn(A, B, p, o) {
+  const amp = Math.sin(Math.PI * p);
+  if (p >= .96 || p <= .04 || amp < .12) { (p >= .5 ? A : B).style.visibility = 'hidden'; return; }
+  const r = rng(Math.floor(p * o.dur * 20) * 7919 + 1), swap = r() < .3;
+  const base = (p >= .5) !== swap ? B : A, top = base === B ? A : B;
+  let d = '';
+  for (let i = 5 + Math.floor(r() * 8); i > 0; i--) { const y = Math.round(r() * (H - 80)), h = Math.round(8 + r() * 60 * amp); d += `M0 ${y}H${W}V${y + h}H0Z`; }
+  base.style.zIndex = 1; top.style.zIndex = 2;
+  base.style.clipPath = `path(evenodd, 'M0 0H${W}V${H}H0Z${d}')`;
+  top.style.clipPath = `path('${d}')`;
+  top.style.transform = `translateX(${Math.round((r() - .5) * 2 * (60 + 190 * amp))}px)`;
+} });
+
+// Bayer ordered dither: both slides are masked by complementary tiled 8x8 threshold patterns, one pre-rendered tile per level
+// (2 x 65 tiny PNGs), so a frame costs two mask swaps: no noise, no filter, no per-pixel work, no opaque cards, and every cell
+// shows exactly one slide. data-cell is the cell size in px (default 14), data-seed shifts the pattern. Meaning: sampling, going digital.
+const bayer8 = (() => {
+  let m = [[0]];
+  while (m.length < 8) {
+    const k = m.length, t = [];
+    for (let y = 0; y < 2 * k; y++) { t[y] = []; for (let x = 0; x < 2 * k; x++) t[y][x] = m[y % k][x % k] * 4 + [[0, 2], [3, 1]][y >= k ? 1 : 0][x >= k ? 1 : 0]; }
+    m = t;
+  }
+  return m;
+})();
+const ditherSets = new Map();
+function ditherTiles(cell, seed) {
+  const key = `${cell}|${seed}`;
+  let set = ditherSets.get(key);
+  if (!set) {
+    const r = rng(seed * 101 + 7), sx = Math.floor(r() * 8), sy = Math.floor(r() * 8), T = 8 * cell;
+    const small = document.createElement('canvas'), big = document.createElement('canvas'), sg = small.getContext('2d'), bg = big.getContext('2d');
+    small.width = small.height = 8; big.width = big.height = T; bg.imageSmoothingEnabled = false;
+    set = { on: [], off: [], T };
+    for (let lvl = 0; lvl <= 64; lvl++) for (const [name, inv] of [['on', 0], ['off', 1]]) {
+      const img = sg.createImageData(8, 8);
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) img.data[(y * 8 + x) * 4 + 3] = (bayer8[(y + sy) & 7][(x + sx) & 7] < lvl) !== !!inv ? 255 : 0;
+      sg.putImageData(img, 0, 0); bg.clearRect(0, 0, T, T); bg.drawImage(small, 0, 0, T, T);
+      set[name].push(`url(${big.toDataURL('image/png')})`);
+    }
+    ditherSets.set(key, set);
+  }
+  return set;
+}
+const maskWith = (x, img, T) => Object.assign(x.style, { maskImage: img, maskSize: `${T}px ${T}px`, maskRepeat: 'repeat' });
+transition('dither', { dur: .9, init: () => ditherTiles(14, 0), fn(A, B, p, o) {
+  const fwd = o.sign > 0, L = Math.round(64 * ease.inOutSine(p)), lvl = fwd ? L : 64 - L, on = fwd ? B : A, off = fwd ? A : B;
+  if (lvl <= 0) { on.style.visibility = 'hidden'; return; }
+  if (lvl >= 64) { off.style.visibility = 'hidden'; return; }
+  const set = ditherTiles(num(o.data.cell, 14), num(o.data.seed, 0));
+  maskWith(on, set.on[lvl], set.T); maskWith(off, set.off[lvl], set.T);
+} });
+
+// Warm light leak over a crossfade: two screen-blended gradient lobes and a streak sweep across, peaking mid-way.
+// The sweep runs the other way going back. data-color tints it. Meaning: memory, warmth, a change of mood.
+transition('lightleak', { dur: 1.1, fn(A, B, p, o) {
+  const e = ease.inOutSine(p), a = Math.sin(Math.PI * p) ** 1.15, x = lerp(.12, .88, o.sign > 0 ? p : 1 - p) * 100;
+  A.style.opacity = 1 - e; B.style.opacity = e;
+  if (a < .004) return;
+  const c = rgbOf(o.color, '255,196,120'), hot = `255,${Math.round(lerp(196, 240, .5))},${Math.round(lerp(120, 200, .5))}`;
+  const v = o.veil.style;
+  v.mixBlendMode = 'screen'; v.opacity = 1;
+  v.background = `radial-gradient(ellipse 55% 85% at ${x.toFixed(1)}% 38%, rgba(${hot},${(a * .95).toFixed(3)}), rgba(${c},${(a * .55).toFixed(3)}) 38%, rgba(255,90,40,0) 76%),` +
+    `radial-gradient(ellipse 38% 60% at ${(112 - x).toFixed(1)}% 84%, rgba(255,96,64,${(a * .5).toFixed(3)}), rgba(255,60,20,0) 70%),` +
+    `linear-gradient(105deg, rgba(255,232,190,0) ${(x - 12).toFixed(1)}%, rgba(255,232,190,${(a * .22).toFixed(3)}) ${x.toFixed(1)}%, rgba(255,232,190,0) ${(x + 12).toFixed(1)}%)`;
+} });
+
+/* ───────────────────────── helpers for charts & diagrams ───────────────────────── */
+const SVGNS = 'http://www.w3.org/2000/svg';
+// Presentation attributes lose to any CSS rule (`.chart text { fill }` beats fill="red").
+// Values passed to the helper are explicit per-element choices, so they go to inline style and win.
+const AS_STYLE = new Set(['fill', 'stroke', 'stroke-width', 'font-size', 'font-weight', 'font-family', 'text-anchor', 'fill-opacity', 'stroke-opacity', 'letter-spacing']);
+function mk(ns, tag, attrs = {}, parent) {
+  const el = ns ? document.createElementNS(ns, tag) : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'text') el.textContent = v;
+    else if (k === 'html') el.innerHTML = v;
+    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (ns && AS_STYLE.has(k)) el.style.setProperty(k, typeof v === 'number' && /size|width|spacing/.test(k) ? v + 'px' : String(v));
+    else el.setAttribute(k, v);
+  }
+  if (parent) parent.append(el);
+  return el;
+}
+const svg = (tag, attrs, parent) => mk(SVGNS, tag, attrs, parent);
+const el = (tag, attrs, parent) => mk(null, tag, attrs, parent);
+function niceStep(span, n) {
+  const raw = span / Math.max(1, n), mag = 10 ** Math.floor(Math.log10(raw)), r = raw / mag;
+  return (r >= 5 ? 10 : r >= 2 ? 5 : r >= 1 ? 2 : 1) * mag;
+}
+function ticks(a, b, n = 5) {
+  const st = niceStep(b - a, n), out = [];
+  for (let v = Math.ceil(a / st) * st; v <= b + st * 1e-9; v += st) out.push(+v.toFixed(10));
+  return out;
+}
+function scaleLinear(domain, range) {
+  let [d0, d1] = domain; const [r0, r1] = range;
+  const f = v => r0 + (v - d0) / (d1 - d0 || 1) * (r1 - r0);
+  f.invert = y => d0 + (y - r0) / (r1 - r0 || 1) * (d1 - d0);
+  f.ticks = (n = 5) => ticks(d0, d1, n);
+  f.nice = (n = 5) => { const st = niceStep(d1 - d0, n); d0 = Math.floor(d0 / st) * st; d1 = Math.ceil(d1 / st) * st; return f; };
+  f.domain = () => [d0, d1]; f.range = () => [r0, r1];
+  return f;
+}
+function scaleBand(keys, range, { padding = .2, outer = padding / 2 } = {}) {
+  const [r0, r1] = range, n = keys.length, step = (r1 - r0) / (n - padding + outer * 2);
+  const f = k => r0 + step * (outer + keys.indexOf(k));
+  f.bw = step * (1 - padding); f.step = step; f.keys = keys;
+  return f;
+}
+// Monotone cubic (Fritsch–Carlson): passes through points, never overshoots.
+function linePath(pts, curve = 'monotone') {
+  if (!pts.length) return '';
+  if (curve === 'linear' || pts.length < 3) return 'M' + pts.map(p => `${p[0]},${p[1]}`).join('L');
+  if (curve === 'step') return 'M' + pts.map((p, i) => i ? `H${p[0]}V${p[1]}` : `${p[0]},${p[1]}`).join('');
+  const n = pts.length, dx = [], m = [], tg = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1][0] - pts[i][0]; m[i] = (pts[i + 1][1] - pts[i][1]) / dx[i]; }
+  tg[0] = m[0]; tg[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) tg[i] = m[i - 1] * m[i] <= 0 ? 0 : 3 * (dx[i - 1] + dx[i]) / ((2 * dx[i] + dx[i - 1]) / m[i - 1] + (dx[i] + 2 * dx[i - 1]) / m[i]);
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], h = dx[i] / 3;
+    d += `C${x0 + h},${y0 + tg[i] * h} ${x1 - h},${y1 - tg[i + 1] * h} ${x1},${y1}`;
+  }
+  return d;
+}
+const areaPath = (pts, y0, curve) => pts.length ? `${linePath(pts, curve)}L${pts[pts.length - 1][0]},${y0}L${pts[0][0]},${y0}Z` : '';
+// Angles in radians, 0 at twelve o'clock, clockwise.
+function arcPath(cx, cy, r0, r1, a0, a1) {
+  if (a1 - a0 >= Math.PI * 2 - 1e-6) a1 = a0 + Math.PI * 2 - 1e-4;
+  const P = (r, a) => `${cx + r * Math.sin(a)},${cy - r * Math.cos(a)}`, big = a1 - a0 > Math.PI ? 1 : 0;
+  if (a1 <= a0) return '';
+  return r0 > 0
+    ? `M${P(r1, a0)}A${r1},${r1} 0 ${big} 1 ${P(r1, a1)}L${P(r0, a1)}A${r0},${r0} 0 ${big} 0 ${P(r0, a0)}Z`
+    : `M${cx},${cy}L${P(r1, a0)}A${r1},${r1} 0 ${big} 1 ${P(r1, a1)}Z`;
+}
+function fmtNum(v, dec = 0, comma = true) {
+  const s = Math.abs(v).toFixed(dec), [i, f] = s.split('.');
+  const ii = comma ? i.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : i;
+  return (v < 0 && +s !== 0 ? '−' : '') + ii + (f ? '.' + f : '');
+}
+function fmt(v, { dec = 0, prefix = '', suffix = '', compact = false, comma = true } = {}) {
+  if (compact) {
+    const a = Math.abs(v), [d, u] = a >= 1e9 ? [1e9, 'B'] : a >= 1e6 ? [1e6, 'M'] : a >= 1e3 ? [1e3, 'K'] : [1, ''];
+    return prefix + fmtNum(v / d, dec, comma) + u + suffix;
+  }
+  return prefix + fmtNum(v, dec, comma) + suffix;
+}
+function hex(c) { const n = parseInt(c.slice(1), 16); return c.length === 4 ? [(n >> 8 & 15) * 17, (n >> 4 & 15) * 17, (n & 15) * 17] : [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+function mix(c1, c2, p) { const a = hex(c1), b = hex(c2); return `rgb(${a.map((v, i) => Math.round(lerp(v, b[i], p))).join(',')})`; }
+const _len = new WeakMap();
+function pointAt(path, p) {
+  let L = _len.get(path); if (L == null) { L = path.getTotalLength(); _len.set(path, L); }
+  const q = path.getPointAtLength(clamp(p) * L); return { x: q.x, y: q.y };
+}
+
+/* ───────────────────────── Deck.fx: opt-in atmosphere for the stage and canvas slides ─────────────────────────
+ * Nothing here runs unless a deck calls it; every cache is keyed by the look (colour, size), never by time.
+ * Everything is a pure function of its arguments and a seed. Recipes: 10-stage.md. */
+const _sprites = new Map();
+const spriteOf = (key, make) => { let s = _sprites.get(key); if (!s) { if (_sprites.size > 64) _sprites.clear(); s = make(); _sprites.set(key, s); } return s; };
+const newCanvas = (w, h = w) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const _rgbCss = new Map();
+function cssRgb(c) {                       // '#rgb', '#rrggbb', 'rgb(r,g,b)' without touching a canvas; anything else is parsed once by the browser
+  let v = _rgbCss.get(c);
+  if (!v) {
+    let m;
+    if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c)) v = hex(c);
+    else if ((m = /^rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)/.exec(c))) v = [+m[1], +m[2], +m[3]];
+    else { const t = newCanvas(1).getContext('2d'); t.fillStyle = c; t.fillRect(0, 0, 1, 1); v = [...t.getImageData(0, 0, 1, 1).data].slice(0, 3); }
+    if (_rgbCss.size > 256) _rgbCss.clear();
+    _rgbCss.set(c, v);
+  }
+  return v;
+}
+const fx = {
+  // Seeded 2D value noise and fractal noise, both 0..1: n(x, y), fbm(x, y, octaves = 5).
+  noise(seed = 1) {
+    const r = rng(seed), P = new Uint8Array(512), G = new Float32Array(256);
+    for (let i = 0; i < 256; i++) { P[i] = i; G[i] = r(); }
+    for (let i = 255; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [P[i], P[j]] = [P[j], P[i]]; }
+    for (let i = 0; i < 256; i++) P[i + 256] = P[i];
+    const h = (x, y) => G[P[P[x & 255] + (y & 255)]];
+    const n = (x, y) => {
+      const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+      return lerp(lerp(h(xi, yi), h(xi + 1, yi), u), lerp(h(xi, yi + 1), h(xi + 1, yi + 1), u), v);
+    };
+    const fbm = (x, y, oct = 5) => { let s = 0, a = .5; for (let i = 0; i < oct; i++) { s += a * n(x, y); x *= 2; y *= 2; a *= .5; } return s / (1 - .5 ** oct); };
+    return { n, fbm };
+  },
+  // Film grain from `tiles` pre-rendered seeded tiles of black and white specks with varying alpha (they read on dark and on light
+  // backgrounds); the tile and its offset change `fps` times a second (12..24). g.draw(ctx, S, amount, live = true) inside Deck.stage's
+  // draw. Frozen on S.rest (exports) and when live is false; then it does not read S.T, so the deck can go idle. ?nograin (or
+  // g.enabled = false) turns it off. Pair it with `ambient: g.fps` on the stage. Tiles are drawn with drawImage (a pattern fill of the
+  // whole canvas is 5-10x slower in a software canvas). g.warm() builds the tiles early, so the first frame does not pay for them.
+  grain({ size = 512, tiles = 6, fps = 18, seed = 100, blend = 'source-over' } = {}) {
+    fps = clamp(fps, 12, 24);
+    let cvs = null;
+    const g = { fps, enabled: !Q.has('nograin'),
+      warm() {
+        if (cvs || !g.enabled) return g;
+        const r = rng(seed);
+        cvs = Array.from({ length: tiles }, () => {
+          const c = newCanvas(size), x = c.getContext('2d'), img = x.createImageData(size, size);
+          for (let i = 0; i < img.data.length; i += 4) { const v = r(); img.data[i] = img.data[i + 1] = img.data[i + 2] = v > .5 ? 255 : 0; img.data[i + 3] = Math.abs(v - .5) * 510; }
+          x.putImageData(img, 0, 0);
+          return c;
+        });
+        return g;
+      },
+      draw(ctx, S, amount = .06, live = true) {
+        if (!g.enabled || amount <= 0) return false;
+        g.warm();
+        const tick = live && !S.rest ? Math.floor(S.T * fps) : 0, ox = ihash(tick, seed, 1) * size | 0, oy = ihash(tick, seed, 2) * size | 0, tile = cvs[tick % tiles];
+        ctx.save(); ctx.globalAlpha = amount; ctx.globalCompositeOperation = blend;
+        for (let x = -ox; x < S.W; x += size) for (let y = -oy; y < S.H; y += size) ctx.drawImage(tile, x, y);
+        ctx.restore();
+        return true;
+      } };
+    return g;
+  },
+  // Darkened corners from one small cached gradient stretched over the canvas. S needs W and H (the stage's S does).
+  vignette(ctx, S, { strength = .45, inner = .35, color = '0,0,0' } = {}) {
+    const c = spriteOf(`vig|${strength}|${inner}|${color}|${S.W}|${S.H}`, () => {
+      const w = 256, h = Math.max(2, Math.round(256 * S.H / S.W)), cv = newCanvas(w, h), g = cv.getContext('2d');
+      const gr = g.createRadialGradient(w / 2, h / 2, Math.min(w, h) * inner, w / 2, h / 2, Math.hypot(w, h) * .6);
+      gr.addColorStop(0, `rgba(${color},0)`); gr.addColorStop(1, `rgba(${color},${strength})`);
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      return cv;
+    });
+    ctx.drawImage(c, 0, 0, S.W, S.H);
+  },
+  // Two-layer glow (a wide faint halo and a tight bright core with a near-white centre) drawn from a sprite that is cached by
+  // its look. `r` is the radius on screen; draw it hundreds of times if you like, nothing is blurred per call.
+  // Colours are quantized to 16 levels per channel for the cache key, so an animated tint cannot flood the cache; to move
+  // smoothly between two colours pass `to` and `t` (0..1): both glows are drawn, cross-faded by alpha.
+  glow(ctx, x, y, r, color, { a = 1, core = .35, halo = 1, op = 'lighter', to = null, t = 0 } = {}) {
+    const one = (c, alpha) => {
+      if (alpha <= .004) return;
+      const q = cssRgb(c).map(v => Math.round(v / 17) * 17).join(',');
+      const s = spriteOf(`glow|${q}|${core}|${halo}`, () => {
+        const N = 256, cv = newCanvas(N), g = cv.getContext('2d'), m = N / 2, [R, G, B] = q.split(',').map(Number);
+        let gr = g.createRadialGradient(m, m, 0, m, m, m * halo);
+        gr.addColorStop(0, `rgba(${q},.55)`); gr.addColorStop(.4, `rgba(${q},.18)`); gr.addColorStop(1, `rgba(${q},0)`);
+        g.fillStyle = gr; g.fillRect(0, 0, N, N);
+        gr = g.createRadialGradient(m, m, 0, m, m, m * core);
+        gr.addColorStop(0, `rgba(${[R, G, B].map(v => Math.round(lerp(v, 255, .65))).join(',')},1)`); gr.addColorStop(.45, `rgba(${q},.65)`); gr.addColorStop(1, `rgba(${q},0)`);
+        g.fillStyle = gr; g.fillRect(0, 0, N, N);
+        return cv;
+      });
+      ctx.save(); ctx.globalCompositeOperation = op; ctx.globalAlpha = alpha; ctx.drawImage(s, x - r, y - r, r * 2, r * 2); ctx.restore();
+    };
+    one(color, a * (1 - t));
+    if (to) one(to, a * t);
+  },
+  // Hand-drawn jitter, "line boil": the pattern is new `fps` times a second (default 10) and identical within a tick.
+  // const j = fx.boil(seed, T, 10); const [dx, dy] = j(i, amp);   or   fx.boil.pts(points, seed, T, amp, fps)
+  boil(seed, t, fps = 10) {
+    const f = Math.floor(t * fps);
+    return (i, amp = 1) => [(ihash(seed, f, i * 2) - .5) * amp, (ihash(seed, f, i * 2 + 1) - .5) * amp];
+  },
+};
+fx.boil.pts = (pts, seed, t, amp = 1.6, fps = 10) => { const j = fx.boil(seed, t, fps); return pts.map(([x, y], i) => { const [dx, dy] = j(i, amp); return [x + dx, y + dy]; }); };
+
+/* ───────────────────────── fit text ─────────────────────────
+ * data-fit       shrink until the content fits the element's box (it needs a width, and a height to fit both)
+ * data-fit="2"   shrink until the text takes at most 2 lines
+ * Runs once after fonts load; never below data-fit-min (default .6) of the authored size. */
+function fitText(n) {
+  const cs = getComputedStyle(n), size0 = parseFloat(cs.fontSize), lines = +n.dataset.fit || 0;
+  const min = size0 * num(n.dataset.fitMin, .6);
+  const lh = sz => { const v = parseFloat(getComputedStyle(n).lineHeight); return isFinite(v) ? v : sz * 1.2; };
+  const fits = sz => {
+    if (n.scrollWidth > n.clientWidth + 1) return false;
+    if (lines) return n.offsetHeight <= lh(sz) * lines + 2;
+    return n.scrollHeight <= n.clientHeight + 1;   // auto-height boxes always pass
+  };
+  let sz = size0;
+  while (!fits(sz) && sz > min) { sz = Math.max(min, sz - Math.max(1, sz * .03)); n.style.fontSize = sz + 'px'; }
+}
+
+/* ───────────────────────── slides & builds ───────────────────────── */
+let slides = [];
+const num = (v, d) => (v == null || v === '' ? d : +v);
+
+function parsePos(s, prev) {
+  if (s) { const [x, y, sc] = s.trim().split(/[\s,]+/).map(Number); return { x: x || 0, y: y || 0, s: sc || 1 }; }
+  return prev ? { x: prev.x + prev.s * 1.12, y: prev.y, s: prev.s } : { x: 0, y: 0, s: 1 };
+}
+
+const textOf = n => (n ? n.innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '') : '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+function collect() {
+  const secs = [...deckEl.querySelectorAll(':scope > section.slide')];
+  let prevPos = null;
+  slides = secs.map((sec, i) => {
+    const layer = document.createElement('div');
+    layer.className = 'dk-layer';
+    sec.before(layer); layer.append(sec);
+    const d = sec.dataset, notesEl = sec.querySelector(':scope > .notes');
+    const pos = parsePos(d.pos, prevPos); prevPos = pos;
+    const hold = (d.hold || deckEl.dataset.hold || '3').trim().split(/[\s,]+/).map(Number);
+    return {
+      i, el: sec, layer, id: sec.id || `s${i + 1}`, d, pos, hold,
+      title: d.title || textOf(sec.querySelector('h1,h2,h3')) || `Slide ${i + 1}`,
+      notes: notesEl ? notesEl.innerHTML.trim() : '',
+      notesText: notesEl ? notesEl.textContent.replace(/\s+/g, ' ').trim() : '',
+      hook: hooks[sec.id] || {}, builds: [], steps: 0, entry: 0, api: null,
+    };
+  });
+}
+
+function parseBuilds(s) {
+  const seen = new Set(), list = [];
+  const push = (node, group, extra) => {
+    if (seen.has(node)) return; seen.add(node);
+    const d = node.dataset, g = group ? group.dataset : {};
+    const name = d.anim || g.anim || (group || d.step != null ? 'rise' : 'fade'), A = ANIMS[name] || ANIMS.rise;
+    const b = {
+      el: node, A, name,
+      noIn: !group && d.step == null && d.anim == null,
+      step: num(d.step ?? g.step, 0),
+      out: d.out != null || g.out != null ? num(d.out ?? g.out) : null,
+      dim: d.dim != null || g.dim != null ? num(d.dim ?? g.dim) : null,
+      delay: num(d.delay ?? g.delay, 0) + extra,
+      outDelay: num(d.outDelay ?? g.outDelay, 0),
+      curve: ease[d.ease || g.ease] || A.curve || ease.outCubic,
+      cache: {},
+    };
+    b.dur = num(d.dur ?? g.dur, typeof A.dur === 'function' ? A.dur(node) : A.dur);
+    b.data = A.init ? A.init(node, b) : null;
+    list.push(b);
+  };
+  for (const node of s.el.querySelectorAll('[data-step],[data-anim],[data-stagger],[data-dim],[data-out]')) {
+    if (node.closest('.notes')) continue;
+    if (node.dataset.stagger != null && !ANIMS[node.dataset.anim]?.stagger) {
+      const gap = num(node.dataset.stagger, .08) || .08;
+      let kids = [...node.children];
+      if (node.dataset.order === 'reverse') kids.reverse();
+      if (node.dataset.order === 'center') { const c = (kids.length - 1) / 2; kids = kids.map((k, j) => [k, Math.abs(j - c)]).sort((a, b) => a[1] - b[1]).map(x => x[0]); }
+      if (node.dataset.order === 'random') { const r = rng(kids.length * 31 + 7); kids = kids.map(k => [k, r()]).sort((a, b) => a[1] - b[1]).map(x => x[0]); }
+      seen.add(node);
+      kids.forEach((k, j) => push(k, node, j * gap));
+    } else if (!seen.has(node)) push(node, null, 0);
+  }
+  s.builds = list;
+  let m = s.hook.steps || 0;
+  for (const b of list) m = Math.max(m, b.step + (b.A.steps ? b.A.steps(b) : 0), b.out ?? 0, b.dim ?? 0);
+  s.steps = m;
+}
+
+// Local time since the build for `step` started: +Inf once passed, -Inf while in the future.
+function stepLT(n, st, delay) {
+  if (n < st.step) return Infinity;
+  if (n > st.step) return -Infinity;
+  return st.t - delay - (n === 0 ? st.entry : 0);
+}
+
+function setStyle(b, k, v) { if (b.cache[k] !== v) { b.cache[k] = v; b.el.style[k] = v; } }
+
+function applyBuild(b, st) {
+  const e0 = st.step === 0 ? st.entry : 0;
+  if (!b.noIn && b.step === st.step) st._end = Math.max(st._end, e0 + b.delay + b.dur);
+  if (b.out === st.step) st._end = Math.max(st._end, e0 + b.outDelay + b.dur);
+  if (b.dim === st.step) st._end = Math.max(st._end, e0 + .5);
+  const lt = b.noIn ? Infinity : stepLT(b.step, st, b.delay);
+  // t - delay - entry is not exactly dur when t = entry + delay + dur (float): a frame drawn at 0.9999999999 would be the last one, because the slide goes idle at t >= _end
+  const snap = p => (p > 1 - 1e-9 ? 1 : p);
+  let raw = snap(seg(lt, 0, b.dur)), leaving = false;
+  if (b.out != null) {
+    const ro = snap(seg(stepLT(b.out, st, b.outDelay), 0, b.dur));
+    if (ro > 0) { leaving = true; raw = Math.min(raw, 1 - ro); }
+  }
+  const e = b.curve(raw);
+  const r = b.A.f(b.el, e, { raw, lt, leaving, b, st }) || {};
+  let op = clamp(r.opacity ?? 1);
+  if (b.dim != null) op *= lerp(1, DIM, ease.outCubic(seg(stepLT(b.dim, st, 0), 0, .5)));
+  setStyle(b, 'opacity', op === 1 ? '' : String(+op.toFixed(4)));
+  setStyle(b, 'visibility', op <= 0 ? 'hidden' : '');
+  setStyle(b, 'transform', r.transform && raw < 1 ? r.transform : '');
+  setStyle(b, 'filter', r.filter || '');
+  setStyle(b, 'clipPath', r.clip && (raw < 1 || b.name === 'mask') ? r.clip : '');
+}
+
+// st records what the frame depended on: the latest end time it asked about (_end) and
+// whether it read the global clock (_usesT). A slide past _end that never read T is idle.
+function mkState(s, step, t, T, rest) {
+  const e0 = n => (n === 0 ? s.entry : 0);
+  const st = {
+    slide: s, i: s.i, id: s.id, step, t, rest, last: s.steps, entry: s.entry, W, H, _end: 0, _usesT: false,
+    get T() { st._usesT = true; return T; },
+    // progress 0..1 of a build that starts at `step n` (+delay) and lasts dur
+    p: (n, delay = 0, dur = .8, curve = ease.outCubic) => {
+      if (n === step) st._end = Math.max(st._end, e0(n) + delay + dur);
+      return curve(seg(stepLT(n, st, delay), 0, dur));
+    },
+    // raw local seconds since step n began (Infinity if passed); counts as active for hook.active seconds
+    since: n => { if (n === step) st._end = Math.max(st._end, e0(n) + (s.hook.active ?? 4)); return stepLT(n, st, 0); },
+    at: n => step >= n,
+    // ambient motion; frozen in rest frames so PDF pages are canonical
+    life: (period = 4, amp = 1, phase = 0) => { st._usesT = true; return rest ? 0 : Math.sin(T / period * Math.PI * 2 + phase) * amp; },
+  };
+  return st;
+}
+
+function renderSlide(s, step, t, T, rest = false) {
+  const st = mkState(s, step, t, T, rest);
+  for (const b of s.builds) applyBuild(b, st);
+  if (s.hook.frame) s.hook.frame(s.el, st);
+  return st;
+}
+
+/* ───────────────────────── stage (persistent background) ───────────────────────── */
+let stageCv = null, stageCtx = null, stageQ = 1;
+function setupStage() {
+  if (!stageSpec) return;
+  stageCv = document.createElement('canvas');
+  stageCv.className = 'dk-stage';
+  deckEl.prepend(stageCv);
+  resizeStage();
+  stageCtx = stageCv.getContext('2d');
+  stageSpec.setup?.(stageCtx, { W, H, deck: deckEl });
+}
+function resizeStage() {
+  if (!stageCv) return false;
+  const q = MODE === 'live' ? Math.min(2, (devicePixelRatio || 1) * fitK) : 1;
+  const w = Math.round(W * q), h = Math.round(H * q);
+  if (stageCv.width === w && stageCv.height === h) return false;
+  stageQ = q; stageCv.width = w; stageCv.height = h;
+  return true;
+}
+let stageKey = '', stageUsesT = false, stagePos = null, stageDrew = false;
+// Redraws only when the camera moved, the canvas was resized, or the drawing reads the clock. A stage that declares
+// `ambient: fps` is redrawn at most that many times a second and sees T rounded down to 1/fps (it stays a pure function of T).
+// Returns true while the stage animates (it then keeps the deck from going idle).
+function drawStage(info) {
+  stageDrew = false;
+  if (!stageCv) return false;
+  const resized = resizeStage(), c = info.cam, amb = stageSpec.ambient === true ? 24 : +stageSpec.ambient || 0;
+  const key = `${c.x},${c.y},${c.s},${info.rest},${info.i},${amb && stageUsesT ? Math.floor(info.T * amb) : 0}`;
+  if (!resized && key === stageKey && (amb || !stageUsesT)) return stageUsesT;
+  stageKey = key; stageDrew = true;
+  stagePos = stagePos || slides.map(s => s.pos);
+  const T = amb ? Math.floor(info.T * amb) / amb : info.T; let used = false;
+  const S2 = { W, H, slides: stagePos, ...info, get T() { used = true; return T; } };
+  stageCtx.setTransform(stageQ, 0, 0, stageQ, 0, 0);
+  stageSpec.draw(stageCtx, S2);
+  stageUsesT = used && !info.rest;
+  return stageUsesT;
+}
+
+/* ───────────────────────── overlays ───────────────────────── */
+let veil, blackout, morphLayer, progressEl, numberEl, help, dsv = {};
+function overlays() {
+  morphLayer = el('div', { class: 'dk-morph' }, deckEl);
+  veil = el('div', { class: 'dk-veil' }, deckEl);
+  blackout = el('div', { class: 'dk-blackout' }, deckEl);
+  const chrome = (deckEl.dataset.chrome || '').split(/[\s,]+/);
+  if (chrome.includes('progress')) progressEl = el('div', { class: 'dk-progress' }, deckEl);
+  if (chrome.includes('number')) numberEl = el('div', { class: 'dk-number' }, deckEl);
+  const f = (id, slope, icpt) => `<filter id="${id}" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency=".0085" numOctaves="4" seed="7" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0" result="a"/>
+    <feComponentTransfer in="a" result="m"><feFuncA type="linear" slope="${slope}" intercept="${icpt}"/></feComponentTransfer>
+    <feComposite in="SourceGraphic" in2="m" operator="in"/></filter>`;
+  const defs = el('div', { class: 'dk-defs', html: `<svg width="0" height="0" aria-hidden="true">${f('dk-dsv-in', 0, 0)}${f('dk-dsv-out', 0, 1)}</svg>` }, document.body);
+  dsv.inA = defs.querySelector('#dk-dsv-in feFuncA');
+  dsv.outA = defs.querySelector('#dk-dsv-out feFuncA');
+}
+
+/* ───────────────────────── state machine ───────────────────────── */
+const S = { i: 0, step: 0, t0: 0, settled: false, tr: null };
+let deckBg = '';
+
+function trCfg(s, sign) {
+  const d = s.d, dd = deckEl.dataset;
+  let type = d.transition || dd.transition || 'fade';
+  if (reduced && type !== 'none') type = 'fade';
+  const spec = TRANSITIONS[type] || TRANSITIONS.fade;
+  const o = (d.origin || dd.origin || '').split(/[\s,]+/).map(Number);
+  return {
+    type, spec, sign,
+    dur: reduced ? .3 : num(d.transitionDur ?? dd.transitionDur, spec.dur),
+    dir: d.dir || dd.dir || spec.dir,
+    origin: o.length === 2 && o.every(isFinite) ? o : null,
+    color: d.color || dd.color, lift: num(d.lift ?? dd.lift, 1), data: d,
+  };
+}
+
+function layerOn(s, on) { s.layer.classList.toggle('is-on', on); }
+function resetLayer(s) { s.layer.style.cssText = ''; }
+
+function measure(s, node) {
+  const k = fitKLive(), base = deckEl.getBoundingClientRect(), r = node.getBoundingClientRect();
+  return { x: (r.left - base.left) / k, y: (r.top - base.top) / k, w: Math.max(1, r.width / k), h: Math.max(1, r.height / k) };
+}
+const INHERIT = ['color', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'textTransform',
+  'textAlign', 'whiteSpace', 'fontVariantNumeric', 'fontFeatureSettings', 'fill', 'stroke', 'wordSpacing'];
+function cloneFor(node, r) {
+  const c = node.cloneNode(true), cs = getComputedStyle(node);
+  for (const k of INHERIT) c.style[k] = cs[k];
+  c.removeAttribute('id');
+  Object.assign(c.style, { position: 'absolute', left: '0', top: '0', margin: '0', width: r.w + 'px', height: r.h + 'px',
+    transformOrigin: '0 0', boxSizing: 'border-box', visibility: 'visible', opacity: '1' });
+  morphLayer.append(c);
+  return c;
+}
+
+function beginTransition(from, to, sign, T) {
+  const A = slides[from.i], B = slides[to.i];
+  const cfg = trCfg(sign > 0 ? B : A, sign);
+  const tr = { from, to, A, B, cfg, start: T, dur: cfg.dur, morph: null };
+  resetLayer(A); resetLayer(B); layerOn(A, true); layerOn(B, true);
+  if (cfg.type === 'morph') {
+    renderSlide(A, from.step, Infinity, T); renderSlide(B, to.step, Infinity, T);
+    tr.morph = [];
+    for (const nb of B.el.querySelectorAll('[data-morph]')) {
+      const na = A.el.querySelector(`[data-morph="${CSS.escape(nb.dataset.morph)}"]`);
+      if (!na) continue;
+      const a = measure(A, na), b = measure(B, nb);
+      tr.morph.push({ na, nb, a, b, ca: cloneFor(na, a), cb: cloneFor(nb, b) });
+      na.style.visibility = nb.style.visibility = 'hidden';
+    }
+  }
+  return tr;
+}
+function endTransition(tr) {
+  resetLayer(tr.A); resetLayer(tr.B);
+  if (tr.A !== tr.B) layerOn(tr.A, false);
+  veil.style.cssText = ''; resetFx();
+  if (tr.morph) { for (const m of tr.morph) { m.na.style.visibility = m.nb.style.visibility = ''; m.ca.remove(); m.cb.remove(); } }
+}
+function renderTransition(tr, p, T) {
+  const { A, B, cfg } = tr;
+  resetLayer(A); resetLayer(B); veil.style.cssText = ''; resetFx();
+  if (cfg.spec.opaque) A.layer.style.background = B.layer.style.background = `var(--dk-card, ${deckBg})`;
+  A.layer.style.willChange = B.layer.style.willChange = 'transform, opacity';
+  B.layer.style.zIndex = 1;
+  const o = { ...cfg, veil, from: A, to: B, morph: tr.morph, cam: null };
+  const fs = tr.from, ts = tr.to;
+  renderSlide(A, fs.step, fs.settled ? Infinity : T - fs.t0, T);
+  renderSlide(B, ts.step, ts.settled ? Infinity : T - tr.start, T);
+  cfg.spec.fn(A.layer, B.layer, clamp(p), o);
+  return o;
+}
+function camOf(s) { return { x: s.pos.x, y: s.pos.y, s: s.pos.s }; }
+function lerpCam(a, b, e) { return { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), s: lerp(a.s, b.s, e) }; }
+
+// One frame for the live clock. Once every build of the step has finished and nothing reads
+// the clock, the slide is idle and frames are skipped until the state changes.
+const perf = { rendered: 0, skipped: 0, ms: 0, worst: 0 };
+function frame(T) {
+  if (S.tr) {
+    const p = (T - S.tr.start) / Math.max(1e-6, S.tr.dur);
+    if (p >= 1) { endTransition(S.tr); S.tr = null; S.dirty = true; annRefresh(); }
+    else {
+      const o = renderTransition(S.tr, p, T);
+      drawStage({ T, rest: false, i: lerp(S.tr.A.i, S.tr.B.i, ease.inOutCubic(p)), p, from: S.tr.A.i, to: S.tr.B.i,
+        cam: o.cam || camOf(S.tr.B) });
+      chrome(S.tr, p);
+      perf.rendered++;
+      return;
+    }
+  }
+  // The slide and the stage idle independently: a still slide is not redrawn while an ambient stage (grain) ticks.
+  // A slide that reads the clock but declares `ambient: fps` is redrawn at that rate only.
+  const s = slides[S.i], amb = s.hook.ambient === true ? 24 : +s.hook.ambient || 0, t = S.settled ? Infinity : T - S.t0;
+  const key = `${S.i}.${S.step}.${S.settled}.${S.t0}.${amb && S.usesT ? Math.floor(T * amb) : 0}`;
+  let drew = false;
+  if (!(S.still && S.idleKey === key && !S.dirty)) {
+    const st = renderSlide(s, S.step, t, T);
+    S.usesT = st._usesT; S.still = t >= st._end && (!st._usesT || !!amb);
+    S.idleKey = key; S.dirty = false; drew = true;
+    chrome();
+  }
+  const stageLive = drawStage({ T, rest: false, i: S.i, p: 1, from: S.i, to: S.i, cam: camOf(s) });
+  S.idle = S.still && !S.usesT && !stageLive;
+  drew || stageDrew ? perf.rendered++ : perf.skipped++;
+}
+// Progress bar and counter. During a transition the bar glides from the source to the destination and the counter
+// switches at the middle, so neither jumps on the first frame.
+const progressOf = (i, step) => (slides.length > 1 ? (i + (slides[i].steps ? step / (slides[i].steps + 1) : 0)) / (slides.length - 1) : 1);
+function chrome(tr, p) {
+  const n = slides.length, i = tr ? (p < .5 ? tr.from.i : tr.to.i) : S.i;
+  if (progressEl) progressEl.style.transform = `scaleX(${tr ? lerp(progressOf(tr.from.i, tr.from.step), progressOf(tr.to.i, tr.to.step), ease.inOutCubic(p)) : progressOf(S.i, S.step)})`;
+  if (numberEl) { const txt = `${i + 1} / ${n}`; if (numberEl.textContent !== txt) numberEl.textContent = txt; }
+}
+
+/* ───────────────────────── navigation ───────────────────────── */
+const listeners = [];
+function changed(action) {
+  if (MODE === 'live' || MODE === 'presenter') {
+    const h = `#${S.i + 1}${S.step ? '.' + S.step : ''}`;
+    if (location.hash !== h) history.replaceState(null, '', h);
+  }
+  for (const f of listeners) f({ i: S.i, step: S.step, action });
+  hideHint(); uiUpdate(); annRefresh();
+}
+function finishTr() { if (S.tr) { endTransition(S.tr); S.tr = null; } }
+function toSlide(i, step, sign, settled) {
+  const T = now();
+  const from = { i: S.i, step: S.step, t0: S.t0, settled: S.settled };
+  finishTr();
+  if (i === S.i || MODE === 'presenter') { if (i !== S.i) { layerOn(slides[S.i], false); layerOn(slides[i], true); } S.i = i; S.step = step; S.t0 = T; S.settled = settled; return; }
+  S.tr = beginTransition(from, { i, step, settled }, sign, T);
+  S.i = i; S.step = step; S.t0 = T; S.settled = settled;
+}
+function next() {
+  const s = slides[S.i];
+  if (S.tr) finishTr();
+  if (S.step < s.steps) { S.step++; S.t0 = now(); S.settled = false; }
+  else if (S.i < slides.length - 1) toSlide(S.i + 1, 0, 1, false);
+  else { toast('End of the deck · Home to start again'); return; }
+  changed('next');
+}
+function prev() {
+  if (S.tr) finishTr();
+  if (S.step > 0) { S.step--; S.t0 = now(); S.settled = true; }
+  else if (S.i > 0) toSlide(S.i - 1, slides[S.i - 1].steps, -1, true);
+  else { toast('First slide'); return; }
+  changed('prev');
+}
+function goto(i, step = 0, { animate = false } = {}) {
+  i = clamp(i | 0, 0, slides.length - 1); step = clamp(step | 0, 0, slides[i].steps);
+  if (animate && i !== S.i) toSlide(i, step, i > S.i ? 1 : -1, step > 0);
+  else {
+    finishTr();
+    for (const s of slides) if (s.i !== i) layerOn(s, false);
+    layerOn(slides[i], true);
+    S.i = i; S.step = step; S.t0 = now(); S.settled = step > 0;
+  }
+  changed('goto');
+}
+// Follow another window: animate if the target is one move away, otherwise cut.
+function sync(i, step) {
+  if (i === S.i && step === S.step) return;
+  const s = slides[S.i];
+  const isNext = (i === S.i && step === S.step + 1) || (i === S.i + 1 && step === 0 && S.step === s.steps);
+  const isPrev = (i === S.i && step === S.step - 1) || (i === S.i - 1 && S.step === 0 && step === slides[i].steps);
+  if (isNext) next(); else if (isPrev) prev(); else goto(i, step);
+}
+function parseHash() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (!h) return null;
+  const [a, b] = h.split('.');
+  let i = /^\d+$/.test(a) ? +a - 1 : slides.findIndex(s => s.id === a);
+  if (i < 0) return null;
+  return { i, step: +b || 0 };
+}
+
+/* ───────────────────────── fit to window ───────────────────────── */
+let fitK = 1;
+const fitKLive = () => (MODE === 'render' ? 1 : fitK);
+function fit() {
+  if (MODE === 'render') { deckEl.style.transform = ''; fitK = 1; return; }
+  const vw = innerWidth, vh = innerHeight;
+  fitK = Math.min(vw / W, vh / H);
+  deckEl.style.transform = `translate(${(vw - W * fitK) / 2}px, ${(vh - H * fitK) / 2}px) scale(${fitK})`;
+  S.dirty = true;
+  if (ann) annResize();
+}
+
+/* ───────────────────────── overview & help ───────────────────────── */
+let overview = false, ovSel = 0;
+function toggleOverview(on = !overview) {
+  overview = on;
+  html.classList.toggle('dk-overview', on);
+  if (on) {
+    if (ann && ann.mode) annSet(null);
+    finishTr();
+    const n = slides.length, cols = Math.ceil(Math.sqrt(n * 1.25)), rows = Math.ceil(n / cols), g = 28;
+    const cap = 15 / fitKLive(), gy = g + cap * 1.9, top = 44 / fitKLive();   // caption height and a hint row, in canvas px
+    const z = Math.min((W - g * (cols + 1)) / (cols * W), (H - top - gy * rows) / (rows * H));
+    const ox = (W - (cols * W * z + (cols - 1) * g)) / 2, oy = top + (H - top - (rows * H * z + (rows - 1) * gy + cap * 1.9)) / 2;
+    ovSel = S.i;
+    for (const s of slides) {
+      layerOn(s, true);
+      const c = s.i % cols, r = Math.floor(s.i / cols), x = ox + c * (W * z + g), y = oy + r * (H * z + gy);
+      renderSlide(s, s.steps, Infinity, 0, true);
+      Object.assign(s.layer.style, { transformOrigin: '0 0', background: `var(--dk-card, ${deckBg})`,
+        transform: `translate(${x}px, ${y}px) scale(${z})` });
+      el('div', { class: 'dk-ov-cap', text: `${s.i + 1}  ${s.title}`, style: { left: x + 'px', top: y + H * z + cap * .45 + 'px',
+        width: W * z + 'px', fontSize: cap + 'px' } }, deckEl);
+    }
+    markOv();
+    if (!document.querySelector('.dk-ov-hint')) el('div', { class: 'dk-ov-hint', html: 'Click a slide, or use the arrows and <kbd>Enter</kbd> · <kbd>Esc</kbd> to go back' }, document.body);
+  } else {
+    document.querySelector('.dk-ov-hint')?.remove();
+    for (const s of slides) { resetLayer(s); s.layer.classList.remove('dk-ov-sel'); layerOn(s, s.i === S.i); }
+    for (const c of deckEl.querySelectorAll('.dk-ov-cap')) c.remove();
+    S.dirty = true; stageKey = '';
+  }
+  uiUpdate(); annRefresh();
+}
+function markOv() { for (const s of slides) s.layer.classList.toggle('dk-ov-sel', s.i === ovSel); }
+function toggleHelp(on) {
+  if (!help) {
+    help = el('div', { class: 'dk-help', html: `<div role="dialog" aria-label="Keyboard shortcuts"><h3>Shortcuts</h3><div class="dk-help-cols">
+      <table><caption>Move</caption>
+        <tr><td><kbd>→</kbd> <kbd>Space</kbd> <kbd>PgDn</kbd></td><td>next step</td></tr>
+        <tr><td><kbd>←</kbd> <kbd>PgUp</kbd></td><td>back</td></tr>
+        <tr><td><kbd>Home</kbd> <kbd>End</kbd></td><td>first / last slide</td></tr>
+        <tr><td><kbd>7</kbd> <kbd>Enter</kbd></td><td>go to slide 7</td></tr>
+        <tr><td>click right / left side</td><td>next / back</td></tr>
+        <tr><td>swipe</td><td>next / back</td></tr></table>
+      <table><caption>Views</caption>
+        <tr><td><kbd>O</kbd> <kbd>Esc</kbd></td><td>all slides</td></tr>
+        <tr><td><kbd>P</kbd></td><td>presenter view with notes</td></tr>
+        <tr><td><kbd>F</kbd></td><td>fullscreen</td></tr>
+        <tr><td><kbd>B</kbd> <kbd>.</kbd></td><td>black screen</td></tr>
+        <tr><td><kbd>?</kbd></td><td>this help</td></tr></table>
+      ${ANN_ON ? `<table><caption>Annotate</caption>
+        <tr><td><kbd>D</kbd></td><td>pen (draw)</td></tr>
+        <tr><td><kbd>H</kbd></td><td>highlighter</td></tr>
+        <tr><td><kbd>L</kbd></td><td>laser pointer</td></tr>
+        <tr><td><kbd>1</kbd>–<kbd>4</kbd></td><td>colour (while drawing)</td></tr>
+        <tr><td><kbd>E</kbd></td><td>erase this slide's marks</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>leave the mode</td></tr></table>` : ''}</div>
+      <p>Dots under the title show the steps left on this slide. The bar at the bottom jumps to any slide.</p></div>` }, document.body);
+    help.addEventListener('click', e => { if (e.target === help) toggleHelp(false); });
+  }
+  help.classList.toggle('is-on', on ?? !help.classList.contains('is-on'));
+}
+
+/* ───────────────────────── on-screen controls ─────────────────────────
+ * Live mode only, outside the scaled canvas, so they never reach an export.
+ * data-controls="off" on .deck disables them (kiosk, embedded decks). */
+const ICON = {
+  prev: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
+  next: '<svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>',
+  grid: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1"/></svg>',
+  pv: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="12" height="9" rx="1"/><path d="M18 7h3M18 11h3M3 18h18"/></svg>',
+  fs: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+  pen: '<svg viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/></svg>',
+  hl: '<svg viewBox="0 0 24 24"><path d="M9 14l6-6 3 3-6 6H9z"/><path d="M4 20h7"/></svg>',
+  laser: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>',
+  bin: '<svg viewBox="0 0 24 24"><path d="M5 8h14M9 8V5h6v3M7 8l1 12h8l1-12"/></svg>',
+  ok: '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>',
+};
+let ui = null, uiT = 0, uiHover = false, hintEl = null, toastEl = null, toastT = 0, uiKey = '';
+function controls() {
+  if (MODE !== 'live') return;
+  toastEl = el('div', { class: 'dk-toast', role: 'status' }, document.body);
+  if (deckEl.dataset.controls === 'off') return;
+  ui = el('div', { class: 'dk-ui', html: `
+    <div class="dk-scrub" role="navigation" aria-label="Slides">${slides.map(s =>
+      `<button class="dk-seg" data-i="${s.i}" data-tip="${s.i + 1}. ${s.title.replace(/"/g, '&quot;')}" aria-label="Slide ${s.i + 1}: ${s.title.replace(/"/g, '&quot;')}"><i></i></button>`).join('')}</div>
+    <div class="dk-bar">
+      <button class="dk-b" data-act="prev" data-tip="Back (←)" aria-label="Back">${ICON.prev}</button>
+      <div class="dk-where"><b class="dk-num"></b><span class="dk-title"></span><span class="dk-steps"></span></div>
+      <button class="dk-b dk-b-next" data-act="next" data-tip="Next (→ or click)" aria-label="Next">${ICON.next}</button>
+      <i class="dk-sep"></i>
+      <button class="dk-b" data-act="overview" data-tip="All slides (O)" aria-label="All slides">${ICON.grid}</button>
+      <button class="dk-b" data-act="presenter" data-tip="Presenter view (P)" aria-label="Presenter view">${ICON.pv}</button>
+      ${ANN_ON ? `<button class="dk-b" data-act="annotate" data-tip="Draw on the slide (D)" aria-label="Draw on the slide">${ICON.pen}</button>` : ''}
+      <button class="dk-b" data-act="fullscreen" data-tip="Fullscreen (F)" aria-label="Fullscreen">${ICON.fs}</button>
+      <button class="dk-b" data-act="help" data-tip="Shortcuts (?)" aria-label="Shortcuts">?</button>
+    </div>` }, document.body);
+  el('div', { class: 'dk-edge dk-edge-l', html: ICON.prev }, document.body);
+  el('div', { class: 'dk-edge dk-edge-r', html: ICON.next }, document.body);
+  hintEl = el('div', { class: 'dk-hint', html: '<kbd>→</kbd> or click to advance · <kbd>←</kbd> back · <kbd>O</kbd> all slides · <kbd>?</kbd> shortcuts' }, document.body);
+  setTimeout(() => hintEl && hintEl.classList.add('is-on'), 600);   // a key pressed in the first 600 ms has already dismissed the hint
+  setTimeout(hideHint, 6000);
+  ui.addEventListener('mouseenter', () => { uiHover = true; showUI(); });
+  ui.addEventListener('mouseleave', () => { uiHover = false; showUI(); });
+  ui.addEventListener('click', e => {
+    e.stopPropagation();
+    const b = e.target.closest('[data-act],[data-i]'); if (!b) return;
+    if (b.dataset.i != null) { if (overview) toggleOverview(false); goto(+b.dataset.i, 0, { animate: Math.abs(+b.dataset.i - S.i) === 1 }); }
+    else ({ prev, next, help: () => toggleHelp(), overview: () => toggleOverview(), presenter: openPresenter, annotate: () => annToggle('pen'),
+      fullscreen: () => (document.fullscreenElement ? document.exitFullscreen() : html.requestFullscreen?.()) })[b.dataset.act]();
+    broadcast();
+  });
+  showUI(4500);
+  uiUpdate();
+}
+function hideHint() { if (hintEl) { hintEl.classList.remove('is-on'); hintEl = null; } }
+function showUI(ms = 2600) {
+  if (!ui) return;
+  html.classList.add('dk-ui-on');
+  clearTimeout(uiT);
+  uiT = setTimeout(() => { if (!uiHover) html.classList.remove('dk-ui-on'); }, ms);
+}
+function toast(msg, ms = 1800) {
+  if (!toastEl) return;
+  toastEl.textContent = msg; toastEl.classList.add('is-on');
+  clearTimeout(toastT);
+  if (ms) toastT = setTimeout(() => toastEl.classList.remove('is-on'), ms);
+}
+function uiUpdate() {
+  if (!ui) return;
+  const s = slides[S.i], key = `${S.i}.${S.step}.${overview}`;
+  if (key === uiKey) return; uiKey = key;
+  ui.querySelector('.dk-num').textContent = `${S.i + 1} / ${slides.length}`;
+  ui.querySelector('.dk-title').textContent = s.title;
+  const dots = ui.querySelector('.dk-steps');
+  dots.innerHTML = s.steps ? Array.from({ length: s.steps + 1 }, (_, k) => `<i class="${k <= S.step ? 'on' : ''}"></i>`).join('') : '';
+  dots.title = s.steps ? `step ${S.step + 1} of ${s.steps + 1}` : '';
+  ui.querySelectorAll('.dk-seg').forEach((b, k) => {
+    b.classList.toggle('is-past', k < S.i); b.classList.toggle('is-cur', k === S.i);
+    b.firstChild.style.transform = `scaleX(${k < S.i ? 1 : k > S.i ? 0 : (S.step + 1) / (s.steps + 1)})`;
+  });
+  ui.querySelector('[data-act=prev]').disabled = S.i === 0 && S.step === 0;
+  ui.querySelector('[data-act=next]').disabled = S.i === slides.length - 1 && S.step === s.steps;
+}
+function hud() {
+  const d = el('div', { class: 'dk-hud' }, document.body);
+  let frames = 0, last = performance.now(), prevR = 0;
+  const tick = () => { frames++; requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  setInterval(() => {
+    const t = performance.now(), sec = (t - last) / 1000, s = slides[S.i];
+    d.textContent = `${Math.round(frames / sec)} fps · drawn ${Math.round((perf.rendered - prevR) / sec)}/s · ${perf.ms.toFixed(2)} ms (worst ${perf.worst.toFixed(1)}) · ${S.tr ? 'transition' : S.idle ? 'idle' : 'animating'} · ${s.el.getElementsByTagName('*').length} nodes`;
+    frames = 0; last = t; prevR = perf.rendered; perf.worst = 0;
+  }, 500);
+}
+
+/* ───────────────────────── presenter view ───────────────────────── */
+let presenterWin = null, pvCur = null;
+function openPresenter() {
+  const url = location.href.split('#')[0].split('?')[0] + '?presenter' + location.hash;
+  presenterWin = window.open(url, 'dk-presenter', 'width=1400,height=860');
+}
+function post(win, msg) { try { win && !win.closed && win.postMessage({ dk: 1, ...msg }, '*'); } catch (e) { /* closed */ } }
+function broadcast() { post(presenterWin, { i: S.i, step: S.step }); if (MODE === 'presenter') post(window.opener, { i: S.i, step: S.step }); }
+
+function nextState(i, step) {
+  const s = slides[i];
+  if (step < s.steps) return { i, step: step + 1 };
+  if (i < slides.length - 1) return { i: i + 1, step: 0 };
+  return null;
+}
+const PV_TX = {
+  en: { now: 'This slide', next: 'Next', slide: 'Slide', click: 'Click', after: 'Next slide', none: 'No notes for this slide.', end: 'End of the deck',
+    back: '‹ Back', fwd: 'Next ›', reset: 'Click to reset the timer', fsm: 'Smaller notes text', fsp: 'Larger notes text', of: 'of', lastSlide: 'This is the last slide' },
+  ru: { now: 'Этот слайд', next: 'Дальше', slide: 'Слайд', click: 'Клик', after: 'Следующий слайд', none: 'К этому слайду нет заметок.', end: 'Конец презентации',
+    back: '‹ Назад', fwd: 'Вперёд ›', reset: 'Клик — сбросить таймер', fsm: 'Мельче текст заметок', fsp: 'Крупнее текст заметок', of: 'из', lastSlide: 'Это последний слайд' },
+};
+// Speaker notes by step. A block of the notes opens the text for step N when it has data-step="N", the class "click",
+// or starts with the marker ▸ (then it is the step after the previous one). Blocks before the first marker are step 0.
+// More markers than steps merge into the last step, so the presenter view never invents a state the slide does not have.
+function noteSegs(s) {
+  const box = document.createElement('div'); box.innerHTML = s.notes || '';
+  const segs = []; let cur, step = 0;
+  const open = n => { step = Math.max(0, Math.min(s.steps, n)); cur = segs.find(g => g.step === step); if (!cur) { cur = { step, html: '' }; segs.push(cur); } };
+  open(0);
+  for (const n of box.childNodes) {
+    const isEl = n.nodeType === 1;
+    if (!isEl && !n.textContent.trim()) continue;
+    if (isEl && n.dataset.step) open(+n.dataset.step);
+    else if (isEl && (n.classList.contains('click') || /^\s*▸/.test(n.textContent))) open(step + 1);
+    if (isEl) cur.html += n.outerHTML; else { const p = document.createElement('p'); p.textContent = n.textContent.trim(); cur.html += p.outerHTML; }
+  }
+  return segs.filter(g => g.html).sort((a, b) => a.step - b.step);
+}
+function presenterUI() {
+  const base = location.href.split('#')[0].split('?')[0];
+  const T = PV_TX[/^ru/i.test(document.documentElement.lang) ? 'ru' : 'en'];
+  document.body.classList.add('dk-presenter');
+  const ui = el('div', { class: 'dk-pv', html: `
+    <header><span class="dk-pv-timer" title="${T.reset}">00:00</span>
+      <span class="dk-pv-pos"><b></b><span></span></span><span class="dk-pv-dots"></span>
+      <span class="dk-pv-fs"><button data-pv="fs-" aria-label="${T.fsm}" title="${T.fsm}">A−</button><button data-pv="fs+" aria-label="${T.fsp}" title="${T.fsp}">A+</button></span>
+      <button data-pv="prev" aria-label="${T.back}">${T.back}</button><button data-pv="next" aria-label="${T.fwd}">${T.fwd}</button><span class="dk-pv-clock"></span></header>
+    <main>
+      <div class="dk-pv-left">
+        <section class="dk-pv-cur"><label>${T.now}</label><div class="dk-pv-frame"><iframe tabindex="-1"></iframe></div></section>
+        <section class="dk-pv-next"><label class="dk-pv-nl"></label><div class="dk-pv-frame"><iframe tabindex="-1"></iframe></div></section>
+      </div>
+      <div class="dk-pv-right">
+        <section class="dk-pv-pane"><label>${T.now}</label><div class="dk-pv-notes dk-pv-now"></div></section>
+        <section class="dk-pv-pane"><label class="dk-pv-al"></label><div class="dk-pv-notes dk-pv-after"></div></section>
+      </div>
+    </main>` }, document.body);
+  const [cur, nxt] = ui.querySelectorAll('iframe');
+  cur.src = `${base}?embed#${S.i + 1}.${S.step}`;
+  pvCur = cur;
+  if (ANN_ON) {   // the audience window's marks and laser are mirrored into this preview (see live annotation)
+    cur.addEventListener('load', () => { if (marks.size) post(cur.contentWindow, { a: 'snap', marks: [...marks] }); });
+    post(window.opener, { a: 'hello' });
+  }
+  const q = s => ui.querySelector(s);
+  const timer = q('.dk-pv-timer'), clock = q('.dk-pv-clock'), posN = q('.dk-pv-pos b'), posT = q('.dk-pv-pos span'), dots = q('.dk-pv-dots'),
+    nowBox = q('.dk-pv-now'), afterBox = q('.dk-pv-after'), nl = q('.dk-pv-nl'), al = q('.dk-pv-al');
+  let t0 = Date.now();
+  timer.onclick = () => { t0 = Date.now(); };
+  q('[data-pv=prev]').onclick = () => { prev(); broadcast(); };
+  q('[data-pv=next]').onclick = () => { next(); broadcast(); };
+  let fs = 26; try { fs = +localStorage.getItem('dk-pv-fs') || fs; } catch (e) { /* storage blocked */ }
+  const setFs = v => { fs = Math.max(16, Math.min(56, v)); ui.style.setProperty('--pv-fs', fs + 'px'); try { localStorage.setItem('dk-pv-fs', fs); } catch (e) { /* storage blocked */ } };
+  q('[data-pv="fs-"]').onclick = () => setFs(fs - 2);
+  q('[data-pv="fs+"]').onclick = () => setFs(fs + 2);
+  setFs(fs);
+  const two = n => String(n).padStart(2, '0');
+  setInterval(() => {
+    const e = Math.floor((Date.now() - t0) / 1000);
+    timer.textContent = `${two(Math.floor(e / 60))}:${two(e % 60)}`;
+    const d = new Date(); clock.textContent = `${two(d.getHours())}:${two(d.getMinutes())}`;
+  }, 250);
+  const tag = g => (g.step ? `${T.click} ${g.step}` : T.slide);
+  const fill = (box, segs, empty) => {
+    box.textContent = ''; box.scrollTop = 0;
+    if (!segs.length) { box.append(el('p', { class: 'dk-pv-none', html: empty })); return []; }
+    return segs.map(g => el('div', { class: 'dk-pv-seg', html: (segs.length > 1 ? `<span class="dk-pv-tag">${tag(g)}</span>` : '') + g.html, 'data-step': g.step }, box));
+  };
+  let nowI = -1, nowSegs = [], nxtKey = '', afterI = -2, lastOn = -2;
+  const refresh = () => {
+    const s = slides[S.i], n = nextState(S.i, S.step);
+    posN.textContent = `${S.i + 1} / ${slides.length}`; posT.textContent = s.title;
+    dots.innerHTML = s.steps ? Array.from({ length: s.steps + 1 }, (_, k) => `<i class="${k <= S.step ? 'on' : ''}"></i>`).join('') : '';
+    dots.title = s.steps ? `${T.click} ${S.step} ${T.of} ${s.steps}` : '';
+    if (nowI !== S.i) { nowI = S.i; lastOn = -2; nowSegs = fill(nowBox, noteSegs(s), T.none); }
+    let on = -1;   // the text being spoken now: the last segment that has started
+    nowSegs.forEach((e, k) => { if (+e.dataset.step <= S.step) on = k; });
+    nowSegs.forEach((e, k) => { e.className = 'dk-pv-seg ' + (k < on ? 'done' : k === on ? 'on' : 'todo'); });
+    if (nowSegs.length > 1 && on !== lastOn) {
+      lastOn = on;
+      const target = on >= 0 ? nowSegs[on] : null;
+      nowBox.scrollTo({ top: target ? Math.max(0, target.offsetTop - 6) : 0, behavior: 'smooth' });
+    }
+    const ns = slides[S.i + 1];
+    if (afterI !== S.i) {
+      afterI = S.i;
+      al.textContent = ns ? `${T.after} · ${S.i + 2} · ${ns.title}` : T.lastSlide;
+      fill(afterBox, ns ? noteSegs(ns) : [], ns ? T.none : T.end);
+    }
+    const key = n ? `${n.i + 1}.${n.step}` : 'end';
+    nl.textContent = !n ? T.end : n.i === S.i ? `${T.next} · ${T.click} ${n.step}` : `${T.next} · ${T.slide} ${n.i + 1}`;
+    if (key !== nxtKey) {
+      nxtKey = key;
+      if (n) { nxt.removeAttribute('srcdoc'); nxt.src = `${base}?embed&rest#${key}`; }
+      else nxt.srcdoc = `<body style="margin:0;height:100vh;display:grid;place-items:center;background:#000;color:#777;font:24px system-ui">${T.end}</body>`;
+    }
+    post(cur.contentWindow, { i: S.i, step: S.step });
+  };
+  listeners.push(refresh);
+  refresh();
+}
+
+/* ───────────────────────── live annotation ─────────────────────────
+ * Drawing on the slide while you talk: D pen, H highlighter, L laser pointer, E erase this slide's marks, 1-4 colour, Esc leaves.
+ * A mode swallows clicks (they do not advance). Marks are vectors in canvas pixels, kept per slide and step for the session, and
+ * drawn on a canvas above the slide and under the control bar. Live and presenter windows only: ?render, ?embed&rest and the print
+ * layout never create any of it, so exports cannot contain a mark. Lazy: no element, listener or timer exists until the first use,
+ * and nothing runs a frame loop (a stroke redraws on the frame after a pointer move), so idle rendering is untouched.
+ * The audience window mirrors strokes and laser to the presenter's preview; the presenter's laser (L there) shows in the audience window.
+ * Colours: --dk-pen-1..4 (default: --accent, --ink, yellow, white). data-annotate="off" on .deck disables it. Reference: 11-presenting.md */
+const marks = new Map();                            // 'slide.step' -> [{ k: 'p' | 'h', c: colour, w: width, p: [x, y, x, y, ...] }]
+const annRemote = new Map();                        // stroke id -> stroke being received from another window
+const PEN = { p: { w: 6, a: 1, n: 1 }, h: { w: 38, a: .38, n: 3 } };
+let ann = null, annOut = null, annLaserOut = null, annFlushQ = 0, annSeq = 0, pvCap = null;
+const annId = () => `${S.i}.${S.step}`;
+const annPost = m => {
+  if (MODE === 'live') post(presenterWin, m);
+  else if (MODE === 'presenter') { post(window.opener, m); post(pvCur && pvCur.contentWindow, m); }
+};
+function annColor(n) {
+  const cs = getComputedStyle(deckEl), v = x => cs.getPropertyValue(x).trim();
+  return v('--dk-pen-' + n) || [v('--accent'), v('--ink'), '#ffd23f', '#ffffff'][n - 1] || ['#e5322d', '#111111', '#ffd23f', '#ffffff'][n - 1];
+}
+function annInit() {
+  if (ann) return ann;
+  const cv = el('canvas', { class: 'dk-ann' }), laser = el('div', { class: 'dk-ann-laser' });
+  deckEl.insertBefore(cv, blackout); deckEl.insertBefore(laser, blackout);
+  ann = { cv, g: cv.getContext('2d'), laser, q: 0, raf: 0, mode: null, down: false, ci: { p: 1, h: 3 }, lt: 0 };
+  if (MODE === 'live') {
+    const cap = ann.cap = el('div', { class: 'dk-ann-cap' }, document.body);
+    let pid = null, cur = null;
+    const at = e => [+((e.clientX - (innerWidth - W * fitK) / 2) / fitK).toFixed(1), +((e.clientY - (innerHeight - H * fitK) / 2) / fitK).toFixed(1)];
+    const end = () => {
+      if (!cur) return;
+      annOut.z = 1; annFlushNow(); cur = null; pid = null; annOut = null; ann.down = false;
+    };
+    cap.addEventListener('pointerdown', e => {
+      if (!e.isPrimary || e.button > 0 || !ann.mode) return;
+      e.preventDefault(); cap.setPointerCapture(e.pointerId);
+      const [x, y] = at(e);
+      if (ann.mode === 'laser') return annLaserAt(x, y);
+      const k = ann.mode === 'pen' ? 'p' : 'h', key = annId(), list = marks.get(key) || [];
+      cur = { k, c: annColor(ann.ci[k]), w: PEN[k].w, p: [x, y] };
+      marks.set(key, list); list.push(cur);
+      annOut = { key, id: MODE + ++annSeq, k, c: cur.c, w: cur.w, p: [x, y] };
+      pid = e.pointerId; ann.down = true; annSched(); annFlushSoon();
+    });
+    cap.addEventListener('pointermove', e => {
+      if (!ann.mode) return;
+      if (ann.mode === 'laser') { const [x, y] = at(e); return annLaserAt(x, y); }
+      if (!cur || e.pointerId !== pid) return;
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+      for (const ev of evs.length ? evs : [e]) {
+        const [x, y] = at(ev), n = cur.p.length;
+        if (Math.hypot(x - cur.p[n - 2], y - cur.p[n - 1]) < 1.5) continue;   // no dust: the path stays light
+        cur.p.push(x, y); annOut.p.push(x, y);
+      }
+      annSched(); annFlushSoon();
+    });
+    for (const t of ['pointerup', 'pointercancel']) cap.addEventListener(t, e => { if (e.pointerId === pid) end(); });
+    ann.end = end;
+  }
+  annResize();
+  return ann;
+}
+function annResize() {
+  const q = Math.min(2, (devicePixelRatio || 1) * fitK), w = Math.round(W * q), h = Math.round(H * q);
+  if (ann.cv.width !== w || ann.cv.height !== h) { ann.cv.width = w; ann.cv.height = h; ann.q = q; annSched(); }
+}
+function annSched() { if (ann && !ann.raf) ann.raf = requestAnimationFrame(annDraw); }
+function annPath(g, p) {                            // a smooth line through the points: quadratic curves between midpoints
+  const n = p.length / 2;
+  g.beginPath(); g.moveTo(p[0], p[1]);
+  if (n < 2) { g.lineTo(p[0] + .01, p[1]); return; }
+  for (let i = 1; i < n - 1; i++) g.quadraticCurveTo(p[i * 2], p[i * 2 + 1], (p[i * 2] + p[i * 2 + 2]) / 2, (p[i * 2 + 1] + p[i * 2 + 3]) / 2);
+  g.lineTo(p[n * 2 - 2], p[n * 2 - 1]);
+}
+function annDraw() {
+  ann.raf = 0;
+  const g = ann.g, list = marks.get(annId()) || [];
+  g.setTransform(ann.q, 0, 0, ann.q, 0, 0); g.clearRect(0, 0, W, H);
+  g.lineCap = g.lineJoin = 'round';
+  for (const s of list) { g.globalAlpha = PEN[s.k].a; g.strokeStyle = s.c; g.lineWidth = s.w; annPath(g, s.p); g.stroke(); }
+  ann.cv.style.display = list.length ? '' : 'none';   // an empty canvas is not composited at all
+}
+// Follows navigation, the end of a transition and the overview: the layer belongs to the slide and step on screen.
+function annRefresh() {
+  if (!ann) return;
+  const hide = !!S.tr || overview;
+  ann.cv.style.visibility = ann.laser.style.visibility = hide ? 'hidden' : '';
+  if (!hide) annSched();
+}
+function annLaserAt(x, y) {                         // the dot, then the message to the other window (one per frame)
+  annLaserShow(x, y);
+  annLaserOut = [x, y]; annFlushSoon();
+}
+function annLaserShow(x, y) {
+  const L = ann.laser, r = 22;
+  L.style.transform = `translate(${Math.round((x - r) * 100) / 100}px, ${Math.round((y - r) * 100) / 100}px)`;
+  L.classList.add('is-on'); L.classList.remove('is-fade');
+  clearTimeout(ann.lt);
+  ann.lt = setTimeout(() => L.classList.add('is-fade'), 1100);   // gone 1.5 s after the pointer stopped (a .4 s fade)
+}
+function annFlushSoon() { if (!annFlushQ) annFlushQ = requestAnimationFrame(annFlushNow); }
+function annFlushNow() {
+  annFlushQ = 0;
+  if (annOut && (annOut.p.length || annOut.z)) { annPost({ a: 's', ...annOut }); annOut.p = []; }
+  if (annLaserOut) { annPost({ a: 'l', x: annLaserOut[0], y: annLaserOut[1] }); annLaserOut = null; }
+}
+function annEraseSlide(i) { let n = 0; for (const k of [...marks.keys()]) if (k.startsWith(i + '.')) { marks.delete(k); n++; } return n; }
+function annSet(mode) {
+  if (mode && !ann) annInit();
+  if (!ann || !ann.cap) return;
+  if (ann.mode === 'laser' || !mode) { clearTimeout(ann.lt); ann.laser.classList.remove('is-on', 'is-fade'); annPost({ a: 'l', x: null }); }
+  ann.end && ann.end();
+  ann.mode = mode;
+  html.classList.toggle('dk-annotating', !!mode);
+  ann.cap.className = 'dk-ann-cap' + (mode ? ' is-' + mode : '');
+  annTools();
+  if (mode) { hideHint(); toast({ pen: 'Pen', hl: 'Highlighter', laser: 'Laser pointer' }[mode] + ' · Esc to stop' + (mode === 'laser' ? '' : ' · 1–4 colour'), 1800); showUI(3200); }
+}
+const annToggle = mode => annSet(ann && ann.mode === mode ? null : mode);
+function annTools() {                               // the palette for touch and mouse: the same actions as the keys
+  if (!ann.tools) {
+    const sw = [1, 2, 3, 4].map(n => `<button class="dk-sw" data-ann="c${n}" data-tip="Colour ${n}" aria-label="Colour ${n}"></button>`).join('');
+    ann.tools = el('div', { class: 'dk-ann-tools', html: `
+      <button class="dk-b" data-ann="pen" data-tip="Pen (D)" aria-label="Pen">${ICON.pen}</button>
+      <button class="dk-b" data-ann="hl" data-tip="Highlighter (H)" aria-label="Highlighter">${ICON.hl}</button>
+      <button class="dk-b" data-ann="laser" data-tip="Laser pointer (L)" aria-label="Laser pointer">${ICON.laser}</button>
+      <i class="dk-sep"></i>${sw}<i class="dk-sep"></i>
+      <button class="dk-b" data-ann="erase" data-tip="Erase this slide (E)" aria-label="Erase this slide">${ICON.bin}</button>
+      <button class="dk-b" data-ann="off" data-tip="Done (Esc)" aria-label="Done">${ICON.ok}</button>` }, document.body);
+    ann.tools.addEventListener('click', e => {
+      e.stopPropagation();
+      const b = e.target.closest('[data-ann]'); if (!b) return;
+      const a = b.dataset.ann; b.blur();
+      if (a === 'pen' || a === 'hl' || a === 'laser') annSet(a);
+      else if (a === 'erase') annErase();
+      else if (a === 'off') annSet(null);
+      else { ann.ci[ann.mode === 'hl' ? 'h' : 'p'] = +a[1]; annTools(); }
+    });
+  }
+  const t = ann.tools, k = ann.mode === 'hl' ? 'h' : 'p';
+  t.dataset.mode = ann.mode || '';
+  for (const b of t.querySelectorAll('[data-ann]')) {
+    const a = b.dataset.ann;
+    b.classList.toggle('is-on', a === ann.mode || (a[0] === 'c' && +a[1] === ann.ci[k]));
+    if (a[0] === 'c' && a.length === 2) b.style.setProperty('--c', annColor(+a[1]));
+  }
+}
+function annErase() {
+  const had = annEraseSlide(S.i);
+  annPost({ a: 'e', i: S.i });
+  if (ann) annSched();
+  toast(had ? 'Marks cleared' : 'Nothing to erase on this slide', 1200);
+}
+function annOnKey(e) {
+  if (!ANN_ON) return false;
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (MODE === 'presenter') {                        // the presenter's laser: drawn over the current-slide preview, shown in the audience window
+    if (k === 'l') { pvLaser(!pvCap || !pvCap.isConnected || pvCap.hidden); return true; }
+    if (k === 'Escape' && pvCap && !pvCap.hidden) { pvLaser(false); return true; }
+    return false;
+  }
+  if (MODE !== 'live') return false;
+  if (k === 'Escape') { if (ann && ann.mode && !(help && help.classList.contains('is-on'))) { annSet(null); return true; } return false; }
+  if (k === 'd') annToggle('pen');
+  else if (k === 'h') annToggle('hl');
+  else if (k === 'l') annToggle('laser');
+  else if (k === 'e') annErase();
+  else if (ann && ann.mode && ann.mode !== 'laser' && /^[1-4]$/.test(k)) { ann.ci[ann.mode === 'hl' ? 'h' : 'p'] = +k; annTools(); }
+  else return false;
+  return true;
+}
+// Messages from the other window: 's' stroke (points appended), 'e' erase a slide, 'l' laser, 'snap' everything, 'hello' (the presenter asks for a snapshot).
+function annRecv(m, src) {
+  if (!ANN_ON) return;
+  if (m.a === 'hello') { if (MODE === 'live') post(src, { a: 'snap', marks: [...marks] }); return; }
+  if (m.a === 'snap') { marks.clear(); annRemote.clear(); for (const [k, v] of m.marks) marks.set(k, v); }
+  else if (m.a === 's') {
+    let s = annRemote.get(m.id);
+    if (!s) { s = { k: m.k, c: m.c, w: m.w, p: [] }; annRemote.set(m.id, s); const l = marks.get(m.key) || []; marks.set(m.key, l); l.push(s); }
+    for (const v of m.p) s.p.push(v);
+    if (m.z) annRemote.delete(m.id);
+  } else if (m.a === 'e') annEraseSlide(m.i);
+  if (MODE === 'presenter') { post(pvCur && pvCur.contentWindow, m); return; }   // the presenter has no overlay of its own: it relays to its preview
+  annInit();
+  if (m.a === 'l') { if (m.x == null) { clearTimeout(ann.lt); ann.laser.classList.remove('is-on', 'is-fade'); } else annLaserShow(m.x, m.y); }
+  else annSched();
+}
+// Presenter window: L puts a transparent pad over the current-slide preview; the pointer over it is the laser in the audience window.
+function pvLaser(on) {
+  if (!pvCap) {
+    const fr = document.querySelector('.dk-pv-cur .dk-pv-frame');
+    pvCap = el('div', { class: 'dk-pv-cap' }, fr);
+    pvCap.addEventListener('pointermove', e => {
+      const r = pvCap.getBoundingClientRect();
+      annLaserOut = [+((e.clientX - r.left) / r.width * W).toFixed(1), +((e.clientY - r.top) / r.height * H).toFixed(1)]; annFlushSoon();
+    });
+    pvCap.addEventListener('pointerleave', () => annPost({ a: 'l', x: null }));
+  }
+  pvCap.hidden = !on;
+  if (!on) annPost({ a: 'l', x: null });
+}
+
+/* ───────────────────────── input ───────────────────────── */
+function input() {
+  let buf = '', bufT = 0;
+  addEventListener('keydown', e => {
+    if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key;
+    if (!overview && annOnKey(e)) { e.preventDefault(); return; }
+    if (/^\d$/.test(k)) { buf += k; toast(`Go to slide ${buf} · Enter`, 2500); clearTimeout(bufT); bufT = setTimeout(() => { buf = ''; }, 2500); return; }
+    if (k === 'Enter' && buf) { if (overview) toggleOverview(false); goto(+buf - 1); toast('', 1); buf = ''; e.preventDefault(); broadcast(); return; }
+    buf = '';
+    if (overview) {
+      const cols = Math.ceil(Math.sqrt(slides.length * 1.25));
+      const mv = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[k];
+      if (mv) { ovSel = clamp(ovSel + mv, 0, slides.length - 1); markOv(); e.preventDefault(); return; }
+      if (k === 'Enter' || k === ' ') { const i = ovSel; toggleOverview(false); goto(i); e.preventDefault(); return; }
+      if (k === 'Escape' || k === 'o' || k === 'O') { toggleOverview(false); return; }
+      return;
+    }
+    switch (k) {
+      case 'ArrowRight': case 'ArrowDown': case 'PageDown': case ' ': case 'Enter': case 'n': case 'N':
+        e.shiftKey && k === ' ' ? prev() : next(); break;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp': case 'Backspace': prev(); break;
+      case 'Home': goto(0); break;
+      case 'End': goto(slides.length - 1, slides[slides.length - 1].steps); break;
+      case 'o': case 'O': if (MODE === 'live') toggleOverview(); break;
+      case 'p': case 'P': if (MODE === 'live') openPresenter(); break;
+      case 'f': case 'F': document.fullscreenElement ? document.exitFullscreen() : html.requestFullscreen?.(); break;
+      case 'b': case 'B': case '.': blackout.classList.toggle('is-on'); break;
+      case '?': toggleHelp(); break;
+      case 'h': case 'H': if (ANN_ON) return; toggleHelp(); break;   // H is the highlighter unless annotation is off
+      case 'Escape':
+        if (help && help.classList.contains('is-on')) toggleHelp(false);
+        else if (blackout.classList.contains('is-on')) blackout.classList.remove('is-on');
+        else if (MODE === 'live') toggleOverview();
+        break;
+      default: return;
+    }
+    e.preventDefault();
+    broadcast();
+  });
+  if (MODE !== 'live') return;
+  // Click anywhere: the left fifth of the screen goes back, the rest goes forward.
+  let swiped = 0;
+  const EDGE = .2;
+  addEventListener('click', e => {
+    if (Date.now() - swiped < 500) return;
+    if (e.target.closest('.dk-ui,.dk-help,.dk-toast,.dk-ann-cap,.dk-ann-tools')) return;   // a click never advances while a mode is on
+    if (overview) {
+      const layer = e.target.closest('.dk-layer'); if (!layer) return;
+      const s = slides.find(x => x.layer === layer); toggleOverview(false); goto(s.i); broadcast(); return;
+    }
+    if (e.target.closest('a,button,input,select,textarea,label,[data-no-advance]')) return;
+    e.clientX < innerWidth * EDGE ? prev() : next(); broadcast();
+  });
+  let tx = null, ty = null;
+  addEventListener('touchstart', e => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; showUI(); }, { passive: true });
+  addEventListener('touchend', e => {
+    if (tx == null || (ann && ann.mode)) { tx = null; return; } const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty; tx = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { swiped = Date.now(); dx < 0 ? next() : prev(); broadcast(); }
+  });
+  let idle;
+  addEventListener('mousemove', e => {
+    html.classList.remove('dk-idle'); clearTimeout(idle); idle = setTimeout(() => html.classList.add('dk-idle'), 2600);
+    if (!(ann && ann.down)) showUI();               // the bar stays away while a stroke is being drawn
+    const x = e.clientX / innerWidth, inUI = !!e.target.closest?.('.dk-ui'), off = overview || inUI || (ann && ann.mode);
+    html.classList.toggle('dk-edge-l-on', !off && x < EDGE);
+    html.classList.toggle('dk-edge-r-on', !off && x > 1 - EDGE);
+  });
+  document.addEventListener('mouseleave', () => html.classList.remove('dk-edge-l-on', 'dk-edge-r-on'));
+  addEventListener('hashchange', () => { const h = parseHash(); if (h && (h.i !== S.i || h.step !== S.step)) { goto(h.i, h.step); broadcast(); } });
+}
+addEventListener('message', e => {
+  const m = e.data; if (!m || m.dk !== 1 || !slides.length) return;
+  if (m.a) { annRecv(m, e.source); return; }
+  if (MODE === 'embed' && Q.has('rest')) { goto(m.i, m.step); show(m.i, m.step); return; }
+  sync(m.i, m.step);
+});
+
+/* ───────────────────────── export & video API ───────────────────────── */
+// Video timeline: each step holds for data-hold seconds, transitions play in between.
+function timeline() {
+  const segs = []; let T = 0;
+  slides.forEach((s, i) => {
+    for (let st = 0; st <= s.steps; st++) {
+      if (i > 0 && st === 0) {
+        const cfg = trCfg(s, 1);
+        segs.push({ kind: 'tr', from: { i: i - 1, step: slides[i - 1].steps }, to: { i, step: 0 }, t0: T, dur: cfg.dur });
+        T += cfg.dur;
+      }
+      const hold = Q.has('hold') ? +Q.get('hold') : s.hold[Math.min(st, s.hold.length - 1)];
+      segs.push({ kind: 'hold', i, step: st, t0: T, dur: hold, entry: st === 0 && i > 0 ? segs[segs.length - 1].dur : 0 });
+      T += hold;
+    }
+  });
+  return { segs, duration: T };
+}
+let TL = null, vidTr = null, vidSeg = null;
+function drawAt(T) {
+  const g = TL.segs.find(x => T >= x.t0 && T < x.t0 + x.dur) || TL.segs[TL.segs.length - 1];
+  if (g !== vidSeg) {
+    if (vidTr) { endTransition(vidTr); vidTr = null; }
+    for (const s of slides) layerOn(s, false);
+    vidSeg = g;
+    if (g.kind === 'tr') {
+      const prevHold = TL.segs[TL.segs.indexOf(g) - 1];
+      vidTr = beginTransition({ ...g.from, t0: prevHold.t0 - (prevHold.entry || 0), settled: false }, { ...g.to, settled: false }, 1, g.t0);
+    } else layerOn(slides[g.i], true);
+  }
+  if (g.kind === 'tr') {
+    const p = (T - g.t0) / g.dur, o = renderTransition(vidTr, p, T);
+    drawStage({ T, rest: false, i: lerp(g.from.i, g.to.i, ease.inOutCubic(p)), p, from: g.from.i, to: g.to.i,
+      cam: o.cam || camOf(slides[g.to.i]) });
+  } else {
+    const s = slides[g.i];
+    renderSlide(s, g.step, T - g.t0 + (g.entry || 0), T);
+    drawStage({ T, rest: false, i: g.i, p: 1, from: g.i, to: g.i, cam: camOf(s) });
+  }
+  S.i = g.kind === 'tr' ? g.to.i : g.i; S.step = g.kind === 'tr' ? g.to.step : g.step;
+  g.kind === 'tr' ? chrome(g, (T - g.t0) / g.dur) : chrome();
+}
+// Rest frame: every build of `step` finished, ambient motion frozen.
+function show(i, step) {
+  finishTr();
+  if (vidTr) { endTransition(vidTr); vidTr = null; vidSeg = null; }
+  for (const s of slides) { resetLayer(s); layerOn(s, s.i === i); }
+  S.i = i; S.step = step;
+  renderSlide(slides[i], step, Infinity, 0, true);
+  drawStage({ T: 0, rest: true, i, p: 1, from: i, to: i, cam: camOf(slides[i]) });
+  chrome();
+}
+function states(which = 'all') {
+  const out = [];
+  for (const s of slides) {
+    const only = (s.d.export || '').trim();
+    if (which === 'last' || only === 'last') out.push({ i: s.i, step: s.steps });
+    else for (let st = 0; st <= s.steps; st++) out.push({ i: s.i, step: st });
+  }
+  return out;
+}
+// Vector print layout: one page per state, built from clones of rest frames.
+function buildPrint(list) {
+  const root = el('div', { class: 'deck dk-print' });
+  let n = 0;
+  for (const { i, step } of list) {
+    show(i, step);
+    const page = el('div', { class: 'dk-page' }, root);
+    page.style.cssText = `width:${W}px;height:${H}px;background:${deckBg}`;
+    if (stageCv) el('img', { src: stageCv.toDataURL('image/png'), class: 'dk-page-stage' }, page);
+    const c = slides[i].layer.cloneNode(true);
+    const liveCv = slides[i].layer.querySelectorAll('canvas'), cloneCv = c.querySelectorAll('canvas');
+    cloneCv.forEach((cv, j) => { const img = el('img', { src: liveCv[j].toDataURL('image/png') }); img.style.cssText = cv.style.cssText; img.className = cv.className; img.width = cv.width; img.height = cv.height; cv.replaceWith(img); });
+    const sfx = `__p${n++}`;
+    c.querySelectorAll('[id]').forEach(x => { x.id += sfx; });
+    c.querySelectorAll('*').forEach(x => {
+      if (!(x instanceof SVGElement)) return;
+      for (const a of [...x.attributes]) {
+        if (/^(xlink:)?href$/.test(a.name) && a.value.startsWith('#')) x.setAttribute(a.name, a.value + sfx);
+        else if (a.value.includes('url(#')) x.setAttribute(a.name, a.value.replace(/url\(#([^)"']+)\)/g, `url(#$1${sfx})`));
+      }
+    });
+    c.classList.add('is-on');
+    page.append(c);
+  }
+  document.body.append(root);
+  html.classList.add('dk-printing');
+  return list.length;
+}
+
+/* ───────────────────────── init ───────────────────────── */
+async function init() {
+  for (const n of deckEl.querySelectorAll('[data-say]')) say(n, n.dataset.say || undefined);   // before collect: titles read the built text
+  collect();
+  deckBg = getComputedStyle(deckEl).backgroundColor;
+  if (!deckBg || deckBg === 'rgba(0, 0, 0, 0)') deckBg = getComputedStyle(document.body).backgroundColor || '#fff';
+  overlays();
+  fit();
+  // Lay out every slide once, hidden: that requests every font the deck uses, so
+  // fonts.ready really means "all text is final" and setup code can measure text.
+  html.classList.add('dk-warm');
+  for (const s of slides) layerOn(s, true);
+  void deckEl.offsetHeight;
+  await document.fonts.ready;
+  setupStage();
+  for (const s of slides) {
+    s.api = api;
+    s.hook.setup?.(s.el, api);
+  }
+  for (const n of deckEl.querySelectorAll('[data-fit]')) fitText(n);
+  for (const s of slides) parseBuilds(s);     // still laid out: an anim's init may measure (text splitting, custom anims)
+  const used = new Set();
+  for (const s of slides.slice(1)) { const c = trCfg(s, 1); if (!used.has(c.spec)) { used.add(c.spec); c.spec.init?.(); } }
+  for (const s of slides) layerOn(s, false);
+  html.classList.remove('dk-warm');
+  for (const s of slides) s.entry = s.i === 0 ? .15 : trCfg(s, 1).dur * .55;
+  let rz = 0;
+  addEventListener('resize', () => { cancelAnimationFrame(rz); rz = requestAnimationFrame(() => { fit(); if (overview) toggleOverview(true); }); });
+  const h = parseHash();
+  goto(h ? h.i : 0, h ? h.step : 0);
+  if (MODE === 'embed' && Q.has('rest')) show(S.i, S.step);
+  TL = timeline();
+  window.__deck = { W, H, slides: slides.map(s => ({ id: s.id, title: s.title, notes: s.notesText, steps: s.steps })),
+    states, show, buildPrint, timeline: () => TL, count: slides.length };
+  window.__meta = { W, H, FPS: +(deckEl.dataset.fps || 30), DURATION: TL.duration };
+  window.__draw = drawAt;
+  if (MODE === 'presenter') presenterUI();
+  if (MODE === 'live' || MODE === 'presenter') input();
+  controls();
+  if (Q.has('perf')) hud();
+  html.classList.add('dk-ready');
+  await document.fonts.ready;
+  await Promise.all([...document.images].map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; })));
+  window.__ready = true;
+  if (MODE === 'render' || MODE === 'presenter' || (MODE === 'embed' && Q.has('rest'))) return;
+  const loop = () => {
+    if (!overview) { const a = performance.now(); frame(now()); const ms = performance.now() - a; perf.ms = perf.ms * .9 + ms * .1; perf.worst = Math.max(perf.worst, ms); }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+
+/* ───────────────────────── public API ───────────────────────── */
+const api = {
+  // Deck.slide('id', { steps, setup(el, api), frame(el, st) })
+  slide(id, spec) { hooks[id] = spec; return api; },
+  // Deck.stage({ setup(ctx), draw(ctx, S) }): canvas behind every slide
+  stage(spec) { stageSpec = spec; return api; },
+  anim, transition, next, prev, goto, toast, say, fx,
+  on(f) { listeners.push(f); return api; },
+  get state() { return { i: S.i, step: S.step, count: slides.length }; },
+  W, H, MODE, ease, clamp, lerp, seg, spring, rng, mix,
+  svg, el, scaleLinear, scaleBand, ticks, linePath, areaPath, arcPath, fmt, pointAt,
+};
+window.Deck = api;
+document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', init) : queueMicrotask(init);
+})();
+</script>
+<script>
+// ── Slide code. Setup runs once; frame(el, st) runs every frame and must be a pure function of st.
+const { svg, scaleLinear, scaleBand, linePath, ease, lerp, pointAt } = Deck;
+
+Deck.slide('bars', {
+  steps: 1,
+  setup(el) {
+    const g = el.querySelector('svg'), data = [['Team A', 41], ['Team B', 47], ['Team C', 96], ['Team D', 38]];
+    const x = scaleBand(data.map(d => d[0]), [0, 1620], { padding: .38 }), y = scaleLinear([0, 100], [480, 20]);
+    svg('line', { class: 'axis', x1: 0, x2: 1620, y1: 480, y2: 480 }, g);
+    el._bars = data.map(([k, v], i) => ({
+      v, i, rect: svg('rect', { x: x(k), width: x.bw, rx: 6, fill: 'var(--accent)' }, g),
+      val: svg('text', { class: 'val', x: x(k) + x.bw / 2, 'text-anchor': 'middle' }, g),
+      lab: svg('text', { x: x(k) + x.bw / 2, y: 526, 'text-anchor': 'middle', text: k }, g),
+      winner: v === 96,
+    }));
+    el._y = y;
+  },
+  frame(el, st) {
+    for (const b of el._bars) {
+      const p = st.p(0, b.i * .08, 1, ease.outExpo), h = (480 - el._y(b.v)) * p;
+      b.rect.setAttribute('y', 480 - h); b.rect.setAttribute('height', h);
+      b.val.setAttribute('y', 462 - h); b.val.textContent = Math.round(b.v * p);
+      b.val.style.opacity = p;
+      const fade = b.winner ? 1 : lerp(1, .22, st.p(1, 0, .5));
+      b.rect.style.opacity = b.val.style.opacity = fade * p;
+    }
+  },
+});
+
+Deck.slide('line', {
+  steps: 1,
+  setup(el) {
+    const g = el.querySelector('svg'), vals = [62, 66, 71, 78, 84, 86, 85, 86, 85, 86, 86, 85];
+    const x = scaleLinear([0, vals.length - 1], [60, 1560]), y = scaleLinear([50, 90], [520, 40]);
+    for (const t of y.ticks(4)) {
+      svg('line', { class: 'axis', x1: 60, x2: 1560, y1: y(t), y2: y(t), style: 'opacity:.6' }, g);
+      svg('text', { x: 0, y: y(t) + 8, text: t }, g);
+    }
+    el._path = svg('path', { d: linePath(vals.map((v, i) => [x(i), y(v)])), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 6, 'stroke-linecap': 'round' }, g);
+    el._head = svg('circle', { r: 11, fill: 'var(--accent)' }, g);
+    svg('line', { x1: x(5), x2: x(5), y1: 40, y2: 520, stroke: 'var(--ink)', 'stroke-dasharray': '6 8', 'stroke-width': 2, 'data-step': 1, 'data-anim': 'fade' }, g);
+    svg('text', { x: x(5) + 20, y: 80, text: 'Switch in June', class: 'val', 'data-step': 1, 'data-anim': 'rise' }, g);
+    el._path.setAttribute('pathLength', 1);
+  },
+  frame(el, st) {
+    const p = st.p(0, 0, 1.8, ease.inOutCubic), q = pointAt(el._path, p);
+    el._path.style.strokeDasharray = `${p} 1`;
+    el._head.setAttribute('cx', q.x); el._head.setAttribute('cy', q.y);
+  },
+});
+
+Deck.slide('flow', {
+  steps: 1,
+  setup(el) {
+    const g = el.querySelector('svg'), nodes = [['Capture', 170], ['Decide', 810], ['Act', 1450]];
+    nodes.forEach(([t, cx], i) => {
+      const n = svg('g', { class: 'node', 'data-anim': 'pop', 'data-delay': i * .15 }, g);
+      svg('rect', { x: cx - 150, y: 170, width: 300, height: 130, rx: 18 }, n);
+      svg('text', { x: cx, y: 235, text: t }, n);
+    });
+    const edges = ['M320,235 H660', 'M960,235 H1300', 'M1450,300 C1450,470 170,470 170,300'];
+    el._flows = edges.map((d, i) => {
+      svg('path', { d, class: 'edge', 'data-anim': 'draw', 'data-delay': .5 + i * .25 }, g);
+      return svg('path', { d, class: 'flow', 'data-step': 1, 'data-anim': 'fade' }, g);
+    });
+  },
+  // Constant processes are the one place linear motion is right (05-motion.md).
+  frame(el, st) { for (const f of el._flows) f.style.strokeDashoffset = -st.T * 60; },
+});
+</script>
+</body>
+</html>

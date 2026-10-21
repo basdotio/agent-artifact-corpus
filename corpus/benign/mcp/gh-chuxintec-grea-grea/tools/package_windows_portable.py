@@ -8,9 +8,10 @@ The launcher extracts to NSIS's private temp directory, waits for its child,
 then cleans that directory. Saves MUST be external to the temporary payload.
 Exit 0: packaging/content validation passed; 2: failure (no runtime verdict).
 """
+from grea.host.files import temporary_directory
 import argparse
 import hashlib
-from pathlib import Path
+from grea.host.paths import Path
 import shutil
 import struct
 import subprocess
@@ -122,7 +123,7 @@ def main():
         if len(pe) != 6 or pe[:4] != b"PE\0\0" or struct.unpack_from("<H", pe, 4)[0] != expected_machine:
             raise ValueError("Entry PE architecture does not match --machine")
         version = run([args.makensis, "-VERSION"], args.timeout).stdout.strip()
-        with tempfile.TemporaryDirectory(prefix="game-portable-") as temp:
+        with temporary_directory(prefix="game-portable-") as temp:
             temp = Path(temp)
             stage = temp / "payload"
             for rel in files:

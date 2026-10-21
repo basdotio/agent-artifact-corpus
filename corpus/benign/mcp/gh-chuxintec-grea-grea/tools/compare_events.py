@@ -4,7 +4,7 @@ Schema: one JSON object per line: seq (integer), event (nonempty string), state 
 Optional time/rng fields may be compared with additional --field options.
 """
 import argparse,json,sys
-from pathlib import Path
+from grea.host.paths import Path
 def validate(path):
     previous=None;count=0
     with path.open() as f:

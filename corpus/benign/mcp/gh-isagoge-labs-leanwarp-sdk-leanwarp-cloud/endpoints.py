@@ -29,3 +29,11 @@ def api_origin(api_key: str) -> str:
     if origin is None:
         raise ConfigurationError("this SDK release cannot use the LeanWarp service for this key")
     return origin
+
+
+def public_origin() -> str:
+    """The production service, whose environment catalog needs no key."""
+    origin = _API_ORIGINS["live"]
+    if origin is None:
+        raise ConfigurationError("this SDK release has no public LeanWarp service")
+    return origin

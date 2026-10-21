@@ -335,6 +335,46 @@ def trigger_interactive_session_renewal(timeout_sec: int = 180) -> bool:
         print("[Sesión LinkedIn] Sesión activa sincronizada silenciosamente desde Brave CDP (0 interacción).")
         return True
 
+    # 1. Si Brave CDP está activo en el puerto 9222, abrir pestaña visible de login directamente en su navegador y esperar
+    try:
+        import urllib.request
+        import websocket
+        with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=1.5) as resp:
+            ver_data = json.loads(resp.read().decode())
+            ws_url = ver_data.get("webSocketDebuggerUrl")
+        if ws_url:
+            print("[Sesión LinkedIn] Brave está abierto. Abriendo pestaña interactiva de login y esperando...")
+            ws = websocket.create_connection(ws_url, timeout=3.0)
+            ws.send(json.dumps({
+                "id": 1,
+                "method": "Target.createTarget",
+                "params": {"url": "https://www.linkedin.com/login"}
+            }))
+            res = json.loads(ws.recv())
+            target_id = res.get("result", {}).get("targetId")
+            if target_id:
+                ws.send(json.dumps({
+                    "id": 2,
+                    "method": "Target.activateTarget",
+                    "params": {"targetId": target_id}
+                }))
+                try:
+                    ws.recv()
+                except Exception:
+                    pass
+            ws.close()
+
+            # Esperar a que el usuario complete el inicio de sesión en Brave
+            start_wait = time.time()
+            while time.time() - start_wait < timeout_sec:
+                time.sleep(2.0)
+                if sync_cookies_from_brave_cdp():
+                    print("[Sesión LinkedIn] ¡Sesión autenticada y sincronizada exitosamente desde Brave!")
+                    return True
+            print("[Sesión LinkedIn] Tiempo de espera agotado esperando login en Brave.")
+    except Exception as cdp_err:
+        print(f"[Sesión LinkedIn] Brave CDP no disponible para apertura directa: {cdp_err}")
+
     session_id = uuid.uuid4().hex[:8]
     task_name = f"Antigravity_LinkedIn_Renew_{session_id}"
     bat_path = TEMP_DIR / f"renew_{session_id}.bat"

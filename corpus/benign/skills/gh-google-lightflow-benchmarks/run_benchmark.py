@@ -14,7 +14,7 @@
 # limitations under the License.
 """Reproducible token-efficiency benchmark for Lightflow example workflows.
 
-Executes all 6 included example Lightflows end-to-end and measures:
+Executes all 7 included example Lightflows end-to-end and measures:
 1. Runtime Agent Context (CLI command invocations + authored files + stdout).
 2. Multi-Turn Cumulative Input Tokens (accounting for transcript re-reads across
    turns in a stateful LLM conversation).
@@ -248,6 +248,66 @@ class BenchmarkRunner:
         cmd_chars=len(norm_cmd) + extra_input_chars,
     )
 
+  def bench_quarterly_revenue_brief(self) -> WorkflowBenchmark:
+    log_id = "bench_q3"
+    out_md = os.path.join(self.work_dir, "q3_revenue_brief.md")
+    steps = [
+        self._run_step(
+            "start (SQL query + variance analysis -> pause at draft_commentary)",
+            [
+                "start",
+                "--lightflow=examples/quarterly_revenue_brief",
+                f"--log_id={log_id}",
+                f'--payload={{"output_path": "{out_md}"}}',
+            ],
+            expected_exit=2,
+        ),
+        self._run_step(
+            "resume draft_commentary (render_report -> pause at approve_send)",
+            [
+                "resume",
+                f"--log_id={log_id}",
+                "--stage=draft_commentary",
+                "--resolution=APPROVE",
+                (
+                    '--payload={"approved": true, "commentary": "Q3 revenue'
+                    " grew +12.4% QoQ led by NA and APAC; EMEA trailed plan by"
+                    ' 6.2% on Q4 renewal timing (closed Oct 4)."}'
+                ),
+            ],
+            expected_exit=2,
+        ),
+        self._run_step(
+            "resume approve_send (send_report -> complete)",
+            [
+                "resume",
+                f"--log_id={log_id}",
+                "--stage=approve_send",
+                "--resolution=APPROVE",
+            ],
+            expected_exit=0,
+        ),
+    ]
+    p_chars, p_out_chars = self._measure_passport(log_id)
+    steps.append(
+        self._run_step("cleanup", ["cleanup", f"--log_id={log_id}"], 0)
+    )
+    y_ch, a_ch, r_ch = self._measure_blueprint("quarterly_revenue_brief")
+    return WorkflowBenchmark(
+        name="quarterly_revenue_brief",
+        description=(
+            "SQLite query -> Python variance math -> commentary gate -> render"
+            " -> send gate -> receipt"
+        ),
+        is_authoring_workflow=False,
+        steps=steps,
+        yaml_chars=y_ch,
+        actions_chars=a_ch,
+        readme_chars=r_ch,
+        passport_chars=p_chars,
+        passport_outputs_chars=p_out_chars,
+    )
+
   def bench_hn_digest(self) -> WorkflowBenchmark:
     log_id = "bench_hn"
     out_md = os.path.join(self.work_dir, "hn_digest.md")
@@ -266,7 +326,6 @@ class BenchmarkRunner:
             "resume APPROVE (publish_digest)",
             [
                 "resume",
-                "--lightflow=examples/hn_digest",
                 f"--log_id={log_id}",
                 "--stage=editorial_gate",
                 "--resolution=APPROVE",
@@ -315,7 +374,6 @@ class BenchmarkRunner:
             "resume APPROVE (emit_bulletin)",
             [
                 "resume",
-                "--lightflow=examples/usgs_seismic_alert",
                 f"--log_id={log_id}",
                 "--stage=incident_commander_gate",
                 "--resolution=APPROVE",
@@ -365,7 +423,6 @@ class BenchmarkRunner:
             "resume APPROVE (smoke failure + automatic rollback)",
             [
                 "resume",
-                "--lightflow=examples/pypi_upgrade_guard",
                 f"--log_id={log_id}",
                 "--stage=approve_upgrades",
                 "--resolution=APPROVE",
@@ -377,7 +434,6 @@ class BenchmarkRunner:
             "resume surgical recovery (preserves upstream stages)",
             [
                 "resume",
-                "--lightflow=examples/pypi_upgrade_guard",
                 f"--log_id={log_id}",
                 '--payload={"simulate_smoke_failure": false}',
             ],
@@ -458,7 +514,6 @@ class BenchmarkRunner:
         "resume align_on_design (pause at implement_and_test_actions)",
         [
             "resume",
-            "--lightflow=examples/create_lightflow",
             f"--log_id={log_id}",
             "--stage=align_on_design",
             "--resolution=APPROVE",
@@ -474,7 +529,7 @@ class BenchmarkRunner:
         expected_exit=2,
     )
     actions_src = (
-        "def step_one(payload, **kwargs):\n"
+        "def step_one(payload, dry_run=False, **kwargs):\n"
         "    return {'done': True}, 'Step one complete'\n"
     )
     tests_src = (
@@ -496,7 +551,6 @@ class BenchmarkRunner:
         " implement_and_test_actions",
         [
             "resume",
-            "--lightflow=examples/create_lightflow",
             f"--log_id={log_id}",
             "--stage=implement_and_test_actions",
             "--resolution=APPROVE",
@@ -510,6 +564,7 @@ class BenchmarkRunner:
     )
     manifest_src = (
         'name: "demo_flow"\n'
+        "strict_expressions: true\n"
         "actions:\n"
         '  - id: "step_one"\n'
         '    python_import: "actions.step_one"\n'
@@ -526,7 +581,6 @@ class BenchmarkRunner:
         "write lightflow.yaml & resume draft_and_explain_manifest",
         [
             "resume",
-            "--lightflow=examples/create_lightflow",
             f"--log_id={log_id}",
             "--stage=draft_and_explain_manifest",
             "--resolution=APPROVE",
@@ -579,11 +633,9 @@ class BenchmarkRunner:
             " prompt_iam_quota_override)",
             [
                 "resume",
-                "--lightflow=examples/tenant_gitops_onboarding",
                 f"--log_id={log_id}",
                 "--stage=verify_spec",
                 "--resolution=APPROVE",
-                '--payload={"approved": true}',
             ],
             expected_exit=2,
         ),
@@ -592,11 +644,10 @@ class BenchmarkRunner:
             " complete)",
             [
                 "resume",
-                "--lightflow=examples/tenant_gitops_onboarding",
                 f"--log_id={log_id}",
                 "--stage=prompt_iam_quota_override",
                 "--resolution=APPROVE",
-                '--payload={"approved": true, "quota_override_approved": true}',
+                '--payload={"quota_override_approved": true}',
             ],
             expected_exit=0,
         ),
@@ -623,6 +674,7 @@ class BenchmarkRunner:
 
   def run_all(self) -> list[WorkflowBenchmark]:
     return [
+        self.bench_quarterly_revenue_brief(),
         self.bench_hn_digest(),
         self.bench_usgs_seismic_alert(),
         self.bench_pypi_upgrade_guard(),
@@ -641,19 +693,17 @@ def format_markdown_report(
   runner_skill_tokens = estimate_tokens(runner_skill_chars)
   author_skill_tokens = estimate_tokens(author_skill_chars)
   lines: list[str] = []
-  lines.append("# Lightflow Token-Efficiency Benchmark Results")
+  lines.append("# Lightflow Token & Context Footprint Benchmark Results")
   lines.append("")
   lines.append("## 1. Per-Workflow Context Footprint (Measured End-to-End)")
   lines.append("")
   lines.append(
       "| Workflow | CLI Calls | Warm Runtime (`cmd + stdout`) | Cold Start"
-      " (`N=1` incl. `SKILL.md`) | Multi-Turn Cumulative | Out-of-Context State"
-      " (`passport.json`) | Source Avoided (`yaml + actions.py`) |"
-      " Zero-Context Savings (Warm) |"
+      " (`N=1` incl. `SKILL.md`) | Multi-Turn Cumulative | Persisted in"
+      " `passport.json` (Off-Context) | On-Disk Blueprint (`yaml + actions.py`)"
+      " |"
   )
-  lines.append(
-      "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |"
-  )
+  lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: |")
 
   tot_runtime_ch = 0
   tot_cum_tok = 0
@@ -676,7 +726,6 @@ def format_markdown_report(
     pp_tok = r.passport_tokens
     bp_ch = r.blueprint_chars
     bp_tok = r.blueprint_tokens
-    savings = r.zero_context_savings_ratio
 
     tot_runtime_ch += rt_ch
     tot_cum_tok += cum_tok
@@ -687,13 +736,11 @@ def format_markdown_report(
         f"| `{r.name}` | {n_calls} | {rt_ch:,} ch (~**{rt_tok:,} tok**) |"
         f" {n1_cold_ch:,} ch (~{n1_cold_tok:,} tok) | ~{cum_tok:,} tok |"
         f" {pp_ch:,} ch (~{pp_tok:,} tok) | {bp_ch:,} ch (~{bp_tok:,} tok) |"
-        f" **{savings * 100:.0f}%** |"
     )
 
   tot_runtime_tok = estimate_tokens(tot_runtime_ch)
   tot_pp_tok = estimate_tokens(tot_passport_ch)
   tot_bp_tok = estimate_tokens(tot_blueprint_ch)
-  warm_savings = tot_blueprint_ch / (tot_runtime_ch + tot_blueprint_ch)
   n_wf = len(results)
 
   lines.append(
@@ -702,18 +749,15 @@ def format_markdown_report(
       f" (~{tot_runtime_tok:,} tok)** | — | **~{tot_cum_tok:,} tok** |"
       f" **{tot_passport_ch:,} ch (~{tot_pp_tok:,} tok)** |"
       f" **{tot_blueprint_ch:,} ch (~{tot_bp_tok:,} tok)** |"
-      f" **{warm_savings * 100:.0f}%** |"
   )
   session_cold_ch = tot_runtime_ch + runner_skill_chars + author_skill_chars
   session_cold_tok = estimate_tokens(session_cold_ch)
-  cold_savings = tot_blueprint_ch / (session_cold_ch + tot_blueprint_ch)
   lines.append(
       f"| **Session Total (`N={n_wf}`, cold start incl. both `SKILL.md`s)** |"
       f" **{sum(len(r.steps) for r in results)} + 2 reads** | — |"
       f" **{session_cold_ch:,} ch (~{session_cold_tok:,} tok)** | — |"
       f" **{tot_passport_ch:,} ch (~{tot_pp_tok:,} tok)** |"
       f" **{tot_blueprint_ch:,} ch (~{tot_bp_tok:,} tok)** |"
-      f" **{cold_savings * 100:.0f}%** |"
   )
   lines.append("")
   lines.append("## 2. Step-by-Step Breakdown")

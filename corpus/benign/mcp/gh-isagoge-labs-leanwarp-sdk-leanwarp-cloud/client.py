@@ -6,20 +6,41 @@ import json
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
-from urllib.parse import quote, urlparse
+from typing import Any, Literal, get_args
+from urllib.parse import quote, urlencode, urlparse
 from uuid import uuid4
 
 import httpx
 
+from ._version import __version__
 from .amounts import validate_spending_cap
-from .endpoints import api_origin
+from .endpoints import api_origin, public_origin
 from .project import choose_environment, project_identity, validate_selection
 from .transport import DeadlineTransport
 
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+#: Which SDK surface sends requests; the service reads it from the User-Agent.
+Interface = Literal["python", "cli", "mcp"]
+_INTERFACES = frozenset(get_args(Interface))
 #: The longest the API holds a read of an operation that has not finished.
 MAX_SERVER_WAIT_SECONDS = 20.0
+#: The most operations one history page holds.
+MAX_OPERATION_PAGE = 25
+#: Every operation the service runs; mirrors the service's runtime contract.
+OperationKind = Literal[
+    "check",
+    "inspect",
+    "try_tactics",
+    "verify_target",
+    "suggest",
+    "holes",
+    "extract_decls",
+    "sorry2lemma",
+    "check_files",
+]
+OPERATION_KINDS: frozenset[str] = frozenset(get_args(OperationKind))
+#: The most files one check_files operation checks.
+MAX_BATCH_FILES = 64
 # Time allowed for a held response to arrive after the server stops waiting.
 _RESPONSE_MARGIN = 2.0
 
@@ -44,14 +65,18 @@ class OperationTimeout(TimeoutError):
 class LeanWarpCloud:
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None,
         *,
         base_url: str | None = None,
         timeout: float = 30.0,
         retries: int = 2,
         transport: httpx.BaseTransport | None = None,
+        interface: Interface = "python",
     ) -> None:
-        base_url = api_origin(api_key) if base_url is None else base_url
+        """Without a key, only ``versions`` works: the production catalog is public,
+        so a project can be checked before signing up."""
+        if base_url is None:
+            base_url = public_origin() if api_key is None else api_origin(api_key)
         parsed = urlparse(base_url)
         local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
         if parsed.scheme != "https" and not (parsed.scheme == "http" and local):
@@ -67,13 +92,21 @@ class LeanWarpCloud:
             raise ValueError(
                 "base_url must be an origin without a path, credentials, query or fragment"
             )
-        if not api_key or api_key.strip() != api_key or "\n" in api_key or "\r" in api_key:
+        if api_key is not None and (
+            not api_key or api_key.strip() != api_key or "\n" in api_key or "\r" in api_key
+        ):
             raise ValueError("api_key must be a nonempty token")
         if timeout <= 0 or not 0 <= retries <= 5:
             raise ValueError("timeout must be positive and retries must be between zero and five")
+        if interface not in _INTERFACES:
+            raise ValueError("interface must be python, cli or mcp")
         self._client = httpx.Client(
             base_url=base_url.rstrip("/") + "/",
-            headers={"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"},
+            headers={
+                **({"Authorization": f"Bearer {api_key}"} if api_key is not None else {}),
+                "Accept-Encoding": "identity",
+                "User-Agent": f"leanwarp-sdk/{__version__} ({interface})",
+            },
             timeout=timeout,
             transport=transport if transport is not None else DeadlineTransport(base_url),
             follow_redirects=False,
@@ -169,6 +202,28 @@ class LeanWarpCloud:
     def workspace(self, workspace_id: str) -> dict[str, Any]:
         return self._request("GET", f"workspaces/{_segment(workspace_id)}")
 
+    def workspace_files(self, workspace_id: str) -> dict[str, Any]:
+        """The workspace's committed revision and each file's SHA-256, without contents."""
+        return self._request("GET", f"workspaces/{_segment(workspace_id)}/files")
+
+    def operations(
+        self, workspace_id: str, *, limit: int = MAX_OPERATION_PAGE, cursor: str | None = None
+    ) -> dict[str, Any]:
+        """One page of a workspace's operations with their results, newest first.
+
+        Pass the page's ``next_cursor`` to read the next, older page; it is None
+        after the last one. A page may hold fewer than ``limit`` operations.
+        """
+        if isinstance(limit, bool) or not 1 <= limit <= MAX_OPERATION_PAGE:
+            raise ValueError(f"limit must be between 1 and {MAX_OPERATION_PAGE}")
+        query = {"limit": limit} | ({"cursor": cursor} if cursor is not None else {})
+        path = f"workspaces/{_segment(workspace_id)}/operations?{urlencode(query)}"
+        return self._request("GET", path)
+
+    def workspace_usage(self, workspace_id: str) -> dict[str, Any]:
+        """Each history cap with its current use; finished work makes room after an hour."""
+        return self._request("GET", f"workspaces/{_segment(workspace_id)}/usage")
+
     def sync_files(
         self,
         workspace_id: str,
@@ -199,6 +254,7 @@ class LeanWarpCloud:
         resource_profile: str | None = None,
         timeout_seconds: int | None = None,
         idempotency_key: str | None = None,
+        deadline: float | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "kind": kind,
@@ -216,6 +272,7 @@ class LeanWarpCloud:
             f"workspaces/{_segment(workspace_id)}/operations",
             body=body,
             idempotency_key=idempotency_key or uuid4().hex,
+            deadline=deadline,
         )
 
     def operation(
@@ -327,6 +384,127 @@ class LeanWarpCloud:
             idempotency_key=idempotency_key,
         )
 
+    def suggest(
+        self,
+        workspace_id: str,
+        file: str,
+        *,
+        expected_revision: int,
+        line: int,
+        column: int,
+        tactics: list[str] | None = None,
+        timeout_ms: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Close the hole at a position with a freshly rechecked patch.
+
+        Apply the patch with ``leanwarp_cloud.edits.edited_source`` or, for a local
+        project, ``ProjectSession.apply``; it binds to the exact source it read.
+
+        Without tactics, LeanWarp ranks its own portfolio for the hole. Without
+        timeout_ms, each tactic gets LeanWarp's learned budget.
+        """
+        payload: dict[str, Any] = {"file": file, "line": line, "column": column}
+        if tactics is not None:
+            payload["tactics"] = tactics
+        if timeout_ms is not None:
+            payload["timeout_ms"] = timeout_ms
+        return self.submit(
+            workspace_id,
+            "suggest",
+            expected_revision=expected_revision,
+            payload=payload,
+            idempotency_key=idempotency_key,
+        )
+
+    def holes(
+        self,
+        workspace_id: str,
+        file: str,
+        *,
+        expected_revision: int,
+        goals: bool = True,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """List every `sorry` and `?_`, with goals for the first 16."""
+        return self.submit(
+            workspace_id,
+            "holes",
+            expected_revision=expected_revision,
+            payload={"file": file, "goals": goals},
+            idempotency_key=idempotency_key,
+        )
+
+    def extract_decls(
+        self,
+        workspace_id: str,
+        file: str,
+        *,
+        expected_revision: int,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """The declarations a file adds, with types and dependencies."""
+        return self.submit(
+            workspace_id,
+            "extract_decls",
+            expected_revision=expected_revision,
+            payload={"file": file},
+            idempotency_key=idempotency_key,
+        )
+
+    def sorry2lemma(
+        self,
+        workspace_id: str,
+        file: str,
+        *,
+        expected_revision: int,
+        max_extractions: int = 64,
+        name_prefix: str | None = None,
+        strict_final_check: bool = False,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Lift each `sorry` into a named obligation; the file is not changed."""
+        payload: dict[str, Any] = {
+            "file": file,
+            "max_extractions": max_extractions,
+            "strict_final_check": strict_final_check,
+        }
+        if name_prefix is not None:
+            payload["name_prefix"] = name_prefix
+        return self.submit(
+            workspace_id,
+            "sorry2lemma",
+            expected_revision=expected_revision,
+            payload=payload,
+            idempotency_key=idempotency_key,
+        )
+
+    def check_files(
+        self,
+        workspace_id: str,
+        files: list[str],
+        *,
+        expected_revision: int,
+        strict: bool = True,
+        timeout: int | None = None,
+        timeout_seconds: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Check up to 64 files in one operation; timeout bounds each file in seconds."""
+        if not 1 <= len(files) <= MAX_BATCH_FILES:
+            raise ValueError(f"check_files takes 1 to {MAX_BATCH_FILES} files")
+        payload: dict[str, Any] = {"files": list(files), "strict": strict}
+        if timeout is not None:
+            payload["timeout"] = timeout
+        return self.submit(
+            workspace_id,
+            "check_files",
+            expected_revision=expected_revision,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+            idempotency_key=idempotency_key,
+        )
+
     def wait(
         self, operation_id: str, *, timeout: float = 300, poll_interval: float = 1
     ) -> dict[str, Any]:
@@ -382,14 +560,16 @@ class LeanWarpCloud:
                 # is retried at the polling pace.
                 time.sleep(min(poll_interval, remaining))
 
-    def cancel(self, operation_id: str) -> dict[str, Any]:
-        return self._request("POST", f"operations/{_segment(operation_id)}/cancel")
+    def cancel(self, operation_id: str, *, deadline: float | None = None) -> dict[str, Any]:
+        return self._request(
+            "POST", f"operations/{_segment(operation_id)}/cancel", deadline=deadline
+        )
 
-    def stop(self, workspace_id: str) -> dict[str, Any]:
-        return self._request("POST", f"workspaces/{_segment(workspace_id)}/stop")
+    def stop(self, workspace_id: str, *, deadline: float | None = None) -> dict[str, Any]:
+        return self._request("POST", f"workspaces/{_segment(workspace_id)}/stop", deadline=deadline)
 
-    def delete(self, workspace_id: str) -> None:
-        self._request("DELETE", f"workspaces/{_segment(workspace_id)}")
+    def delete(self, workspace_id: str, *, deadline: float | None = None) -> None:
+        self._request("DELETE", f"workspaces/{_segment(workspace_id)}", deadline=deadline)
 
     def _request(
         self,

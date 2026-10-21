@@ -1,6 +1,6 @@
 """Thin CLI over the same application contracts advertised to MCP."""
 import argparse,json,os,sys,subprocess
-from pathlib import Path
+from grea.host.paths import Path
 from . import __version__
 from .common import GreaError,package_root,digest
 from .contracts import CONTRACTS,catalog
@@ -14,6 +14,9 @@ def legacy_main(tool_id,arguments):
     except GreaError as e:print(e.code+': '+str(e),file=sys.stderr);return 2
 
 def main():
+    if os.name=='nt':
+        for stream in (sys.stdin,sys.stdout,sys.stderr):
+            if hasattr(stream,'reconfigure'):stream.reconfigure(encoding='utf-8')
     p=argparse.ArgumentParser(prog='grea',description='Game Reverse Engineering and Assembly: Unity evidence, recovery tools, workflows and MCP.')
     p.add_argument('--version',action='version',version=__version__)
     sub=p.add_subparsers(dest='operation',required=True)
@@ -38,7 +41,7 @@ def main():
         value={'schema_version':1,'product':'grea','version':__version__,'operations':catalog(),'providers':load()}
         value['catalog_sha256']=digest(value);print(json.dumps(value,ensure_ascii=False,indent=2));return 0
     from .application import dispatch
-    try:request=json.loads(args.input.read_text() if args.input else args.request or '{}',parse_constant=lambda value: (_ for _ in ()).throw(ValueError('Non-JSON constant '+value)))
+    try:request=json.loads(args.input.read_text(encoding='utf-8') if args.input else args.request or '{}',parse_constant=lambda value: (_ for _ in ()).throw(ValueError('Non-JSON constant '+value)))
     except (OSError,ValueError) as e:
         from .common import envelope
         result=envelope(args.operation.replace('-','_'),status='error',error=GreaError('INVALID_JSON',str(e)))

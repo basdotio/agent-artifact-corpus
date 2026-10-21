@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only local links, reachability and recovery CLI contract checks. No tool execution."""
+"""Read-only local links, reachability, Skill frontmatter and recovery CLI contract checks for the grea plugin or a single Skill. No tool execution."""
 
 import argparse
 import ast
@@ -7,11 +7,13 @@ import json
 import re
 import sys
 import unicodedata
-from pathlib import Path
+from grea.host.paths import Path
 from urllib.parse import unquote
 
 
 SKILL_REL = Path('.agents/skills/game-build')
+PLUGIN_REL = Path('plugin')
+ROUTER = Path('skills/grea/SKILL.md')
 
 
 def without_fences(text):
@@ -41,7 +43,7 @@ def within(path, root):
 
 def tool_root_for(workspace):
     for candidate in (workspace, workspace / 'grea'):
-        if (candidate / 'registry.json').is_file() and (candidate / 'skill/SKILL.md').is_file():
+        if (candidate / 'registry.json').is_file() and (candidate / PLUGIN_REL / ROUTER).is_file():
             return candidate
     return workspace / 'tools'
 
@@ -49,8 +51,8 @@ def tool_root_for(workspace):
 def dispatcher_contract(workspace):
     """Inspect literal tables without importing or executing the dispatcher."""
     tool_root = tool_root_for(workspace)
-    if (tool_root / 'skill/SKILL.md').is_file():
-        entries = json.loads((tool_root / 'registry.json').read_text())['tools']
+    if (tool_root / PLUGIN_REL / ROUTER).is_file():
+        entries = json.loads((tool_root / 'registry.json').read_text(encoding='utf-8'))['tools']
         result = {}
         for entry in entries:
             command = (entry.get('execution') or {}).get('command', [])
@@ -79,12 +81,37 @@ def dispatcher_contract(workspace):
             for name in tables[group]}
 
 
+def entries_for(skill):
+    """A single Skill directory, or a plugin directory whose skills/*/SKILL.md are all entries."""
+    if (skill / 'SKILL.md').is_file():
+        return [Path('SKILL.md')]
+    found = sorted(p.relative_to(skill) for p in (skill / 'skills').glob('*/SKILL.md')) if (skill / 'skills').is_dir() else []
+    if not found:
+        raise ValueError('directory must contain SKILL.md or skills/*/SKILL.md')
+    return found
+
+
+def frontmatter_errors(skill, entry):
+    text = (skill / entry).read_text(encoding='utf-8')
+    match = re.match(r'^---\n(.*?)\n---\n', text, re.DOTALL)
+    meta = dict(line.split(': ', 1) for line in match[1].splitlines() if ': ' in line) if match else {}
+    if entry == Path('SKILL.md') and not match:
+        return []  # Legacy single-Skill fixtures predate frontmatter checks; plugin entries always require it.
+    expected = entry.parent.name if entry.parent != Path('.') else meta.get('name')
+    errors = []
+    if not meta.get('name') or meta.get('name') != expected:
+        errors.append({'code': 'skill_name_mismatch', 'file': str(entry)})
+    if not meta.get('description') or len(meta['description']) > 1024:
+        errors.append({'code': 'skill_description_invalid', 'file': str(entry)})
+    return errors
+
+
 def check(workspace, skill):
     workspace, skill = workspace.resolve(), skill.resolve()
-    if not (skill / 'SKILL.md').is_file():
-        raise ValueError('skill directory must contain SKILL.md')
-    if not within((skill / 'SKILL.md').resolve(), skill):
-        raise ValueError('SKILL.md must remain inside the selected skill directory')
+    entries = entries_for(skill)
+    for entry in entries:
+        if not within((skill / entry).resolve(), skill):
+            raise ValueError('SKILL.md must remain inside the selected skill directory')
     contract = dispatcher_contract(workspace)
     tool_root = tool_root_for(workspace)
     registry = json.loads((tool_root / 'registry.json').read_text(encoding='utf-8'))
@@ -92,7 +119,11 @@ def check(workspace, skill):
     errors, warnings, graph, used, count = [], [], {}, set(), 0
     if len(registered) != len(set(registered)):
         errors.append({'code': 'duplicate_registry_id'})
-    virtual_skill = tool_root / 'skill' if (tool_root / 'skill/SKILL.md').exists() else workspace / SKILL_REL
+    virtual_skill = tool_root / PLUGIN_REL if (tool_root / PLUGIN_REL / ROUTER).exists() else workspace / SKILL_REL
+    if (skill / 'SKILL.md').is_file() and not (virtual_skill / 'SKILL.md').is_file() and virtual_skill != workspace / SKILL_REL:
+        virtual_skill = skill  # A standalone Skill candidate resolves its own links.
+    for entry in entries:
+        errors.extend(frontmatter_errors(skill, entry))
     docs = sorted(skill.rglob('*.md'))
 
     def actual(virtual):
@@ -136,7 +167,8 @@ def check(workspace, skill):
                 if unquote(anchor) not in heading_ids(real.read_text(encoding='utf-8')):
                     errors.append(dict(item, code='missing_heading_anchor'))
         # Check explicit CLI mentions in prose and fenced examples, not arbitrary tool-like words.
-        for match in re.finditer(r'\brecovery\s+([a-z_][a-z0-9_-]*)\b', text):
+        body = re.sub(r'^---\n.*?\n---\n', '', text, count=1, flags=re.DOTALL)  # frontmatter prose is not a CLI call
+        for match in re.finditer(r'\brecovery\s+([a-z_][a-z0-9_-]*)\b', body):
             name = match[1]
             if name not in contract:
                 errors.append({'code': 'unknown_recovery_id', 'file': str(relative), 'id': name})
@@ -144,7 +176,7 @@ def check(workspace, skill):
             used.add(name)
             if not contract[name].is_file():
                 errors.append({'code': 'missing_tool_implementation', 'file': str(relative), 'id': name})
-    reached, pending = set(), [Path('SKILL.md')]
+    reached, pending = set(), list(entries)
     while pending:
         name = pending.pop()
         if name in reached:
@@ -153,14 +185,15 @@ def check(workspace, skill):
         pending.extend(graph.get(name, ()))
     for doc in docs:
         name = doc.relative_to(skill)
-        if name.parts[0] == 'references' and name not in reached:
+        if ('references' in name.parts or name.parts[0] == 'shared') and name not in reached:
             errors.append({'code': 'unreachable_reference', 'file': str(name)})
     return {'schema_version': 1, 'ok': not errors, 'errors': errors, 'warnings': warnings,
             'markdown_files': len(docs), 'local_links': count,
             'recovery_ids': sorted(used),
             'size': {'unicode_characters': sum(len(p.read_text(encoding='utf-8')) for p in docs
                                                 if within(p.resolve(), skill)),
-                     'entry_characters': len((skill / 'SKILL.md').read_text(encoding='utf-8'))},
+                     'entry_characters': max(len((skill / e).read_text(encoding='utf-8')) for e in entries)},
+            'skills': [str(e.parent) if e.parent != Path('.') else '.' for e in entries],
             'boundary': 'Static inline Markdown links/heading anchors, routing reachability and explicit '
                         'recovery IDs only. No external URL, tool runtime or Agent behavior validation. '
                         'Git-excluded project source links may warn; counts are not tokens.'}
@@ -169,11 +202,12 @@ def check(workspace, skill):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workspace-root', required=True, type=Path)
-    parser.add_argument('--skill-dir', type=Path, help='Optional candidate skill; resolve external links in workspace')
+    parser.add_argument('--skill-dir', type=Path, help='Optional candidate plugin or single skill; resolve external links in workspace')
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args()
     try:
-        default_skill = tool_root_for(args.workspace_root) / 'skill' if (tool_root_for(args.workspace_root) / 'skill/SKILL.md').exists() else args.workspace_root / SKILL_REL
+        root = tool_root_for(args.workspace_root)
+        default_skill = root / PLUGIN_REL if (root / PLUGIN_REL / ROUTER).exists() else args.workspace_root / SKILL_REL
         result = check(args.workspace_root, args.skill_dir or default_skill)
     except (OSError, ValueError, SyntaxError, KeyError, TypeError) as error:
         print(json.dumps({'ok': False, 'input_error': str(error)}, ensure_ascii=False))

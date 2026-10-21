@@ -36,7 +36,9 @@ client = OpenAI(base_url="http://127.0.0.1:9830/v1", api_key="<API key>")
 client.audio.speech.create(model="qwen3-tts", voice="Narrator", input="Hello!").write_to_file("hello.mp3")
 ```
 
-`model` is `qwen3-tts` (or `qwen3-tts-q4`), or `s2-pro` / `s2-pro-q6` for Fish Audio S2 Pro once it's downloaded.
+`model` is `qwen3-tts` (or `qwen3-tts-q4`), `omnivoice` / `omnivoice-q4` for OmniVoice, `chatterbox`, `voxcpm2`,
+`cosyvoice3`, `kokoro`, `moss-tts-nano`, or `s2-pro` / `s2-pro-q6` for Fish Audio S2 Pro, once they're downloaded. Kokoro takes only its own
+voices (the ones marked Kokoro).
 S2 Pro is non-commercial, so AI agents only use it if you allow non-commercial models on this page.
 
 API requests go ahead of batches, so an app doesn't wait for the queue. The full, interactive list of endpoints is

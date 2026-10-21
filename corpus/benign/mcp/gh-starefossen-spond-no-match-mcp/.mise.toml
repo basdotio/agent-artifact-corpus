@@ -1,0 +1,155 @@
+[tools]
+python = "3.12"
+
+[env]
+APP_NAME = "spond"
+NAMESPACE = "mcp"
+_.python.venv = { path = ".venv", create = true }
+
+[tasks.setup]
+description = "Install dependencies"
+run = "uv pip install -q -r requirements.txt -r requirements-dev.txt"
+
+[tasks.configure]
+description = "Create Spond credentials secret in cluster"
+raw = true
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "Configure Spond credentials (saved to K8s secret in mcp namespace)"
+echo ""
+
+kubectl create namespace mcp --dry-run=client -o yaml | kubectl apply -f -
+
+if kubectl get secret spond-credentials -n mcp &>/dev/null; then
+  echo "Existing secret found."
+  read -rp "Overwrite? [y/N] " confirm
+  [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Cancelled."; exit 0; }
+fi
+
+read -rp "Spond username (email): " username
+read -rsp "Spond password: " password
+echo ""
+
+kubectl create secret generic spond-credentials -n mcp \
+  --from-literal=username="$username" \
+  --from-literal=password="$password" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+echo "Secret spond-credentials created in mcp namespace."
+'''
+
+[tasks.dev]
+description = "Run server locally"
+depends = ["setup"]
+run = "python main.py"
+
+[tasks."test:unit"]
+description = "Run unit tests"
+depends = ["setup"]
+run = "python -m pytest -v"
+
+[tasks.lint]
+description = "Run linter"
+depends = ["setup"]
+run = "ruff check ."
+
+[tasks.lint-fix]
+description = "Auto-fix lint issues"
+depends = ["setup"]
+run = "ruff check --fix ."
+
+[tasks.fix]
+description = "Run all auto-fixers (ruff)"
+depends = ["setup"]
+run = "ruff check --fix . && ruff format ."
+
+[tasks.outdated]
+description = "Check for outdated dependencies"
+depends = ["setup"]
+run = "pip list --outdated"
+
+[tasks.check]
+description = "Run all quality checks"
+depends = ["test:unit", "lint"]
+
+# ================================
+# BUILD TASKS
+# ================================
+
+[tasks.build]
+description = "Build Docker image"
+run = "../../scripts/app-build-docker.sh ${APP_NAME}"
+
+# ================================
+# DEPLOYMENT TASKS
+# ================================
+
+[tasks.deploy]
+description = "Deploy to Knative"
+raw = true
+run = """
+kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f config/networkpolicy.yaml
+../../scripts/app-deploy.sh deploy ${APP_NAME} ${NAMESPACE}
+"""
+
+[tasks.full-deploy]
+description = "Build and deploy"
+raw = true
+depends = ["build"]
+run = """
+kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f config/networkpolicy.yaml
+../../scripts/app-deploy.sh deploy ${APP_NAME} ${NAMESPACE}
+"""
+
+[tasks.redeploy]
+description = "Rebuild and force redeploy"
+raw = true
+run = """
+../../scripts/app-build-docker.sh ${APP_NAME}
+../../scripts/app-deploy.sh redeploy ${APP_NAME} ${NAMESPACE}
+"""
+
+# ================================
+# MANAGEMENT TASKS
+# ================================
+
+[tasks.logs]
+description = "Show service logs"
+run = "../../scripts/app-deploy.sh logs ${APP_NAME} ${NAMESPACE}"
+
+[tasks.status]
+description = "Show service status"
+run = "../../scripts/app-deploy.sh status ${APP_NAME} ${NAMESPACE}"
+
+[tasks.url]
+description = "Show service URL"
+run = "../../scripts/app-deploy.sh url ${APP_NAME} ${NAMESPACE}"
+
+[tasks.test]
+description = "Test the deployed service (health check)"
+run = "../../scripts/app-deploy.sh test ${APP_NAME} ${NAMESPACE}"
+
+[tasks."test:mcp"]
+description = "Run comprehensive MCP protocol tests (fetches auth token from K8s)"
+raw = true
+run = """
+export MCP_AUTH_TOKEN=$(kubectl get secret mcp-auth-token -n mcp -o jsonpath='{.data.token}' | base64 -d)
+./scripts/test-mcp.sh
+"""
+
+[tasks."test:mcp-local"]
+description = "Integration test against local server"
+run = "./scripts/test-mcp.sh http://localhost:8080"
+
+[tasks.delete]
+description = "Delete service"
+run = "../../scripts/app-deploy.sh delete ${APP_NAME} ${NAMESPACE}"
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = """
+rm -rf .venv __pycache__ .pytest_cache .ruff_cache .build-tag 2>/dev/null || true
+"""

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MediBlazeAI</title>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='styles.css') }}"
+    />
+  </head>
+  <body>
+    <div class="container-fluid h-100 d-flex flex-column app-container">
+      <!-- Navbar -->
+      <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid">
+          <a class="navbar-brand" href="#">
+            <i class="fas fa-leaf brand-icon me-2"></i>
+            MediBlazeAI
+          </a>
+          <div class="navbar-text">Your personal medical guide</div>
+        </div>
+      </nav>
+
+      <!-- Main Content -->
+      <div class="container py-3 flex-grow-1">
+        <div class="row justify-content-center">
+          <div class="col-md-10">
+            <!-- Added subtitle here -->
+            <h4 class="text-center mb-3">MediBlaze- AI Health Assistant</h4>
+            <div class="card chat-card">
+              <div class="card-body chat-window" id="chatWindow">
+                <!-- Welcome message -->
+                <div class="message bot-message">
+                  <div class="message-avatar">
+                    <img
+                      src="{{ url_for('static', filename='doctor-avatar.png') }}"
+                      alt="Doctor"
+                      onerror="this.src='https://via.placeholder.com/40/4CAF50/ffffff?text=DR'"
+                    />
+                  </div>
+                  <div class="message-bubble">
+                    <div class="message-content">
+                      Hello! I'm your Health Assistant. I can answer your
+                      medical questions and provide health information. How can
+                      I help you today?
+                    </div>
+                    <div class="message-time">{{ current_time }}</div>
+                  </div>
+                </div>
+              </div>
+              <div class="card-footer">
+                <form id="chatForm" class="d-flex">
+                  <div class="input-group">
+                    <input
+                      type="text"
+                      id="userMessage"
+                      name="msg"
+                      class="form-control"
+                      placeholder="Ask me about any health concern..."
+                      required
+                    />
+                    <button class="btn btn-send" type="submit">
+                      <i class="fas fa-paper-plane"></i>
+                    </button>
+                  </div>
+                </form>
+                <div class="mt-2 small text-muted">
+                  <i class="fas fa-shield-alt me-1"></i> This is informational
+                  only and not a substitute for professional medical advice.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <footer>
+        <div class="container">
+          <p class="mb-0">&copy; 2025 MediBlazeAI. All rights reserved.</p>
+        </div>
+      </footer>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const chatForm = document.getElementById("chatForm");
+        const userMessage = document.getElementById("userMessage");
+        const chatWindow = document.getElementById("chatWindow");
+
+        // Function to get current time
+        function getCurrentTime() {
+          const now = new Date();
+          return now.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        }
+
+        // Add initial time to welcome message
+        document.querySelector(".message-time").textContent = getCurrentTime();
+
+        // Function to add a message to the chat window
+        function addMessage(message, isUser) {
+          const messageDiv = document.createElement("div");
+          messageDiv.className = isUser
+            ? "message user-message"
+            : "message bot-message";
+
+          const avatarSrc = isUser
+            ? "{{ url_for('static', filename='user-avatar.png') }}"
+            : "{{ url_for('static', filename='doctor-avatar.png') }}";
+
+          const avatarFallback = isUser
+            ? "https://via.placeholder.com/40/4CAF50/ffffff?text=You"
+            : "https://via.placeholder.com/40/4CAF50/ffffff?text=DR";
+
+          messageDiv.innerHTML = `
+                    <div class="message-avatar">
+                        <img src="${avatarSrc}" alt="${
+            isUser ? "You" : "Doctor"
+          }" onerror="this.src='${avatarFallback}'">
+                    </div>
+                    <div class="message-bubble">
+                        <div class="message-content">${message}</div>
+                        <div class="message-time">${getCurrentTime()}</div>
+                    </div>
+                `;
+
+          chatWindow.appendChild(messageDiv);
+          chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        // Function to show typing indicator
+        function showTypingIndicator() {
+          const indicator = document.createElement("div");
+          indicator.className = "message bot-message typing-indicator";
+          indicator.id = "typingIndicator";
+
+          indicator.innerHTML = `
+                    <div class="message-avatar">
+                        <img src="{{ url_for('static', filename='doctor-avatar.png') }}" alt="Doctor" onerror="this.src='https://via.placeholder.com/40/4CAF50/ffffff?text=DR'">
+                    </div>
+                    <div class="message-bubble">
+                        <div class="typing-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
+                `;
+
+          chatWindow.appendChild(indicator);
+          chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        // Function to remove typing indicator
+        function removeTypingIndicator() {
+          const indicator = document.getElementById("typingIndicator");
+          if (indicator) {
+            indicator.remove();
+          }
+        }
+
+        // Handle form submission
+        chatForm.addEventListener("submit", function (e) {
+          e.preventDefault();
+
+          const message = userMessage.value.trim();
+          if (!message) return;
+
+          // Add user message to chat
+          addMessage(message, true);
+
+          // Clear input field
+          userMessage.value = "";
+
+          // Show typing indicator
+          showTypingIndicator();
+
+          // Disable input while waiting for response
+          userMessage.disabled = true;
+
+          // Send message to backend
+          fetch("/get", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+              msg: message,
+            }),
+          })
+            .then((response) => {
+              if (!response.ok) {
+                throw new Error("Network response was not ok");
+              }
+              return response.text();
+            })
+            .then((data) => {
+              // Remove typing indicator
+              removeTypingIndicator();
+
+              // Add bot response to chat
+              addMessage(data, false);
+
+              // Re-enable input
+              userMessage.disabled = false;
+              userMessage.focus();
+            })
+            .catch((error) => {
+              console.error("Error:", error);
+              removeTypingIndicator();
+              addMessage(
+                "Sorry, there was an error processing your request. Please try again.",
+                false
+              );
+              userMessage.disabled = false;
+              userMessage.focus();
+            });
+        });
+      });
+    </script>
+  </body>
+</html>

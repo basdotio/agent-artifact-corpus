@@ -1,0 +1,11 @@
+MYSQL_HOST = '163.13.201.152'
+MYSQL_PORT = '5487'
+MYSQL_USER = root
+MYSQL_PASS = '@@ethci2925'
+MYSQL_DB = gym_center407630465
+SVPORT = 2083
+LogPath = logs
+assetsPath = /assets
+HomePagePath = /index.html
+OllamaHost = https://model.ethci.app
+OLLAMAKEY = 'Z&4pL!e9@Qv#Tm6x'
