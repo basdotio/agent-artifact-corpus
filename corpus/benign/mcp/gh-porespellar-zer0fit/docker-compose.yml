@@ -1,0 +1,41 @@
+services:
+  zer0fit-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGETARCH: ${BUILDARCH:-amd64}
+        BASE_IMAGE: ${BASE_IMAGE:-nvidia/cuda:12.6.3-base-ubuntu24.04}
+        TORCH_INDEX: ${TORCH_INDEX:-https://download.pytorch.org/whl/cu124}
+        TABFM_REF: ${TABFM_REF:-fbb665569425fd2f490c6576b3af967876fe11ff}
+    container_name: zer0fit_mcp_server
+    volumes:
+      # Mount sample data directory (optional — files can be uploaded via chat)
+      - ./data:/app/data
+      # Open WebUI uploads volume (OPTIONAL — only needed for file ID resolution
+      # when Zer0Fit and Open WebUI run on the same Docker host).
+      # Uncomment the line below and ensure the 'open-webui' named volume exists:
+      # - open-webui:/app/webui_data:ro
+      # Persist downloaded TimesFM and TabFM weights across container recreation.
+      - zerofit_huggingface_cache:/app/.cache/huggingface
+    environment:
+      - ZER0FIT_VRAM_TTL=${ZER0FIT_VRAM_TTL:-300}
+      - ZER0FIT_UPLOAD_TTL_HOURS=${ZER0FIT_UPLOAD_TTL_HOURS:-6}
+      - ZER0FIT_WEBUI_DIR=${ZER0FIT_WEBUI_DIR:-/app/webui_data/uploads}
+      - ZER0FIT_MAX_UPLOAD_MB=${ZER0FIT_MAX_UPLOAD_MB:-50}
+      - ZER0FIT_DEBUG=${ZER0FIT_DEBUG:-false}
+    ports:
+      - "${ZER0FIT_PORT:-8002}:8002"
+    restart: unless-stopped
+    profiles:
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  zerofit_huggingface_cache:

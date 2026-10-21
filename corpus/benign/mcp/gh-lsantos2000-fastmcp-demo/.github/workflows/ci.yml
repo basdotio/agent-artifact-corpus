@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11, 3.12, 3.13]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+    
+    - name: Run tests
+      run: |
+        python tests/run_tests.py
+    
+    - name: Run tests with unittest
+      run: |
+        python -m unittest discover tests -v
+    
+    - name: Test server import
+      run: |
+        python -c "import demo; print('Server import successful')"
+    
+    - name: Test tools import
+      run: |
+        python -c "from tools import add, multiply, calculate, greet; print('Tools import successful')"
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort
+    
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Check code formatting with black
+      run: |
+        black --check --diff .
+    
+    - name: Check import sorting with isort
+      run: |
+        isort --check-only --diff .
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install bandit safety
+    
+    - name: Run security checks with bandit
+      run: |
+        bandit -r . -f json -o bandit-report.json || true
+    
+    - name: Check dependencies with safety
+      run: |
+        safety check --json --output safety-report.json || true
+    
+    - name: Test calculator security
+      run: |
+        python -c "
+        from tools.math_tools import calculate
+        import sys
+        
+        # Test that dangerous expressions are blocked
+        dangerous = ['__import__(\\'os\\')', 'open(\\'/etc/passwd\\')', 'exec(\\'print(1)\\')']
+        for expr in dangerous:
+            result = calculate(expr)
+            if not result.startswith('Error:'):
+                print(f'SECURITY ISSUE: {expr} was not blocked')
+                sys.exit(1)
+        print('✅ Security tests passed')
+        "

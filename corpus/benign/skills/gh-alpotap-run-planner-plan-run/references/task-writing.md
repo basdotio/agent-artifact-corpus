@@ -36,7 +36,10 @@ The runner sends the whole task section to the session, with the plan's `## Rule
   - `**Size: S|M|L**`, required.
   - `**Model: haiku|sonnet|opus**`, required (see [Choosing the model](#choosing-the-model)).
   - `**Effort: low|medium|high**`, optional. It overrides the model's default effort from `runs/runner.json` (Sonnet: low; Haiku: medium; Opus: the model's own default). Use `**Effort: medium**` on a Sonnet task that is tricky but does not need Opus.
-  - `**Tools: default**`, optional. This gives the session every built-in tool instead of the lean set (Bash, PowerShell, Read, Edit, Write, Grep, Glob). Only for a task that really needs another tool, for example a web fetch. Each extra tool definition is re-sent on every turn.
+  - `**Tools: ...**`, optional. Name the tools the task needs, comma-separated. Each named tool is pre-approved, so a headless session does not get the call refused. Without the line the session gets the lean set (Bash, PowerShell, Read, Edit, Write, Grep, Glob).
+    - `**Tools: Browser**` adds the browser (the MCP server in `runs/browser-mcp.json`, Playwright by default) for that task only. Use it for any task that opens a page, clicks, fills a form or reads a rendered UI. Its tool definitions are re-sent on every turn, so it is never added to a task that does not need it.
+    - `**Tools: Read,Edit,Grep,mcp__<server>__<tool>**` names a built-in or an MCP tool. An MCP server must be declared in a config the runner loads, so ask the owner before naming one that is not the browser.
+    - `**Tools: default**` gives every built-in tool. Only when the task truly needs one of them; it costs about 35K of context per turn.
 
 ## Sizes
 

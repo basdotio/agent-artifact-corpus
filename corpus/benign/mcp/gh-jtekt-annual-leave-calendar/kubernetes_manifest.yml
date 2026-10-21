@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${APPLICATION_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${APPLICATION_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${APPLICATION_NAME}
+    spec:
+      containers:
+        - name: ${APPLICATION_NAME}
+          image: ${CONTAINER_IMAGE_TAGGED}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 80
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 2
+
+          envFrom:
+            - secretRef:
+                name: environment-variables
+          env:
+            - name: USER_MANAGER_API_URL
+              value: http://employee-manager/v3/users
+            - name: IDENTIFICATION_URL
+              value: http://employee-manager/v3/users/self
+            - name: IDENTIFIER_FIELDS
+              value: _id
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${APPLICATION_NAME}
+spec:
+  ports:
+    - port: 80
+      nodePort: ${K8S_SERVICE_PORT}
+  selector:
+    app: ${APPLICATION_NAME}
+  type: NodePort
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${APPLICATION_NAME}
+spec:
+  rules:
+    - host: leaves-api.jtektrnd.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ${APPLICATION_NAME}
+                port:
+                  number: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ${APPLICATION_NAME}
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+  hostnames:
+    - leaves-api.jtektrnd.net
+  rules:
+    - backendRefs:
+        - name: ${APPLICATION_NAME}
+          port: 80

@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Windows runner 的管道默认编码是 cp1252，脚本输出 ✓ 等字符会直接 UnicodeEncodeError。
+# 全局强制 UTF-8：ubuntu 上无感，windows 上是生死线。
+env:
+  PYTHONUTF8: "1"
+
+# 每个分支只关心最新一次运行；被取代的自动取消。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows + Git Bash 是主要开发平台，所以和 Linux 一起测，
+        # 而不是被当成事后补的。
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # --- 仓库自洽性：版本号漂移、风格目录漂移、残留外链 ---
+      - name: Repository integrity check
+        run: python scripts/check_integrity.py
+
+      # --- Python 脚本至少在支持的最低版本上要能编译 ---
+      - name: Compile Python scripts
+        run: python -m compileall -q scripts
+
+      # --- 画面体检工具要能被导入，且命令行要能响应 ---
+      - name: Lint tool smoke test
+        run: python scripts/lint_frames.py --help
+
+      - name: Integrity checker smoke test
+        run: python scripts/check_integrity.py --root .
+
+      # --- Shell 入口语法 ---
+      - name: Check setup_env.sh syntax
+        shell: bash
+        run: bash -n setup_env.sh
+
+      # --- 文本规则回归：去句读标点，但小数点不是标点 ---
+      # 这条不变式有五个出口（屏幕字幕 / SRT / B() 节拍 / 火山切句 / subs.json），
+      # 任何一处削掉小数点，屏幕上就会出现「念 2.4%、写 24%」的假数字，且不报错。
+      - name: Subtitle text rules regression test
+        run: python tests/test_subs_text.py
+
+      - name: Beats matcher regression test
+        run: node tests/test_beats_norm.mjs
+
+      # --- frontmatter description 的长度上限 ---
+      # 超长时本地一切正常，只有换到按 1024 字符扫描的加载器才会「整个技能消失」，
+      # 且不报错。这类缺陷在本地不可观测，只能在构建期钉住（issue #3）。
+      - name: Skill frontmatter regression test
+        run: python tests/test_skill_frontmatter.py
+
+      # --- 渲染器 / 封面器 / 单帧速览工具的语法 ---
+      - name: Check Node module syntax
+        shell: bash
+        run: |
+          set -e
+          for f in scripts/*.mjs; do
+            echo "checking $f"
+            node --check "$f"
+          done
+
+      - name: Check templates are self-contained
+        shell: bash
+        run: |
+          set -e
+          # 画面帧绝不允许引 CDN 或网络字体：离线渲染不会报错，只会静默劣化。
+          # 只扫 HTML —— markdown 文档里*提到*这些 URL 是合理的
+          # （比如正是指南在教你要把它们删掉），而 GSAP 自带的 README 也会介绍它的 CDN 用法。
+          hits=$(grep -rInE --include='*.html' \
+            'https?://[^"'"'"' ]*(fonts\.googleapis|fonts\.gstatic|cdn\.)' . \
+            || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::external font or CDN reference found in an HTML template"
+            exit 1
+          fi
+          echo "no external font or CDN references in HTML templates"

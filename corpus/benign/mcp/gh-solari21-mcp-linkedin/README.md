@@ -4,19 +4,26 @@
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python&logoColor=white" alt="Python" height="20"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP%20SDK-FastMCP-8A2BE2.svg" alt="MCP SDK" height="20"></a>
   <a href="https://playwright.dev/"><img src="https://img.shields.io/badge/engine-Playwright-2EAD33.svg?logo=playwright&logoColor=white" alt="Playwright" height="20"></a>
+  <a href="https://github.com/solari21/mcp-linkedin/releases"><img src="https://img.shields.io/github/v/release/solari21/mcp-linkedin?logo=github&color=blue" alt="GitHub Release" height="20"></a>
+  <a href="https://github.com/users/solari21/projects/2"><img src="https://img.shields.io/badge/Roadmap-Projects%20V2-orange?logo=github" alt="Roadmap Projects V2" height="20"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" height="20"></a>
   <a href="https://github.com/solari21/mcp-linkedin/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" height="20"></a>
+  <a href="https://m8ven.ai/mcp/solari21-mcp-linkedin-1ary7v?s=readme"><img src="https://m8ven.ai/badge/mcp/solari21-mcp-linkedin-1ary7v" alt="M8ven Score" height="20"></a>
 </p>
+
+<p align="center">
+  <a href="README.md"><img src="https://img.shields.io/badge/Espa%C3%B1ol-Activo-orange?style=for-the-badge&logo=readme&logoColor=white" alt="Versión en Español" /></a>
+  &nbsp;&nbsp;
+  <a href="README_EN.md"><img src="https://img.shields.io/badge/English-Switch-blue?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Switch to English" /></a>
+</p>
+
 
 **MCP LinkedIn** es un servidor open-source de alto rendimiento construido sobre el **Model Context Protocol (MCP)**, **FastMCP** y **Playwright**. Permite a asistentes de inteligencia artificial (Claude Desktop, Gemini, Antigravity, Cursor, Cline) interactuar con LinkedIn de forma supervisada, respetuosa y orientada a la productividad profesional.
 
 A diferencia de otros scripts de automatización opacos, **MCP LinkedIn** incorpora una filosofía estricta de **Human-in-the-Loop (HITL)** con salvaguardas obligatorias en dos fases (`confirm=True`) para acciones críticas, emulación de cadencia humana y un Plan B interactivo que permite resolver retos de seguridad sin pérdida de foco.
 
----
-
-<p align="center">
-  <img src="assets/infografia_mcp_linkedin.png" alt="MCP LinkedIn Infografía" width="850">
-</p>
+> [!TIP]
+> **Manual Operativo Completo**: Para consultar la guía detallada de comandos, prompts recomendados, arquitectura y flujos de trabajo semanales para las 32 herramientas, consulta la **[Guía Operativa de Uso (GUIA_USO.md)](./GUIA_USO.md)**.
 
 ---
 
@@ -26,7 +33,7 @@ Actualmente existen implementaciones experimentales de MCP para LinkedIn en el e
 
 | Característica / Capacidad | `stickerdaniel/linkedin-mcp` | `eliasbiondo/linkedin-mcp` | 🚀 **MCP LinkedIn (Este Proyecto)** |
 |---|:---:|:---:|:---:|
-| **Herramientas Disponibles** | 4 | 5 | **21 herramientas completas** |
+| **Herramientas Disponibles** | 4 | 5 | **32 herramientas completas** |
 | **Publicación Enriquecida con Imágenes** | ❌ Solo texto | ❌ No disponible | ✅ **Subida nativa HD (`expect_file_chooser`)** |
 | **Primer Comentario Automático** | ❌ No | ❌ No | ✅ **Inyección automática para alcance orgánico** |
 | **Control Total del Menú de 3 Puntos** | ❌ No | ❌ No | ✅ **Destacar, Guardar, Embed `<iframe>`, Editar, Borrar** |
@@ -36,38 +43,36 @@ Actualmente existen implementaciones experimentales de MCP para LinkedIn en el e
 | **Búsqueda 360° en Tiempo Real** | ⚠️ Parcial | ⚠️ Parcial | ✅ **Personas, Empleos con requisitos y Empresas** |
 | **Inbox & Hilos de Conversación** | ⚠️ Básico | ❌ No | ✅ **Lectura de chats, hilos y envío supervisado** |
 | **Emulación de Ritmo Humano** | ❌ Instantáneo | ❌ Instantáneo | ✅ **Jitter aleatorio gaussiano (1.5s - 3.0s)** |
+| **Inteligencia y Filtro Anti-IA Local** | ❌ No | ❌ No | ✅ **Humanizador en 3 pasadas y 5-Check Detection Panel** |
+| **Estrategia y Copywriting Calibrado** | ❌ No | ❌ No | ✅ **21 fórmulas de ganchos, 9 arquetipos de comentarios y carruseles 4:5** |
 
 ---
 
-## 🏛️ Arquitectura del Sistema
+## 🏛️ Arquitectura del Sistema (Capas de Software)
 
-```mermaid
-flowchart TD
-    Client["🤖 Cliente MCP (Claude / Gemini / Cursor)"] -->|JSON-RPC via stdio| Server["⚡ FastMCP Server (linkedin_server.py)"]
-    
-    subgraph Core ["Núcleo de MCP LinkedIn"]
-        Server --> Guard{"🛡️ Human-in-the-Loop\n(confirm=True)"}
-        Guard -->|Acciones Críticas| ExecutionEngine["🕹️ Motor de Ejecución"]
-        Guard -->|Sin Confirmación| RejectMsg["🛑 Rechazo Preventivo"]
-        ExecutionEngine --> RateLimiter["⏳ Throttling & Jitter Humano"]
-        RateLimiter --> BrowserManager["🌐 Browser Engine (Brave / Chromium)"]
-    end
-    
-    subgraph Resilience ["Resiliencia y Sesión"]
-        BrowserManager --> CookieSanitizer["🧹 Sanitizador Anti-HTTP 999"]
-        CookieSanitizer --> SessionCheck{"¿Sesión Válida?"}
-        SessionCheck -->|Sí| LinkedInWeb["💼 LinkedIn Web App"]
-        SessionCheck -->|Reto / 2FA / Expirada| Fallback["🖥️ Plan B Interactivo (/IT)"]
-        Fallback -->|Resolución de Usuario| LinkedInWeb
-    end
-```
+A diferencia de la secuencia temporal de publicación, la arquitectura de **MCP LinkedIn** es un modelo modular desacoplado en 5 capas que separa limpiamente las interfaces de cliente, la lógica de control, los motores heurísticos de inteligencia, la persistencia de cookies y la interacción en el navegador:
+
+<p align="center">
+  <img src="assets/infografia_mcp_linkedin.png?v=1.1.0" alt="Arquitectura del Servidor FastMCP LinkedIn v1.1.0" width="850">
+</p>
 
 ---
 
-## 🛠️ Catálogo Completo de Herramientas (21 Herramientas)
+## 🔄 Diagrama de Flujo Operativo (Ciclo de Vida End-to-End)
+
+El siguiente diagrama de flujo ilustra la secuencia temporal y el ciclo de vida completo de una publicación, orquestando las **32 herramientas** desde la ideación inicial hasta la monitorización post-publicación:
+
+<p align="center">
+  <img src="assets/diagrama_flujo_mcp_linkedin.png?v=1.1.0" alt="Diagrama de Flujo Operativo MCP LinkedIn" width="850">
+</p>
+
+---
+
+## 🛠️ Catálogo Completo de Herramientas (32 Herramientas)
 
 ### A. Publicación y Distribución de Contenido
 * `linkedin_create_post`: Crea publicaciones profesionales con formato, hashtags, imagen opcional en alta definición, publicación automática del primer comentario con enlaces y parámetro opcional `clean_previous_tests=True` para purga y deduplicación pre-flight de publicaciones previas de prueba.
+* `linkedin_add_comment`: Publica comentarios estructurados con formateo nativo multilínea (párrafos `<p>` en Tiptap/ProseMirror sin colapso), validación semántica estricta de autoría (`verify_author`) y temática (`verify_topic`) para blindaje anti-posteo cruzado en hilos ajenos.
 * `linkedin_get_recent_posts`: Extrae el listado de publicaciones recientes del perfil autenticado, con conteo de impresiones y engagement.
 * `linkedin_check_session`: Diagnostica la validez de la sesión activa, estado de cookies y conectividad con la plataforma.
 * `linkedin_renew_session_interactive`: Despliega una ventana asistida no invasiva para resolver desafíos de 2FA o reCAPTCHA y sincronizar la sesión.
@@ -96,6 +101,18 @@ flowchart TD
 * `linkedin_get_feed_posts`: Extrae las publicaciones destacadas del feed principal con conteo de reacciones.
 * `linkedin_get_job_details`: Desglose exhaustivo de ofertas de empleo (requisitos clave, descripción íntegra y modalidad).
 * `linkedin_get_company_details`: Información corporativa institucional (sector, tamaño de plantilla, sede y especialidades).
+
+### F. Inteligencia Editorial, Copywriting y Heurística Anti-IA (Jakeschincariol Benchmark)
+* `linkedin_humanize`: Limpieza de texto en 3 pasadas eliminando caracteres invisibles (zero-width, BOMs), normalizando tipografía no estándar (em-dashes a comas, comillas curvadas) y reemplazando 113+ términos vacíos corporativos (slop) con protección estricta de URLs.
+* `linkedin_detect_ai`: Panel de 5 verificaciones (Burstiness, Specificity, Slop Density, Fingerprint, Voice) con veredicto PASS/REVIEW/FLAGGED y puntuación humana 0-100 sin coste de API externa.
+* `linkedin_hook_score`: Calibrador de ganchos contra 21 fórmulas probadas (`hooks.json`) con verificación de visibilidad móvil ($\le$ 140 car) y escritorio ($\le$ 210 car) antes de "Ver más".
+* `linkedin_score_profile`: Auditoría del perfil autenticado o de terceros contra la rúbrica objetiva de 12 elementos (100 puntos totales) con plan de acción prioritario *Fix-First*.
+* `linkedin_generate_comment`: Generador de comentarios profesionales basado en 9 arquetipos de alto impacto (dato, caso límite, recibo, desacuerdo constructivo) erradicando comentarios vacíos ("¡Gran post!").
+* `linkedin_triage_inbox`: Extracción y clasificación automática del inbox en LEAD, RECRUITER, PEER, ASK y SPAM (identificando bots y secuencias frías con Calendly).
+* `linkedin_triage_replies`: Triaje de comentarios bajo publicaciones propias en 5 niveles estratégicos para priorizar respuestas y maximizar el dwell time en la primera hora.
+* `linkedin_carousel_planner`: Arquitectura diapositiva a diapositiva de carruseles PDF verticales (1080x1350 px, ratio 4:5) con menos de 25 palabras por slide y plantilla HTML/CSS para imprimir.
+* `linkedin_repurpose_content`: Desglose de contenido largo (vídeos, transcripciones, artículos) en afirmaciones, números, historias y mecanismos con propuesta de calendario semanal de 4 publicaciones.
+* `linkedin_dm_sequence`: Generador de secuencias de prospección en 4 pasos con nota de invitación estrictamente $\le$ 200 caracteres y 2 follow-ups espaciados.
 
 ---
 
@@ -240,16 +257,6 @@ El repositorio incluye flujos de trabajo automatizados con GitHub Actions para a
 
 ---
 
-## 🙏 Créditos y Reconocimientos Open Source
-
-Este proyecto se apoya y rinde tributo a las siguientes iniciativas y creadores de la comunidad de código abierto:
-
-* **[@Daniel Sticker (stickerdaniel)](https://github.com/stickerdaniel/linkedin-mcp-server)**: Por los conceptos preliminares de mensajería e integración inicial de MCP con LinkedIn.
-* **[@Elias Biondo (eliasbiondo)](https://github.com/eliasbiondo/linkedin-mcp-server)**: Por las ideas fundacionales sobre extracción modular de datos de perfiles.
-* **[FastMCP](https://github.com/jlowin/fastmcp)**: Por proveer el framework Python más ergonómico y rápido para construir servidores MCP.
-* **[Playwright](https://playwright.dev/)**: Por ofrecer el motor de automatización web más robusto y moderno del ecosistema.
-
----
 
 ## ⚖️ Descargo de Responsabilidad Legal (Legal Disclaimer)
 
@@ -267,16 +274,25 @@ Este proyecto se apoya y rinde tributo a las siguientes iniciativas y creadores 
 Estado actual del proyecto y próximas funcionalidades planificadas (disponible también como tablero interactivo Kanban en [**GitHub Projects #2 - MCP LinkedIn Roadmap**](https://github.com/users/solari21/projects/2)):
 
 ### ✅ Implementado (v1.0.0)
-- [x] **Publicación Oficial de Lanzamiento**: Post publicado en vivo en LinkedIn con infografía técnica y primer comentario verificado ([Ver en LinkedIn](https://www.linkedin.com/feed/update/urn:li:activity:7515951568215588864/)).
-- [x] **Arquitectura FastMCP 2.2+**: 21 herramientas registradas con tipado estricto e introspección de esquemas.
+- [x] **Publicación Oficial de Lanzamiento**: Post publicado en vivo en LinkedIn con infografía técnica y primer comentario verificado ([Ver en LinkedIn](https://www.linkedin.com/feed/update/urn:li:share:7512122634080374784/)).
+- [x] **Arquitectura FastMCP 2.2+**: 22 herramientas registradas con tipado estricto e introspección de esquemas.
 - [x] **Publicación Enriquecida**: Soporte para subida de imágenes HD con `expect_file_chooser()` y primer comentario automático con motor Tiptap.
+- [x] **Comentarios Supervisados con Párrafos Nativos y Anti-Posteo Cruzado**: Herramienta `linkedin_add_comment` con comprobación estricta de autoría (`verify_author`), verificación temática (`verify_topic`) e inyección multilínea nativa sin colapso de renglones.
 - [x] **Control del Menú de 3 Puntos**: Fijar en destacados, guardar elementos, extraer snippet `<iframe>`, copiar enlace canónico, editar y eliminar publicaciones.
 - [x] **Salvaguardas Human-in-the-Loop**: Confirmación en dos fases (`confirm=True`) en acciones destructivas o irreversibles.
 - [x] **Plan B Interactivo sin Pérdida de Foco**: Detección de retos (2FA, reCAPTCHA) y proyección asistida con `schtasks /IT` en Windows.
 - [x] **Sanitización de Cookies Anti-HTTP 999**: Normalización de dominios, desescape de comillas en `JSESSIONID` y deduplicación estricta de `li_at`.
 - [x] **Búsqueda e Inteligencia 360°**: Motores de búsqueda de personas, ofertas de empleo con descripción íntegra y fichas corporativas de empresas.
 - [x] **Bandeja de Entrada e Hilos**: Lectura de conversaciones recientes, consulta de hilos cronológicos y envío supervisado de mensajes.
-- [x] **Empaquetado y Distribución**: Paquetes precompilados Wheel (`.whl`) y Source Distribution (`.tar.gz`) listos para instalar.
+### ✅ Implementado (v1.1.0 - Inteligencia Editorial y Heurística Anti-IA)
+- [x] **Motor Anti-IA y Limpieza Heurística**: Integración de `linkedin_humanize` (limpieza en 3 pasadas: 17 caracteres invisibles, tipografía y 113+ términos slop bilingües) y `linkedin_detect_ai` (panel de 5 verificaciones con veredicto PASS/REVIEW/FLAGGED).
+- [x] **Copywriting y Calibración de Ganchos**: `linkedin_hook_score` con 21 fórmulas probadas de alto impacto y validación de límites de corte visual móvil (140 car) y escritorio (210 car).
+- [x] **Auditoría de Perfil 100 Puntos**: `linkedin_score_profile` con 12 criterios objetivos y plan de acción prioritario *Fix-First*.
+- [x] **Generador de Comentarios de Alto Valor**: `linkedin_generate_comment` con 9 arquetipos profesionales erradicando comentarios vacíos.
+- [x] **Triaje de Inbox y Respuestas**: `linkedin_triage_inbox` (5 categorías y detección anti-spam con Calendly) y `linkedin_triage_replies` (priorización de hilos en la primera hora).
+- [x] **Carruseles PDF y Reciclaje de Contenido**: `linkedin_carousel_planner` (diapositivas en ratio 4:5 vertical y HTML/CSS) y `linkedin_repurpose_content` (desglose en 4 posts semanales).
+- [x] **Prospección por Mensajería Directa**: `linkedin_dm_sequence` (secuencia en 4 fases con invitación $\le$ 200 caracteres y follow-ups espaciados).
+- [x] **Distribución Oficial y Auto-Release CI/CD**: Publicación oficial en [GitHub Releases](https://github.com/solari21/mcp-linkedin/releases) con binarios precompilados Wheel (`.whl`) y tarball (`.tar.gz`), workflow automatizado en cada push a `main` y sincronización transversal continua con el tablero [Projects V2 #2 (Roadmap)](https://github.com/users/solari21/projects/2).
 
 ### 🛡️ Lecciones de Ingeniería y Selectores DOM en 2026
 1. **Inputs Fantasma en `/login`**: LinkedIn inyecta campos ocultos en el DOM para autocompletado y WebAuthn con dimensiones 0 (`visible: false`). Se requiere forzar el pseudoselector `:visible` (`input[type="email"]:visible`, `input[type="password"]:visible`) para evitar `TimeoutError` en Playwright.
@@ -286,18 +302,32 @@ Estado actual del proyecto y próximas funcionalidades planificadas (disponible 
 5. **Normalización Estricta de Dominio de Cookies (`.linkedin.com`)**: Restringir el dominio de `li_at` a `.www.linkedin.com` provocaba que Chromium omitiera la cookie en peticiones al dominio raíz (`linkedin.com/feed/`) y APIs internas, desencadenando redirecciones HTTP 302 hacia `/login` y bloqueos de tasa HTTP 429. Se normalizan todos los dominios canónicamente a `.linkedin.com`.
 6. **Erradicación Radical del Bucle de Popups (Zero Invasive Windows)**: Se eliminó el lanzamiento automático de `trigger_interactive_session_renewal` en `ensure_authenticated()`. Si una sesión no está disponible, se emite una excepción limpia en lugar de invocar tareas en segundo plano que levanten ventanas físicas repetitivas.
 7. **Persistencia Garantizada a 1 Año y Captura Pasiva CDP**: Captura en caliente de la cookie `li_at` desde la sesión activa de Brave (puerto 9222) mediante WebSocket directo (`Storage.getCookies` / `Network.getCookies`), con extensión de caducidad forzada a 365 días y respaldo atómico inmune a sobreescrituras vacías (`linkedin_storage_state.json.bak`).
-8. **Prohibición de Procesos Headless Concurrentes y Revocación de `li_at`**: Al ejecutar un script en un subproceso de Playwright headless (`browser.launch()`) con cookies compartidas mientras el navegador regular (Brave) mantiene la sesión de LinkedIn abierta, el backend de LinkedIn detecta una discrepancia en huella/TLS/concurrencia de la misma cuenta. Como medida de seguridad, invalida de inmediato el token de sesión `li_at`, redirigiendo la pestaña del usuario a «¡Hola de nuevo!» para exigir la contraseña. La solución obligatoria es no lanzar navegadores secundarios si Brave está activo: toda interacción (edición, publicación, lectura) debe realizarse despachando llamadas CDP vía WebSocket directamente a la pestaña existente de Brave.
+8. **Prohibición de Procesos Headless Concurrentes y Revocación de `li_at`**: Al ejecutar un script en un subproceso de Playwright headless (`browser.launch()`) con cookies compartidas mientras el navegador regular (Brave) mantiene la sesión de LinkedIn abierta, el backend de LinkedIn detecta una discrepancia en huella/TLS/concurrencia de la misma cuenta. Como medida de seguridad, invalida de inmediato el token de sesión `li_at`, redirigiendo la pestaña del usuario a «¡Hola de nuevo!» para exigir la contraseña. La solución definitiva implementada en `linkedin_cdp.py` es no lanzar navegadores secundarios si Brave está activo: toda interacción (edición, publicación, lectura) se ejecuta despachando llamadas CDP vía WebSocket directamente a la pestaña existente de Brave (`/devtools/page/<id>`), con cero robo de foco y cero revocaciones de sesión.
 9. **Deduplicación Preventiva y Limpieza Pre-Flight de Posts Huérfanos de Prueba**: Antes de publicar una versión definitiva u oficial, el agente debe verificar las publicaciones recientes del perfil (`linkedin_get_recent_posts`) para identificar y eliminar de forma proactiva (`linkedin_delete_post(confirm=True)`) cualquier prueba preliminar o publicación duplicada, garantizando que el feed permanezca limpio y libre de posts de prueba obsoletos.
 10. **Desambiguación de Botones en Comentarios Tiptap**: En el árbol DOM de LinkedIn, el botón "Comentar" coexiste en dos instancias (el toggle de la barra de acciones inferior y el disparador de envío primario de la caja de comentarios con estilos `hcbgmy hcbhay`). Es mandatorio apuntar al botón primario de envío tras la inyección de saltos de línea con `Shift+Enter` y verificar la existencia efectiva del texto en el DOM antes de dar por completada la tarea.
-
-
+11. **Párrafos Multilínea en Tiptap / ProseMirror (`Input.insertText` vs `Shift+Enter`)**: El editor Tiptap colapsa los saltos simples de línea generados por eventos de teclado sintéticos (`Shift+Enter` o `<br>` sueltos) en un único párrafo continuo al publicarse. Para que el parser de ProseMirror cree bloques `<p>...</p>` independientes con separaciones visibles reales, es obligatorio inyectar bloques multilínea completos mediante `Input.insertText` (o `page.keyboard.insert_text()`).
+12. **Blindaje de Autoría y Anti-Posteo Cruzado**: Queda terminantemente prohibido comentar o interactuar asumiendo URLs de publicaciones extraídas de pestañas abiertas o feeds sin validar el autor. Se implementa validación semántica estricta (`verify_author`, `verify_topic`) para asegurar que las interacciones supervisadas ocurran exclusivamente en las publicaciones legítimas del usuario.
+13. **Inviolabilidad de Navegación y Operación en Segundo Plano**: Prohibición absoluta de secuestrar el foco del usuario mediante `$w.AppActivate`, ventanas emergentes o activación de pestañas visibles. Toda interacción remota en Brave debe operar en background mediante WebSockets CDP de baja latencia sin perturbar el trabajo activo.
+14. **Gobernanza de Identidad en Primera Persona Singular**: Al redactar comunicaciones, publicaciones o comentarios en nombre del creador del proyecto, debe utilizarse estrictamente la primera persona del singular ("mi servidor MCP", "sigo mejorando"), erradicando el uso incorrecto de plurales de modestia ("hicimos", "seguimos").
 
 ### 📋 Próximas Funcionalidades (Backlog)
 - [ ] **Encuestas Interactivas (Polls)**: Creación y monitorización de votos en encuestas de LinkedIn.
 - [ ] **Publicación Programada Nativa**: Programación de posts diferidos en fecha y hora específica.
-- [ ] **Carruseles y Documentos PDF**: Soporte para publicación de presentaciones diapositiva a diapositiva.
+- [ ] **Subida Automática de Carruseles PDF**: Automatización de subida directa de presentaciones PDF generadas al modal de LinkedIn.
 - [ ] **Exportador de Analíticas**: Volcado estructurado de estadísticas de impresiones y reacciones a formato SQLite y CSV.
-- [ ] **Webhooks Locales**: Notificaciones en tiempo real al recibir mensajes directos en la bandeja de entrada.
+
+---
+
+## 🎖️ Créditos y Reconocimientos Open Source
+
+Este proyecto se apoya y rinde tributo a las aportaciones técnicas y metodológicas de la comunidad open-source:
+
+* **[Jesús Moronta](https://github.com/solari21)**: Arquitectura global del ecosistema FastMCP, integración de ingeniería, automatización pasiva en Brave CDP sin robo de foco, inyección multilínea Tiptap, suite de 32 herramientas y desarrollo del proyecto.
+* **[Jake Schincariol](https://github.com/Jakeschincariol)** ([opusjake.ai](https://opusjake.ai)): Creador del repositorio y benchmark **[linkedin-agent-skill](https://github.com/Jakeschincariol/linkedin-agent-skill)**, del cual se han adaptado e integrado los motores de heurística anti-detección de IA (`humanize` y `detect`), el catálogo de 21 fórmulas de ganchos (`hooks.json`), la rúbrica de 12 criterios y 100 puntos de perfil (`rubric.json`), las directrices de carruseles PDF verticales en ratio 4:5 y las reglas de triaje para bandeja de entrada y respuestas a publicaciones.
+* **[@Daniel Sticker (stickerdaniel)](https://github.com/stickerdaniel/linkedin-mcp-server)**: Por los conceptos preliminares de mensajería e integración inicial de MCP con LinkedIn.
+* **[@Elias Biondo (eliasbiondo)](https://github.com/eliasbiondo/linkedin-mcp-server)**: Por las ideas fundacionales sobre extracción modular de datos de perfiles.
+* **[FastMCP](https://github.com/jlowin/fastmcp)**: Por proveer el framework Python más ergonómico y rápido para construir servidores MCP.
+* **[Playwright](https://playwright.dev/)**: Por ofrecer el motor de automatización web más robusto y moderno del ecosistema.
 
 ---
 

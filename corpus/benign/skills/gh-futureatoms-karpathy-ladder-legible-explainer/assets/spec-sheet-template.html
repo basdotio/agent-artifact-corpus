@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>HTTP caching: overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #fbfbf9;
+    --ink: #1b1d1f;
+    --ink-2: #3a3e43;
+    --muted: #6b7077;
+    --hair: #cfd2d6;
+    --tint: #f1f2f3;
+    --zebra: #f6f7f8;
+    --blue: #1f5fbf;
+    --blue-tint: #e7eef9;
+    --blue-mid: #a9c1e6;
+    --red: #c4302b;
+    --red-tint: #fbeceb;
+    --sans: "IBM Plex Sans Condensed", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --gap: 22px;
+  }
+  @media screen and (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16181b; --ink: #e4e6e9; --ink-2: #c3c7cc; --muted: #969ba3; --hair: #3a3e44;
+      --tint: #22252a; --zebra: #1c1f23; --blue: #7aa7ec; --blue-tint: #1d2a3d; --blue-mid: #3f5f8f;
+      --red: #f07a73; --red-tint: #3a2120;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.45 var(--sans); }
+  h1, h2, h3, p { margin: 0; text-wrap: normal; }
+  p { text-align: justify; hyphens: auto; }
+  code, .mono { font-family: var(--mono); hyphens: none; }
+  .muted { color: var(--muted); }
+  .d { display: block; font-size: 12px; color: var(--muted); }
+  .blue { color: var(--blue); }
+  .red { color: var(--red); }
+
+  /* COMPONENT: drawing frame with zone margins (1-8 across, A-D down) */
+  .sheet { padding: 16px; }
+  .frame { display: grid; grid-template-columns: 20px minmax(0, 1fr) 20px; grid-template-rows: 20px auto 20px; border: 1px solid var(--ink); }
+  .zones { display: grid; font: 11px/1 var(--mono); color: var(--ink-2); }
+  .zones span { display: grid; place-items: center; position: relative; }
+  .zones-top, .zones-bottom { grid-column: 2; grid-template-columns: repeat(8, 1fr); }
+  .zones-top { grid-row: 1; }
+  .zones-bottom { grid-row: 3; }
+  .zones-left, .zones-right { grid-row: 2; grid-template-rows: repeat(4, 1fr); }
+  .zones-left { grid-column: 1; }
+  .zones-right { grid-column: 3; }
+  .zones-top span + span::before, .zones-bottom span + span::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: var(--ink); }
+  .zones-left span + span::before, .zones-right span + span::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--ink); }
+  .content { grid-column: 2; grid-row: 2; border: 1px solid var(--ink); padding: var(--gap); min-width: 0; }
+  /* .frame.plain: no zone margins, for a working diagram that needs every pixel of width */
+  .frame.plain { grid-template-columns: 0 minmax(0, 1fr) 0; grid-template-rows: 0 auto 0; border: 0; }
+  .frame.plain .zones { display: none; }
+  .frame.plain .content { border: 0; padding: 0; }
+
+  /* Panel grid: 12 columns. Give each panel a span-N class; each row adds up to 12. */
+  .panels { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gap); align-items: stretch; }
+  .span-3 { grid-column: span 3; } .span-4 { grid-column: span 4; } .span-5 { grid-column: span 5; }
+  .span-6 { grid-column: span 6; } .span-7 { grid-column: span 7; } .span-8 { grid-column: span 8; }
+  .span-9 { grid-column: span 9; } .span-12 { grid-column: span 12; }
+  .stack { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+  .stack > .panel { flex: 1; }
+
+  /* COMPONENT: panel with letter chip, title and meta label */
+  .panel { border: 1.5px solid var(--ink); background: var(--paper); display: flex; flex-direction: column; min-width: 0; }
+  .panel-head { display: flex; flex-wrap: wrap; align-items: stretch; border-bottom: 1px solid var(--ink); min-height: 32px; }
+  .panel-id { flex: 0 0 32px; display: grid; place-items: center; background: var(--ink); color: var(--paper); font: 600 15px/1 var(--sans); }
+  .panel-title { flex: 1 1 auto; min-width: 0; padding: 6px 12px; font: 600 16px/1.25 var(--sans); align-self: center; }
+  .panel-meta { flex: 0 1 auto; margin-left: auto; padding: 6px 12px; align-self: center; font: 10.5px/1.3 var(--mono); color: var(--muted); text-align: right; }
+  .panel-body { padding: 16px 18px; flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .panel-note { padding: 10px 18px 12px; font-size: 12.5px; color: var(--muted); }
+  .panel-note p + p { margin-top: 4px; }
+  .sub { font: 500 13.5px/1.3 var(--sans); color: var(--ink); }
+  .caption { font: 10.5px/1.3 var(--mono); color: var(--muted); }
+  hr.hair { border: 0; height: 1px; background: var(--hair); margin: 2px 0; width: 100%; flex: none; }
+  hr.hair.flush { margin: 0; }
+
+  /* COMPONENT: structure tree (root box, branch boxes, item lists) */
+  .tree { display: flex; flex-direction: column; align-items: center; }
+  .tree-root { border: 1.5px solid var(--ink-2); background: var(--blue-tint); padding: 8px 28px; text-align: center; }
+  .tree-root b { display: block; font: 600 17px/1.2 var(--sans); }
+  .tree-root span { font-size: 12.5px; color: var(--ink-2); }
+  .tree-stem { width: 1px; height: 14px; background: var(--ink); }
+  .tree-branches { display: grid; grid-template-columns: repeat(var(--n, 2), minmax(0, 1fr)); gap: 18px; width: 100%; position: relative; padding-top: 14px; }
+  .tree-branches::before { content: ""; position: absolute; top: 0; height: 1px; background: var(--ink); left: calc(100% / var(--n, 2) / 2); right: calc(100% / var(--n, 2) / 2); }
+  .tree-branch { position: relative; min-width: 0; }
+  .tree-branch::before { content: ""; position: absolute; top: -14px; left: 50%; width: 1px; height: 14px; background: var(--ink); }
+  .tree-node { border: 1.5px solid var(--ink-2); padding: 6px 10px; text-align: center; font: 600 14px/1.25 var(--sans); }
+  .tree-list { list-style: none; margin: 10px 0 0 14px; padding: 0 0 0 16px; position: relative; }
+  .tree-list::before { content: ""; position: absolute; left: 0; top: -10px; bottom: 9px; width: 1px; background: var(--ink-2); }
+  .tree-list li { position: relative; padding: 3px 0; font-size: 13.5px; }
+  .tree-list li::before { content: ""; position: absolute; left: -16px; top: 12px; width: 11px; height: 1px; background: var(--ink-2); }
+  .tree-list small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.3; }
+  .tree-list .k { font: 10.5px var(--mono); color: var(--muted); margin-right: 6px; white-space: nowrap; }
+
+  /* COMPONENT: callouts and severity chips (WARNING = injury or data loss, CAUTION = damage or outage) */
+  .callout { background: var(--tint); border: 1px solid var(--hair); padding: 8px 12px; font-size: 13px; }
+  .callout small { display: block; color: var(--muted); font-size: 11.5px; }
+  .callout.warning { background: var(--red-tint); border-color: var(--red); }
+  .callout.caution { background: var(--tint); border-color: var(--ink-2); }
+  .sev { display: inline-block; font: 600 10.5px/1 var(--mono); letter-spacing: .04em; padding: 3px 6px; border: 1px solid currentColor; margin-right: 6px; vertical-align: 1px; }
+  .sev.warning { color: var(--red); background: var(--red-tint); }
+  .sev.caution { color: var(--ink); background: var(--tint); }
+  .sev.note { color: var(--blue); background: var(--blue-tint); }
+
+  /* COMPONENT: annotated line. Each .seg holds the annotated text (.t) and its .ann-label.
+     When the line wraps or labels collide, the script below switches it to a numbered legend. */
+  .ann-block { display: flex; flex-direction: column; gap: 6px; }
+  .ann-wrap { display: inline-flex; flex-direction: column; max-width: 100%; align-self: flex-start; }
+  .ann-line { font: 15px/1.2 var(--mono); padding-bottom: 46px; position: relative; overflow-wrap: anywhere; }
+  .seg { position: relative; display: inline-block; white-space: nowrap; }
+  .seg > .t { position: relative; display: inline-block; }
+  .seg > .t::after { content: ""; position: absolute; left: 1px; right: 1px; top: calc(100% + 3px); height: 5px; border: 1px solid var(--blue); border-top: 0; }
+  .seg.bad > .t::after { border-color: var(--red); }
+  .ann-label { position: absolute; top: calc(100% + 11px); left: 50%; transform: translateX(-50%); font: 11.5px/1.2 var(--sans); color: var(--blue); white-space: nowrap; }
+  .seg.bad .ann-label { color: var(--red); }
+  .ann-label.lane-2 { top: calc(100% + 27px); }
+  .ann-label.start { left: 0; transform: none; }
+  .ann-label.end { left: auto; right: 0; transform: none; }
+  .ann-line.legend { padding-bottom: 8px; line-height: 2.2; white-space: normal; }
+  .ann-line.legend .t { line-height: 1.2; }
+  .ann-line.legend .ann-label { display: none; }
+  .ann-line.legend .seg { white-space: normal; }
+  .ann-line.legend .seg[data-n]::before { content: attr(data-n); font: 600 9.5px/1 var(--sans); color: var(--blue); vertical-align: super; margin-right: 1px; }
+  .ann-line.legend .seg.bad[data-n]::before { color: var(--red); }
+  ol.ann-legend { list-style: none; margin: 0; padding: 0; counter-reset: ann; display: flex; flex-direction: column; gap: 2px; font: 12px/1.35 var(--sans); color: var(--blue); }
+  ol.ann-legend li { counter-increment: ann; display: grid; grid-template-columns: 18px 1fr; }
+  ol.ann-legend li::before { content: counter(ann); font: 600 10px/1.6 var(--sans); }
+  ol.ann-legend li.bad { color: var(--red); }
+  .ann-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; font: 10.5px var(--mono); color: var(--muted); }
+
+  /* COMPONENT: dimension line above an annotated line ("13 words, limit 20") */
+  .measure { display: flex; align-items: center; gap: 8px; height: 11px; margin-bottom: 8px; font: 10.5px/1 var(--mono); color: var(--muted);
+    border-left: 1px solid var(--muted); border-right: 1px solid var(--muted); }
+  .measure::before, .measure::after { content: ""; flex: 1; height: 1px; background: var(--muted); }
+
+  /* COMPONENT: tables (status table, dictionary table). Add .stack-sm and data-label on each td
+     to turn rows into stacked cards on phones. */
+  .table-wrap { overflow-x: auto; margin: 0 -18px; }
+  table.sheet-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .sheet-table th { text-align: left; font: 400 10.5px/1.3 var(--mono); color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--hair); }
+  .sheet-table td { padding: 7px 10px; vertical-align: top; }
+  .sheet-table th:first-child, .sheet-table td:first-child { padding-left: 18px; }
+  .sheet-table th:last-child, .sheet-table td:last-child { padding-right: 18px; }
+  .sheet-table tbody tr:nth-child(odd) { background: var(--zebra); }
+  .sheet-table code { font: 12.5px var(--mono); white-space: nowrap; }
+  .status { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12.5px; }
+  .status svg { width: 15px; height: 15px; fill: currentColor; flex: none; }
+  .status.ok { color: var(--blue); }
+  .status.no { color: var(--red); }
+
+  /* COMPONENT: limit gauge (track, fill, max marker, tick scale) */
+  .gauges { display: flex; flex-direction: column; gap: 14px; }
+  .gauge-head { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; margin-bottom: 5px; }
+  .gauge-head .v { font: 11.5px var(--mono); color: var(--blue); white-space: nowrap; }
+  .gauge-track { position: relative; height: 12px; background: var(--tint); border: 1px solid var(--hair); }
+  .gauge-fill { position: absolute; left: 0; top: -1px; bottom: -1px; width: calc(var(--value) / var(--max) * 100%); background: var(--blue-tint); border: 1px solid var(--blue-mid); }
+  .gauge-fill::after { content: ""; position: absolute; right: -1.5px; top: -4px; bottom: -4px; width: 2px; background: var(--blue); }
+  .gauge.bad .gauge-fill { background: var(--red-tint); border-color: var(--red); }
+  .gauge.bad .gauge-fill::after { background: var(--red); }
+  .gauge-ticks { display: flex; justify-content: space-between; margin-top: 4px; font: 9.5px/1 var(--mono); color: var(--muted); }
+  .gauge-ticks span { width: 0; display: flex; justify-content: center; }
+  .gauge-ticks span:first-child { justify-content: flex-start; }
+  .gauge-ticks span:last-child { justify-content: flex-end; }
+
+  /* COMPONENT: numbered procedure (one instruction in each step) */
+  ol.procedure { list-style: none; margin: 0; padding: 0; counter-reset: step; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+  ol.procedure li { counter-increment: step; display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; }
+  ol.procedure li::before { content: counter(step); font: 500 11px/18px var(--mono); text-align: center; border: 1px solid var(--ink); height: 20px; }
+
+  /* COMPONENT: square-bullet rule list */
+  ul.rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  ul.rules li { position: relative; padding-left: 16px; }
+  ul.rules li::before { content: ""; position: absolute; left: 1px; top: 6px; width: 6px; height: 6px; background: var(--ink); }
+
+  /* COMPONENT: timeline (year, node, caption) */
+  .timeline { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); position: relative; }
+  .timeline::before { content: ""; position: absolute; top: 31px; height: 1px; background: var(--ink); left: calc(100% / var(--n, 4) / 2 - 18px); right: calc(100% / var(--n, 4) / 2 - 18px); }
+  .timeline li { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 0 6px; min-width: 0; }
+  .timeline .year { font: 500 15px/1 var(--sans); height: 22px; }
+  .timeline .node { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--ink); background: var(--paper); position: relative; z-index: 1; margin: 3px 0 9px; }
+  .timeline .what { font-size: 12px; color: var(--ink-2); line-height: 1.35; }
+
+  /* COMPONENT: title block (bottom right of the sheet) */
+  .titleblock { border: 1.5px solid var(--ink); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--ink); }
+  .tb { grid-column: span 2; padding: 6px 10px 8px; background: var(--paper); min-width: 0; }
+  .tb-title, .tb-wide { grid-column: 1 / -1; }
+  .tb-3 { grid-column: span 3; }
+  .tb-1 { grid-column: span 1; }
+  .tb .k { display: block; font: 10px/1.3 var(--mono); color: var(--muted); }
+  .tb .v { display: block; font: 500 14px/1.3 var(--sans); overflow-wrap: anywhere; }
+  .tb-title .v { font: 600 18px/1.25 var(--sans); }
+
+  /* Tablet: two columns, the title block stays at the right */
+  @media screen and (max-width: 1180px) {
+    .panels { grid-auto-flow: row dense; }
+    .span-3, .span-4, .span-5 { grid-column: span 6; }
+    .span-6, .span-7, .span-8, .span-9 { grid-column: span 12; }
+    .panels > .stack:last-child { grid-column: 7 / -1; }
+    .tree-list .k { display: block; white-space: normal; overflow-wrap: anywhere; }
+  }
+  /* Phone: one column */
+  @media screen and (max-width: 760px) {
+    :root { --gap: 14px; }
+    .panels > *, .panels > .stack:last-child { grid-column: 1 / -1; }
+    .sheet { padding: 8px; }
+    .frame { grid-template-columns: 6px minmax(0, 1fr) 6px; grid-template-rows: 6px auto 6px; }
+    .zones span { font-size: 0; }
+    .zones span::before { display: none; }
+    .content { padding: 12px; }
+    .panel-body { padding: 14px; }
+    .table-wrap { margin: 0 -14px; }
+    .sheet-table th:first-child, .sheet-table td:first-child { padding-left: 14px; }
+    .sheet-table.stack-sm thead { display: none; }
+    .sheet-table.stack-sm, .sheet-table.stack-sm tbody, .sheet-table.stack-sm tr, .sheet-table.stack-sm td { display: block; width: 100%; }
+    .sheet-table.stack-sm tr { padding: 8px 14px; }
+    .sheet-table.stack-sm td, .sheet-table.stack-sm td:first-child, .sheet-table.stack-sm td:last-child { padding: 2px 0; }
+    .sheet-table.stack-sm td[data-label]::before { content: attr(data-label); display: block; font: 10px/1.4 var(--mono); color: var(--muted); }
+    .sheet-table.stack-sm code { white-space: normal; overflow-wrap: anywhere; }
+    .ann-line { font-size: 13px; }
+    .timeline { grid-template-columns: 1fr; gap: 10px; }
+    .timeline::before { left: 5.5px; right: auto; top: 6px; bottom: 6px; width: 1px; height: auto; }
+    .timeline li { display: grid; grid-template-columns: 12px 52px 1fr; align-items: start; gap: 10px; text-align: left; padding: 0; }
+    .timeline .node { grid-column: 1; grid-row: 1; margin: 2px 0 0; }
+    .timeline .year { grid-column: 2; grid-row: 1; height: auto; }
+    .timeline .what { grid-column: 3; grid-row: 1; }
+  }
+  @media screen and (max-width: 680px) {
+    p { text-align: left; hyphens: manual; }
+  }
+  /* Print: one landscape sheet with the line work kept. A4 by default (fits a desk printer, small
+     type); <html data-paper="a3"> gives a one-page A3 sheet with readable type for pinning up. */
+  @page { size: A4 landscape; margin: 20mm; }
+  @page a3 { size: A3 landscape; margin: 20mm; }
+  @media print {
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { background: #fff; }
+    html[data-paper="a3"] body { page: a3; }
+    .sheet { padding: 0; zoom: var(--print-zoom, 0.56); }
+    html[data-paper="a3"] .sheet { zoom: var(--print-zoom, 0.83); }
+    .panel, .titleblock, table { break-inside: avoid; }
+  }
+  /* Print layout, set by the script before printing so that it can measure the sheet:
+     tighter spacing and no text under 13 px before the zoom that fits the page. */
+  html.printing { --gap: 14px; }
+  html.printing .panel-body { padding: 12px 14px; gap: 10px; }
+  html.printing .panel-meta, html.printing .caption, html.printing .zones, html.printing .gauge-ticks,
+  html.printing .tb .k, html.printing .sheet-table th, html.printing .ann-meta, html.printing .measure,
+  html.printing .d, html.printing .tree-list small, html.printing .tree-list .k, html.printing .callout small,
+  html.printing .sev, html.printing .ann-label, html.printing ol.ann-legend, html.printing .timeline .what,
+  html.printing .status { font-size: 13px; }
+</style>
+</head>
+<body>
+<!-- Icon sprite: Material Symbols "check" and "close" paths. Use <svg><use href="#i-ok"/></svg>. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-ok" viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+  <symbol id="i-no" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+</svg>
+
+<div class="sheet">
+<div class="frame">
+  <div class="zones zones-top" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>
+  <div class="zones zones-left" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div>
+  <div class="zones zones-right" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div>
+
+  <main class="content">
+  <div class="panels">
+
+    <!-- Panel A: structure tree + callout -->
+    <section class="panel span-4" aria-labelledby="pa">
+      <div class="panel-head"><div class="panel-id">A</div><h2 class="panel-title" id="pa">How a cache decides</h2><div class="panel-meta">RFC 9111 structure</div></div>
+      <div class="panel-body">
+        <div class="tree">
+          <div class="tree-root"><b>Stored response</b><span>A copy that a browser or CDN keeps</span></div>
+          <div class="tree-stem"></div>
+          <div class="tree-branches" style="--n:2">
+            <div class="tree-branch">
+              <div class="tree-node">Freshness</div>
+              <ul class="tree-list">
+                <li><span class="k">max-age</span>Lifetime in seconds</li>
+                <li><span class="k">s-maxage</span>Lifetime for shared caches</li>
+                <li><span class="k">Expires</span>Old form, a date<small>max-age wins when both are sent</small></li>
+                <li><span class="k">heuristic</span>The cache guesses the lifetime<small>Only when the origin sends no lifetime</small></li>
+              </ul>
+            </div>
+            <div class="tree-branch">
+              <div class="tree-node">Validation</div>
+              <ul class="tree-list">
+                <li><span class="k">ETag</span>Version tag of the body</li>
+                <li><span class="k">If-None-Match</span>The cache sends the tag back</li>
+                <li><span class="k">Last-Modified</span>Date of the last change</li>
+                <li><span class="k">304</span>The origin says "no change"<small>No body, so the answer is small</small></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="callout">A fresh copy goes to the client at once.<small>A stale copy goes back to the origin for a check first.</small></div>
+      </div>
+    </section>
+
+    <!-- Panel B: annotated lines with a dimension line -->
+    <section class="panel span-5" aria-labelledby="pb">
+      <div class="panel-head"><div class="panel-id">B</div><h2 class="panel-title" id="pb">Anatomy of Cache-Control</h2><div class="panel-meta">annotated examples</div></div>
+      <div class="panel-body">
+        <div class="ann-block">
+          <div class="sub">1 Static file with a hash in its name</div>
+          <div class="ann-wrap">
+            <div class="measure">1 header, 3 directives</div>
+            <div class="ann-line"><code>Cache-Control: </code><span class="seg"><code class="t">public</code><span class="ann-label start">Shared caches can keep it</span></span><code class="sep">, </code><span class="seg"><code class="t">max-age=31536000</code><span class="ann-label lane-2">Fresh for 1 year (seconds)</span></span><code class="sep">, </code><span class="seg"><code class="t">immutable</code><span class="ann-label end">No check on reload (RFC 8246)</span></span></div>
+          </div>
+        </div>
+        <hr class="hair">
+        <div class="ann-block">
+          <div class="sub">2 HTML page that can change at any time</div>
+          <div class="ann-line"><code>Cache-Control: </code><span class="seg"><code class="t">no-cache</code><span class="ann-label start">Keep it, but ask the origin before each use</span></span><code class="sep">   </code><code>ETag: </code><span class="seg"><code class="t">"v42"</code><span class="ann-label lane-2">The tag that the cache sends back</span></span></div>
+        </div>
+        <hr class="hair">
+        <div class="ann-block">
+          <div class="sub">3 Header that does not do what people expect</div>
+          <div class="ann-line"><span class="seg bad"><code class="t">Pragma: no-cache</code><span class="ann-label start">Request header from HTTP/1.0. In a response, it has no defined effect.</span></span></div>
+        </div>
+        <div class="ann-meta"><span>Directive names are not case sensitive</span><span>Put a comma between directives</span></div>
+      </div>
+    </section>
+
+    <!-- Panel C: status table + rule list -->
+    <section class="panel span-3" aria-labelledby="pc">
+      <div class="panel-head"><div class="panel-id">C</div><h2 class="panel-title" id="pc">Directive effects</h2><div class="panel-meta">section 5.2</div></div>
+      <div class="panel-body">
+        <div class="table-wrap">
+          <table class="sheet-table">
+            <thead><tr><th>Directive</th><th>Stored</th></tr></thead>
+            <tbody>
+              <tr><td><code>no-store</code><span class="d">No cache keeps any part</span></td><td><span class="status no"><svg><use href="#i-no"/></svg>No</span></td></tr>
+              <tr><td><code>no-cache</code><span class="d">Ask the origin before each use</span></td><td><span class="status ok"><svg><use href="#i-ok"/></svg>Yes</span></td></tr>
+              <tr><td><code>private</code><span class="d">Browser only, no CDN</span></td><td><span class="status ok"><svg><use href="#i-ok"/></svg>Yes</span></td></tr>
+              <tr><td><code>public</code><span class="d">CDN too, also with Authorization</span></td><td><span class="status ok"><svg><use href="#i-ok"/></svg>Yes</span></td></tr>
+              <tr><td><code>max-age=0</code><span class="d">Stale at once</span></td><td><span class="status ok"><svg><use href="#i-ok"/></svg>Yes</span></td></tr>
+              <tr><td><code>must-revalidate</code><span class="d">No stale use after expiry</span></td><td><span class="status ok"><svg><use href="#i-ok"/></svg>Yes</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <hr class="hair">
+        <ul class="rules">
+          <li>Use <code>no-store</code> for private data.</li>
+          <li>Send an ETag with each HTML response.</li>
+          <li>Give a changed static file a new URL.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Panel D: dictionary-style table, stacked on phones, + caution callout -->
+    <section class="panel span-5" aria-labelledby="pd">
+      <div class="panel-head"><div class="panel-id">D</div><h2 class="panel-title" id="pd">Header choices</h2><div class="panel-meta">by content type</div></div>
+      <div class="panel-body">
+        <div class="table-wrap">
+          <table class="sheet-table stack-sm">
+            <thead><tr><th>Content</th><th>Status</th><th>Send</th><th>Do not send</th></tr></thead>
+            <tbody>
+              <tr><td data-label="Content">Bank statement</td><td data-label="Status"><span class="status ok"><svg><use href="#i-ok"/></svg>Use</span></td><td data-label="Send"><code>no-store</code></td><td data-label="Do not send" class="red"><code>no-cache</code>: the copy stays on disk</td></tr>
+              <tr><td data-label="Content">File with hash in name</td><td data-label="Status"><span class="status ok"><svg><use href="#i-ok"/></svg>Use</span></td><td data-label="Send"><code>max-age=31536000</code>, <code>immutable</code></td><td data-label="Do not send" class="red">A short max-age: many checks for no gain</td></tr>
+              <tr><td data-label="Content">HTML page</td><td data-label="Status"><span class="status ok"><svg><use href="#i-ok"/></svg>Use</span></td><td data-label="Send"><code>no-cache</code> and an <code>ETag</code></td><td data-label="Do not send" class="red"><code>max-age=86400</code>: users see an old page</td></tr>
+              <tr><td data-label="Content">API data for one user</td><td data-label="Status"><span class="status ok"><svg><use href="#i-ok"/></svg>Use</span></td><td data-label="Send"><code>private</code>, <code>max-age=60</code></td><td data-label="Do not send" class="red"><code>public</code>: a CDN can give it to other users</td></tr>
+              <tr><td data-label="Content">Error page (404)</td><td data-label="Status"><span class="status ok"><svg><use href="#i-ok"/></svg>Use</span></td><td data-label="Send"><code>max-age=60</code></td><td data-label="Do not send" class="red"><code>max-age=31536000</code>: the error stays after the fix</td></tr>
+              <tr><td data-label="Content">Any response</td><td data-label="Status"><span class="status no"><svg><use href="#i-no"/></svg>Do not use</span></td><td data-label="Send" class="muted">No header</td><td data-label="Do not send" class="red"><code>Pragma: no-cache</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout caution"><span class="sev caution">Caution</span>Do not send <code>public</code> with data for one user. A shared cache can give that data to a different user.</div>
+      </div>
+      <hr class="hair flush">
+      <div class="panel-note"><p>Find the row for your content. Send the header in the Send column. When the content changes, give it a new URL or a new ETag. Each cache then gets the new version.</p></div>
+    </section>
+
+    <!-- Panel E: limit gauges + procedure -->
+    <section class="panel span-4" aria-labelledby="pe">
+      <div class="panel-head"><div class="panel-id">E</div><h2 class="panel-title" id="pe">Time left before stale</h2><div class="panel-meta">worked example, seconds</div></div>
+      <div class="panel-body">
+        <div class="gauges">
+          <div class="gauge" style="--value:600; --max:900">
+            <div class="gauge-head"><span>Freshness lifetime (max-age)</span><span class="v">600 s</span></div>
+            <div class="gauge-track"><div class="gauge-fill"></div></div>
+            <div class="gauge-ticks"><span>0</span><span>150</span><span>300</span><span>450</span><span>600</span><span>750</span><span>900</span></div>
+          </div>
+          <div class="gauge" style="--value:480; --max:900">
+            <div class="gauge-head"><span>Time in caches (Age header)</span><span class="v">480 s</span></div>
+            <div class="gauge-track"><div class="gauge-fill"></div></div>
+            <div class="gauge-ticks"><span>0</span><span>150</span><span>300</span><span>450</span><span>600</span><span>750</span><span>900</span></div>
+          </div>
+          <div class="gauge" style="--value:120; --max:900">
+            <div class="gauge-head"><span>Time left (600 &minus; 480)</span><span class="v">120 s</span></div>
+            <div class="gauge-track"><div class="gauge-fill"></div></div>
+            <div class="gauge-ticks"><span>0</span><span>150</span><span>300</span><span>450</span><span>600</span><span>750</span><span>900</span></div>
+          </div>
+        </div>
+        <hr class="hair">
+        <div class="sub">To find the time left for a copy:</div>
+        <ol class="procedure">
+          <li>Read max-age in the Cache-Control header.</li>
+          <li>Read the Age header. If there is no Age header, use 0.</li>
+          <li>Subtract Age from max-age. A result of 0 or less means that the copy is stale.</li>
+        </ol>
+        <div class="callout"><span class="sev note">Note</span>The Age header counts the seconds since the origin made or checked the response. Each cache on the path adds the time that it kept the copy.</div>
+      </div>
+    </section>
+
+    <!-- Right column: timeline panel stacked on the title block -->
+    <div class="stack span-3">
+      <section class="panel" aria-labelledby="pf">
+        <div class="panel-head"><div class="panel-id">F</div><h2 class="panel-title" id="pf">History</h2><div class="panel-meta">RFC 1945 to RFC 9111</div></div>
+        <div class="panel-body">
+          <ol class="timeline" style="--n:4">
+            <li><span class="year">1996</span><span class="node"></span><span class="what">HTTP/1.0 has Expires and Pragma</span></li>
+            <li><span class="year">1997</span><span class="node"></span><span class="what">HTTP/1.1 adds Cache-Control and ETag</span></li>
+            <li><span class="year">2014</span><span class="node"></span><span class="what">Caching gets its own RFC (7234)</span></li>
+            <li><span class="year">2022</span><span class="node"></span><span class="what">RFC 9111, the current standard</span></li>
+          </ol>
+        </div>
+        <div class="panel-note"><p>The first HTTP/1.1 text is RFC 2068.</p></div>
+      </section>
+
+      <!-- COMPONENT: title block. The h1 text is also the page <title>. -->
+      <div class="titleblock">
+        <div class="tb tb-title"><span class="k">Title</span><h1 class="v">HTTP caching: overview</h1></div>
+        <div class="tb"><span class="k">Specification</span><span class="v">RFC 9111</span></div>
+        <div class="tb"><span class="k">Owner</span><span class="v">IETF HTTP WG</span></div>
+        <div class="tb"><span class="k">Applies to</span><span class="v">Browsers, CDNs, proxies</span></div>
+        <div class="tb"><span class="k">Facts as of</span><span class="v">2026-10-03</span></div>
+        <div class="tb"><span class="k">Revision</span><span class="v">A</span></div>
+        <div class="tb"><span class="k">Sheet</span><span class="v">1 of 1</span></div>
+        <div class="tb tb-wide"><span class="k">Source</span><span class="v">rfc-editor.org/rfc/rfc9111</span></div>
+      </div>
+    </div>
+
+  </div>
+  </main>
+
+  <div class="zones zones-bottom" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>
+</div>
+</div>
+
+<script>
+/* Annotated lines: when the segments wrap onto two lines, a label leaves the panel, or labels
+   collide, show the line with numbered brackets and list the labels below it. Keep this script. */
+(function () {
+  function overlap(a, b) { return a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1; }
+  function needsLegend(line) {
+    var ts = line.querySelectorAll('.seg > .t');
+    if (!ts.length) return false;
+    var top = ts[0].getBoundingClientRect().top;
+    for (var i = 1; i < ts.length; i++) if (Math.abs(ts[i].getBoundingClientRect().top - top) > 2) return true;
+    if (line.scrollWidth > line.clientWidth + 1) return true;
+    var box = (line.closest('.panel-body') || line.parentElement).getBoundingClientRect();
+    var labels = line.querySelectorAll('.ann-label'), rects = [];
+    for (var j = 0; j < labels.length; j++) {
+      var r = labels[j].getBoundingClientRect();
+      if (r.left < box.left - 1 || r.right > box.right + 1) return true;
+      for (var k = 0; k < rects.length; k++) if (overlap(r, rects[k])) return true;
+      rects.push(r);
+    }
+    var texts = line.querySelectorAll('.t');
+    for (var m = 0; m < rects.length; m++) for (var n = 0; n < texts.length; n++) if (overlap(rects[m], texts[n].getBoundingClientRect())) return true;
+    return false;
+  }
+  function layout() {
+    document.querySelectorAll('.ann-line').forEach(function (line) {
+      line.classList.remove('legend');
+      var next = line.nextElementSibling;
+      if (next && next.classList.contains('ann-legend')) next.remove();
+      line.querySelectorAll('.seg[data-n]').forEach(function (s) { s.removeAttribute('data-n'); });
+      if (!needsLegend(line)) return;
+      line.classList.add('legend');
+      var ol = document.createElement('ol'), n = 0;
+      ol.className = 'ann-legend';
+      line.querySelectorAll('.seg').forEach(function (seg) {
+        var label = seg.querySelector('.ann-label');
+        if (!label) return;
+        seg.setAttribute('data-n', ++n);
+        var li = document.createElement('li');
+        li.textContent = label.textContent;
+        if (seg.classList.contains('bad')) li.className = 'bad';
+        ol.appendChild(li);
+      });
+      line.after(ol);
+    });
+  }
+  /* Print: try a few layout widths and keep the one whose zoom fills the page best, so the
+     printed type is as large as the page allows (A4 or A3 landscape inside 20 mm margins). */
+  function fitPrint() {
+    var root = document.documentElement, sheet = document.querySelector('.sheet');
+    root.classList.add('printing');
+    if (!sheet) { layout(); return; }
+    var a3 = root.getAttribute('data-paper') === 'a3';
+    var pageW = a3 ? 1436 : 971, pageH = a3 ? 971 : 642, best = null;
+    root.style.setProperty('--print-zoom', '1');  /* measure the sheet unzoomed */
+    [1150, 1250, 1350, 1450, 1550, 1650, 1750].forEach(function (w) {
+      sheet.style.width = w + 'px';
+      layout();
+      var z = Math.min(pageW / w, pageH / sheet.getBoundingClientRect().height) * 0.98;
+      if (!best || z > best.z) best = { w: w, z: z };
+    });
+    sheet.style.width = best.w + 'px';
+    root.style.setProperty('--print-zoom', Math.min(best.z, 1).toFixed(3));
+    layout();
+  }
+  function endPrint() {
+    var sheet = document.querySelector('.sheet');
+    document.documentElement.classList.remove('printing');
+    document.documentElement.style.removeProperty('--print-zoom');
+    if (sheet) sheet.style.width = '';
+    layout();
+  }
+  var timer;
+  window.addEventListener('resize', function () { if (document.documentElement.classList.contains('printing')) return; clearTimeout(timer); timer = setTimeout(layout, 60); });
+  window.addEventListener('beforeprint', fitPrint);
+  window.addEventListener('afterprint', endPrint);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout); else window.addEventListener('load', layout);
+  layout();
+})();
+</script>
+</body>
+</html>

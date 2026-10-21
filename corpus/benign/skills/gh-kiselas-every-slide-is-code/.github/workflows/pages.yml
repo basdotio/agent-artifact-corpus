@@ -1,0 +1,39 @@
+# Publishes the demo deck to GitHub Pages: the page runs the whole deck live in the browser.
+# index.html is examples/demo/deck.html with social preview tags added at build time;
+# template.html is the starter deck.
+name: pages
+on:
+  push:
+    branches: [main]
+    paths: ['examples/demo/**', 'template/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      SITE_URL: https://kiselas.github.io/every-slide-is-code/
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build site
+        run: |
+          mkdir -p _site
+          cp examples/demo/preview.jpg _site/preview.jpg
+          cp template/deck.html _site/template.html
+          desc="A seed pitch built entirely in code: animated charts, diagrams and transitions in one HTML file. Made with deck-kit, an Agent Skill for Claude Code, Codex and ChatGPT."
+          meta="<meta name=\"description\" content=\"$desc\">\n<meta property=\"og:title\" content=\"deck-kit · every slide is code\">\n<meta property=\"og:description\" content=\"$desc\">\n<meta property=\"og:image\" content=\"${SITE_URL}preview.jpg\">\n<meta property=\"og:url\" content=\"$SITE_URL\">\n<meta name=\"twitter:card\" content=\"summary_large_image\">"
+          sed "s|</title>|</title>\n$meta|" examples/demo/deck.html > _site/index.html
+          grep -q 'og:image' _site/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+      - id: deployment
+        uses: actions/deploy-pages@v4

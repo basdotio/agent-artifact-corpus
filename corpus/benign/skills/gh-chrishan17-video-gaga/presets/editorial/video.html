@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The first message — "LO" (video-gaga · Editorial)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,800;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans+Condensed:wght@500;600&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   EDITORIAL — a magazine page that reads itself aloud.
+   White stock, near-black ink, ONE ultramarine, the blue of a riso print. A
+   newspaper serif set like type (masked line reveals), condensed sans
+   datelines in sentence case, rules that draw on, a drop cap, a procedurally
+   printed blue duotone halftone, a full-bleed blue page as the one colour
+   event, a pull quote with hanging punctuation revealed word by word on the
+   voice, footnote marks.
+   Rhythm: documentary score at 84 BPM. The masthead builds over a bar of music,
+   the camera pans along a teletype tape, and the score holds one breath before
+   the conclusion.
+   ============================================================================= */
+const { ease, clamp, lerp, fx, draw, color } = CV;
+
+// === THEME (swap for brand) ==================================================
+const T = {
+  paper: '#F8F8F6',
+  paper2: '#E6E8EE',      // tape / blocks
+  ink: '#111114',
+  muted: '#676A73',
+  rule: 'rgba(17,17,20,0.45)',
+  accent: '#2436D9',      // the one ultramarine: the key word, the mark, the blue page
+  serif: '"Newsreader", "Noto Serif SC", Georgia, serif',
+  mono: '"IBM Plex Mono", ui-monospace, monospace',
+  sans: '"IBM Plex Sans Condensed", "Noto Sans SC", sans-serif',
+};
+const F = (w, px, fam = T.serif, style = '') => `${style ? style + ' ' : ''}${w} ${px}px ${fam}`;
+const L = 150, R = 1920 - 150; // page margins
+const set = { ease: ease.enter, dur: 0.75 }; // "set like type": masked rise, long settle
+
+// === KIT: rules and datelines ================================================
+// A hairline rule that draws on left → right.
+function rule(ctx, x0, x1, y, p, w = 2, col = T.ink) {
+  if (p <= 0) return;
+  ctx.fillStyle = col;
+  ctx.fillRect(x0, y - w / 2, (x1 - x0) * ease.inOutCubic(clamp(p)), w);
+}
+
+// Dateline / label: condensed sans in sentence case, set like a caption.
+function label(ctx, txt, x, y, a, col = T.muted, size = 26, align = 'left') {
+  if (a <= 0) return;
+  ctx.save();
+  ctx.font = F(500, size, T.sans);
+  ctx.fillStyle = col;
+  ctx.globalAlpha *= clamp(a);
+  ctx.textAlign = align;
+  ctx.fillText(txt, x, y);
+  ctx.restore();
+}
+
+// === EXAMPLE: halftone map of the coast ======================================
+// --- The duotone halftone "photo": a printed map of the California coast ----
+// Stylised outline (block-normalised), north at the top. Two hosts: UCLA (Los
+// Angeles) and SRI (Menlo Park). The dots are computed once from a seeded
+// noise field and cached; drawing reveals them like a press printing rows.
+const BLOCK = { x: 1050, y: 210, w: 720, h: 690 };
+const COAST = [[0.10, 0], [0.56, 0], [0.56, 0.40], [0.93, 0.83], [0.91, 0.97], [0.63, 0.97], [0.57, 0.88], [0.47, 0.80],
+  [0.36, 0.73], [0.30, 0.66], [0.27, 0.58], [0.20, 0.50], [0.14, 0.43], [0.11, 0.37], [0.12, 0.33], [0.08, 0.29],
+  [0.04, 0.20], [0.0, 0.14], [0.05, 0.06]];
+const UCLA = [0.505, 0.815], SRI = [0.15, 0.405];
+function inside(pt, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+const DOTS = (() => {
+  const out = [], step = 15;
+  for (let y = step / 2; y < BLOCK.h; y += step) for (let x = step / 2; x < BLOCK.w; x += step) {
+    const u = x / BLOCK.w, v = y / BLOCK.h;
+    const land = inside([u, v], COAST);
+    // land: mid-dark with relief from noise; sea: a light, even tint
+    const n = CV.noise2(u * 6, v * 6, 4) * 0.5 + CV.noise2(u * 19, v * 19, 9) * 0.25;
+    const tone = land ? clamp(0.55 + n * 0.55, 0.18, 0.95) : clamp(0.08 + n * 0.06, 0, 0.2);
+    out.push([BLOCK.x + x, BLOCK.y + y, tone * step * 0.52]);
+  }
+  return out;
+})();
+function halftone(ctx, printed) {
+  ctx.fillStyle = color.mix(T.paper, T.accent, 0.16);
+  ctx.fillRect(BLOCK.x, BLOCK.y, BLOCK.w, BLOCK.h);
+  const lim = BLOCK.y + BLOCK.h * printed;
+  ctx.fillStyle = T.ink;
+  ctx.beginPath();
+  for (const [x, y, r] of DOTS) {
+    if (y > lim || r < 0.6) continue;
+    ctx.moveTo(x + r, y);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+  }
+  ctx.fill();
+  // the press roller: a thin red line at the printing edge
+  if (printed > 0 && printed < 1) { ctx.fillStyle = T.accent; ctx.fillRect(BLOCK.x, lim, BLOCK.w, 3); }
+}
+const bp = ([u, v]) => [BLOCK.x + u * BLOCK.w, BLOCK.y + v * BLOCK.h];
+
+// === KIT: ink-wash transition ================================================
+// Ink wash: the next page rises like ink soaking up the sheet, with a soft
+// wavering edge (into and out of the dark breath page).
+function inkWash(ctx, A, B, p) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  ctx.drawImage(A, 0, 0);
+  if (p <= 0) return;
+  const edge = lerp(H * 1.06, -H * 0.06, p), amp = H * 0.025 * Math.sin(Math.PI * p);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += W / 48) ctx.lineTo(x, edge + Math.sin(x / W * 9 + p * 4) * amp + Math.sin(x / W * 23 + 1.3) * amp * 0.35);
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  ctx.clip();
+  ctx.drawImage(B, 0, 0);
+  ctx.restore();
+}
+
+// Page scroll: the reader's eye travels down the same sheet. The outgoing page
+// leaves upward and the next part of the page arrives from below, at one speed,
+// so the seam reads as one continuous move rather than a slide change.
+function pageScroll(ctx, A, B, p) {
+  const H = ctx.canvas.height;
+  ctx.drawImage(A, 0, -H * p);
+  ctx.drawImage(B, 0, H * (1 - p));
+}
+
+// === VIDEO ===================================================================
+CV.create({
+  width: 1920, height: 1080, fps: 30,
+  background: T.paper,
+  lang: 'en-US',
+  // the score designed for this video: measured and cinematic: low minor pads, a pulse of plucked strings, a heartbeat tom
+  music: {
+    bpm: 84, seed: 7, duck: -14, key: 'D', mode: 'minor', progression: [0, 5, 3, 4],
+    layers: [
+      { name: 'low strings', inst: 'pad', notes: 'chord', octave: -1, pattern: 'X---', vel: 0.09, cutoff: [650, 1150], attack: 1.1, release: 1.6 },
+      { name: 'sub', inst: 'bass', octave: -2, pattern: 'X---', gate: 0.95, vel: 0.2, decay: 4, from: 0.3 },
+      { name: 'pulse', inst: 'pluck', notes: [0, 1], pattern: 'XXXXXXXX', gate: 0.9, vel: 0.07, bright: 0.2, decay: 0.993, from: 0.4 },
+      { name: 'heartbeat', inst: 'tom', pitch: 75, pattern: 'Xx......', vel: 0.4, from: 0.6 },
+      { name: 'answer', inst: 'tom', pitch: 90, pattern: '....X...', vel: 0.3, from: 0.75 },
+    ],
+    lead: { inst: 'keys', range: [69, 84], rhythm: 'sparse', vel: 0.1, bright: 0.4, decay: 2, echo: 0.2 },
+  },
+  transition: { type: 'wipe', angle: 0, duration: 0.7, ease: ease.inOutCubic, lineColor: T.ink, lineWidth: 3, sfx: 'paper' },
+  subtitles: {
+    style: { font: F(500, 40, T.sans), color: T.paper, box: 'rgba(17,17,20,0.88)', y: 0.925, radius: 4 },
+  },
+  scenes: [
+    // --- 1. Masthead builds over a bar of music, then the dateline ----------
+    {
+      id: 'dateline', narration: false, beats: 6, energy: 0.3,
+      // the date is set in type, one part per beat, each with a tick
+      sfx: [1.5, 2.5, 3.5].map((i) => ({ at: (s) => s.onBeat(i), type: 'tick', gain: 0.8 })),
+      draw(ctx, s) {
+        const { t, W, H } = s;
+        const b = (i) => s.onBeat(i);
+        const out = 0; // nothing leaves: the whole page scrolls on into the next scene
+        // the shot opens close on the masthead and pulls back to the page as the date is set
+        const cam = draw.cameraAt(t, [[0, { zoom: 1.9 }], [b(0.9), { zoom: 1.9 }], [b(1.6), { zoom: 1 }, ease.inOutCubic]]);
+        ctx.save();
+        draw.camera(ctx, W, H, { ...cam, focusX: W / 2, focusY: 300, x: 0, y: (H / 2 - 300) / cam.zoom }, () => {
+        // double rule + masthead, on the first beats of the bar
+        rule(ctx, L, R, 196, (t - b(0)) / 0.9, 3);
+        rule(ctx, L, R, 206, (t - b(0) - 0.12) / 0.9, 1);
+        ctx.font = F(400, 112, T.serif, 'italic');
+        ctx.fillStyle = T.ink;
+        fx.charReveal(ctx, 'Notes on the Network', W / 2, 340, t - b(0.5), { align: 'center', stagger: 0.03, dur: 0.6, rise: 0.2, blur: 6 });
+        rule(ctx, L, R, 392, (t - b(1)) / 0.8, 1);
+        label(ctx, 'The first message', L, 436, (t - b(1)) / 0.5);
+        label(ctx, 'Arpanet, autumn 1969', R, 436, (t - b(1) - 0.15) / 0.5, T.muted, 26, 'right');
+        // the dateline: month, day and year each land on a beat
+        ctx.font = F(800, 172);
+        ctx.fillStyle = T.ink;
+        ctx.textAlign = 'left';
+        const parts = ['October', '29,', '1969'];
+        let x = L;
+        parts.forEach((w, i) => {
+          const wd = ctx.measureText(w + ' ').width;
+          fx.lineReveal(ctx, [w], x, 690, t - b(1.5 + i) + 0.05, { ...set, exit: out, lineHeight: 190 });
+          if (i === 2) {
+            // the year gets the red underline once it lands
+            ctx.strokeStyle = T.accent;
+            ctx.lineWidth = 8;
+            const uw = ctx.measureText(w).width;
+            draw.drawOn(ctx, [[x, 720], [x + uw, 720]], ease.inOutCubic(clamp((t - b(3.5) - 0.4) / 0.6)) * (1 - out));
+          }
+          x += wd;
+        });
+        ctx.font = F(400, 54, T.serif, 'italic');
+        ctx.fillStyle = T.muted;
+        fx.lineReveal(ctx, ['Half past ten at night, Pacific time.'], L, 820, t - b(4.25), { ...set, exit: out, lineHeight: 70 });
+        });
+        ctx.restore();
+      },
+    },
+    // --- 2. The attempt: column, drop cap, the printed map ------------------
+    {
+      id: 'attempt', tail: 0.7, energy: 0.45,
+      transition: { type: pageScroll, duration: 0.8, ease: ease.inOutCubic, sfx: 'paper' },
+      draw(ctx, s) {
+        const { t, W, H } = s;
+        const out = s.out(0.4, ease.exit, 0.35);
+        label(ctx, 'UCLA to SRI, over Arpanet', L, 230, s.at(0.35, 0.5) * (1 - out), T.accent);
+        ctx.font = F(600, 92);
+        ctx.fillStyle = T.ink;
+        ctx.textAlign = 'left';
+        fx.lineReveal(ctx, ['Two computers,', 'one word.'], L, 340, t - 0.4, { ...set, stagger: 0.12, lineHeight: 100, exit: out });
+        rule(ctx, L, 900, 470, s.at(0.9, 0.7) * (1 - out), 1, T.rule);
+        // drop cap paragraph: lines set as the voice reaches them
+        const lines = ['he plan: type LOGIN on a', 'terminal at UCLA and watch', 'it arrive at the Stanford', 'Research Institute.'];
+        const at = [s.when('student', 1.2), s.when('log', 1.9), s.when('computer', 2.6), s.when('coast', 3.3)];
+        const dc = ease.enter(clamp((t - at[0] + 0.2) / 0.6));
+        ctx.font = F(800, 196);
+        ctx.fillStyle = T.accent;
+        ctx.globalAlpha = dc * (1 - out);
+        ctx.fillText('T', L - 6, 680 + (1 - dc) * 20);
+        const dw = ctx.measureText('T').width + 18;
+        ctx.globalAlpha = 1;
+        ctx.font = F(400, 44);
+        ctx.fillStyle = T.ink;
+        lines.forEach((ln, i) => fx.lineReveal(ctx, [ln], i < 3 ? L + dw : L, 560 + i * 60, t - at[i], { ...set, dur: 0.6, lineHeight: 60, exit: out }));
+        // the printed map holds almost still while it is read, then the camera
+        // dives into SRI, accelerating into the cut: the next shot is that machine
+        const printed = s.at(0.3, 1.8, ease.inOutSine);
+        const dive = s.dur - 0.85;
+        const { zoom: z } = draw.cameraAt(t, [[0, { zoom: 1 }], [dive, { zoom: 1.03 }, ease.inOutSine], [s.dur, { zoom: 10 }, (p) => p * p * p]]);
+        const k = ease.inOutCubic(clamp((t - dive) / 0.85));
+        const [fx0, fy0] = bp(SRI);
+        // SRI stays put, then slides to the centre of the frame as the camera closes in
+        const sxs = lerp(fx0, W / 2, k), sys = lerp(fy0, H / 2, k);
+        draw.camera(ctx, W, H, { zoom: z, focusX: fx0, focusY: fy0, x: (W / 2 - sxs) / z, y: (H / 2 - sys) / z }, () => {
+          halftone(ctx, printed);
+          // UCLA appears with its name; the link draws up the coast on "computer"
+          const pu = ease.outBack(clamp((t - s.when('UCLA', 0.4)) / 0.5));
+          const [ux, uy] = bp(UCLA), [sx, sy] = bp(SRI);
+          const pl = ease.inOutCubic(clamp((t - s.when('computer', 2.6) + 0.1) / 1.1));
+          if (pl > 0) {
+            ctx.strokeStyle = T.accent;
+            ctx.lineWidth = 5;
+            ctx.setLineDash([2, 12]);
+            ctx.lineCap = 'round';
+            const pts = [];
+            for (let i = 0; i <= 40; i++) { const k = i / 40; pts.push([lerp(ux, sx, k) + Math.sin(Math.PI * k) * 120, lerp(uy, sy, k)]); }
+            draw.drawOn(ctx, pts, pl);
+            ctx.setLineDash([]);
+          }
+          const dot = (x, y, p, txt, dx) => {
+            if (p <= 0) return;
+            const tagA = 1 - k; // the tags step back as the camera dives
+            ctx.fillStyle = T.accent;
+            ctx.beginPath(); ctx.arc(x, y, 12 * p, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = T.paper; ctx.lineWidth = 3; ctx.stroke();
+            ctx.fillStyle = T.paper;
+            ctx.font = F(600, 26, T.sans);
+            const tw = ctx.measureText(txt).width + 24;
+            ctx.globalAlpha = clamp(p) * tagA;
+            ctx.fillRect(x + dx - (dx < 0 ? tw : 0), y - 20, tw, 40);
+            ctx.fillStyle = T.ink;
+            ctx.textAlign = 'left';
+            ctx.fillText(txt, x + dx - (dx < 0 ? tw : 0) + 12, y + 8);
+            ctx.globalAlpha = 1;
+          };
+          dot(ux, uy, pu, 'UCLA, Los Angeles', -26);
+          dot(sx, sy, ease.outBack(clamp((t - s.when('computer', 2.6) - 0.9) / 0.5)), 'SRI, Menlo Park', 26);
+        });
+        label(ctx, 'Fig. 1  The two hosts, California', BLOCK.x, BLOCK.y + BLOCK.h + 40, s.at(1.6, 0.6) * (1 - out));
+      },
+    },
+    // --- 3. The crash: the camera tracks along the teletype tape -------------
+    {
+      id: 'crash', tail: 1.2, energy: 0.65,
+      // a hard cut while the camera is still diving: the zoom keeps its direction across it
+      transition: { type: 'cut' },
+      sfx: [
+        { at: 'L', type: 'type', gain: 1.3 },
+        { at: (s) => s.when('O', 2.2), type: 'type', gain: 1.3 },
+        { at: (s) => s.when('crashed', 3.9), type: 'hit', gain: 0.8 },
+      ],
+      draw(ctx, s) {
+        const { t, W, H } = s;
+        const tL = s.when('L', 0.7), tO = s.when('O', 2.2), tC = s.when('crashed', 3.9);
+        const out = s.out(0.4, ease.exit, 0.35);
+        // the dive from the map lands here: still closing in for the first moments
+        const zin = lerp(0.8, 1, ease.outCubic(clamp(t / 0.7)));
+        ctx.save();
+        ctx.translate(W / 2, H / 2); ctx.scale(zin, zin); ctx.translate(-W / 2, -H / 2);
+        label(ctx, '29 October 1969, 22:30 Pacific', L, 230, s.at(0.3, 0.5) * (1 - out), T.accent);
+        label(ctx, 'UCLA to SRI', R, 230, s.at(0.4, 0.5) * (1 - out), T.muted, 26, 'right');
+        // the camera rides a spring from letter to letter
+        const LX = [760, 1060, 1360];
+        const cam = CV.springTrack(t, [[0, 120], [tL - 0.1, LX[0] - 820], [tO - 0.1, LX[1] - 900], [tC - 0.5, LX[2] - 960]], CV.spring.presets.smooth);
+        ctx.save();
+        ctx.translate(-cam, 0);
+        // paper tape with sprocket holes
+        const ty = 380, th = 330, tapeIn = s.at(0, 0.45, ease.outCubic); // already running as the dive lands
+        ctx.fillStyle = T.paper2;
+        ctx.fillRect(-200, ty, 3200 * tapeIn, th);
+        ctx.fillStyle = T.paper;
+        for (let x = -180; x < 3000 * tapeIn; x += 38) {
+          ctx.beginPath(); ctx.arc(x, ty + 26, 7, 0, Math.PI * 2); ctx.arc(x + 0.01, ty + th - 26, 7, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = T.rule;
+        for (let x = 0; x < 3000 * tapeIn; x += 60) ctx.fillRect(x, ty + 48, 1, x % 300 === 0 ? 22 : 10);
+        label(ctx, 'Typed: LOGIN', 400, ty + th / 2 + 12, s.at(0.5, 0.5) * 0.9, T.muted, 30);
+        // typed letters: they strike in, ink spreads a hair, then hold
+        ctx.font = F(500, 250, T.mono);
+        ctx.textAlign = 'left';
+        const strike = (ch, x, at, alpha = 1) => {
+          const p = clamp((t - at) / 0.12);
+          if (p <= 0) return;
+          const sc = lerp(1.08, 1, ease.outCubic(p));
+          ctx.save();
+          ctx.globalAlpha = alpha * clamp(p * 2);
+          ctx.translate(x, ty + th / 2 + 88);
+          ctx.scale(sc, sc);
+          ctx.fillStyle = T.ink;
+          ctx.fillText(ch, 0, 0);
+          ctx.restore();
+        };
+        strike('L', LX[0], tL);
+        strike('O', LX[1], tO);
+        // the G never fully printed
+        strike('G', LX[2], tC - 0.35, 0.18);
+        const pc = ease.inOutCubic(clamp((t - tC) / 0.35));
+        if (pc > 0) {
+          ctx.fillStyle = T.accent;
+          ctx.fillRect(LX[1] + 170, ty + th / 2 - 4, 900 * pc, 8);
+          label(ctx, 'System crash¹', LX[2] + 200, ty - 30, clamp((t - tC - 0.2) / 0.4), T.accent, 34);
+        }
+        ctx.restore();
+        // the footnote it earns
+        label(ctx, '¹ The host at SRI failed as the “G” of “LOGIN” arrived.', L, 840, clamp((t - tC - 0.6) / 0.6) * (1 - out), T.muted, 26);
+        ctx.restore();
+        // everything holds dead still for a breath, then the crash line floods the
+        // frame: the blue page that follows is that line, grown
+        const fl = ease.inOutCubic(clamp((t - (s.dur - 0.55)) / 0.55));
+        if (fl > 0) {
+          const bx = LX[1] + 170 - cam, by = 380 + 330 / 2 - 4;
+          ctx.fillStyle = T.accent;
+          ctx.fillRect(lerp(bx, 0, fl), lerp(by, 0, fl), lerp(900, W, fl), lerp(8, H, fl));
+        }
+      },
+    },
+    // --- 3b. The breath: two letters, the whole story ------------------------
+    {
+      id: 'breath', narration: false, beats: 4, energy: 0.55,
+      transition: { type: 'cut', sfx: 'swell' },
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        ctx.fillStyle = T.accent;
+        ctx.fillRect(0, 0, W, H);
+        ctx.font = F(800, 470);
+        ctx.fillStyle = T.paper;
+        // each letter lands with weight on its beat, then nothing moves until the underline
+        fx.charReveal(ctx, 'LO', W / 2, H * 0.66, t - s.onBeat(0), { align: 'center', stagger: 0.22, dur: 0.5, rise: 0.16, ease: ease.outBack });
+        const w = ctx.measureText('LO').width;
+        ctx.strokeStyle = T.paper;
+        ctx.lineWidth = 12;
+        draw.drawOn(ctx, [[W / 2 - w / 2, H * 0.66 + 54], [W / 2 + w / 2, H * 0.66 + 54]], ease.inOutCubic(clamp((t - s.onBeat(2)) / 0.7)));
+        label(ctx, 'The first message on the network', W / 2, H * 0.84, clamp((t - s.onBeat(3)) / 0.6), color.rgba(T.paper, 0.9), 30, 'center');
+      },
+    },
+    // --- 4. The meaning: the pull quote reads itself -------------------------
+    {
+      id: 'meaning', tail: 1.6, energy: 0.4,
+      transition: { type: inkWash, duration: 0.8, ease: ease.inOutSine, sfx: 'swell' },
+      draw(ctx, s) {
+        const { t, W } = s;
+        // hanging punctuation: the opening quote sits outside the text column
+        const QX = 300;
+        ctx.font = F(400, 240, T.serif, 'italic');
+        ctx.fillStyle = T.accent;
+        ctx.textAlign = 'right';
+        const qp = ease.enter(clamp((t - s.voiceStart + 0.2) / 0.6));
+        ctx.globalAlpha = qp;
+        ctx.fillText('“', QX - 6, 530 + (1 - qp) * 30);
+        ctx.globalAlpha = 1;
+        ctx.font = F(500, 92, T.serif, 'italic');
+        ctx.fillStyle = T.ink;
+        const ws = fx.wordReveal(ctx, 'So the first word on the network was ‘lo’ — as in, lo and behold.”', QX, 480, t,
+          { sync: s, maxWidth: 1360, lineHeight: 118, dur: 0.5, rise: 0.18, blur: 4, ghost: 0.07 });
+        // the key word gets the red underline once it is spoken
+        const key = ws.find((w) => /lo/.test(w.text) && w.text.length <= 4);
+        if (key) {
+          const tk = s.syncTimes(ws.map((w) => w.text))[key.i];
+          ctx.strokeStyle = T.accent;
+          ctx.lineWidth = 7;
+          draw.drawOn(ctx, [[key.x, key.y + 22], [key.x + key.w, key.y + 22]], ease.inOutCubic(clamp((t - tk - 0.3) / 0.5)));
+        }
+        // footnote + source, then the page closes on the beat after the voice
+        const fe = ease.enter(clamp((t - s.voiceEnd + 0.4) / 0.6));
+        label(ctx, '¹ “Lo” was the start of “login”. The full login worked about an hour later.', QX, 820, fe, T.muted, 26);
+        label(ctx, 'Source: L. Kleinrock, UCLA, Internet History Archive', QX, 860, fe * 0.85, T.muted, 26);
+        const so = clamp((t - s.nextBeat(s.voiceEnd)) / 0.9);
+        rule(ctx, L, R, 196, so, 3);
+        label(ctx, 'Notes on the Network', W / 2, 172, ease.enter(clamp((t - s.nextBeat(s.voiceEnd) - 0.4) / 0.6)), T.ink, 24, 'center');
+      },
+    },
+  ],
+  // Running head (pages 2–3) + paper grain
+  overlay(ctx, g) {
+    // <example>
+    const sc = (id) => g.scenes.find((x) => x.id === id);
+    const a = sc('attempt'), br = sc('breath');
+    // the head leaves just before the crash line floods the frame
+    const on = clamp((g.T - a.start - 0.4) / 0.5) * (1 - clamp((g.T - br.start + 0.6) / 0.3));
+    if (on > 0) {
+      ctx.globalAlpha = on;
+      ctx.fillStyle = T.ink;
+      ctx.fillRect(L, 120, R - L, 1.5);
+      label(ctx, 'Notes on the Network', L, 102, 1, T.muted, 24);
+      label(ctx, 'The first message', R, 102, 1, T.muted, 24, 'right');
+      ctx.globalAlpha = 1;
+    }
+    // </example>
+    draw.grain(ctx, g.frame, 0.055, { blend: 'multiply' });
+  },
+});
+</script>
+</body>
+</html>

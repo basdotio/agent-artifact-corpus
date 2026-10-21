@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How a four-stroke engine works (video-gaga · Blueprint)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   BLUEPRINT — technical "how it works".
+   A cyanotype engineering drawing that builds itself in a draftsman's order:
+   construction lines → outlines → a section cut → callouts → dimensions. Then
+   the mechanism runs for real (true crank-slider kinematics), because here the
+   motion IS the explanation. One signal colour marks the moving parts.
+   Rhythm: 104 BPM. In the music-only beat the engine runs one stroke per beat,
+   so the cycle and the bar are the same length (4 strokes = 4 beats).
+   One continuous drawing, cut on the beat; a cyan-edged wipe to a new sheet.
+   ============================================================================= */
+const { ease, clamp, lerp, fx, draw, color } = CV;
+
+// === THEME ===================================================================
+const T = {
+  field: '#0D3A66',
+  fieldDeep: '#092B4F',
+  line: '#EAF4FF',          // object lines
+  cyan: '#8EC9F2',          // construction, dimensions, leaders
+  dim: 'rgba(142,201,242,0.55)',
+  hatch: 'rgba(142,201,242,0.42)',
+  grid: 'rgba(160,205,245,0.06)',
+  gridMajor: 'rgba(160,205,245,0.13)',
+  signal: '#FF8A1F',        // the moving parts — and the power
+  exhaust: '#A9BCD2',
+  display: '"Barlow Condensed", "Arial Narrow", sans-serif',
+  mono: '"JetBrains Mono", ui-monospace, monospace',
+};
+const F = (w, px, fam = T.display) => `${w} ${px}px ${fam}`;
+const M = (w, px) => F(w, px, T.mono);
+
+// === EXAMPLE: engine geometry (design px; 1 mm ≈ 2.09 px) ====================
+const EX = 620, EY = 700;            // crank centre
+const R = 90, LR = 300;              // crank radius (stroke = 2R), con-rod length (rod ratio 3.3)
+const PIN = 45, PH = 115;            // crown above the gudgeon pin, piston height
+const DECK = EY - (R + LR) - PIN - 20; // chamber roof: 20 px clearance → compression ratio 10:1
+const BL = 530, BR = 710, WALL = 34; // bore walls
+const HEAD_T = 150, CC_BOT = 860;
+const MAXLIFT = 18;
+const rad = (d) => (d * Math.PI) / 180;
+// crank-slider: gudgeon-pin height for crank angle th (0 = top dead centre, clockwise)
+const pinY = (th) => EY - (R * Math.cos(th) + Math.sqrt(LR * LR - (R * Math.sin(th)) ** 2));
+const crankpin = (th) => [EX + R * Math.sin(th), EY - R * Math.cos(th)];
+const crownY = (th) => pinY(th) - PIN;
+const CROWN_TDC = crownY(0), CROWN_BDC = crownY(Math.PI);
+// piston travel from TDC (px), 0 … 2R
+const travel = (phi) => crownY(rad(phi)) - CROWN_TDC;
+
+// The four strokes: what moves, which valve is open
+const STROKES = [
+  { n: '01', name: 'INTAKE', note: 'INTAKE VALVE OPEN · MIX DRAWN IN' },
+  { n: '02', name: 'COMPRESSION', note: 'VALVES CLOSED · MIX SQUEEZED ~10:1' },
+  { n: '03', name: 'POWER', note: 'SPARK · GAS EXPANDS · PISTON PUSHED' },
+  { n: '04', name: 'EXHAUST', note: 'EXHAUST VALVE OPEN · GAS PUSHED OUT' },
+];
+
+// Ports through the head (intake left; exhaust mirrored)
+const IN_PORT = [[545, DECK], [518, DECK - 13], [470, DECK - 23], [470, DECK - 70], [570, DECK - 55], [598, DECK - 23], [605, DECK]];
+const mirror = (pts) => pts.map(([x, y]) => [2 * EX - x, y]);
+const EX_PORT = mirror(IN_PORT);
+const IN_FLOW = [[420, DECK - 47], [470, DECK - 47], [540, DECK - 35], [575, DECK - 8], [575, DECK + 18]];
+const EX_FLOW = mirror(IN_FLOW).reverse();
+// mixture particles: fixed seeds, mapped into whatever volume the chamber has
+const DOTS = (() => { const r = CV.rand(9); return Array.from({ length: 64 }, () => [r(), r()]); })();
+
+// === KIT: drafting sheet =====================================================
+function sheet(ctx, W, H) {
+  const g = ctx.createRadialGradient(W * 0.42, H * 0.45, 80, W * 0.5, H * 0.5, W * 0.78);
+  g.addColorStop(0, '#11457C');
+  g.addColorStop(1, T.fieldDeep);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += 24) {
+    ctx.strokeStyle = x % 120 === 0 ? T.gridMajor : T.grid;
+    ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, H); ctx.stroke();
+  }
+  for (let y = 0; y <= H; y += 24) {
+    ctx.strokeStyle = y % 120 === 0 ? T.gridMajor : T.grid;
+    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(W, y + 0.5); ctx.stroke();
+  }
+}
+
+function kicker(ctx, s, text) {
+  // leaves before each cut; stays on the final frame (the poster)
+  const p = ease.enter(clamp((s.t - s.onBeat(0)) / 0.5)), q = s.id === 'result' ? 0 : s.out(0.3, ease.exit, 0.1);
+  ctx.save();
+  ctx.font = M(500, 26);
+  ctx.fillStyle = T.cyan;
+  ctx.globalAlpha = p * (1 - q);
+  ctx.letterSpacing = '4px';
+  ctx.textAlign = 'left';
+  ctx.fillText(text, 100 - (1 - p) * 20, 132);
+  ctx.restore();
+}
+
+function zoomAbout(ctx, x, y, z, fn) {
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(z, z); ctx.translate(-x, -y);
+  fn();
+  ctx.restore();
+}
+
+function poly(ctx, pts, close) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  if (close) ctx.closePath();
+}
+const rectPts = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
+// === EXAMPLE: crankcase outline ==============================================
+// crankcase: a U with rounded bottom corners, as points (so it can draw on)
+const CASE_PTS = (() => {
+  const pts = [[470, 580], [470, CC_BOT - 70]];
+  for (let i = 1; i <= 8; i++) { const a = Math.PI - (i / 8) * (Math.PI / 2); pts.push([540 + 70 * Math.cos(a), CC_BOT - 70 + 70 * Math.sin(a)]); }
+  pts.push([700, CC_BOT]);
+  for (let i = 1; i <= 8; i++) { const a = Math.PI / 2 - (i / 8) * (Math.PI / 2); pts.push([700 + 70 * Math.cos(a), CC_BOT - 70 + 70 * Math.sin(a)]); }
+  pts.push([770, 580], [470, 580]);
+  return pts;
+})();
+
+// === KIT: hatching and arrowheads ============================================
+function hatchIn(ctx, clipPath, x0, y0, x1, y1, gap = 11) {
+  ctx.save();
+  clipPath();
+  ctx.clip('evenodd');
+  ctx.fillStyle = 'rgba(142,201,242,0.07)';
+  ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+  ctx.strokeStyle = T.hatch;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  const h = y1 - y0;
+  for (let k = x0 - h; k < x1; k += gap) { ctx.moveTo(k, y1); ctx.lineTo(k + h, y0); }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function arrowHead(ctx, x, y, ang, s = 14) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - Math.cos(ang - 0.32) * s, y - Math.sin(ang - 0.32) * s);
+  ctx.lineTo(x - Math.cos(ang + 0.32) * s, y - Math.sin(ang + 0.32) * s);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// === EXAMPLE: construction lines =============================================
+function construction(ctx, k, alpha = 1) {
+  ctx.save();
+  ctx.strokeStyle = T.cyan;
+  ctx.globalAlpha = 0.55 * alpha;
+  ctx.lineWidth = 1.3;
+  ctx.setLineDash([26, 6, 4, 6]);
+  draw.drawOn(ctx, [[EX, 92], [EX, 900]], k[0]);
+  draw.drawOn(ctx, [[400, EY], [840, EY]], k[1]);
+  draw.arc(ctx, EX, EY, R, -Math.PI / 2, Math.PI * 1.5, k[2]);
+  ctx.setLineDash([8, 6]);
+  draw.drawOn(ctx, [[500, pinY(0)], [740, pinY(0)]], k[2]);
+  draw.drawOn(ctx, [[500, pinY(Math.PI)], [740, pinY(Math.PI)]], k[2]);
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 0.4 * alpha;
+  draw.drawOn(ctx, [[430, DECK], [810, DECK]], k[3]);
+  draw.drawOn(ctx, [[BL, DECK], [BL, 600]], k[3]);
+  draw.drawOn(ctx, [[BR, DECK], [BR, 600]], k[3]);
+  ctx.restore();
+}
+
+// === EXAMPLE: valve gear =====================================================
+function valveTop(ctx, x, lift, a = 1) {
+  const L = lift * MAXLIFT, top = 118 + L;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = T.line;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(x, HEAD_T); ctx.lineTo(x, top - 6); ctx.stroke();
+  // spring: compresses as the valve opens
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = T.cyan;
+  ctx.beginPath();
+  const n = 7;
+  for (let i = 0; i <= n; i++) { const y = lerp(HEAD_T, top, i / n); ctx.lineTo(x + (i % 2 ? 15 : -15), y); }
+  ctx.stroke();
+  ctx.strokeStyle = T.line;
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(x - 19, top - 6, 38, 6);
+  ctx.restore();
+}
+function plugTop(ctx, a = 1) {
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = T.line;
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(EX - 9, 116, 18, HEAD_T - 116);
+  ctx.strokeRect(EX - 5, 106, 10, 10);
+  ctx.restore();
+}
+
+// === EXAMPLE: elevation (outside view) =======================================
+// prog: { block, head, case, top } each 0..1 (draw-on order of a draftsman)
+function elevation(ctx, prog, lifts = [0, 0]) {
+  ctx.save();
+  ctx.strokeStyle = T.line;
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  draw.drawOn(ctx, rectPts(496, DECK, 744, 580), prog.block);
+  draw.drawOn(ctx, rectPts(470, HEAD_T, 770, DECK), prog.head);
+  draw.drawOn(ctx, CASE_PTS, prog.case);
+  // port flanges + head bolts
+  ctx.globalAlpha = clamp((prog.head - 0.7) / 0.3);
+  ctx.lineWidth = 2;
+  ctx.strokeRect(448, DECK - 76, 22, 60);
+  ctx.strokeRect(770, DECK - 76, 22, 60);
+  for (const bx of [492, 748]) for (const by of [170, 225]) { ctx.beginPath(); ctx.arc(bx, by, 6, 0, Math.PI * 2); ctx.stroke(); }
+  // block fins (cooling ribs) — elevation detail only
+  ctx.globalAlpha = clamp((prog.block - 0.6) / 0.4) * 0.6;
+  ctx.lineWidth = 1.5;
+  for (let y = DECK + 40; y < 570; y += 42) { ctx.beginPath(); ctx.moveTo(500, y); ctx.lineTo(740, y); ctx.stroke(); }
+  ctx.restore();
+  valveTop(ctx, 575, lifts[0], prog.top);
+  valveTop(ctx, 665, lifts[1], prog.top);
+  plugTop(ctx, prog.top);
+}
+
+// === EXAMPLE: section A–A (the cut view) =====================================
+function section(ctx, phi, t, o = {}) {
+  const cyc = ((phi % 720) + 720) % 720;
+  const th = rad(phi);
+  const stroke = Math.min(3, Math.floor(cyc / 180)), sp = (cyc % 180) / 180;
+  const liftI = stroke === 0 ? Math.sin(Math.PI * sp) : 0;
+  const liftE = stroke === 3 ? Math.sin(Math.PI * sp) : 0;
+  const pin = pinY(th), crown = pin - PIN, cp = crankpin(th);
+
+  // --- gas in the chamber -------------------------------------------------
+  if (!o.noGas) {
+    const V = crown - DECK, Vmax = CROWN_BDC - DECK;
+    let fill = null, dotCol = null, count = DOTS.length;
+    if (stroke === 0) { fill = color.rgba(T.cyan, 0.1 + 0.08 * sp); dotCol = T.cyan; count = Math.floor(DOTS.length * clamp(sp * 1.15)); }
+    if (stroke === 1) { fill = color.rgba(T.cyan, 0.14 + 0.32 * (1 - V / Vmax)); dotCol = T.cyan; }
+    if (stroke === 2) { fill = color.rgba(T.signal, 0.12 + 0.5 * (1 - sp)); dotCol = T.signal; }
+    if (stroke === 3) { fill = color.rgba(T.exhaust, 0.2 * (1 - sp)); dotCol = T.exhaust; count = Math.floor(DOTS.length * (1 - sp)); }
+    ctx.fillStyle = fill;
+    ctx.fillRect(BL, DECK, BR - BL, V);
+    ctx.fillStyle = dotCol;
+    for (let i = 0; i < count; i++) {
+      const [u, v] = DOTS[i];
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.arc(BL + 8 + u * (BR - BL - 16), DECK + 5 + v * Math.max(0, V - 10), 3.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // flow through the open valve
+    const flow = (pts, lift, col) => {
+      if (lift < 0.04) return;
+      ctx.save();
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = lift;
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.setLineDash([12, 14]);
+      ctx.lineDashOffset = -t * 110;
+      poly(ctx, pts);
+      ctx.stroke();
+      ctx.restore();
+    };
+    flow(IN_FLOW, liftI, T.cyan);
+    flow(EX_FLOW, liftE, T.exhaust);
+    // spark at top dead centre of the power stroke
+    if (cyc >= 352 && cyc < 380) {
+      const k = 1 - Math.abs(cyc - 362) / 18;
+      ctx.save();
+      ctx.strokeStyle = '#FFE2B8';
+      ctx.fillStyle = color.rgba(T.signal, 0.5 * k);
+      ctx.beginPath(); ctx.arc(EX, DECK + 6, 38 * k + 6, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 2.5;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + 0.3;
+        ctx.beginPath();
+        ctx.moveTo(EX + Math.cos(a) * 8, DECK + 6 + Math.sin(a) * 8);
+        ctx.lineTo(EX + Math.cos(a) * (14 + 26 * k), DECK + 6 + Math.sin(a) * (14 + 26 * k));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  // --- cylinder walls & head (cut material is hatched) ---------------------
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = T.line;
+  for (const [x0, x1] of [[BL - WALL, BL], [BR, BR + WALL]]) {
+    hatchIn(ctx, () => { ctx.beginPath(); ctx.rect(x0, DECK, x1 - x0, 580 - DECK); }, x0, DECK, x1, 580);
+    ctx.strokeRect(x0, DECK, x1 - x0, 580 - DECK);
+  }
+  hatchIn(ctx, () => {
+    ctx.beginPath();
+    ctx.rect(470, HEAD_T, 300, DECK - HEAD_T);
+    poly(ctx, IN_PORT, true);
+    poly(ctx, EX_PORT, true);
+    ctx.rect(EX - 11, HEAD_T, 22, DECK - HEAD_T);
+  }, 470, HEAD_T, 770, DECK);
+  ctx.strokeStyle = T.line;
+  ctx.strokeRect(470, HEAD_T, 300, DECK - HEAD_T);
+  poly(ctx, IN_PORT.slice(1, -1)); ctx.stroke();
+  poly(ctx, EX_PORT.slice(1, -1)); ctx.stroke();
+  ctx.strokeRect(448, DECK - 76, 22, 60);
+  ctx.strokeRect(770, DECK - 76, 22, 60);
+  // crankcase: outer wall + inner line
+  draw.drawOn(ctx, CASE_PTS, 1);
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = T.dim;
+  ctx.translate(EX, 720); ctx.scale(0.9, 0.93); ctx.translate(-EX, -720);
+  draw.drawOn(ctx, CASE_PTS.slice(1, -1), 1);
+  ctx.restore();
+
+  // --- valves (poppet: they open *into* the chamber) ------------------------
+  const valve = (x, lift) => {
+    const L = lift * MAXLIFT;
+    ctx.save();
+    ctx.strokeStyle = T.line;
+    ctx.fillStyle = T.field;
+    ctx.lineWidth = 2.5;
+    poly(ctx, [[x - 30, DECK + L], [x + 30, DECK + L], [x + 9, DECK - 9 + L], [x - 9, DECK - 9 + L]], true);
+    ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, DECK - 9 + L); ctx.lineTo(x, HEAD_T); ctx.stroke();
+    ctx.restore();
+  };
+  valve(575, liftI);
+  valve(665, liftE);
+  valveTop(ctx, 575, liftI);
+  valveTop(ctx, 665, liftE);
+  plugTop(ctx);
+  ctx.strokeStyle = T.line;
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(EX - 7, HEAD_T, 14, DECK - HEAD_T - 2);
+
+  // --- crank: counterweight opposite the crankpin ----------------------------
+  ctx.save();
+  ctx.translate(EX, EY);
+  ctx.rotate(th);
+  ctx.beginPath();
+  ctx.arc(0, 0, 112, Math.PI * 0.14, Math.PI * 0.86);
+  ctx.arc(0, -R, 36, Math.PI * 1.05, Math.PI * 1.95);
+  ctx.closePath();
+  ctx.fillStyle = color.rgba(T.fieldDeep, 0.85);
+  ctx.fill();
+  ctx.strokeStyle = T.cyan;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle = T.cyan;
+  ctx.beginPath(); ctx.arc(EX, EY, 26, 0, Math.PI * 2); ctx.stroke();
+
+  // --- connecting rod ---------------------------------------------------------
+  const dx = cp[0] - EX, dy = cp[1] - pin, len = Math.hypot(dx, dy), nx = -dy / len, ny = dx / len;
+  ctx.strokeStyle = T.signal;
+  ctx.fillStyle = color.rgba(T.fieldDeep, 0.92);
+  ctx.lineWidth = 3;
+  poly(ctx, [[EX + nx * 12, pin + ny * 12], [cp[0] + nx * 19, cp[1] + ny * 19], [cp[0] - nx * 19, cp[1] - ny * 19], [EX - nx * 12, pin - ny * 12]], true);
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cp[0], cp[1], 32, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cp[0], cp[1], 17, 0, Math.PI * 2); ctx.stroke();
+
+  // --- piston (sectioned: rings, gudgeon pin, the rod's small end) ------------
+  ctx.fillStyle = color.rgba(T.fieldDeep, 0.9);
+  ctx.beginPath(); ctx.rect(BL + 2, crown, BR - BL - 4, PH); ctx.fill(); ctx.stroke();
+  ctx.lineWidth = 2;
+  for (const dy2 of [12, 22, 32]) {
+    ctx.beginPath(); ctx.moveTo(BL + 2, crown + dy2); ctx.lineTo(BL + 18, crown + dy2); ctx.moveTo(BR - 18, crown + dy2); ctx.lineTo(BR - 2, crown + dy2); ctx.stroke();
+  }
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(EX, pin, 21, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(EX, pin, 11, 0, Math.PI * 2); ctx.stroke();
+  return { cyc, stroke, sp, crown, pin, cp };
+}
+
+// The whole drawing: construction lines, then elevation | section split at `cut`
+// (cut = null → elevation only; cut ≥ 800 → full section).
+function engine(ctx, o) {
+  construction(ctx, o.k || [1, 1, 1, 1], o.constructAlpha ?? 1);
+  const phi = o.phi ?? 0, cyc = ((phi % 720) + 720) % 720;
+  const lifts = [cyc < 180 ? Math.sin(Math.PI * cyc / 180) : 0, cyc >= 540 ? Math.sin(Math.PI * (cyc - 540) / 180) : 0];
+  const prog = o.prog || { block: 1, head: 1, case: 1, top: 1 };
+  if (o.cut == null) { elevation(ctx, prog, lifts); return null; }
+  let info = null;
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, o.cut, 1080); ctx.clip();
+  info = section(ctx, phi, o.t ?? 0, o);
+  ctx.restore();
+  if (o.cut < 800) {
+    ctx.save(); ctx.beginPath(); ctx.rect(o.cut, 0, 1920, 1080); ctx.clip();
+    elevation(ctx, prog, lifts);
+    ctx.restore();
+    // the cutting plane: a cyan line with section arrows
+    ctx.save();
+    ctx.strokeStyle = T.cyan;
+    ctx.fillStyle = T.cyan;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([22, 6, 4, 6]);
+    ctx.beginPath(); ctx.moveTo(o.cut, 96); ctx.lineTo(o.cut, 890); ctx.stroke();
+    ctx.restore();
+  }
+  return info;
+}
+
+// === KIT: callouts ===========================================================
+// Callout: dot on the part → leader → numbered balloon → name.
+function callout(ctx, p, n, name, px, py, ly) {
+  if (p <= 0) return;
+  const bx = 980, lx = 1022;
+  const lead = ease.inOutCubic(clamp(p / 0.6));
+  ctx.save();
+  ctx.strokeStyle = T.cyan;
+  ctx.fillStyle = T.cyan;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(px, py, 5 * clamp(p * 4), 0, Math.PI * 2); ctx.fill();
+  draw.drawOn(ctx, [[px, py], [900, ly], [bx - 24, ly]], lead);
+  const q = ease.enter(clamp((p - 0.45) / 0.5));
+  if (q > 0) {
+    ctx.globalAlpha = q;
+    ctx.beginPath(); ctx.arc(bx, ly, 24 * q, 0, Math.PI * 2); ctx.stroke();
+    ctx.font = M(500, 24);
+    ctx.textAlign = 'center';
+    ctx.fillText(n, bx, ly + 8);
+    ctx.textAlign = 'left';
+    ctx.font = F(600, 54);
+    ctx.fillStyle = T.line;
+    fx.mask(ctx, lx, ly - 46, 520, 64, () => ctx.fillText(name, lx, ly + 18 + (1 - q) * 54));
+  }
+  ctx.restore();
+}
+
+// === EXAMPLE: dimensions on the engine =======================================
+// Linear dimension with extension lines, arrowheads and a counting value.
+function dimension(ctx, p, a, b, at, value, label, vertical) {
+  if (p <= 0) return;
+  ctx.save();
+  ctx.strokeStyle = T.cyan;
+  ctx.fillStyle = T.cyan;
+  ctx.lineWidth = 1.5;
+  const ext = ease.outCubic(clamp(p / 0.35));
+  const grow = ease.inOutCubic(clamp((p - 0.25) / 0.45));
+  const mid = (a + b) / 2;
+  if (vertical) {
+    // extension lines run left from the part to the dimension line
+    draw.drawOn(ctx, [[BL - 40, a], [at - 14, a]], ext);
+    draw.drawOn(ctx, [[BL - 40, b], [at - 14, b]], ext);
+    if (grow > 0) {
+      const y0 = lerp(mid, a, grow), y1 = lerp(mid, b, grow);
+      ctx.beginPath(); ctx.moveTo(at, y0); ctx.lineTo(at, y1); ctx.stroke();
+      if (grow >= 1) { arrowHead(ctx, at, a, -Math.PI / 2); arrowHead(ctx, at, b, Math.PI / 2); }
+    }
+  } else {
+    draw.drawOn(ctx, [[a, DECK - 4], [a, at - 12]], ext);
+    draw.drawOn(ctx, [[b, DECK - 4], [b, at - 12]], ext);
+    if (grow > 0) {
+      const x0 = lerp(mid, a, grow), x1 = lerp(mid, b, grow);
+      ctx.beginPath(); ctx.moveTo(x0, at); ctx.lineTo(x1, at); ctx.stroke();
+      if (grow >= 1) { arrowHead(ctx, a, at, Math.PI); arrowHead(ctx, b, at, 0); }
+    }
+  }
+  const q = ease.outQuart(clamp((p - 0.45) / 0.55));
+  if (q > 0) {
+    ctx.globalAlpha = clamp(q * 3);
+    if (vertical) {
+      ctx.textAlign = 'right';
+      ctx.font = M(500, 24);
+      ctx.fillText(label, at - 26, mid - 22);
+      ctx.font = F(700, 64);
+      ctx.fillStyle = T.line;
+      ctx.fillText(fx.countUp(q, 0, value) + ' mm', at - 26, mid + 40);
+    } else {
+      ctx.textAlign = 'center';
+      ctx.font = M(500, 24);
+      ctx.fillText(`${label} ${fx.countUp(q, 0, value)} mm`, mid, at - 14);
+    }
+  }
+  ctx.restore();
+}
+
+// === EXAMPLE: stroke timing ==================================================
+// Piecewise crank angle that steps through the strokes on the spoken words.
+function strokePhi(s) {
+  const ts = ['intake', 'compression', 'power', 'exhaust'].map((w, i) => s.when(w, 1 + i));
+  const gap = (ts[3] - ts[0]) / 3;
+  ts.push(ts[3] + Math.max(0.9, gap));
+  const t = s.t;
+  if (t <= ts[0]) return 0;
+  for (let k = 0; k < 4; k++) if (t < ts[k + 1]) {
+    let p = (t - ts[k]) / (ts[k + 1] - ts[k]);
+    if (k === 0) p = ease.inQuad(p) * 0.5 + p * 0.5; // start from rest
+    if (k === 3) p = ease.outQuad(p) * 0.5 + p * 0.5; // come to rest at TDC
+    return 180 * (k + p);
+  }
+  return 720;
+}
+
+// === VIDEO ===================================================================
+CV.create({
+  width: 1920, height: 1080, fps: 30,
+  background: T.field,
+  lang: 'en-US',
+  fonts: [F(700, 112), F(600, 54), M(500, 24)],
+  // the score designed for this video: minimal and precise: a dorian marimba ostinato over a four-on-the-floor
+  music: {
+    bpm: 104, seed: 4, key: 'E', mode: 'dorian', progression: [0, 0, 5, 6],
+    layers: [
+      { name: 'pad', inst: 'pad', notes: 'chord', pattern: 'X---', vel: 0.04, cutoff: [600, 1000], attack: 0.5 },
+      { name: 'marimba (sparse)', inst: 'bell', kind: 'marimba', notes: [0, 1, 0, 1, 0, 1, 3, 1], pattern: 'X.x.X.x.X.x.X.x.', gate: 1.4, vel: 0.12, verb: 0.12, from: 0.2, to: 0.5 },
+      { name: 'marimba', inst: 'bell', kind: 'marimba', notes: [0, 2, 1, 2, 0, 2, 1, 2, 0, 2, 1, 2, 3, 2, 1, 2], pattern: 'XxxxXxxxXxxxXxxx', gate: 1.4, vel: 0.12, verb: 0.12, from: 0.5 },
+      { name: 'kick', inst: 'kick', pattern: '9888', vel: 0.6, from: 0.45 },
+      { name: 'bass', inst: 'bass', octave: -1, pattern: '.X.X.X.X', gate: 0.6, vel: 0.24, from: 0.45 },
+      { name: 'clap', inst: 'clap', pattern: '.X.X', vel: 0.18, from: 0.55 },
+      { name: 'offbeat hat', inst: 'hat', pattern: '.X.X.X.X', vel: 0.09, from: 0.55 },
+      { name: 'ticks', inst: 'hat', pattern: 'XX.XXX.XXX.XXX.X', vel: 0.025, from: 0.8 },
+    ],
+    lead: { inst: 'bell', kind: 'kalimba', range: [76, 88], rhythm: 'rhythmic', vel: 0.09, echo: 0.2 },
+  },
+  transition: 'cut',
+  subtitles: {
+    style: { font: F(500, 46), color: T.line, box: 'rgba(6,28,52,0.86)', y: 0.935, radius: 4 },
+  },
+  scenes: [
+    // --- 1. The question. One bar of music lays the construction lines on the beat,
+    //        then the outlines draw while the question is asked.
+    {
+      id: 'title', voiceDelay: 2.3, energy: 0.3, tail: 0.4,
+      sfx: [0, 1, 2, 3].map((i) => ({ at: (s) => s.onBeat(i), type: 'click', gain: 0.6 })),
+      draw(ctx, s) {
+        const { t, W, H } = s;
+        sheet(ctx, W, H);
+        kicker(ctx, s, 'THE QUESTION');
+        const k = [0, 1, 2, 3].map((i) => ease.inOutCubic(clamp((t - s.onBeat(i)) / 0.5)));
+        const te = s.when('engine', 2.8);
+        const at = (a, d) => ease.inOutCubic(clamp((t - te - a) / d));
+        engine(ctx, { k, cut: null, prog: { block: at(0, 0.8), head: at(0.4, 0.8), case: at(0.8, 0.8), top: at(1.2, 0.6) } });
+        ctx.font = F(700, 112);
+        ctx.fillStyle = T.line;
+        ctx.textAlign = 'left';
+        const out = s.out(0.4, ease.exit, 0.05);
+        const o = { sync: s, dur: 0.4, rise: 0.25, exit: out, colorFor: (w) => (w.text.startsWith('MOTION') ? T.signal : null) };
+        fx.wordReveal(ctx, 'HOW DOES', 900, 470, t, o);
+        fx.wordReveal(ctx, 'AN ENGINE TURN', 900, 590, t, o);
+        fx.wordReveal(ctx, 'FUEL INTO MOTION?', 900, 710, t, o);
+      },
+    },
+    // --- 2. Anatomy: the section cut opens on "Inside"; callouts on their words;
+    //        then the stroke and bore are dimensioned (and counted).
+    {
+      id: 'parts', energy: 0.45, tail: 1.5,
+      sfx: [
+        { at: 'inside', type: 'swish' },
+        ...['cylinder', 'piston', 'crankshaft', 'connecting rod'].map((w) => ({ at: w, type: 'tick', gain: 0.7 })),
+        { at: (s) => s.voiceEnd + 0.15 + 0.45 * 0.6, type: 'tick', gain: 0.6 },
+        { at: (s) => s.voiceEnd + 0.55 + 0.45 * 0.6, type: 'tick', gain: 0.6 },
+      ],
+      draw(ctx, s) {
+        const { t, W, H } = s;
+        sheet(ctx, W, H);
+        kicker(ctx, s, 'ANATOMY');
+        const ti = s.when('inside', 0.3);
+        const cut = lerp(455, 820, ease.inOutCubic(clamp((t - ti) / 0.8)));
+        const after = (w, d = 0.9) => clamp((t - s.when(w, 2)) / d);
+        zoomAbout(ctx, EX, 500, lerp(1, 1.04, s.p), () => {
+          engine(ctx, { cut: t < ti ? null : cut, phi: 0, t, constructAlpha: 0.45, noGas: true });
+          callout(ctx, after('cylinder'), '1', 'CYLINDER', BR + WALL, 330, 250);
+          callout(ctx, after('piston'), '2', 'PISTON', 690, 315, 370);
+          callout(ctx, after('connecting rod'), '4', 'CONNECTING ROD', EX + 8, 470, 490);
+          callout(ctx, after('crankshaft'), '3', 'CRANKSHAFT', EX + 96, 760, 640);
+          // dimensions after the line: stroke (with the BDC position in phantom) and bore
+          const d1 = clamp((t - s.voiceEnd - 0.15) / 0.9), d2 = clamp((t - s.voiceEnd - 0.55) / 0.9);
+          if (d1 > 0) {
+            ctx.save();
+            ctx.strokeStyle = T.dim;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([22, 5, 4, 5, 4, 5]); // phantom line: the piston at bottom dead centre
+            ctx.globalAlpha = clamp(d1 * 3);
+            ctx.strokeRect(BL + 2, CROWN_BDC, BR - BL - 4, PH);
+            ctx.restore();
+          }
+          dimension(ctx, d1, CROWN_TDC, CROWN_BDC, 400, 86, 'STROKE', true);
+          dimension(ctx, d2, BL, BR, 96, 86, 'BORE', false);
+        });
+        // footnote: why these numbers
+        ctx.font = M(400, 24);
+        ctx.fillStyle = T.cyan;
+        ctx.textAlign = 'right';
+        ctx.globalAlpha = clamp((t - s.voiceEnd - 1.0) / 0.5);
+        ctx.fillText('86 × 86 MM · 4 CYLINDERS = 1,998 CM³ · ROD RATIO 3.3', 1860, 905);
+        ctx.globalAlpha = 1;
+      },
+    },
+    // --- 3. The cycle: the crank steps through each stroke as it is named --------
+    {
+      id: 'strokes', energy: 0.6, tail: 1.0,
+      sfx: [
+        { at: 'intake', type: 'tick' }, { at: 'compression', type: 'tick' },
+        { at: 'power', type: 'pop' }, { at: 'exhaust', type: 'tick' },
+      ],
+      draw(ctx, s) {
+        const { t, W, H } = s;
+        sheet(ctx, W, H);
+        kicker(ctx, s, 'THE CYCLE');
+        const phi = strokePhi(s);
+        let info;
+        zoomAbout(ctx, EX, 500, lerp(1.04, 1.1, ease.inOutSine(clamp(t / 2.2))), () => {
+          info = engine(ctx, { cut: 2000, phi, t, constructAlpha: 0.35 });
+        });
+        const active = phi > 0 && phi < 720 ? info.stroke : -1;
+        STROKES.forEach((st, i) => {
+          const y = 300 + i * 150;
+          const p = ease.enter(clamp((t - s.when(st.name.toLowerCase(), 1 + i) + 0.05) / 0.45));
+          if (p <= 0) return;
+          const on = i === active, done = active > i || phi >= 720;
+          ctx.globalAlpha = p * (on ? 1 : done ? 0.55 : 0.4);
+          ctx.textAlign = 'left';
+          ctx.font = M(700, 28);
+          ctx.fillStyle = on ? T.signal : T.cyan;
+          ctx.fillText(st.n, 1040, y);
+          ctx.font = F(700, 72);
+          ctx.fillStyle = on && i === 2 ? T.signal : T.line;
+          ctx.fillText(st.name, 1110 + (1 - p) * 30, y + 8);
+          ctx.font = M(400, 24);
+          ctx.fillStyle = T.cyan;
+          ctx.fillText(st.note, 1112, y + 48);
+          // progress of this stroke (half a crank turn)
+          ctx.fillStyle = color.rgba(T.cyan, 0.25);
+          ctx.fillRect(1112, y + 64, 560, 3);
+          ctx.fillStyle = on && i === 2 ? T.signal : T.line;
+          ctx.fillRect(1112, y + 64, 560 * (done ? 1 : on ? info.sp : 0), 3);
+          ctx.globalAlpha = 1;
+        });
+      },
+    },
+    // --- 4. No voice: the engine runs one stroke per beat, the cycle is the bar.
+    //        The piston-travel curve is plotted live, crank angle on the x axis.
+    {
+      id: 'run', narration: false, beats: 8, energy: 0.85,
+      draw(ctx, s) {
+        const { t, W, H } = s;
+        sheet(ctx, W, H);
+        kicker(ctx, s, 'RUNNING');
+        const b0 = s.onBeat(0);
+        const phi = Math.max(0, (180 * (t - b0)) / s.beatLen);
+        let info;
+        zoomAbout(ctx, EX, 500, lerp(1.1, 1.0, ease.inOutSine(clamp(t / 1.6))), () => {
+          info = engine(ctx, { cut: 2000, phi, t, constructAlpha: 0.3 });
+        });
+        // chart: piston travel vs crank angle (1 px per degree)
+        const CX = 1040, CY0 = 300, CY1 = 520, k = (CY1 - CY0) / (2 * R);
+        const ax = ease.inOutCubic(clamp(t / 0.6));
+        const cyc = phi % 720, lap = Math.floor(phi / 720);
+        STROKES.forEach((st, i) => {
+          const x = CX + i * 180;
+          ctx.fillStyle = i === info.stroke ? color.rgba(i === 2 ? T.signal : T.cyan, i === 2 ? 0.22 : 0.12) : 'rgba(0,0,0,0)';
+          ctx.fillRect(x, CY0 - 10, 180, CY1 - CY0 + 20);
+          ctx.font = M(500, 24);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = i === info.stroke ? (i === 2 ? T.signal : T.line) : T.cyan;
+          ctx.globalAlpha = ax;
+          ctx.fillText(st.name, x + 90, CY1 + 72);
+          ctx.globalAlpha = 1;
+        });
+        ctx.strokeStyle = T.dim;
+        ctx.lineWidth = 1.5;
+        draw.drawOn(ctx, [[CX, CY1 + 10], [CX + 720, CY1 + 10]], ax);
+        draw.drawOn(ctx, [[CX, CY0 - 10], [CX, CY1 + 10]], ax);
+        ctx.font = M(400, 24);
+        ctx.fillStyle = T.cyan;
+        ctx.globalAlpha = ax;
+        ctx.textAlign = 'right';
+        ctx.fillText('TDC', CX - 14, CY0 + 8);
+        ctx.fillText('BDC', CX - 14, CY1 + 8);
+        ctx.textAlign = 'center';
+        for (let d = 0; d <= 720; d += 180) ctx.fillText(`${d}°`, CX + d, CY1 + 40);
+        ctx.globalAlpha = 1;
+        const curve = (to, a, col, w) => {
+          const pts = [];
+          for (let d = 0; d <= to; d += 4) pts.push([CX + d, CY0 + travel(d) * k]);
+          pts.push([CX + to, CY0 + travel(to) * k]);
+          if (pts.length < 2) return;
+          ctx.strokeStyle = col; ctx.globalAlpha = a; ctx.lineWidth = w; ctx.lineJoin = 'round';
+          draw.drawOn(ctx, pts, 1);
+          ctx.globalAlpha = 1;
+        };
+        if (lap > 0) curve(720, 0.3, T.line, 2);       // the previous cycle, faint
+        curve(cyc, 1, T.line, 4);
+        // playhead rides the curve
+        ctx.fillStyle = info.stroke === 2 ? T.signal : T.line;
+        ctx.beginPath(); ctx.arc(CX + cyc, CY0 + travel(cyc) * k, 9 + 3 * s.pulse(0.12), 0, Math.PI * 2); ctx.fill();
+        // readout
+        ctx.textAlign = 'left';
+        ctx.font = M(500, 24);
+        ctx.fillStyle = T.cyan;
+        ctx.globalAlpha = ax;
+        ctx.fillText('CRANK ANGLE', CX, 690);
+        ctx.fillText('STROKE', CX + 340, 690);
+        ctx.font = F(700, 96);
+        ctx.fillStyle = T.line;
+        ctx.fillText(`${String(Math.floor(cyc)).padStart(3, '0')}°`, CX, 780);
+        ctx.fillStyle = info.stroke === 2 ? T.signal : T.line;
+        ctx.fillText(STROKES[info.stroke].name, CX + 340, 780);
+        ctx.globalAlpha = 1;
+      },
+    },
+    // --- 5. The result, on a new sheet: two turns, one push --------------------------
+    {
+      id: 'result', energy: 0.5, tail: 3.0,
+      transition: { type: 'wipe', angle: 0, duration: 0.6, ease: ease.swift, lineColor: T.cyan, lineWidth: 4 },
+      // after the line the music carries the number; the sign-off lands two beats later
+      sfx: [{ at: (s) => s.nextBeat(s.voiceEnd), type: 'tick' }, { at: (s) => s.nextBeat(s.voiceEnd) + 2 * s.beatLen, type: 'chime', gain: 0.8 }],
+      draw(ctx, s) {
+        const { t, W, H } = s;
+        sheet(ctx, W, H);
+        kicker(ctx, s, 'THE RESULT');
+        // a two-turn spiral of crank angle; the power stroke is the only orange part
+        const cx = 560, cy = 520;
+        const sp = ease.inOutSine(clamp((t - s.when('two', 0.4)) / 1.7));
+        const at = (d) => { const a = -Math.PI / 2 + rad(d), r = 120 + (d / 720) * 130; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; };
+        const seg = (d0, d1, col, w) => {
+          const pts = [];
+          for (let d = d0; d <= d1; d += 3) pts.push(at(d));
+          ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+          draw.drawOn(ctx, pts, 1);
+        };
+        ctx.save();
+        ctx.strokeStyle = T.cyan;
+        ctx.globalAlpha = 0.45;
+        ctx.lineWidth = 1.3;
+        ctx.setLineDash([26, 6, 4, 6]);
+        draw.drawOn(ctx, [[cx - 300, cy], [cx + 300, cy]], s.at(0.1, 0.6));
+        draw.drawOn(ctx, [[cx, cy - 300], [cx, cy + 300]], s.at(0.1, 0.6));
+        ctx.restore();
+        const reach = sp * 720;
+        if (reach > 1) seg(0, reach, T.line, 4);
+        const pw = ease.inOutCubic(clamp((t - s.when('power', 2) + 0.1) / 0.6));
+        if (reach > 360) seg(360, Math.min(reach, 540), T.signal, 4 + 6 * pw); // thickens on "power"
+        if (reach > 1) {
+          const [hx, hy] = at(reach);
+          ctx.fillStyle = reach > 360 && reach < 540 ? T.signal : T.line;
+          ctx.beginPath(); ctx.arc(hx, hy, 10, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.font = M(500, 24);
+        ctx.textAlign = 'center';
+        [[90, 'IN'], [270, 'COMP'], [450, 'POWER'], [630, 'EXH']].forEach(([d, lab]) => {
+          if (reach < d) return;
+          const a = -Math.PI / 2 + rad(d), r = 120 + (d / 720) * 130 + (d < 360 ? -38 : 38);
+          ctx.fillStyle = d === 450 ? T.signal : T.cyan;
+          ctx.globalAlpha = clamp((reach - d) / 60);
+          ctx.fillText(lab, cx + Math.cos(a) * r, cy + Math.sin(a) * r + 8);
+        });
+        ctx.globalAlpha = 1;
+        ctx.font = F(700, 64);
+        ctx.fillStyle = T.line;
+        ctx.fillText(`${Math.round(reach)}°`, cx, cy + 22);
+        // the statement, word by word with the voice
+        ctx.textAlign = 'left';
+        ctx.font = F(700, 120);
+        ctx.fillStyle = T.line;
+        fx.wordReveal(ctx, '2 CRANK TURNS', 980, 370, t, { sync: s, dur: 0.4, rise: 0.25 });
+        fx.wordReveal(ctx, '1 POWER STROKE', 980, 500, t, { sync: s, dur: 0.4, rise: 0.25, colorFor: (w) => (w.text === 'POWER' || w.text === 'STROKE' || w.text === '1' ? T.signal : null) });
+        // the rate: counted on the first beat after the voice (shown, not said)
+        const tk = s.nextBeat(s.voiceEnd);
+        const q = ease.outQuart(clamp((t - tk + 0.1) / 1.0));
+        if (q > 0) {
+          ctx.globalAlpha = clamp(q * 3);
+          ctx.font = M(500, 24);
+          ctx.fillStyle = T.cyan;
+          ctx.fillText('POWER STROKES PER MINUTE, ONE CYLINDER', 984, 620);
+          ctx.font = F(700, 120);
+          ctx.fillStyle = T.line;
+          ctx.fillText(fx.countUp(q, 0, 1250), 980, 740);
+          ctx.font = M(400, 24);
+          ctx.fillStyle = T.cyan;
+          ctx.fillText('AT 2,500 RPM, HIGHWAY CRUISE: 2,500 ÷ 2', 984, 790);
+          ctx.globalAlpha = 1;
+        }
+        const so = ease.enter(clamp((t - s.nextBeat(s.voiceEnd) - 2 * s.beatLen) / 0.6));
+        ctx.font = M(500, 24);
+        ctx.fillStyle = T.cyan;
+        ctx.globalAlpha = so;
+        ctx.letterSpacing = '3px';
+        ctx.fillText('FOUR-STROKE (OTTO) CYCLE · FIRST BUILT 1876', 984, 880 + (1 - so) * 12);
+        ctx.letterSpacing = '0px';
+        ctx.globalAlpha = 1;
+      },
+    },
+  ],
+  // The sheet border and title block stay put while the drawing changes under them.
+  overlay(ctx, g) {
+    const a = ease.enter(clamp(g.T / 0.8));
+    ctx.save();
+    ctx.strokeStyle = T.cyan;
+    ctx.globalAlpha = 0.55 * a;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(40, 40, g.W - 80, g.H - 80);
+    ctx.globalAlpha = 0.25 * a;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(52, 52, g.W - 104, g.H - 104);
+    // <example>
+    // title block
+    ctx.globalAlpha = 0.8 * a;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(1440, 52, 420, 104);
+    ctx.beginPath(); ctx.moveTo(1440, 108); ctx.lineTo(1860, 108); ctx.stroke();
+    ctx.font = F(600, 34);
+    ctx.fillStyle = T.line;
+    ctx.textAlign = 'left';
+    ctx.fillText('FOUR-STROKE CYCLE', 1458, 94);
+    ctx.font = M(400, 24);
+    ctx.fillStyle = T.cyan;
+    ctx.fillText('SECTION A–A · 1:2 · MM', 1458, 142);
+    // </example>
+    ctx.restore();
+    draw.vignette(ctx, g.W, g.H, 0.3, '#020c18');
+    draw.grain(ctx, g.frame, 0.045);
+  },
+});
+</script>
+</body>
+</html>

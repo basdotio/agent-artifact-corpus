@@ -1,0 +1,92 @@
+{
+  "skill_name": "legible-explainer",
+  "evals": [
+    {
+      "id": 1,
+      "name": "ste-text-tcp-congestion",
+      "prompt": "can you explain how TCP congestion control works? write it in ASD-STE100, maybe 80% of the way there, the full spec reads too stiff for me. I mostly care about slow start, what happens when a packet gets lost, and why CUBIC is the default on linux now",
+      "expected_output": "Tier 1: the answer in chat (saved as answer.md), no HTML page, opening with a short answer to each named topic. Written in about 80% STE: short sentences, approved verb forms, active voice. Covers slow start, congestion avoidance, loss signals (timeout vs triple duplicate ACK), fast retransmit / fast recovery, and why CUBIC replaced Reno-style AIMD on Linux (window growth as a cubic function of time since the last loss, better on high bandwidth-delay paths, default since kernel 2.6.19). Offers the next tier in one line.",
+      "files": [],
+      "assertions": [
+        "Technically accurate: slow start grows cwnd by about one MSS per ACK (doubling each RTT) up to ssthresh; a timeout sets ssthresh to about half and restarts cwnd from a small window; three duplicate ACKs trigger fast retransmit and fast recovery with cwnd about halved; no wrong claims",
+        "Explains why CUBIC is the Linux default: window growth is a cubic function of the time since the last loss, mostly independent of RTT, so it uses high bandwidth-delay paths well and treats flows with different RTTs more fairly; default since about kernel 2.6.19 (2006)",
+        "Reads as about 80% STE: short sentences, active voice, approved verb forms, mostly approved words, and it does not read stiff",
+        "Does not over-build: a prose answer (chat or Markdown), no page, diagram or video that the user did not ask for",
+        "Opens with a short answer to each topic the user named before the detail"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "diagram-oauth-pkce",
+      "prompt": "I keep losing track of the OAuth 2.0 authorization code flow with PKCE while debugging our login (Next.js app, Auth0 is the IdP, then we call our own API with the access token). Draw me a diagram I can keep open on my second monitor.",
+      "expected_output": "Tier 2: one self-contained HTML page with a hand-drawn inline SVG sequence diagram in the drawing-sheet style. Parties: user/browser, Next.js app (client), Auth0 authorization server, own API (resource server). Numbered steps covering code_verifier generation, code_challenge (S256) on /authorize, login and consent, redirect with code (and state), token request with code + code_verifier, Auth0 checks the challenge, tokens returned, API call with the bearer access token and token validation. STE labels and a numbered STE steps list. Passes check_page.",
+      "files": [],
+      "assertions": [
+        "Sequence is correct: the client makes code_verifier, sends code_challenge = BASE64URL(SHA-256(verifier)) with method S256 and state on /authorize; user logs in at Auth0; Auth0 redirects with code and state; the app checks state; the app exchanges code + code_verifier at /oauth/token; Auth0 checks the challenge and returns tokens (access token for the API audience); the API validates the JWT (signature with JWKS, iss, aud, exp)",
+        "Usable as a second-monitor reference: numbered steps, legible text at desktop size, no labels on lines or on each other (judge from the screenshot)",
+        "Specific to the user's stack and debugging: shows where each value lives or the common failure points (state mismatch, redirect URI mismatch, wrong audience, verifier lost between requests)",
+        "Uses the engineering-drawing sheet language (frame, title block, sheet tokens) or an equally clear, consistent visual system",
+        "Diagram text reads at 12 px or more on the desktop screenshot and the tracked values (state, code_challenge, code_verifier, token) are visible without clicking"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "sheet-ste-overview",
+      "prompt": "Make me a one-page overview of ASD-STE100 itself, drawn like an engineering drawing sheet. Something like the attached image (evals/files/example-ste-sheet.png). I want to pin it next to my desk when I write docs.",
+      "expected_output": "Tier 3: one self-contained HTML spec sheet that matches the reference image's visual language (zone frame 1-8 by A-D, lettered panels, title block) with correct STE facts: Issue 9 (2025), 9 sections, 53 rules, about 900 approved words, limits 20 / 25 words, 6 sentences per paragraph, noun clusters of max 3 words, approved verb forms, WARNING vs CAUTION, history 1979 / 1986 / 2004-2005. Prose in STE. Passes check_page and ste_lint. It must not copy the reference image's own errors: APPROXIMATELY is an approved word (ABOUT means only 'concerned with'), TEST and CHECK are approved only as nouns, and Issue 9 uses 'technical nouns' and 'multi-word nouns'.",
+      "files": [
+        "evals/files/example-ste-sheet.png"
+      ],
+      "assertions": [
+        "Visual fidelity to the reference image: zone frame 1-8 by A-D, lettered panels, title block at bottom right, blue approved and red not approved, bracket annotations under an example sentence, limit gauges, a timeline (judge from the desktop screenshot)",
+        "Does not copy the reference image's STE errors: does not call APPROXIMATELY unapproved or replace it with ABOUT, does not show TEST or CHECK as approved verbs, uses Issue 9 terms (technical nouns, multi-word nouns) when it names Issue 9",
+        "Facts are correct on a spot-check of at least 8 facts (limits 20/25/6/3, verb forms, WARNING vs CAUTION, Issue 9 date and counts, history dates)",
+        "Annotations stay readable at desktop and phone width (no labels over text, no clipped panels)",
+        "No large empty area in any panel at 1440 px and short table cells do not wrap onto two lines"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "understand-llm-plan",
+      "prompt": "Claude wrote this migration plan overnight (evals/files/plan.md). I don't have time to read all of it carefully before standup. Help me actually understand what it proposes and what could go wrong before I approve phase 0.",
+      "expected_output": "The skill picks a sheet (tier 3) or another tier with a stated reason. Every fact traces to plan.md: CDC with Debezium into Kafka topic orders.status.v1 (12 partitions, keyed by order_id, 7-day retention), notifier service, rejected outbox and LISTEN/NOTIFY with reasons, at-least-once plus Redis idempotency key (72 h TTL), rollout phases 0-5 with the 10/50/100% flag steps and the 99.9% shadow match, p95 from 4 min 40 s to under 10 s, rollback by flag, cost figures, named risks and both open questions. Its own assessment is separated from the plan's claims and catches at least one real gap the plan does not name (for example: the Redis key is set before the provider call, so a failed send is skipped on retry; the 72 h TTL is shorter than the 7-day Kafka retention, so a replay resends; max_slot_wal_keep_size invalidates the slot and loses events). No invented numbers.",
+      "files": [
+        "evals/files/plan.md"
+      ],
+      "assertions": [
+        "Every claim traces to plan.md; no invented numbers, names or decisions (spot-check numbers against the plan)",
+        "Keeps the plan's own claims visibly separate from the reviewer's assessment",
+        "Finds at least one real gap the plan does not name: the Redis key is set before the provider call so a failed send is skipped on retry; the 72 h TTL is shorter than the 7-day retention so a replay resends; max_slot_wal_keep_size invalidates the slot and loses events; the cron key backport is not in the phase 0 row; open questions are not tied to a gate",
+        "Gives a clear answer on approving phase 0 (with conditions) that the user can use at standup",
+        "Scannable in a few minutes: the reader finds what the plan proposes and the top risks without reading everything",
+        "Opens with a one-sentence verdict on phase 0 and a line the user can say at standup (in chat and on the sheet)"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "video-attention",
+      "prompt": "Create a 3b1b style video explainer on how self-attention works in transformers, about 45 seconds, with narration. I don't have an ElevenLabs key, so find something free that runs locally.",
+      "expected_output": "Tier 4: an MP4 of about 45 s (within 15%) with an audio stream, made with Manim (the skill's engine for a 3Blue1Brown look), voiced by a free local TTS (Kokoro or similar). Narration script in STE (about 100 words) and a scene plan saved next to it, outside the hyperframes project. Content covers queries, keys and values, dot-product scores, softmax weights and the weighted sum. The final message names the voice used.",
+      "files": [],
+      "assertions": [
+        "The voice is free and runs locally (for example Kokoro), with no cloud TTS or paid provider, and the final message names it",
+        "Looks 3Blue1Brown-like on extracted frames: dark background, objects that build up and change, readable text, nothing cut off",
+        "Content is correct: queries, keys and values from learned projections, dot-product scores (scaled by the square root of d_k), softmax weights, and the weighted sum of values",
+        "Narration is complete and matches the scenes (judge from the script, timings and any transcript)",
+        "Looks like 3Blue1Brown on the frames: LaTeX-set math, vectors drawn as arrows, objects that transform, no burned-in captions"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "tier-restraint-mutex",
+      "prompt": "quick q, whats the difference between a mutex and a semaphore? keep it short and STE-ish, I'm reading this on my phone",
+      "expected_output": "Tier 1 only: a short STE answer in chat (saved as answer.md for grading), under about 300 words, no HTML page, no video offer. Correct: a mutex has one owner and only the owner can release it; a semaphore holds a count and any thread can signal it; a binary semaphore is not the same as a mutex (ownership, priority inheritance).",
+      "files": [],
+      "assertions": [
+        "Correct: a mutex has an owner and only the owner unlocks it; a semaphore holds a count and any thread can signal it; a binary semaphore is not the same as a mutex",
+        "Phone-friendly: short, scannable, no page or file the user has to open",
+        "Opens with the bottom line: the first sentence states the difference"
+      ]
+    }
+  ]
+}

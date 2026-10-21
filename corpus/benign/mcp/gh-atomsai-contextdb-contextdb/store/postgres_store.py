@@ -1,0 +1,1335 @@
+"""Postgres implementation of the memory store.
+
+Same schema and visibility rules as :class:`SQLiteStore`. Vectors stay in
+the row (``BYTEA``) and are mirrored into the in-process
+:class:`VectorIndex` — ``pgvector`` is optional later, not required to
+self-host. Graph and audit tables are created through a small SQLite→Postgres
+SQL adapter so existing graph code keeps working.
+
+Install: ``pip install 'pycontextdb[postgres]'``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from datetime import datetime, timezone
+from typing import Any
+
+import numpy as np
+
+from contextdb.core.exceptions import (
+    MemoryNotFoundError,
+    StaleReadError,
+    StorageError,
+)
+from contextdb.core.models import (
+    MemoryConsistencyToken,
+    MemoryItem,
+    MemoryStatus,
+    MemoryType,
+    _detached_memory_copy,
+)
+from contextdb.store.base import BaseStore, like_pattern
+from contextdb.store.pg_sql import split_script, translate_sqlite_sql
+from contextdb.store.sqlite_store import (
+    _BUMP_REVISION_SQL,
+    _BUMP_SCOPED_REVISION_SQL,
+    _READ_REVISION_SQL,
+    _REVISION_KEY,
+    _TRUST_COLUMNS,
+    SCHEMA,
+    _embedding_to_blob,
+    _passes_filters,
+    _row_to_item,
+    scoped_revision_key,
+)
+from contextdb.store.vector_index import VectorIndex, get_vector_index
+
+_PG_SCHEMA = SCHEMA.replace("BLOB", "BYTEA")
+
+# Postgres' catalogs are not race-safe even for IF NOT EXISTS DDL: two
+# workers initializing one database concurrently can collide on the catalog
+# unique indexes (23505) or duplicate table/object/column (42P07/42710/
+# 42701). The object exists afterwards either way — which is the intent.
+_SCHEMA_RACE_SQLSTATES = frozenset({"23505", "42P07", "42710", "42701"})
+
+
+async def _exec_schema_statement(conn: Any, stmt: str) -> None:
+    try:
+        await conn.execute(stmt)
+    except Exception as exc:  # noqa: BLE001
+        if getattr(exc, "sqlstate", None) not in _SCHEMA_RACE_SQLSTATES:
+            raise
+
+
+class _PgResult:
+    def __init__(self, rows: list[Mapping[str, Any]], rowcount: int = 0) -> None:
+        self._rows = rows
+        self.rowcount = rowcount
+
+    async def fetchone(self) -> Mapping[str, Any] | None:
+        return self._rows[0] if self._rows else None
+
+    async def fetchall(self) -> list[Mapping[str, Any]]:
+        return list(self._rows)
+
+
+class _PgAdapter:
+    """Connection-shaped object the graph and audit modules already call."""
+
+    def __init__(self, pool: Any) -> None:
+        self._pool = pool
+        self._bound_connection: ContextVar[Any | None] = ContextVar(
+            f"contextdb_pg_connection_{id(self)}",
+            default=None,
+        )
+
+    def bind(self, connection: Any) -> Any:
+        return self._bound_connection.set(connection)
+
+    def reset(self, token: Any) -> None:
+        self._bound_connection.reset(token)
+
+    @property
+    def bound_connection(self) -> Any | None:
+        return self._bound_connection.get()
+
+    async def _execute(
+        self,
+        conn: Any,
+        translated: str,
+        params: tuple[Any, ...] | list[Any],
+    ) -> _PgResult:
+        stripped = translated.lstrip().upper()
+        if stripped.startswith("SELECT") or "RETURNING" in stripped:
+            rows = await conn.fetch(translated, *params)
+            return _PgResult([dict(row) for row in rows], rowcount=len(rows))
+        status = await conn.execute(translated, *params)
+        count = 0
+        if isinstance(status, str) and status.split()[-1].isdigit():
+            count = int(status.split()[-1])
+        return _PgResult([], rowcount=count)
+
+    async def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> _PgResult:
+        translated = translate_sqlite_sql(sql)
+        bound = self._bound_connection.get()
+        if bound is not None:
+            return await self._execute(bound, translated, params)
+        async with self._pool.acquire() as conn:
+            return await self._execute(conn, translated, params)
+
+    async def executescript(self, script: str) -> None:
+        bound = self._bound_connection.get()
+        if bound is not None:
+            for stmt in split_script(script):
+                await _exec_schema_statement(bound, translate_sqlite_sql(stmt))
+            return
+        async with self._pool.acquire() as conn:
+            for stmt in split_script(script):
+                await _exec_schema_statement(conn, translate_sqlite_sql(stmt))
+
+    async def commit(self) -> None:
+        return None
+
+
+class _PgMutation:
+    """Bind one logical mutation to one Postgres transaction."""
+
+    def __init__(self, adapter: _PgAdapter) -> None:
+        self._adapter = adapter
+        self._pool = adapter._pool
+        self._conn: Any = None
+        self._tx: Any = None
+        self._binding: Any = None
+        self._nested = False
+
+    async def __aenter__(self) -> _PgMutation:
+        if self._adapter.bound_connection is not None:
+            self._nested = True
+            return self
+        self._conn = await self._pool.acquire()
+        try:
+            self._tx = self._conn.transaction()
+            await self._tx.start()
+            self._binding = self._adapter.bind(self._conn)
+        except BaseException:
+            await self._pool.release(self._conn)
+            self._conn = None
+            raise
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._nested:
+            return
+        try:
+            if exc_type is None:
+                await self._tx.commit()
+            else:
+                await self._tx.rollback()
+        finally:
+            if self._binding is not None:
+                self._adapter.reset(self._binding)
+                self._binding = None
+            await self._pool.release(self._conn)
+            self._conn = None
+
+
+class _PgAdvisoryLock:
+    """Cross-process mutex via a transaction-scoped Postgres advisory lock.
+
+    ``pg_advisory_xact_lock`` serializes holders of the same key across
+    every connection and process on the database; the transaction ends
+    the hold. The adapter binds the critical section to the same connection,
+    making read-modify-write atomic and ensuring a lock holder never needs a
+    second pool connection while other scoped stores wait on the same lock.
+    The in-process ``guard`` additionally limits waiters per store.
+    """
+
+    def __init__(self, adapter: _PgAdapter, key: str, guard: asyncio.Lock) -> None:
+        self._adapter = adapter
+        self._pool = adapter._pool
+        self._key = key
+        self._guard = guard
+        self._conn: Any = None
+        self._tx: Any = None
+        self._binding: Any = None
+        self._nested = False
+
+    async def __aenter__(self) -> _PgAdvisoryLock:
+        await self._guard.acquire()
+        bound = self._adapter.bound_connection
+        if bound is not None:
+            try:
+                await bound.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    self._key,
+                )
+            except BaseException:
+                self._guard.release()
+                raise
+            self._conn = bound
+            self._nested = True
+            return self
+        try:
+            self._conn = await self._pool.acquire()
+            self._tx = self._conn.transaction()
+            await self._tx.start()
+            await self._conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))", self._key
+            )
+            self._binding = self._adapter.bind(self._conn)
+        except BaseException:
+            try:
+                if self._tx is not None:
+                    await self._tx.rollback()
+            finally:
+                try:
+                    if self._conn is not None:
+                        await self._pool.release(self._conn)
+                        self._conn = None
+                finally:
+                    self._guard.release()
+            raise
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._nested:
+            self._guard.release()
+            return
+        try:
+            if exc_type is None:
+                await self._tx.commit()
+            else:
+                await self._tx.rollback()
+        finally:
+            if self._binding is not None:
+                self._adapter.reset(self._binding)
+                self._binding = None
+            try:
+                await self._pool.release(self._conn)
+                self._conn = None
+            finally:
+                self._guard.release()
+
+
+class PostgresStore(BaseStore):
+    """Async Postgres store with the same scope rules as SQLite."""
+
+    def __init__(
+        self,
+        storage_url: str,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        agent_id: str | None = None,
+        vector_index: VectorIndex | None = None,
+        embedding_dim: int = 1536,
+        pool: Any | None = None,
+        embedding_model_id: str | None = None,
+    ) -> None:
+        self._url = storage_url
+        self._user_id = user_id
+        self._tenant_id = tenant_id
+        self._agent_id = agent_id
+        self._revision_key = scoped_revision_key(tenant_id, agent_id)
+        self._pool: Any = pool
+        self._owns_pool = pool is None
+        self._initialized = False
+        self._adapter: _PgAdapter | None = None
+        self._index: VectorIndex | None = vector_index
+        self._index_items: dict[str, MemoryItem] = {}
+        self._index_ids_by_user: dict[str | None, set[str]] = {}
+        self._index_ids_by_entity: dict[str, dict[str, None]] = {}
+        self._index_ids_by_user_entity: dict[
+            tuple[str | None, str],
+            dict[str, None],
+        ] = {}
+        self._embedding_dim = embedding_dim
+        self._embedding_model_id = embedding_model_id
+        self._index_loaded = False
+        self._loaded_revision: int | None = None
+        self._write_lock = asyncio.Lock()
+        # In-process gates for the cross-process advisory locks (see
+        # _PgAdvisoryLock for why the two layers are both needed). One gate
+        # per lock class — not per key — so a process holds at most one
+        # slot advisory connection and one audit advisory connection;
+        # per-key gates could hold one connection per distinct key and
+        # starve the pool.
+        self._slot_advisory_gate = asyncio.Lock()
+        self._audit_guard = asyncio.Lock()
+
+    async def initialize(self) -> None:
+        if self._initialized:
+            return
+        try:
+            import asyncpg
+        except ImportError as exc:  # pragma: no cover - optional extra
+            raise StorageError(
+                "asyncpg is not installed. `pip install 'pycontextdb[postgres]'`."
+            ) from exc
+        if self._pool is None:
+            self._pool = await asyncpg.create_pool(
+                self._url,
+                min_size=1,
+                max_size=10,
+            )
+        self._adapter = _PgAdapter(self._pool)
+        async with self._pool.acquire() as conn:
+            for stmt in split_script(_PG_SCHEMA):
+                await _exec_schema_statement(conn, stmt)
+            cols = {
+                row["column_name"]
+                for row in await conn.fetch(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'memories'"
+                )
+            }
+            for column, ddl in _TRUST_COLUMNS:
+                if column not in cols:
+                    await _exec_schema_statement(
+                        conn,
+                        f"ALTER TABLE memories ADD COLUMN IF NOT EXISTS {column} {ddl}",
+                    )
+            if "user_id" not in cols:
+                await _exec_schema_statement(
+                    conn, "ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT"
+                )
+            if self._embedding_model_id is not None:
+                await conn.execute(
+                    "UPDATE memories SET embedding_model_id = $1 "
+                    "WHERE embedding_model_id IS NULL "
+                    "AND embedding_dim = $2",
+                    self._embedding_model_id,
+                    self._embedding_dim,
+                )
+        self._initialized = True
+
+    def _require_conn(self) -> _PgAdapter:
+        if self._adapter is None:
+            raise StorageError("PostgresStore is not initialized. Call initialize() first.")
+        return self._adapter
+
+    @asynccontextmanager
+    async def mutation(self) -> AsyncIterator[None]:
+        async with _PgMutation(self._require_conn()):
+            yield
+
+    def _resolve_scope(self, user_id: str | None) -> str | None:
+        if self._user_id is not None:
+            return self._user_id
+        return user_id
+
+    def _scope_allows(self, row: Mapping[str, Any]) -> bool:
+        return (
+            (self._user_id is None or row["user_id"] == self._user_id)
+            and (self._tenant_id is None or row["tenant_id"] == self._tenant_id)
+            and (self._agent_id is None or row["agent_id"] == self._agent_id)
+        )
+
+    def _item_scope_allows(
+        self,
+        item: MemoryItem,
+        user_id: str | None,
+    ) -> bool:
+        scope = self._resolve_scope(user_id)
+        return (
+            (scope is None or item.user_id == scope)
+            and (
+                self._tenant_id is None
+                or item.tenant_id == self._tenant_id
+            )
+            and (
+                self._agent_id is None
+                or item.agent_id == self._agent_id
+            )
+        )
+
+    def _cache_index_item(self, item: MemoryItem) -> None:
+        if item.id in self._index_items:
+            self._discard_index_item(item.id)
+        self._index_items[item.id] = item
+        self._index_ids_by_user.setdefault(item.user_id, set()).add(item.id)
+        if item.entity_key is not None:
+            self._index_ids_by_entity.setdefault(item.entity_key, {})[item.id] = None
+            self._index_ids_by_user_entity.setdefault(
+                (item.user_id, item.entity_key),
+                {},
+            )[item.id] = None
+
+    def _discard_index_item(self, memory_id: str) -> None:
+        item = self._index_items.pop(memory_id, None)
+        if item is None:
+            return
+        user_ids = self._index_ids_by_user.get(item.user_id)
+        if user_ids is not None:
+            user_ids.discard(memory_id)
+            if not user_ids:
+                self._index_ids_by_user.pop(item.user_id, None)
+        if item.entity_key is not None:
+            entity_ids = self._index_ids_by_entity.get(item.entity_key)
+            if entity_ids is not None:
+                entity_ids.pop(memory_id, None)
+                if not entity_ids:
+                    self._index_ids_by_entity.pop(item.entity_key, None)
+            scoped_entity_ids = self._index_ids_by_user_entity.get(
+                (item.user_id, item.entity_key)
+            )
+            if scoped_entity_ids is not None:
+                scoped_entity_ids.pop(memory_id, None)
+                if not scoped_entity_ids:
+                    self._index_ids_by_user_entity.pop(
+                        (item.user_id, item.entity_key),
+                        None,
+                    )
+
+    def _clear_index_items(self) -> None:
+        self._index_items.clear()
+        self._index_ids_by_user.clear()
+        self._index_ids_by_entity.clear()
+        self._index_ids_by_user_entity.clear()
+
+    def _scope_sql(self, user_id: str | None = None) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        scope = self._resolve_scope(user_id)
+        if scope is not None:
+            clauses.append("user_id = ?")
+            params.append(scope)
+        if self._tenant_id is not None:
+            clauses.append("tenant_id = ?")
+            params.append(self._tenant_id)
+        if self._agent_id is not None:
+            clauses.append("agent_id = ?")
+            params.append(self._agent_id)
+        return " AND ".join(clauses), params
+
+    async def slot_lock(
+        self,
+        entity_key: str,
+        attribute_key: str,
+        user_id: str | None = None,
+    ) -> _PgAdvisoryLock:
+        """Cross-process slot mutex: in-process gate + advisory xact lock.
+
+        Two workers writing the same (user, tenant, entity, attribute)
+        slot from different processes serialize on the advisory key, so
+        read-slot-then-write in the trust engine cannot interleave.
+        """
+        scope = self._resolve_scope(user_id)
+        key = "|".join((scope or "", self._tenant_id or "", entity_key, attribute_key))
+        return _PgAdvisoryLock(
+            self._require_conn(),
+            f"contextdb-slot:{key}",
+            self._slot_advisory_gate,
+        )
+
+    def audit_lock(self) -> _PgAdvisoryLock:
+        """Cross-process serialization for hash-chain appends."""
+        return _PgAdvisoryLock(
+            self._require_conn(),
+            "contextdb-audit-chain",
+            self._audit_guard,
+        )
+
+    async def _fetch(
+        self, sql: str, params: list[Any] | tuple[Any, ...] = ()
+    ) -> list[dict[str, Any]]:
+        result = await self._require_conn().execute(sql, list(params))
+        return [dict(row) for row in await result.fetchall()]
+
+    async def _execute(self, sql: str, params: list[Any] | tuple[Any, ...] = ()) -> int:
+        result = await self._require_conn().execute(sql, list(params))
+        return int(result.rowcount)
+
+    async def _read_revision(self) -> int:
+        rows = await self._fetch(
+            _READ_REVISION_SQL,
+            (self._revision_key,),
+        )
+        return int(rows[0]["value"]) if rows else 0
+
+    async def _bump_revision(self) -> int:
+        """Atomically increment the global store revision and return it.
+
+        Called inside the write lock alongside the mutation, so a revision
+        the process-local index has not seen always means "someone wrote".
+        """
+        if self._revision_key != _REVISION_KEY:
+            rows = await self._fetch(
+                _BUMP_SCOPED_REVISION_SQL,
+                (self._revision_key, _REVISION_KEY),
+            )
+            row = next(
+                (
+                    candidate
+                    for candidate in rows
+                    if candidate["key"] == self._revision_key
+                ),
+                None,
+            )
+        else:
+            rows = await self._fetch(
+                _BUMP_REVISION_SQL,
+                (self._revision_key,),
+            )
+            row = rows[0] if rows else None
+        assert row is not None
+        return int(row["value"])
+
+    async def consistency_token(self) -> MemoryConsistencyToken:
+        adapter = self._require_conn()
+        rows = await adapter.execute(
+            """
+            SELECT
+                COALESCE((
+                    SELECT CAST(value AS BIGINT)
+                    FROM contextdb_meta
+                    WHERE key = ?
+                ), 0) AS memory_version,
+                CASE
+                    WHEN pg_is_in_recovery()
+                    THEN pg_last_wal_replay_lsn()::text
+                    ELSE pg_current_wal_lsn()::text
+                END AS wal_lsn
+            """,
+            (self._revision_key,),
+        )
+        row = await rows.fetchone()
+        assert row is not None
+        return MemoryConsistencyToken(
+            memory_version=int(row["memory_version"]),
+            primary_wal_lsn=(
+                str(row["wal_lsn"])
+                if row["wal_lsn"] is not None
+                else None
+            ),
+        )
+
+    async def require_consistency(
+        self,
+        *,
+        min_memory_version: int | None = None,
+        min_wal_lsn: str | None = None,
+    ) -> MemoryConsistencyToken:
+        adapter = self._require_conn()
+        wal_lsn_value = _wal_lsn_value(min_wal_lsn)
+        rows = await adapter.execute(
+            """
+            SELECT
+                COALESCE((
+                    SELECT CAST(value AS BIGINT)
+                    FROM contextdb_meta
+                    WHERE key = ?
+                ), 0) AS memory_version,
+                CASE
+                    WHEN pg_is_in_recovery()
+                    THEN pg_last_wal_replay_lsn()::text
+                    ELSE pg_current_wal_lsn()::text
+                END AS wal_lsn,
+                CASE
+                    WHEN CAST(? AS TEXT) IS NULL THEN TRUE
+                    WHEN pg_is_in_recovery()
+                    THEN pg_last_wal_replay_lsn() >= CAST(? AS pg_lsn)
+                    ELSE pg_current_wal_lsn() >= CAST(? AS pg_lsn)
+                END AS wal_ready
+            """,
+            (
+                self._revision_key,
+                min_wal_lsn,
+                wal_lsn_value,
+                wal_lsn_value,
+            ),
+        )
+        row = await rows.fetchone()
+        assert row is not None
+        current_version = int(row["memory_version"])
+        current_lsn = (
+            str(row["wal_lsn"]) if row["wal_lsn"] is not None else None
+        )
+        version_ready = (
+            min_memory_version is None
+            or current_version >= min_memory_version
+        )
+        if not version_ready or not bool(row["wal_ready"]):
+            raise StaleReadError(
+                required_version=min_memory_version,
+                current_version=current_version,
+                required_wal_lsn=min_wal_lsn,
+                current_wal_lsn=current_lsn,
+            )
+        return MemoryConsistencyToken(
+            memory_version=current_version,
+            primary_wal_lsn=current_lsn,
+        )
+
+    async def _ensure_index(self) -> VectorIndex:
+        if self._index is None:
+            self._index = get_vector_index(self._embedding_dim)
+        revision = await self._read_revision()
+        if self._index_loaded and self._loaded_revision == revision:
+            return self._index
+        async with self._write_lock:
+            # Re-check under the lock: a writer may have synced meanwhile.
+            revision = await self._read_revision()
+            if self._index_loaded and self._loaded_revision == revision:
+                return self._index
+            await self._rebuild_index(revision)
+        return self._index
+
+    async def _rebuild_index(self, revision: int) -> None:
+        """Reload the process-local index from the authoritative rows.
+
+        Caller must hold ``_write_lock``. The snapshot reflects every
+        committed write up to and including ``revision`` — including
+        writes from other processes sharing this database.
+        """
+        assert self._index is not None
+        self._index.remove(self._index.ids())
+        self._clear_index_items()
+        scope_sql, scope_params = self._scope_sql()
+        sql = (
+            "SELECT * FROM memories "
+            "WHERE embedding IS NOT NULL AND status = 'ACTIVE' "
+            "AND embedding_dim = ?"
+        )
+        params: list[Any] = [self._embedding_dim]
+        if self._embedding_model_id is not None:
+            sql += " AND embedding_model_id = ?"
+            params.append(self._embedding_model_id)
+        if scope_sql:
+            sql += f" AND {scope_sql}"
+            params.extend(scope_params)
+        rows = await self._fetch(
+            sql,
+            params,
+        )
+        if rows:
+            items = [
+                _row_to_item(_normalize_row(row))
+                for row in rows
+            ]
+            ids = [item.id for item in items]
+            vectors = np.stack(
+                [
+                    np.asarray(item.embedding, dtype=np.float32)
+                    for item in items
+                ],
+                axis=0,
+            )
+            self._index.add(ids, vectors)
+            for item in items:
+                self._cache_index_item(item)
+        self._index_loaded = True
+        self._loaded_revision = revision
+
+    def _sync_index_after_write(
+        self,
+        revision: int,
+        delta: Callable[[VectorIndex], None] | None = None,
+    ) -> None:
+        """Reconcile the process-local index with a just-committed write.
+
+        Caller must hold ``_write_lock``; the write must already have
+        bumped the store revision to ``revision``. A warm index that was
+        coherent at ``revision - 1`` takes the incremental ``delta``.
+        Anything else — a cold index, a bulk mutation with no cheap delta
+        (``delta=None``), or an interleaved write from another process —
+        invalidates the snapshot so the next read rebuilds from the
+        authoritative rows (which include this write).
+        """
+        if self._index is None:
+            self._index = get_vector_index(self._embedding_dim)
+        if not self._index_loaded:
+            return
+        if delta is not None and self._loaded_revision == revision - 1:
+            delta(self._index)
+            self._loaded_revision = revision
+            return
+        self._index_loaded = False
+        self._loaded_revision = None
+        self._clear_index_items()
+
+    async def add(self, item: MemoryItem) -> MemoryItem:
+        async with self.mutation():
+            return await self._add_transactional(item)
+
+    async def _add_transactional(
+        self,
+        item: MemoryItem,
+    ) -> MemoryItem:
+        uid = item.user_id or self._user_id
+        if self._user_id is not None and uid is not None and uid != self._user_id:
+            raise StorageError("cannot write another user's memory into a scoped store")
+        item.user_id = uid
+        if item.embedding is not None and self._embedding_model_id is not None:
+            if (
+                item.embedding_model_id is not None
+                and item.embedding_model_id != self._embedding_model_id
+            ):
+                raise StorageError("memory embedding model does not match store")
+            item.embedding_model_id = self._embedding_model_id
+        blob, dim = _embedding_to_blob(item.embedding)
+        async with self._write_lock:
+            await self._execute(
+                """
+                INSERT INTO memories (
+                    id, content, embedding, embedding_dim, memory_type, source,
+                    metadata, user_id, event_time, ingestion_time, pii_annotations,
+                    retention_policy, created_at, updated_at, access_count, last_accessed,
+                    confidence, status, entity_mentions, tags,
+                    epistemic_source, corroboration_count, action_relevant,
+                    entity_key, attribute_key, valid_from, valid_until,
+                    superseded_by, pending_consolidation, injection_suspect,
+                    corroborated_by, confirmed, confirmed_at, write_generation,
+                    slot_class, slot_value, negated, tenant_id, agent_id,
+                    session_id, pii_shadow, contested, embedding_model_id
+                ) VALUES (
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                    ?,?,?
+                )
+                """,
+                (
+                    item.id,
+                    item.content,
+                    blob,
+                    dim,
+                    item.memory_type.value,
+                    item.source,
+                    _json(item.metadata),
+                    uid,
+                    _iso(item.event_time),
+                    item.ingestion_time.isoformat(),
+                    _json([a.model_dump(mode="json") for a in item.pii_annotations]),
+                    item.retention_policy.model_dump_json() if item.retention_policy else None,
+                    item.created_at.isoformat(),
+                    item.updated_at.isoformat(),
+                    item.access_count,
+                    _iso(item.last_accessed),
+                    item.confidence,
+                    item.status.value,
+                    _json(item.entity_mentions),
+                    _json(item.tags),
+                    item.epistemic_source,
+                    item.corroboration_count,
+                    int(item.action_relevant),
+                    item.entity_key,
+                    item.attribute_key,
+                    _iso(item.valid_from),
+                    _iso(item.valid_until),
+                    item.superseded_by,
+                    int(item.pending_consolidation),
+                    int(item.injection_suspect),
+                    _json(item.corroborated_by),
+                    int(item.confirmed),
+                    _iso(item.confirmed_at),
+                    item.write_generation,
+                    item.slot_class,
+                    item.slot_value,
+                    int(item.negated),
+                    item.tenant_id or self._tenant_id,
+                    item.agent_id or self._agent_id,
+                    item.session_id,
+                    item.pii_shadow,
+                    int(item.contested),
+                    item.embedding_model_id,
+                ),
+            )
+            revision = await self._bump_revision()
+            if item.embedding is not None:
+                embedding = item.embedding
+
+                def _delta(index: VectorIndex) -> None:
+                    index.add([item.id], np.asarray([embedding], dtype=np.float32))
+                    self._cache_index_item(item.model_copy(deep=True))
+
+                self._sync_index_after_write(revision, _delta)
+            else:
+                self._sync_index_after_write(revision)
+        return item
+
+    async def get(self, memory_id: str) -> MemoryItem | None:
+        rows = await self._fetch("SELECT * FROM memories WHERE id = ?", (memory_id,))
+        if not rows or not self._scope_allows(rows[0]):
+            return None
+        item = _row_to_item(_normalize_row(rows[0]))
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        await self._execute(
+            "UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?",
+            (now_iso, memory_id),
+        )
+        return item
+
+    async def get_raw(self, memory_id: str) -> MemoryItem | None:
+        rows = await self._fetch("SELECT * FROM memories WHERE id = ?", (memory_id,))
+        if not rows or not self._scope_allows(rows[0]):
+            return None
+        return _row_to_item(_normalize_row(rows[0]))
+
+    async def update(self, memory_id: str, **kwargs: object) -> MemoryItem:
+        async with self.mutation():
+            return await self._update_transactional(
+                memory_id,
+                **kwargs,
+            )
+
+    async def _update_transactional(
+        self,
+        memory_id: str,
+        **kwargs: object,
+    ) -> MemoryItem:
+        current = await self.get_raw(memory_id)
+        if current is None:
+            raise MemoryNotFoundError(memory_id)
+        if "embedding" in kwargs and self._embedding_model_id is not None:
+            kwargs["embedding_model_id"] = self._embedding_model_id
+        sets: list[str] = []
+        params: list[Any] = []
+        allowed = {
+            "content",
+            "embedding",
+            "embedding_model_id",
+            "metadata",
+            "status",
+            "source",
+            "confidence",
+            "pii_annotations",
+            "entity_mentions",
+            "tags",
+            "event_time",
+            "memory_type",
+            "access_count",
+            "last_accessed",
+            "epistemic_source",
+            "corroboration_count",
+            "action_relevant",
+            "entity_key",
+            "attribute_key",
+            "valid_from",
+            "valid_until",
+            "superseded_by",
+            "pending_consolidation",
+            "injection_suspect",
+            "corroborated_by",
+            "confirmed",
+            "confirmed_at",
+            "write_generation",
+            "slot_class",
+            "slot_value",
+            "negated",
+            "tenant_id",
+            "agent_id",
+            "session_id",
+            "pii_shadow",
+            "contested",
+        }
+        unknown = set(kwargs) - allowed
+        if unknown:
+            raise ValueError(f"Unknown update fields: {unknown}")
+        for k, v in kwargs.items():
+            if k == "embedding":
+                blob, dim = _embedding_to_blob(v)  # type: ignore[arg-type]
+                sets.append("embedding = ?")
+                sets.append("embedding_dim = ?")
+                params.extend([blob, dim])
+            elif k in {"metadata", "entity_mentions", "tags", "corroborated_by"}:
+                sets.append(f"{k} = ?")
+                params.append(_json(v))
+            elif k == "pii_annotations":
+                assert isinstance(v, list)
+                sets.append("pii_annotations = ?")
+                params.append(_json([a.model_dump(mode="json") for a in v]))
+            elif k == "memory_type":
+                sets.append("memory_type = ?")
+                params.append(v.value if isinstance(v, MemoryType) else str(v))
+            elif k == "status":
+                sets.append("status = ?")
+                params.append(v.value if isinstance(v, MemoryStatus) else str(v))
+            elif k in {"event_time", "last_accessed", "valid_from", "valid_until", "confirmed_at"}:
+                sets.append(f"{k} = ?")
+                params.append(v.isoformat() if isinstance(v, datetime) else v)
+            elif k in {
+                "action_relevant",
+                "pending_consolidation",
+                "injection_suspect",
+                "confirmed",
+                "negated",
+                "contested",
+            }:
+                sets.append(f"{k} = ?")
+                params.append(int(bool(v)))
+            else:
+                sets.append(f"{k} = ?")
+                params.append(v)
+        sets.append("updated_at = ?")
+        params.append(datetime.now(tz=timezone.utc).isoformat())
+        params.append(memory_id)
+        async with self._write_lock:
+            await self._execute(
+                f"UPDATE memories SET {', '.join(sets)} WHERE id = ?", params
+            )
+            revision = await self._bump_revision()
+            if "embedding" in kwargs:
+                new_embedding = kwargs["embedding"]
+                updated_item = current.model_copy(
+                    update=kwargs,
+                    deep=True,
+                )
+
+                def _delta(index: VectorIndex) -> None:
+                    index.remove([memory_id])
+                    self._discard_index_item(memory_id)
+                    if (
+                        new_embedding is not None
+                        and updated_item.status == MemoryStatus.ACTIVE
+                    ):
+                        index.add(
+                            [memory_id],
+                            np.asarray([new_embedding], dtype=np.float32),
+                        )
+                        self._cache_index_item(updated_item)
+
+                self._sync_index_after_write(revision, _delta)
+            else:
+                self._sync_index_after_write(revision)
+        refreshed = await self.get_raw(memory_id)
+        assert refreshed is not None
+        return refreshed
+
+    async def delete(self, memory_id: str, hard: bool = False) -> bool:
+        async with self.mutation():
+            return await self._delete_transactional(
+                memory_id,
+                hard=hard,
+            )
+
+    async def _delete_transactional(
+        self,
+        memory_id: str,
+        *,
+        hard: bool,
+    ) -> bool:
+        rows = await self._fetch(
+            "SELECT user_id, tenant_id, agent_id FROM memories WHERE id = ?",
+            (memory_id,),
+        )
+        if not rows or not self._scope_allows(rows[0]):
+            return False
+        async with self._write_lock:
+            if hard:
+                await self._execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            else:
+                await self._execute(
+                    "UPDATE memories SET status = ?, updated_at = ? WHERE id = ?",
+                    (
+                        MemoryStatus.DELETED.value,
+                        datetime.now(tz=timezone.utc).isoformat(),
+                        memory_id,
+                    ),
+                )
+            revision = await self._bump_revision()
+
+            def _delta(index: VectorIndex) -> None:
+                if hard:
+                    index.purge([memory_id])
+                else:
+                    index.remove([memory_id])
+                self._discard_index_item(memory_id)
+
+            self._sync_index_after_write(revision, _delta)
+        return True
+
+    async def search_by_embedding(
+        self,
+        embedding: list[float],
+        top_k: int = 10,
+        filters: dict[str, object] | None = None,
+        user_id: str | None = None,
+        *,
+        copy_items: bool = True,
+    ) -> list[MemoryItem]:
+        index = await self._ensure_index()
+        query = np.asarray(embedding, dtype=np.float32)
+        # The revision-gated cache was loaded from this store's fixed
+        # tenant/project scope. Apply the per-call user partition in memory
+        # before ranking so foreign users never compete for top-k.
+        scope = self._resolve_scope(user_id)
+        scoped_ids = (
+            None if scope is None else self._index_ids_by_user.get(scope, set())
+        )
+        if scoped_ids is not None and not scoped_ids:
+            return []
+        as_of_filter = (
+            filters.get("as_of")
+            if filters and isinstance(filters.get("as_of"), datetime)
+            else None
+        )
+        if as_of_filter is not None:
+            pool_ids = scoped_ids if scoped_ids is not None else self._index_items.keys()
+            candidate_ids = {
+                mid
+                for mid in pool_ids
+                if (it := self._index_items.get(mid)) is not None
+                and it.is_valid_at(as_of_filter)
+            }
+            if not candidate_ids:
+                return []
+        else:
+            candidate_ids = (
+                None
+                if scoped_ids is None or len(scoped_ids) == len(self._index_items)
+                else scoped_ids
+            )
+        # Fetch extra only to allow for post-filter culling.
+        raw = index.search(
+            query,
+            top_k=top_k * 3 if filters else top_k,
+            include_ids=candidate_ids,
+        )
+        if not raw:
+            return []
+        results: list[MemoryItem] = []
+        for mid, _ in raw:
+            item = self._index_items.get(mid)
+            if item is None or item.status != MemoryStatus.ACTIVE:
+                continue
+            if filters and not _passes_filters(item, filters):
+                continue
+            results.append(_detached_memory_copy(item) if copy_items else item)
+            if len(results) >= top_k:
+                break
+        return results
+
+    async def list_memories(
+        self,
+        user_id: str | None = None,
+        memory_type: MemoryType | None = None,
+        status: MemoryStatus | None = MemoryStatus.ACTIVE,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[MemoryItem]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status.value)
+        scope_sql, scope_params = self._scope_sql(user_id)
+        if scope_sql:
+            clauses.append(scope_sql)
+            params.extend(scope_params)
+        if memory_type is not None:
+            clauses.append("memory_type = ?")
+            params.append(memory_type.value)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.extend([limit, offset])
+        rows = await self._fetch(
+            f"SELECT * FROM memories {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params,
+        )
+        return [_row_to_item(_normalize_row(row)) for row in rows]
+
+    async def search_text(
+        self,
+        token: str,
+        user_id: str | None = None,
+        limit: int = 20,
+    ) -> list[MemoryItem]:
+        clauses = ["status = ?", "LOWER(content) LIKE ? ESCAPE '!'"]
+        params: list[Any] = [MemoryStatus.ACTIVE.value, like_pattern(token)]
+        scope_sql, scope_params = self._scope_sql(user_id)
+        if scope_sql:
+            clauses.append(scope_sql)
+            params.extend(scope_params)
+        params.append(limit)
+        sql = (
+            f"SELECT * FROM memories WHERE {' AND '.join(clauses)} "
+            "ORDER BY created_at DESC LIMIT ?"
+        )
+        rows = await self._fetch(sql, params)
+        return [_row_to_item(_normalize_row(row)) for row in rows]
+
+    async def list_by_slot(
+        self,
+        entity_key: str,
+        attribute_key: str,
+        status: MemoryStatus | None = MemoryStatus.ACTIVE,
+        user_id: str | None = None,
+    ) -> list[MemoryItem]:
+        clauses = ["entity_key = ?", "attribute_key = ?"]
+        params: list[Any] = [entity_key, attribute_key]
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status.value)
+        scope_sql, scope_params = self._scope_sql(user_id)
+        if scope_sql:
+            clauses.append(scope_sql)
+            params.extend(scope_params)
+        rows = await self._fetch(
+            f"SELECT * FROM memories WHERE {' AND '.join(clauses)}", params
+        )
+        return [_row_to_item(_normalize_row(row)) for row in rows]
+
+    async def list_by_entity(
+        self,
+        entity_key: str,
+        status: MemoryStatus | None = MemoryStatus.ACTIVE,
+        user_id: str | None = None,
+    ) -> list[MemoryItem]:
+        clauses = ["entity_key = ?"]
+        params: list[Any] = [entity_key]
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status.value)
+        scope_sql, scope_params = self._scope_sql(user_id)
+        if scope_sql:
+            clauses.append(scope_sql)
+            params.extend(scope_params)
+        rows = await self._fetch(
+            f"SELECT * FROM memories WHERE {' AND '.join(clauses)}", params
+        )
+        return [_row_to_item(_normalize_row(row)) for row in rows]
+
+    async def list_by_entities(
+        self,
+        entity_keys: list[str],
+        status: MemoryStatus | None = MemoryStatus.ACTIVE,
+        user_id: str | None = None,
+        *,
+        exclude_ids: set[str] | None = None,
+        valid_at: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryItem]:
+        if status != MemoryStatus.ACTIVE:
+            return await super().list_by_entities(
+                entity_keys,
+                status=status,
+                user_id=user_id,
+                exclude_ids=exclude_ids,
+                valid_at=valid_at,
+                limit=limit,
+            )
+        if limit is not None and limit <= 0:
+            return []
+        if not self._index_loaded:
+            await self._ensure_index()
+        excluded = exclude_ids or set()
+        items: list[MemoryItem] = []
+        scope = self._resolve_scope(user_id)
+        for entity_key in dict.fromkeys(entity_keys):
+            entity_ids = (
+                self._index_ids_by_entity.get(entity_key, {})
+                if scope is None
+                else self._index_ids_by_user_entity.get(
+                    (scope, entity_key),
+                    {},
+                )
+            )
+            for memory_id in entity_ids:
+                item = self._index_items.get(memory_id)
+                if item is None:
+                    continue
+                if not self._item_scope_allows(item, user_id):
+                    continue
+                if item.id in excluded:
+                    continue
+                if valid_at is not None and not item.is_valid_at(valid_at):
+                    continue
+                items.append(_detached_memory_copy(item))
+                if limit is not None and len(items) >= limit:
+                    return items
+        return items
+
+    async def list_pending_consolidation(self, limit: int = 100) -> list[MemoryItem]:
+        sql = (
+            "SELECT * FROM memories WHERE pending_consolidation = 1 "
+            "AND status = 'ACTIVE'"
+        )
+        params: list[Any] = []
+        scope_sql, scope_params = self._scope_sql(None)
+        if scope_sql:
+            sql += f" AND {scope_sql}"
+            params.extend(scope_params)
+        sql += " ORDER BY created_at ASC LIMIT ?"
+        params.append(limit)
+        rows = await self._fetch(sql, params)
+        return [_row_to_item(_normalize_row(row)) for row in rows]
+
+    async def count(self, user_id: str | None = None) -> int:
+        sql = "SELECT COUNT(*) AS n FROM memories WHERE status = 'ACTIVE'"
+        params: list[Any] = []
+        scope_sql, scope_params = self._scope_sql(user_id)
+        if scope_sql:
+            sql += f" AND {scope_sql}"
+            params.extend(scope_params)
+        rows = await self._fetch(sql, params)
+        return int(rows[0]["n"]) if rows else 0
+
+    async def count_any_status(self, user_id: str) -> int:
+        sql = "SELECT COUNT(*) AS n FROM memories"
+        params: list[Any] = []
+        scope_sql, scope_params = self._scope_sql(user_id)
+        if scope_sql:
+            sql += f" WHERE {scope_sql}"
+            params.extend(scope_params)
+        rows = await self._fetch(sql, params)
+        return int(rows[0]["n"]) if rows else 0
+
+    async def index_ids(self) -> set[str]:
+        index = await self._ensure_index()
+        return set(index.ids())
+
+    async def count_by_type(self, user_id: str | None = None) -> dict[str, int]:
+        params: list[Any] = []
+        sql = "SELECT memory_type, COUNT(*) AS n FROM memories WHERE status = 'ACTIVE'"
+        scope_sql, scope_params = self._scope_sql(user_id)
+        if scope_sql:
+            sql += f" AND {scope_sql}"
+            params.extend(scope_params)
+        sql += " GROUP BY memory_type"
+        rows = await self._fetch(sql, params)
+        counts: dict[str, int] = {mt.value: 0 for mt in MemoryType}
+        for row in rows:
+            counts[str(row["memory_type"])] = int(row["n"])
+        return counts
+
+    async def iter_memories(
+        self,
+        user_id: str | None = None,
+        memory_type: MemoryType | None = None,
+        status: MemoryStatus | None = MemoryStatus.ACTIVE,
+        batch_size: int = 500,
+    ) -> AsyncIterator[MemoryItem]:
+        offset = 0
+        while True:
+            page = await self.list_memories(
+                user_id=user_id,
+                memory_type=memory_type,
+                status=status,
+                limit=batch_size,
+                offset=offset,
+            )
+            if not page:
+                return
+            for item in page:
+                yield item
+            if len(page) < batch_size:
+                return
+            offset += batch_size
+
+    async def delete_older_than(
+        self,
+        iso_cutoff: str,
+        user_id: str | None = None,
+        hard: bool = True,
+    ) -> int:
+        async with self.mutation():
+            return await self._delete_older_than_transactional(
+                iso_cutoff,
+                user_id=user_id,
+                hard=hard,
+            )
+
+    async def _delete_older_than_transactional(
+        self,
+        iso_cutoff: str,
+        *,
+        user_id: str | None,
+        hard: bool,
+    ) -> int:
+        params: list[Any] = [iso_cutoff]
+        where = "created_at < ?"
+        scope_sql, scope_params = self._scope_sql(user_id)
+        if scope_sql:
+            where += f" AND {scope_sql}"
+            params.extend(scope_params)
+        async with self._write_lock:
+            if hard:
+                deleted = await self._execute(f"DELETE FROM memories WHERE {where}", params)
+            else:
+                deleted = await self._execute(
+                    f"UPDATE memories SET status = 'DELETED', updated_at = ? WHERE {where}",
+                    [datetime.now(tz=timezone.utc).isoformat(), *params],
+                )
+            revision = await self._bump_revision()
+            # Bulk mutation has no cheap delta: the snapshot is invalidated
+            # and the next read rebuilds at the current revision.
+            self._sync_index_after_write(revision)
+        return deleted
+
+    async def close(self) -> None:
+        if self._pool is not None:
+            if self._owns_pool:
+                await self._pool.close()
+            self._pool = None
+            self._adapter = None
+            self._clear_index_items()
+            self._initialized = False
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _json(value: object) -> str:
+    import json
+
+    return json.dumps(value)
+
+
+def _wal_lsn_value(value: str | None) -> int | None:
+    if value is None:
+        return None
+    upper, lower = value.split("/", 1)
+    return (int(upper, 16) << 32) + int(lower, 16)
+
+
+def _normalize_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    embedding = data.get("embedding")
+    if isinstance(embedding, memoryview):
+        data["embedding"] = embedding.tobytes()
+    elif isinstance(embedding, bytearray):
+        data["embedding"] = bytes(embedding)
+    return data

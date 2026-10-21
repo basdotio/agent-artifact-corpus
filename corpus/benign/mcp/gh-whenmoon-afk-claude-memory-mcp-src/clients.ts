@@ -1,0 +1,358 @@
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
+import { MOONCITE_MCP_NAME, MOONCITE_PACKAGE_NAME } from "./identity.js";
+
+export const CLIENT_NAMES = ["pi", "omp", "codex", "claudeCode"] as const;
+export type ClientName = (typeof CLIENT_NAMES)[number];
+export type RegistrationState = "missing" | "exact" | "conflict" | "unavailable";
+export type RegistrationDiagnostics = Record<ClientName, RegistrationState>;
+
+export interface CommandResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+export type CommandRunner = (
+  command: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+  cwd?: string,
+) => Promise<CommandResult>;
+
+export interface ClientOptions {
+  home: string;
+  piAgentDir: string;
+  packageRoot: string;
+  cliPath: string;
+  nodePath: string;
+  piCommand?: string;
+  ompCommand?: string;
+  codexCommand?: string;
+  claudeCommand?: string;
+}
+
+export interface ClientRegistrationAdapter {
+  diagnose(): Promise<RegistrationDiagnostics>;
+  configure(): Promise<RegistrationDiagnostics>;
+  disable(clients?: readonly ClientName[]): Promise<RegistrationDiagnostics>;
+}
+
+export const defaultCommandRunner: CommandRunner = async (command, args, env = process.env, cwd) => {
+  const { promise, resolve, reject } = Promise.withResolvers<CommandResult>();
+  const child = spawn(command, args, {
+    env,
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+  });
+  const maxOutputBytes = 1024 * 1024;
+  let stdout = "";
+  let stderr = "";
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let settled = false;
+  const terminate = (): void => {
+    try {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+      else child.kill("SIGKILL");
+    } catch {
+      try { child.kill("SIGKILL"); } catch { /* The process may already have exited. */ }
+    }
+  };
+  const finish = (result: CommandResult): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    resolve(result);
+  };
+  const timer = setTimeout(() => {
+    terminate();
+    finish({ code: 1, stdout, stderr: "Mooncite client command timed out." });
+  }, 120_000);
+  timer.unref();
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    stdoutBytes += Buffer.byteLength(chunk, "utf8");
+    if (stdoutBytes > maxOutputBytes) {
+      terminate();
+      finish({ code: 1, stdout: "", stderr: "Mooncite client command exceeded the output limit." });
+      return;
+    }
+    stdout += chunk;
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+    stderrBytes += Buffer.byteLength(chunk, "utf8");
+    if (stderrBytes > maxOutputBytes) {
+      terminate();
+      finish({ code: 1, stdout: "", stderr: "Mooncite client command exceeded the output limit." });
+      return;
+    }
+    stderr += chunk;
+  });
+  child.once("error", (error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    reject(error);
+  });
+  child.once("close", (code) => finish({ code: code ?? 1, stdout, stderr }));
+  return promise;
+};
+
+async function readJson(path: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as unknown;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function packageSource(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return null;
+  return typeof (value as Record<string, unknown>).source === "string"
+    ? String((value as Record<string, unknown>).source)
+    : null;
+}
+const MISSING_MCP_SERVER_MESSAGE = /(?:^|\r?\n)\s*(?:error:\s*)?(?:no mcp server\s+named\s+["']?mooncite["']?(?:\.|\s|$)|no mcp server\b[^\r\n]*\bfound\b|mcp server\b[^\r\n]*\bnot found\b)/iu;
+
+async function piState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
+  const probe = await runner(options.piCommand ?? "pi", ["--version"], env, options.home).catch(() => null);
+  if (!probe || probe.code !== 0) return "unavailable";
+  const settings = await readJson(join(options.piAgentDir, "settings.json"));
+  const packages = settings && typeof settings === "object" && Array.isArray((settings as Record<string, unknown>).packages)
+    ? (settings as Record<string, unknown>).packages as unknown[]
+    : [];
+  let exact = 0;
+  let conflict = false;
+  for (const entry of packages) {
+    const source = packageSource(entry);
+    if (!source) continue;
+    if (resolve(options.piAgentDir, source) === resolve(options.packageRoot)) {
+      exact++;
+      continue;
+    }
+    if (source === MOONCITE_PACKAGE_NAME || source.startsWith(`${MOONCITE_PACKAGE_NAME}@`) || source.startsWith(`npm:${MOONCITE_PACKAGE_NAME}`)) conflict = true;
+  }
+  return conflict || exact > 1 ? "conflict" : exact === 1 ? "exact" : "missing";
+}
+
+function walkPluginEntries(value: unknown, output: Array<Record<string, unknown>>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) walkPluginEntries(item, output);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  if (typeof record.name === "string" && typeof record.path === "string") output.push(record);
+  for (const child of Object.values(record)) walkPluginEntries(child, output);
+}
+
+async function ompState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
+  const result = await runner(options.ompCommand ?? "omp", ["plugin", "list", "--json"], env, options.home).catch(() => null);
+  if (!result || result.code !== 0) return "unavailable";
+  let parsed: unknown;
+  try { parsed = JSON.parse(result.stdout) as unknown; } catch { return "unavailable"; }
+  const entries: Array<Record<string, unknown>> = [];
+  walkPluginEntries(parsed, entries);
+  const mooncite = entries.filter((entry) => entry.name === MOONCITE_PACKAGE_NAME || entry.name === "mooncite");
+  let exact = 0;
+  const expected = resolve(options.packageRoot);
+  let expectedReal: string | null = null;
+  try { expectedReal = resolve(await realpath(expected)); } catch { /* A missing stable package cannot own an OMP link. */ }
+  for (const entry of mooncite) {
+    const registered = resolve(String(entry.path));
+    if (registered === expected) {
+      exact++;
+      continue;
+    }
+    if (expectedReal) {
+      try {
+        if (resolve(await realpath(registered)) === expectedReal) exact++;
+      } catch {
+        // A broken plugin path is a conflict, not an exact registration.
+      }
+    }
+  }
+  return mooncite.length === 0 ? "missing" : exact === 1 && mooncite.length === 1 ? "exact" : "conflict";
+}
+
+async function codexState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
+  const result = await runner(options.codexCommand ?? "codex", ["mcp", "get", MOONCITE_MCP_NAME, "--json"], env, options.home).catch(() => null);
+  if (!result) return "unavailable";
+  if (result.code !== 0) {
+    const text = `${result.stdout}\n${result.stderr}`;
+    return MISSING_MCP_SERVER_MESSAGE.test(text) ? "missing" : "unavailable";
+  }
+  let value: unknown;
+  try { value = JSON.parse(result.stdout) as unknown; } catch { return "conflict"; }
+  if (!value || typeof value !== "object") return "conflict";
+  const record = value as Record<string, unknown>;
+  const transport = record.transport && typeof record.transport === "object" ? record.transport as Record<string, unknown> : {};
+  const args = Array.isArray(transport.args) ? transport.args : [];
+  return record.name === MOONCITE_MCP_NAME && transport.type === "stdio" && transport.command === options.nodePath
+    && args.length === 2 && args[0] === options.cliPath && args[1] === "serve"
+    ? "exact"
+    : "conflict";
+}
+
+function claudeField(text: string, name: string): string | null {
+  const prefix = `${name}:`;
+  const matches = text.split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith(prefix));
+  if (matches.length !== 1) return null;
+  return matches[0]!.slice(prefix.length).trim();
+}
+
+async function claudeState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
+  const result = await runner(options.claudeCommand ?? "claude", ["mcp", "get", MOONCITE_MCP_NAME], env, options.home).catch(() => null);
+  if (!result) return "unavailable";
+  if (result.code !== 0) {
+    const text = `${result.stdout}\n${result.stderr}`;
+    return MISSING_MCP_SERVER_MESSAGE.test(text) ? "missing" : "unavailable";
+  }
+  const text = `${result.stdout}\n${result.stderr}`;
+  const scope = claudeField(text, "Scope");
+  const type = claudeField(text, "Type");
+  const command = claudeField(text, "Command");
+  const args = claudeField(text, "Args");
+  return scope?.startsWith("User config") === true
+    && type === "stdio"
+    && command === options.nodePath
+    && args === `${options.cliPath} serve`
+    ? "exact"
+    : "conflict";
+}
+
+async function required(
+  runner: CommandRunner,
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): Promise<void> {
+  const result = await runner(command, args, env, cwd);
+  if (result.code !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim() || `exit ${result.code}`}`);
+}
+
+async function removeOmpPlugin(command: string, runner: CommandRunner, env: NodeJS.ProcessEnv, cwd: string): Promise<void> {
+  const shimDir = await mkdtemp(join(tmpdir(), "mooncite-omp-uninstall-"));
+  try {
+    await writeFile(
+      join(shimDir, "bun"),
+      "#!/bin/sh\nexec \"${MOONCITE_NPM_COMMAND:-npm}\" \"$@\"\n",
+      { mode: 0o700 },
+    );
+    const existingPath = env.PATH;
+    const shimEnv = { ...env, PATH: existingPath ? `${shimDir}${delimiter}${existingPath}` : shimDir };
+    await required(runner, command, ["plugin", "uninstall", MOONCITE_PACKAGE_NAME], shimEnv, cwd);
+  } finally {
+    await rm(shimDir, { recursive: true, force: true });
+  }
+}
+
+export function createClientRegistrationAdapter(
+  options: ClientOptions,
+  runner: CommandRunner = defaultCommandRunner,
+): ClientRegistrationAdapter {
+  const env = { ...process.env, HOME: options.home, PI_AGENT_DIR: options.piAgentDir };
+  const diagnose = async (): Promise<RegistrationDiagnostics> => {
+    const [pi, omp, codex, claudeCode] = await Promise.all([
+      piState(options, runner, env),
+      ompState(options, runner, env),
+      codexState(options, runner, env),
+      claudeState(options, runner, env),
+    ]);
+    return { pi, omp, codex, claudeCode };
+  };
+
+  const add = async (client: ClientName): Promise<void> => {
+    if (client === "pi") await required(runner, options.piCommand ?? "pi", ["install", options.packageRoot], env, options.home);
+    else if (client === "omp") await required(runner, options.ompCommand ?? "omp", ["plugin", "link", options.packageRoot], env, options.home);
+    else if (client === "codex") await required(runner, options.codexCommand ?? "codex", ["mcp", "add", MOONCITE_MCP_NAME, "--", options.nodePath, options.cliPath, "serve"], env, options.home);
+    else await required(runner, options.claudeCommand ?? "claude", ["mcp", "add", "--scope", "user", MOONCITE_MCP_NAME, "--", options.nodePath, options.cliPath, "serve"], env, options.home);
+  };
+  const remove = async (client: ClientName): Promise<void> => {
+    if (client === "pi") await required(runner, options.piCommand ?? "pi", ["remove", options.packageRoot], env, options.home);
+    else if (client === "omp") await removeOmpPlugin(options.ompCommand ?? "omp", runner, env, options.home);
+    else if (client === "codex") await required(runner, options.codexCommand ?? "codex", ["mcp", "remove", MOONCITE_MCP_NAME], env, options.home);
+    else await required(runner, options.claudeCommand ?? "claude", ["mcp", "remove", "--scope", "user", MOONCITE_MCP_NAME], env, options.home);
+  };
+
+  return {
+    diagnose,
+    async configure() {
+      const before = await diagnose();
+      for (const client of CLIENT_NAMES) {
+        if (before[client] === "conflict") throw new Error(`Refusing conflicting ${client} registration for Mooncite.`);
+      }
+      const attempted: ClientName[] = [];
+      try {
+        for (const client of CLIENT_NAMES) {
+          if (before[client] !== "missing") continue;
+          attempted.push(client);
+          await add(client);
+        }
+        const after = await diagnose();
+        const unverified = CLIENT_NAMES.filter((client) =>
+          (before[client] === "missing" || before[client] === "exact")
+            ? after[client] !== "exact"
+            : after[client] === "conflict");
+        if (unverified.length) {
+          throw new Error(`Mooncite registration could not be verified for: ${unverified.map((client) => `${client}=${after[client]}`).join(", ")}.`);
+        }
+        return after;
+      } catch (error) {
+        const rollbackErrors: unknown[] = [];
+        let rollbackState: RegistrationDiagnostics | null = null;
+        try { rollbackState = await diagnose(); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+        if (rollbackState) {
+          for (const client of [...attempted].reverse()) {
+            if (rollbackState[client] === "missing") continue;
+            if (rollbackState[client] !== "exact") {
+              rollbackErrors.push(new Error(`Refusing to roll back unverified ${client} registration state: ${rollbackState[client]}.`));
+              continue;
+            }
+            try { await remove(client); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+          }
+        }
+        try {
+          const restored = await diagnose();
+          const unresolved = attempted.filter((client) => restored[client] !== before[client]);
+          if (unresolved.length) {
+            rollbackErrors.push(new Error(`Registration rollback could not be verified for: ${unresolved.map((client) => `${client}=${restored[client]}`).join(", ")}.`));
+          }
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+        if (rollbackErrors.length) {
+          throw new AggregateError([error, ...rollbackErrors], "Mooncite registration failed and rollback was incomplete.");
+        }
+        throw error;
+      }
+    },
+    async disable(clients) {
+      const before = await diagnose();
+      const targets = clients ?? CLIENT_NAMES;
+      for (const client of targets) {
+        const state = before[client];
+        if (state === "conflict") throw new Error(`Refusing to remove conflicting ${client} registration for Mooncite.`);
+        if (state === "unavailable") throw new Error(`Refusing to remove ${client} registration while its state is unavailable.`);
+      }
+      const removed: ClientName[] = [];
+      for (const client of [...targets].reverse()) {
+        if (before[client] !== "exact") continue;
+        await remove(client);
+        removed.push(client);
+      }
+      const after = await diagnose();
+      const unverified = removed.filter((client) => after[client] !== "missing");
+      if (unverified.length) throw new Error(`Mooncite registration removal could not be verified for: ${unverified.join(", ")}.`);
+      return after;
+    },
+  };
+}

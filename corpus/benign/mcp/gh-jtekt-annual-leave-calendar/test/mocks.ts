@@ -1,0 +1,79 @@
+/**
+ * Mocks the external services the tests depend on (account manager, group
+ * manager, workplace manager) with nock, so that the test job only needs MongoDB.
+ *
+ * Loaded before the test files (mocha --require), hence before the app reads its
+ * environment: the URLs below point at hosts that only exist inside nock.
+ */
+import nock from "nock"
+
+const ACCOUNT_MANAGER = "http://account-manager.test"
+const GROUP_MANAGER = "http://group-manager.test"
+const WORKPLACE_MANAGER = "http://workplace-manager.test"
+
+export const TEST_USER = {
+  _id: "test-user",
+  username: "test-user",
+  display_name: "Test user",
+}
+
+// Must look like a JWT (header.payload.signature): the CalDAV auth bridge only
+// forwards the Basic auth password as a Bearer token when it has three parts.
+// Never verified, since identification is mocked below.
+const base64url = (value: object) =>
+  Buffer.from(JSON.stringify(value)).toString("base64url")
+export const TEST_JWT = [
+  base64url({ alg: "none", typ: "JWT" }),
+  base64url({ user_id: TEST_USER._id }),
+  "test-signature",
+].join(".")
+export const TEST_GROUP_ID = "test-group"
+export const FORBIDDEN_GROUP_ID = "forbidden-group"
+export const TEST_WORKPLACE_ID = "test-workplace"
+
+// Overrides any value coming from a local .env: tests must never use real services
+Object.assign(process.env, {
+  IDENTIFICATION_URL: `${ACCOUNT_MANAGER}/v3/users/self`,
+  GROUP_MANAGER_API_URL: GROUP_MANAGER,
+  WORKPLACE_MANAGER_API_URL: WORKPLACE_MANAGER,
+  IDENTIFIER_FIELDS: "_id",
+})
+
+// Any request to a host that is not mocked fails; only local connections
+// (supertest calling the app) are allowed
+nock.disableNetConnect()
+nock.enableNetConnect(/^(127\.0\.0\.1|localhost)(:\d+)?$/)
+
+// Account manager: identification accepts only the test token
+nock(ACCOUNT_MANAGER)
+  .persist()
+  .get("/v3/users/self")
+  .reply(function () {
+    return this.req.headers.authorization === `Bearer ${TEST_JWT}`
+      ? [200, TEST_USER]
+      : [401, { message: "Unauthorized" }]
+  })
+
+// Group manager: TEST_GROUP_ID contains the test user, FORBIDDEN_GROUP_ID is
+// not visible to them, other groups do not exist
+nock(GROUP_MANAGER)
+  .persist()
+  .get(`/v3/groups/${TEST_GROUP_ID}/members`)
+  .query(true)
+  .reply(200, { items: [TEST_USER], count: 1, batch_size: 10000 })
+  .get(`/v3/groups/${FORBIDDEN_GROUP_ID}/members`)
+  .query(true)
+  .reply(403, { message: "Forbidden" })
+  .get(/^\/v3\/groups\/[^/]+\/members/)
+  .query(true)
+  .reply(404, { message: "Group not found" })
+
+// Workplace manager: TEST_WORKPLACE_ID employs the test user, other workplaces do not exist
+nock(WORKPLACE_MANAGER)
+  .persist()
+  .get(`/v2/workplaces/${TEST_WORKPLACE_ID}/employees`)
+  .query(true)
+  .reply(200, [TEST_USER], { "x-total": "1" })
+  .get(/^\/v2\/workplaces\/[^/]+\/employees/)
+  .query(true)
+  .reply(404, { message: "Workplace not found" })

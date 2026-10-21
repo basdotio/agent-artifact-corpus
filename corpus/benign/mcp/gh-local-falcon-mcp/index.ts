@@ -1,0 +1,1517 @@
+import { pathToFileURL } from "node:url";
+import { getMcpProfile, type McpProfile } from "./chatgptPolicy.js";
+import crypto from "crypto";
+import v8 from "v8";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import dotenv from "dotenv";
+import express, { Application, Request, Response, RequestHandler } from "express";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
+import { v4 as uuidv4 } from "uuid";
+import { getServer } from "./server.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+// Bounded replacement for the SDK's example InMemoryEventStore, which has no
+// cap, TTL or eviction and whose replay copies+sorts every stored event.
+import { BoundedEventStore } from "./eventStore.js";
+import {
+  setupOAuthRoutes,
+  createTokenVerifier,
+  checkRedirectUri,
+  resolveBaseUrl,
+  hasCanonicalBaseUrl,
+} from "./oauth/index.js";
+import { fetchLocalFalconAccountInfo } from "./localfalcon.js";
+import {
+  currentRequestSource,
+  deriveRequestSource,
+  runWithRequestSource,
+  setProcessRequestSource,
+  type RequestSource,
+} from "./requestSource.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+
+// Augment Express Request to include auth info set by our bearer auth middleware
+declare module "express" {
+  interface Request {
+    auth?: AuthInfo;
+  }
+}
+
+// Configure environment variables
+dotenv.config({ path: ".env.local" });
+
+// Types
+interface SessionData {
+  apiKey: string;
+  createdAt: number;
+  lastActivity: number;
+  /**
+   * The session's resumability buffer, kept here purely so /healthz can report
+   * how many events are retained. Optional: the SSE transport does not use one.
+   */
+  eventStore?: BoundedEventStore;
+  /**
+   * Best attribution seen for the client driving this session, stamped on every
+   * outgoing Local Falcon API call as request_source.
+   *
+   * Held per session because the strongest signal rarely arrives on the request
+   * that opens one: ChatGPT's connector sends no Origin on `initialize`, and the
+   * `GET /sse` that creates an SSE session precedes the `initialize` naming the
+   * client. Authenticated ownership middleware binds this before tool execution.
+   * See requestSource.ts.
+   */
+  requestSource?: RequestSource;
+  profile?: McpProfile;
+  /** SSE opens its stream before initialize supplies the final client attribution. */
+  serverReady?: Promise<void>;
+  requiresInitialize?: boolean;
+}
+
+// Minimum session age before revocation (prevents revoking during OAuth setup)
+// Note: Token revocation on session disconnect was removed because Anthropic's
+// connector proxy routinely drops and reconnects SSE/HTTP transports while
+// reusing the same Bearer token. Revocation now only happens via POST /oauth/revoke.
+
+// ── Session memory budget ────────────────────────────────────────────────
+//
+// Each live session retains its own McpServer: getServer() registers 57 or 60
+// tools with their Zod schemas and descriptions per session, measured at
+// ~1.28 MB retained. The SDK forbids sharing one instance — Protocol.connect()
+// throws "Already connected to a transport… use a separate Protocol instance
+// per connection" — so the only lever is how many sessions are resident.
+//
+// Session creation is otherwise unbounded: a client re-initializing gets a
+// fresh session ID each time and abandons the previous one, and auto-recovery
+// restores a transport up to AUTO_RECOVERY_MAX_PER_KEY times per minute. Without a cap
+// that grows until V8's heap ceiling is hit, which is what produced the ~50h
+// OOM cycle. Note the ceiling is V8's, not the container's: with no
+// --max-old-space-size the default is ~2 GB regardless of how much RAM the box
+// has, so see the Dockerfile for the matching flag.
+const MAX_SESSIONS = parseInt(process.env.MAX_SESSIONS ?? "2000", 10);
+
+// Session inactivity timeout. Sessions are deliberately not dropped when an SSE
+// stream closes (the connector proxy reconnects constantly), so this sweep is
+// the main reclamation path. Bearer-token auto-recovery transparently rebuilds a
+// session for a client that returns later — see attemptSessionRecovery — which
+// is what makes a short window safe.
+const SESSION_INACTIVITY_TIMEOUT_MS = parseInt(
+  process.env.SESSION_INACTIVITY_TIMEOUT_MS ?? String(60 * 60 * 1000), // 1 hour
+  10
+);
+
+// How often to check for inactive sessions. Must be well under the timeout:
+// previously an 8h timeout was swept hourly, so a dead session could sit for 9h.
+const INACTIVITY_CHECK_INTERVAL_MS = parseInt(
+  process.env.INACTIVITY_CHECK_INTERVAL_MS ?? String(5 * 60 * 1000), // 5 minutes
+  10
+);
+
+// Log a warning when the V8 heap passes this fraction of its ceiling, so memory
+// pressure is visible in Render's logs before it becomes an OOM.
+const HEAP_WARN_RATIO = 0.8;
+
+// Full request/response payload logging. Off by default: scan responses are
+// megabyte-class and JSON.stringify(x, null, 2) roughly doubles them, and
+// console.log to a pipe (Render captures stdout) queues on the heap with no
+// bound if the log consumer applies backpressure.
+const DEBUG_PAYLOAD_LOGGING = process.env.DEBUG_PAYLOAD_LOGGING === "true";
+
+// Auto-recovery rate limiting: max 5 auto-recoveries per API key per minute
+const AUTO_RECOVERY_MAX_PER_KEY = 5;
+const AUTO_RECOVERY_WINDOW_MS = 60 * 1000; // 1 minute
+
+class AutoRecoveryRateLimiter {
+  private attempts = new Map<string, number[]>();
+
+  isAllowed(apiKey: string): boolean {
+    const now = Date.now();
+    const key = apiKey.substring(0, 16); // Use prefix as key for grouping
+    const timestamps = this.attempts.get(key) || [];
+
+    // Remove expired timestamps
+    const valid = timestamps.filter(t => now - t < AUTO_RECOVERY_WINDOW_MS);
+
+    if (valid.length >= AUTO_RECOVERY_MAX_PER_KEY) {
+      this.attempts.set(key, valid);
+      return false;
+    }
+
+    valid.push(now);
+    this.attempts.set(key, valid);
+    return true;
+  }
+
+  /**
+   * Drop keys whose window has fully expired.
+   *
+   * isAllowed() re-set an empty array rather than deleting, so the map retained
+   * one entry per API-key prefix seen, forever. Small, but it never shrank.
+   */
+  prune(): void {
+    const now = Date.now();
+    for (const [key, timestamps] of this.attempts) {
+      if (timestamps.every((t) => now - t >= AUTO_RECOVERY_WINDOW_MS)) {
+        this.attempts.delete(key);
+      }
+    }
+  }
+}
+
+const autoRecoveryLimiter = new AutoRecoveryRateLimiter();
+
+// HTTP rate limiter for MCP endpoints — protects against abuse.
+// 120 requests per minute per IP is intentionally generous to never block legitimate usage.
+const mcpRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    jsonrpc: "2.0",
+    error: {
+      code: -32000,
+      message: "Rate limit exceeded. Please wait before retrying.",
+    },
+    id: null,
+  },
+});
+
+/**
+ * Validate an API key against the Local Falcon API.
+ * Returns true if the key is valid (account endpoint succeeds), false otherwise.
+ */
+async function validateApiKey(apiKey: string): Promise<boolean> {
+  try {
+    await fetchLocalFalconAccountInfo(apiKey, "subscription");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Attempt to auto-recover a dead session using a valid Bearer token.
+ * Shared by both POST (mcpHandler) and GET (mcpGetHandler) handlers.
+ *
+ * Returns the new transport on success, or null if recovery failed
+ * (in which case an error response has already been sent).
+ */
+async function restoreSessionTransport(
+  req: Request,
+  res: Response,
+  sessionManager: SessionManager
+): Promise<StreamableHTTPServerTransport | null> {
+  if (!req.auth) return null;
+
+  const oldSessionId = req.headers["mcp-session-id"] as string | undefined;
+  const binding = oldSessionId ? sessionManager.getRetired(oldSessionId) : undefined;
+  if (!binding?.profile || binding.requiresInitialize) {
+    res.status(404).json({ jsonrpc: "2.0", error: { code: -32000, message: "Session binding unavailable. Reconnect and send a new initialize request." }, id: req.body?.id ?? null });
+    return null;
+  }
+  const apiKey = req.auth.token;
+  const apiKeyPrefix = apiKey.substring(0, 10) + '...';
+
+  // Rate-limit auto-recovery per API key
+  if (!autoRecoveryLimiter.isAllowed(apiKey)) {
+    console.warn(`[Session] Auto-recovery rate limit exceeded for apiKey: "${apiKeyPrefix}"`);
+    res.status(429).json({
+      jsonrpc: '2.0',
+      error: {
+        code: -32000,
+        message: 'Too many session recovery attempts. Please wait before retrying.',
+      },
+      id: null,
+    });
+    return null;
+  }
+
+  // Validate the API key against the Local Falcon API.
+  const isValid = await validateApiKey(apiKey);
+  if (!isValid) {
+    console.warn(`[Session] Auto-recovery failed: invalid API key "${apiKeyPrefix}"`);
+    res.status(401).json({
+      jsonrpc: '2.0',
+      error: {
+        code: -32000,
+        message: 'Unauthorized: API key validation failed',
+      },
+      id: null,
+    });
+    return null;
+  }
+
+  // Restore the authenticated session identity as well as its profile.
+  const newSessionId = oldSessionId!;
+  const eventStore = new BoundedEventStore();
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => newSessionId,
+    enableJsonResponse: true,
+    eventStore,
+  });
+
+  transport.onclose = () => {
+    const sid = transport.sessionId;
+    console.log(`[Transport] HTTP transport onclose triggered, sessionId: ${sid || 'undefined'}`);
+    if (sid && sessionManager.getTransport(sid)) {
+      console.log(`[Transport] HTTP transport closed for session ${sid}, removing from session manager`);
+      sessionManager.remove(sid);
+    } else {
+      console.log(`[Transport] HTTP transport onclose: session ${sid} not found in manager (already removed or not yet added)`);
+    }
+  };
+
+  // Connect transport to MCP server
+  const server = getServer(sessionManager.getSessionMap());
+  await server.connect(transport);
+  // Another authenticated request can discover ChatGPT while recovery awaits
+  // API validation/connection. Do not resurrect the superseded normal registry.
+  if (binding.requiresInitialize) {
+    await server.close();
+    res.status(404).json({ error: "Session profile changed. Send a new initialize request." });
+    return null;
+  }
+
+  // Directly mark the transport as initialized and assign the session ID.
+  // Normally this happens when the transport processes an initialize JSON-RPC
+  // request, but we need to skip that because the client sent a tools/call (or
+  // similar), not an initialize. Accessing _webStandardTransport is necessary
+  // because the Node wrapper only exposes sessionId as a read-only getter.
+  const webTransport = (transport as any)._webStandardTransport;
+  webTransport.sessionId = newSessionId;
+  webTransport._initialized = true;
+
+  // Register the session in the manager — same as onsessioninitialized would do
+  sessionManager.add(
+    newSessionId,
+    { apiKey, eventStore, requestSource: currentRequestSource(), profile: getMcpProfile(currentRequestSource()!.value) },
+    transport
+  );
+
+  console.warn(`[Session] Auto-recovered session for apiKey: "${apiKeyPrefix}" → new session: ${newSessionId}`);
+
+  // Set the new session ID in the response header so the client can use it going forward
+  res.setHeader('mcp-session-id', newSessionId);
+
+  // Patch the original request headers so the transport's session validation passes.
+  req.headers['mcp-session-id'] = newSessionId;
+  if (!req.headers['mcp-protocol-version']) {
+    req.headers['mcp-protocol-version'] = '2025-03-26';
+  }
+
+  return transport;
+}
+
+// Serialize recovery by session ID so simultaneous GET/POST reconnects share
+// one restored registry and transport instead of replacing one another.
+async function attemptSessionRecovery(req: Request, res: Response, manager: SessionManager): Promise<StreamableHTTPServerTransport | null> {
+  const id = req.headers["mcp-session-id"] as string | undefined;
+  if (!id) return restoreSessionTransport(req, res, manager);
+  const pending = manager.recovering.get(id);
+  if (pending) {
+    const binding = manager.getRetired(id);
+    // A tombstone can expire/be evicted while the first recovery is waiting.
+    // Never let an unknown-session request join that authenticated recovery.
+    const ownerHash = crypto.createHash("sha256").update(req.auth?.token ?? "").digest("hex");
+    if (!binding || binding.requiresInitialize || !secretsMatch(binding.ownerHash, ownerHash)) {
+      res.status(404).json({ error: "Session binding unavailable. Send a new initialize request." });
+      return null;
+    }
+    await pending;
+    const restored = manager.getTransport(id);
+    const session = manager.getSession(id);
+    if (restored instanceof StreamableHTTPServerTransport && session &&
+        secretsMatch(session.apiKey, req.auth!.token) &&
+        session.profile === getMcpProfile(currentRequestSource()!.value) && !session.requiresInitialize) return restored;
+    res.status(404).json({ error: "Session recovery unavailable. Send a new initialize request." });
+    return null;
+  }
+  const recovering = restoreSessionTransport(req, res, manager);
+  manager.recovering.set(id, recovering);
+  try { return await recovering; }
+  finally { manager.recovering.delete(id); }
+}
+
+type Transport = SSEServerTransport | StreamableHTTPServerTransport;
+
+type AsyncRequestHandler = (req: Request, res: Response) => Promise<void>;
+
+/**
+ * Warn when the V8 heap approaches its ceiling.
+ *
+ * The ceiling is V8's own --max-old-space-size, which defaults to roughly 2 GB
+ * no matter how much RAM the container has — so a 16 GB box will still OOM at
+ * ~2 GB unless the flag is set. Surfacing the ratio makes that visible instead
+ * of it presenting as an unexplained restart.
+ */
+const reportHeapPressure = (sessionCount: number): void => {
+  const { heap_size_limit } = v8.getHeapStatistics();
+  const { heapUsed, rss } = process.memoryUsage();
+  const ratio = heapUsed / heap_size_limit;
+  if (ratio < HEAP_WARN_RATIO) return;
+  const mb = (bytes: number) => Math.round(bytes / 1024 / 1024);
+  console.warn(
+    `[Memory] Heap at ${(ratio * 100).toFixed(1)}% of limit ` +
+      `(${mb(heapUsed)}MB used / ${mb(heap_size_limit)}MB limit, rss ${mb(rss)}MB) ` +
+      `across ${sessionCount} sessions. Sessions cost ~1.3MB each; consider lowering ` +
+      `MAX_SESSIONS or raising --max-old-space-size.`
+  );
+};
+
+// Session Management
+export class SessionManager {
+  readonly recovering = new Map<string, Promise<StreamableHTTPServerTransport | null>>();
+  private sessions = new Map<string, SessionData>();
+  private transports = new Map<string, Transport>();
+  // Bounded credential-bound tombstones preserve profiles after transport eviction.
+  // One API key can be used by both ChatGPT and other clients concurrently.
+  private retired = new Map<string, { ownerHash: string; requestSource?: RequestSource; profile?: McpProfile; requiresInitialize?: boolean; expiresAt: number }>();
+
+  getRetired(sessionId: string) {
+    const binding = this.retired.get(sessionId);
+    if (binding && binding.expiresAt > Date.now()) return binding;
+    this.retired.delete(sessionId);
+    return undefined;
+  }
+
+
+  add(sessionId: string, data: Omit<SessionData, 'createdAt' | 'lastActivity'>, transport?: Transport): void {
+    const now = Date.now();
+    const sessionData = { ...data, createdAt: now, lastActivity: now };
+    console.log(`[Session] Adding session ${sessionId}:`, {
+      hasApiKey: !!data.apiKey,
+      apiKeyPrefix: data.apiKey ? data.apiKey.substring(0, 8) + '...' : 'none',
+      createdAt: sessionData.createdAt,
+      requestSource: data.requestSource?.value ?? 'unresolved',
+    });
+
+    // Enforce the memory budget before inserting. Each session costs ~1.28 MB
+    // in retained McpServer state, so an unbounded map is an unbounded heap.
+    this.evictToFit(sessionId);
+
+    this.retired.delete(sessionId);
+    this.sessions.set(sessionId, sessionData);
+    if (transport) this.transports.set(sessionId, transport);
+  }
+
+  /**
+   * Evict least-recently-active sessions until there is room for one more.
+   *
+   * Oldest-`lastActivity` first, so an idle abandoned session goes before a live
+   * one. An evicted client is not broken: presenting its session ID afterwards
+   * triggers Bearer-token recovery with its retained credential-bound profile.
+   */
+  private evictToFit(incomingSessionId: string): void {
+    if (this.sessions.size < MAX_SESSIONS) return;
+
+    const candidates = [...this.sessions.entries()]
+      .filter(([id]) => id !== incomingSessionId)
+      .sort((a, b) => a[1].lastActivity - b[1].lastActivity);
+
+    const overBy = this.sessions.size - MAX_SESSIONS + 1;
+    for (const [sessionId] of candidates.slice(0, overBy)) {
+      const idleMs = Date.now() - (this.sessions.get(sessionId)?.lastActivity ?? Date.now());
+      console.warn(
+        `[Session] At MAX_SESSIONS (${MAX_SESSIONS}); evicting least-recently-active ` +
+          `session ${sessionId} (idle ${Math.round(idleMs / 1000)}s). ` +
+          `Raise MAX_SESSIONS if this is steady state rather than churn.`
+      );
+      this.remove(sessionId);
+    }
+  }
+
+  remove(sessionId: string): void {
+    console.log(`[Session] remove() called for session ${sessionId}`);
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      console.log(`[Session] No session found for ${sessionId} - already removed or never existed`);
+      // A transport can outlive its session entry (e.g. the SSE add-then-connect
+      // failure path), so still close whatever is there.
+      this.closeAndForgetTransport(sessionId);
+      return;
+    }
+
+    console.log(`[Session] Session data for ${sessionId}:`, {
+      hasApiKey: !!session.apiKey,
+      apiKeyPrefix: session.apiKey ? session.apiKey.substring(0, 8) + '...' : 'none',
+      createdAt: session.createdAt,
+      ageMs: Date.now() - session.createdAt,
+    });
+
+    // NOTE: We intentionally do NOT revoke the OAuth token on session disconnect.
+    // Anthropic's connector proxy routinely drops and re-establishes SSE/HTTP
+    // connections while reusing the same Bearer token. Revoking the token here
+    // would kill the API key on Local Falcon's side, causing the next reconnect
+    // to fail and forcing unnecessary re-authentication.
+    // Tokens are revoked only via:
+    //   1. Explicit POST /oauth/revoke (user-initiated disconnect)
+    //   2. Natural 24-hour expiration
+    if (session.apiKey) {
+      console.log(`[Session] Session ${sessionId} disconnected (age: ${Math.round((Date.now() - session.createdAt) / 1000)}s) — token preserved for reconnect`);
+    }
+
+    this.retired.set(sessionId, {
+      ownerHash: crypto.createHash("sha256").update(session.apiKey).digest("hex"),
+      requestSource: session.requestSource, profile: session.profile,
+      requiresInitialize: session.requiresInitialize,
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+    });
+    for (const [id, binding] of this.retired) {
+      if (binding.expiresAt <= Date.now()) this.retired.delete(id);
+    }
+    while (this.retired.size > MAX_SESSIONS * 5) this.retired.delete(this.retired.keys().next().value!);
+    this.sessions.delete(sessionId);
+    this.closeAndForgetTransport(sessionId);
+    console.log(`[Session] Session ${sessionId} removed from manager`);
+  }
+
+  /**
+   * Drop a transport from the map and close it.
+   *
+   * remove() previously only deleted the map entry. Closing matters because the
+   * SDK arms a keep-alive timer per SSE stream and retains the stream controller
+   * and Express response — dropping the reference alone leaves those reachable
+   * until the transport itself is collected. Only the inactivity checker closed
+   * explicitly; every other removal path leaked. Safe to call more than once.
+   */
+  private closeAndForgetTransport(sessionId: string): void {
+    const transport = this.transports.get(sessionId);
+    this.transports.delete(sessionId);
+    if (!transport) return;
+    try {
+      const closing = transport.close();
+      if (closing && typeof closing.catch === "function") {
+        closing.catch((err: unknown) => {
+          console.error(`[Session] Failed to close transport for session ${sessionId}:`, err);
+        });
+      }
+    } catch (err: unknown) {
+      console.error(`[Session] Failed to close transport for session ${sessionId}:`, err);
+    }
+  }
+
+  getTransport(sessionId: string): Transport | undefined {
+    return this.transports.get(sessionId);
+  }
+
+  getSession(sessionId: string): SessionData | undefined {
+    return this.sessions.get(sessionId);
+  }
+
+  getSessionMap(): Map<string, SessionData> {
+    return this.sessions;
+  }
+
+  getTransportMap(): Map<string, Transport> {
+    return this.transports;
+  }
+
+  getSessionCount(): number {
+    return this.sessions.size;
+  }
+
+  /**
+   * Events retained across every session's resumability buffer.
+   *
+   * Each store is individually capped (see eventStore.ts), so this is bounded
+   * by session count — it is reported to make that bound observable rather than
+   * assumed.
+   */
+  getBufferedEventCount(): { retained: number; evicted: number } {
+    let retained = 0;
+    let evicted = 0;
+    for (const session of this.sessions.values()) {
+      if (!session.eventStore) continue;
+      retained += session.eventStore.size();
+      evicted += session.eventStore.evictedCount();
+    }
+    return { retained, evicted };
+  }
+
+  updateActivity(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastActivity = Date.now();
+    }
+  }
+
+  private inactivityInterval: ReturnType<typeof setInterval> | null = null;
+
+  startInactivityChecker(): void {
+    this.inactivityInterval = setInterval(() => {
+      const now = Date.now();
+      // Snapshot first: remove() mutates the map we would otherwise be iterating.
+      const stale = [...this.sessions.entries()].filter(
+        ([, session]) => now - session.lastActivity >= SESSION_INACTIVITY_TIMEOUT_MS
+      );
+      for (const [sessionId, session] of stale) {
+        const inactiveMin = Math.round((now - session.lastActivity) / 1000 / 60);
+        console.log(`[Session] Session ${sessionId} inactive for ${inactiveMin}m, removing`);
+        // remove() closes the transport itself.
+        this.remove(sessionId);
+      }
+      autoRecoveryLimiter.prune();
+      reportHeapPressure(this.sessions.size);
+    }, INACTIVITY_CHECK_INTERVAL_MS);
+  }
+
+  stopInactivityChecker(): void {
+    if (this.inactivityInterval) {
+      clearInterval(this.inactivityInterval);
+      this.inactivityInterval = null;
+    }
+  }
+
+  async cleanup(): Promise<void> {
+    this.stopInactivityChecker();
+    console.log("Cleaning up sessions...");
+
+    // NOTE: We intentionally do NOT revoke OAuth tokens during server shutdown.
+    // Render redeploys cause the server to restart, but Anthropic's proxy will
+    // reconnect with the same Bearer token. Revoking tokens here would break
+    // all active sessions after every deploy. Tokens expire naturally (24h)
+    // and can be explicitly revoked via POST /oauth/revoke.
+
+    // Close all transports
+    for (const [sessionId, transport] of this.transports) {
+      try {
+        console.log(`Closing transport for session ${sessionId}`);
+        await transport.close();
+      } catch (error: unknown) {
+        console.error(`Failed to close transport for session ${sessionId}:`, error);
+      }
+    }
+    this.sessions.clear();
+    this.transports.clear();
+    this.retired.clear();
+  }
+}
+
+// OAuth 2.1 Token Verifier — used by requireBearerAuth middleware
+const tokenVerifier = createTokenVerifier();
+
+// Base Application Setup
+const createBaseApp = (sessionManager: SessionManager): Application => {
+  const app = express();
+  // Trust exactly one proxy hop (Render's edge). Required for express-rate-limit
+  // to read the real client IP from X-Forwarded-For without throwing
+  // ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+  app.set('trust proxy', 1);
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true })); // Required for OAuth token requests
+  // CORS: Wildcard origin is intentional. The MCP widget iframe runs from
+  // unpredictable sandbox origins (e.g. web-sandbox.oaiusercontent.com for
+  // OpenAI, claudemcpcontent.com for Anthropic) that cannot be reliably
+  // allowlisted. All sensitive endpoints require Bearer token authentication
+  // regardless of origin, so the wildcard does not create a security risk.
+  app.use(cors({
+    allowedHeaders: ['Content-Type', 'Authorization', 'mcp-session-id', 'last-event-id'],
+    origin: "*",
+    exposedHeaders: ['mcp-session-id', 'WWW-Authenticate'],
+  }));
+
+  // Resolve who is calling, then run the whole request inside that attribution
+  // so the API client layer can stamp request_source on every outgoing Local
+  // Falcon call — without threading a parameter through 60 tool handlers.
+  //
+  // Registered here, after the body parsers, because resolution reads
+  // clientInfo out of the parsed initialize body, and ahead of every route so
+  // no MCP path can run outside the context. See requestSource.ts.
+  app.use((req: Request, _res: Response, next: Function): void => {
+    // Pre-auth attribution is request-local only. Persist it only after
+    // bearer authentication and credential ownership checks.
+    const resolved = deriveRequestSource({ headers: req.headers, body: req.body });
+    runWithRequestSource(resolved, () => next());
+  });
+
+  // HTTP rate limiting for auth endpoints — stricter than MCP endpoints.
+  const authRateLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 20, // 20 requests per minute per IP
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      error: "rate_limit_exceeded",
+      error_description: "Too many requests. Please wait before retrying.",
+    },
+  });
+
+  // Apply auth rate limiter to auth-related endpoints
+  app.use("/oauth/authorize", authRateLimiter);
+  app.use("/oauth/token", authRateLimiter);
+  app.use("/register", authRateLimiter);
+  app.use("/oauth/revoke", authRateLimiter);
+
+  // OpenAI domain verification token
+  app.get("/.well-known/openai-apps-challenge", (_req: Request, res: Response): void => {
+    res.set("Content-Type", "text/plain");
+    res.status(200).send("Qwq9UUOPu2HyUuzn_O5BqcB-vEX_O12G2JvAQbsDQ9w");
+  });
+
+  // Health check endpoints
+  app.get("/ping", (_req: Request, res: Response): void => {
+    res.status(200).json({ status: "ok", message: "Local Falcon MCP server is up." });
+  });
+
+  // Exposes heap and session figures so memory growth is diagnosable from
+  // outside the process. Previously this reported only uptime and a session
+  // count, which was not enough to tell a leak from a high baseline.
+  app.get("/healthz", (_req: Request, res: Response): void => {
+    const { heap_size_limit } = v8.getHeapStatistics();
+    const { heapUsed, heapTotal, rss, external } = process.memoryUsage();
+    const mb = (bytes: number) => Math.round(bytes / 1024 / 1024);
+    res.status(200).json({
+      status: "ok",
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      connectedSessions: sessionManager.getSessionCount(),
+      transports: sessionManager.getTransportMap().size,
+      maxSessions: MAX_SESSIONS,
+      sessionInactivityTimeoutMs: SESSION_INACTIVITY_TIMEOUT_MS,
+      memory: {
+        rssMb: mb(rss),
+        heapUsedMb: mb(heapUsed),
+        heapTotalMb: mb(heapTotal),
+        heapLimitMb: mb(heap_size_limit),
+        externalMb: mb(external),
+        heapUsedPctOfLimit: Number(((heapUsed / heap_size_limit) * 100).toFixed(1)),
+      },
+      bufferedEvents: sessionManager.getBufferedEventCount(),
+    });
+  });
+
+  // Discovery metadata must not be cacheable by a shared cache: the base URL
+  // can legitimately differ per trusted host, and an intermediary retaining one
+  // client's copy for another is the amplification path that made
+  // X-Forwarded-Host poisoning a cross-user issue rather than a self-inflicted
+  // one. Express otherwise sets an ETag on these JSON responses with no
+  // Cache-Control and no Vary.
+  const noStore = (res: Response): void => {
+    res.set("Cache-Control", "no-store");
+    res.set("Vary", "X-Forwarded-Host, X-Forwarded-Proto, Host");
+  };
+
+  // OAuth 2.1 Authorization Server Metadata (RFC 8414)
+  const oauthMetadata = (_req: Request, res: Response): void => {
+    const baseUrl = resolveBaseUrl(_req);
+    noStore(res);
+    res.status(200).json({
+      issuer: baseUrl,
+      authorization_endpoint: `${baseUrl}/oauth/authorize`,
+      token_endpoint: `${baseUrl}/oauth/token`,
+      registration_endpoint: `${baseUrl}/register`,
+      revocation_endpoint: `${baseUrl}/oauth/revoke`,
+      response_types_supported: ["code"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      scopes_supported: ["api", "offline_access"],
+      code_challenge_methods_supported: ["S256"],
+      token_endpoint_auth_methods_supported: ["none"],
+      revocation_endpoint_auth_methods_supported: ["none"],
+    });
+  };
+
+  // Support both OpenID Connect and OAuth 2.1 discovery paths.
+  // Wildcard variants handle RFC 9728 path-aware discovery: when the MCP server
+  // URL includes a path (e.g. /mcp), clients try /.well-known/{type}/mcp first.
+  app.get("/.well-known/openid-configuration", oauthMetadata);
+  app.get("/.well-known/openid-configuration/*path", oauthMetadata);
+  app.get("/.well-known/oauth-authorization-server", oauthMetadata);
+  app.get("/.well-known/oauth-authorization-server/*path", oauthMetadata);
+
+  // OAuth 2.1 Protected Resource Metadata (RFC 9728)
+  // The wildcard variant handles path-aware discovery (e.g. /.well-known/oauth-protected-resource/mcp)
+  const protectedResourceMetadata = (_req: Request, res: Response): void => {
+    const baseUrl = resolveBaseUrl(_req);
+    noStore(res);
+    res.status(200).json({
+      resource: baseUrl,
+      authorization_servers: [baseUrl],
+      bearer_methods_supported: ["header"],
+      scopes_supported: ["api", "offline_access"],
+    });
+  };
+  app.get("/.well-known/oauth-protected-resource", protectedResourceMetadata);
+  app.get("/.well-known/oauth-protected-resource/*path", protectedResourceMetadata);
+
+  // Dynamic Client Registration (RFC 7591)
+  // Echoes back the client's metadata merged with our server-assigned client_id.
+  // The MCP SDK client expects redirect_uris from its request to be reflected.
+  //
+  // SECURITY: This endpoint issues NO client_secret, and must never return one.
+  // /register is unauthenticated by design (RFC 7591 open registration), so any
+  // value in this response body is world-readable to anyone who can reach the
+  // server. Clients registered here are OAuth 2.1 *public* clients that
+  // authenticate with PKCE only — hence token_endpoint_auth_method: "none" and,
+  // per RFC 7591 §3.2.1, no client_secret / client_secret_expires_at fields.
+  // Our own POST /oauth/token never validates a client_secret either, so no
+  // client needs one.
+  //
+  // OAUTH_CLIENT_SECRET is a *server-side* credential used solely to authenticate
+  // this server to localfalcon.com's token/revocation endpoints (see
+  // oauth/oauthClient.ts). It must never be echoed to a client.
+  app.post("/register", (req: Request, res: Response): void => {
+    const clientMetadata =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+
+    // Registration does NOT grant redirect URI trust — see oauth/clientStore.ts.
+    // The authoritative check runs at /oauth/authorize and again at
+    // /oauth/callback before the code is delivered.
+    //
+    // This endpoint nonetheless answers consistently with that policy. It
+    // previously accepted an untrusted-host redirect_uri with 201 and echoed it
+    // back, warning only to the server log — which an external tester
+    // reasonably reads as "accepted", and which RFC 7591 §3.2.2 says should be
+    // an `invalid_redirect_uri` response instead. Reflecting a URI we would
+    // later refuse is what made this endpoint look exploitable.
+    //
+    // Note the response cannot simply omit the offending URI: the MCP SDK's
+    // client metadata schema requires `redirect_uris`
+    // (shared/auth.js — `redirect_uris: z.array(SafeUrlSchema)`, not optional),
+    // and silently dropping an entry could desync a client. So the choice is
+    // reflect-or-reject, and we reject.
+    const redirectUris: string[] = Array.isArray(clientMetadata.redirect_uris)
+      ? clientMetadata.redirect_uris.filter((u: unknown): u is string => typeof u === "string")
+      : [];
+
+    const decisions = redirectUris.map((uri) => ({ uri, decision: checkRedirectUri(uri) }));
+
+    // 1. Structurally impossible URIs are refused whatever else was supplied:
+    //    no allowlist change could ever make a javascript:, fragment-bearing or
+    //    credential-bearing URI a legitimate target.
+    const malformed = decisions.filter(
+      ({ decision }) => !decision.allowed && decision.reason !== "host-not-trusted"
+    );
+    if (malformed.length > 0) {
+      for (const { uri, decision } of malformed) {
+        console.error(`[OAuth] Rejecting registration (${decision.reason}): "${uri}"`);
+      }
+      res.status(400).json({
+        error: "invalid_redirect_uri",
+        error_description:
+          "One or more redirect_uris are not acceptable. Each must be a loopback URI or an " +
+          "https URI, with no fragment and no embedded credentials.",
+      });
+      return;
+    }
+
+    // 2. A registration in which NOTHING is usable could never complete a flow,
+    //    because /oauth/authorize would refuse every one of these URIs. Say so
+    //    now rather than returning 201 and failing later.
+    //
+    //    Deliberately keyed on "none usable" rather than rejecting per URI: a
+    //    client that supplies a mix including a usable callback keeps working.
+    //    The TS SDK authorizes with the same single provider.redirectUrl it
+    //    registers and never compares the reflected list, but other clients are
+    //    not the TS SDK, so this avoids breaking a register-one/authorize-with-
+    //    another client we cannot inspect.
+    const usable = decisions.filter(({ decision }) => decision.allowed);
+    if (decisions.length > 0 && usable.length === 0) {
+      for (const { uri } of decisions) {
+        console.error(`[OAuth] Rejecting registration (no usable redirect_uri): "${uri}"`);
+      }
+      res.status(400).json({
+        error: "invalid_redirect_uri",
+        error_description:
+          "None of the supplied redirect_uris can receive an authorization code. Each must be " +
+          "a loopback URI (RFC 8252) or an https URI on a supported MCP client platform. If " +
+          "this is a legitimate integration, contact compliance@localfalcon.com to have its " +
+          "callback host allowlisted, or set ADDITIONAL_TRUSTED_REDIRECT_DOMAINS on a " +
+          "self-hosted deployment.",
+      });
+      return;
+    }
+
+    // 3. Mixed set — at least one URI is usable, so accept and reflect the list
+    //    unchanged, but flag the entries that will be refused at authorize time.
+    for (const { uri } of decisions.filter(({ decision }) => !decision.allowed)) {
+      console.warn(
+        `[OAuth] Registered redirect_uri is on an untrusted host and will be ` +
+          `rejected at /oauth/authorize: "${uri}". Add its domain to ` +
+          `ADDITIONAL_TRUSTED_REDIRECT_DOMAINS if this client is legitimate.`
+      );
+    }
+
+    // Strip credential-bearing fields from the echoed metadata so a
+    // client-supplied value can never be reflected back as if we had issued it.
+    const {
+      client_secret: _ignoredClientSecret,
+      client_secret_expires_at: _ignoredClientSecretExpiresAt,
+      registration_access_token: _ignoredRegistrationAccessToken,
+      registration_client_uri: _ignoredRegistrationClientUri,
+      ...safeClientMetadata
+    } = clientMetadata as Record<string, unknown>;
+
+    res.status(201).json({
+      // Echo client's metadata so the SDK's Zod parse succeeds
+      ...safeClientMetadata,
+      // Override with our server-assigned values
+      client_id: "74e0d6e848652234efed.localfalconapps.com",
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+      client_name: clientMetadata.client_name || "LocalFalcon MCP",
+      logo_uri: "https://www.localfalcon.com/uploads/identity/logos/471387_local-falcon-logo.png",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+  });
+
+  // Setup OAuth 2.1 routes
+  setupOAuthRoutes(app);
+
+  return app;
+};
+
+// Custom Bearer auth middleware that dynamically sets resource_metadata
+// from the incoming request's host. This avoids hard-coded BASE_URL mismatches
+// that cause OAuth discovery to fail when the client can't reach a static URL.
+const bearerAuthMiddleware: RequestHandler = (async (req: Request, res: Response, next: Function) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      throw { code: "invalid_token", message: "Missing Authorization header", status: 401 };
+    }
+
+    const [type, token] = authHeader.split(" ");
+    if (type.toLowerCase() !== "bearer" || !token) {
+      throw { code: "invalid_token", message: "Invalid Authorization header format, expected 'Bearer TOKEN'", status: 401 };
+    }
+
+    const authInfo = await tokenVerifier.verifyAccessToken(token);
+
+    // Check required scopes
+    if (!authInfo.scopes.includes("api")) {
+      throw { code: "insufficient_scope", message: "Insufficient scope", status: 403 };
+    }
+
+    // Check expiration
+    if (typeof authInfo.expiresAt !== "number" || isNaN(authInfo.expiresAt)) {
+      throw { code: "invalid_token", message: "Token has no expiration time", status: 401 };
+    }
+    if (authInfo.expiresAt < Date.now() / 1000) {
+      throw { code: "invalid_token", message: "Token has expired", status: 401 };
+    }
+
+    req.auth = authInfo;
+    next();
+  } catch (error: any) {
+    const errCode = error?.code || "invalid_token";
+    const errMsg = error?.message || "Unauthorized";
+    const status = error?.status || 401;
+
+    // Transient errors (503) should NOT trigger re-authentication.
+    // Return Retry-After so the client knows to retry the same request,
+    // not start a new OAuth flow.
+    if (status === 503) {
+      res.set("Retry-After", "5");
+      res.status(503).json({ error: errCode, error_description: errMsg });
+      return;
+    }
+
+    // Build WWW-Authenticate with a resource_metadata pointer the client can
+    // trust. resolveBaseUrl() refuses to echo an untrusted X-Forwarded-Host, so
+    // this cannot be pointed at an attacker-controlled discovery document.
+    const resourceMetadataUrl = `${resolveBaseUrl(req)}/.well-known/oauth-protected-resource`;
+
+    let wwwAuth = `Bearer error="${errCode}", error_description="${errMsg}", scope="api"`;
+    wwwAuth += `, resource_metadata="${resourceMetadataUrl}"`;
+
+    res.set("WWW-Authenticate", wwwAuth);
+    res.status(status).json({ error: errCode, error_description: errMsg });
+  }
+}) as RequestHandler;
+
+// Open the legacy stream before initialize, then let connect() reuse it once
+// clientInfo is available. Only public transport methods are used here.
+class InitializingSSETransport extends SSEServerTransport {
+  private started = false;
+  override async start(): Promise<void> {
+    if (this.started) return;
+    await super.start();
+    this.started = true;
+  }
+}
+
+// SSE Transport Handlers
+const setupSSERoutes = (app: Application, sessionManager: SessionManager): void => {
+
+  // SSE endpoint for establishing streams — protected by Bearer auth (OAuth 2.1)
+  const sseHandler: AsyncRequestHandler = async (req, res) => {
+    console.log("Establishing SSE stream...");
+
+    // Auth is validated by requireBearerAuth middleware — req.auth is guaranteed
+    const authInfo = req.auth!;
+    const apiKey = authInfo.token;
+
+    console.log(`[${new Date().toISOString()}] SSE auth - apiKey: "${apiKey.substring(0, 8)}..."`);
+
+    let transport: SSEServerTransport | undefined;
+    let sessionId: string | undefined;
+
+    try {
+      transport = new InitializingSSETransport("/sse/messages", res);
+      sessionId = transport.sessionId;
+      // Captured as a const so the closure below sees a non-optional string.
+      const activeSessionId = sessionId;
+
+      // The attribution resolved for this GET seeds the session; the
+      // initialize that follows over POST /sse/messages usually improves on it.
+      sessionManager.add(
+        activeSessionId,
+        { apiKey, requestSource: currentRequestSource() },
+        transport
+      );
+
+      transport.onclose = () => {
+        console.log(`[Transport] SSE transport onclose triggered for session ${activeSessionId}`);
+        sessionManager.remove(activeSessionId);
+      };
+
+      await transport.start();
+      console.log(`Established SSE stream with session ID: ${sessionId}`);
+    } catch (error: unknown) {
+      console.error("Error establishing SSE stream:", error);
+      // The session was registered before server.connect(); if connect threw,
+      // drop it rather than leaving a dead entry for the sweep to find.
+      if (sessionId) sessionManager.remove(sessionId);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Error establishing SSE stream" });
+      }
+    }
+  };
+
+  // SSE message handling endpoint (session already authenticated)
+  const sseMessagesHandler: AsyncRequestHandler = async (req, res) => {
+    console.log("Received message for SSE...");
+    const sessionId = req.query.sessionId as string | undefined;
+
+    if (!sessionId) {
+      console.error("Missing session ID in SSE request");
+      res.status(400).json({ error: "Missing sessionId parameter" });
+      return;
+    }
+
+    const transport = sessionManager.getTransport(sessionId);
+    if (!transport || !(transport instanceof SSEServerTransport)) {
+      console.error(`No active SSE transport for session ID: ${sessionId}`);
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+
+    try {
+      const session = sessionManager.getSession(sessionId)!;
+      if (!session.serverReady) {
+        if (!isInitializeRequest(req.body)) {
+          res.status(400).json({ error: "Send initialize before using this SSE session." });
+          return;
+        }
+        session.profile = getMcpProfile(session.requestSource!.value);
+        session.serverReady = getServer(sessionManager.getSessionMap(), session.requestSource!.value).connect(transport);
+      }
+      await session.serverReady;
+      sessionManager.updateActivity(sessionId);
+      await transport.handlePostMessage(req, res, req.body);
+    } catch (error: unknown) {
+      console.error("Error handling SSE message:", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "Error handling request",
+          details: String(error)
+        });
+      }
+    }
+  };
+
+  // /sse/messages was previously unauthenticated: possession of the session ID
+  // — which the SSE transport carries in a query string, and which therefore
+  // lands in proxy and CDN access logs — was sufficient to drive the session.
+  // It now requires a Bearer token that owns the named session.
+  app.get("/sse", mcpRateLimiter, bearerAuthMiddleware, requireSessionOwnership(sessionManager), sseHandler);
+  app.post(
+    "/sse/messages",
+    mcpRateLimiter,
+    bearerAuthMiddleware,
+    requireSessionOwnership(sessionManager),
+    sseMessagesHandler
+  );
+};
+
+/**
+ * Constant-time comparison of two secrets via their SHA-256 digests.
+ *
+ * Digests keep the inputs a fixed length, which timingSafeEqual requires, and
+ * avoid leaking length information about the stored key.
+ */
+const secretsMatch = (a: string, b: string): boolean => {
+  const ha = crypto.createHash("sha256").update(a).digest();
+  const hb = crypto.createHash("sha256").update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
+};
+
+/**
+ * Bind an established session to the credential that created it.
+ *
+ * Bearer auth alone proves the caller holds *a* valid API key; it does not prove
+ * the session they name is theirs. Without this check, any authenticated caller
+ * who learned another user's session ID could drive that session — and session
+ * IDs are not secrets in practice: they are written to stdout on nearly every
+ * request, returned in a CORS-exposed `mcp-session-id` response header, and for
+ * the SSE transport travel in a query string that lands in proxy access logs.
+ *
+ * Ordering matters: this must run *after* bearerAuthMiddleware so req.auth is
+ * populated.
+ *
+ * Recovery also checks the retained credential binding. Unknown sessions must
+ * initialize again instead of reconstructing their profile from an API key.
+ */
+const requireSessionOwnership = (sessionManager: SessionManager): RequestHandler => {
+  return (req: Request, res: Response, next): void => {
+    const headerId = req.headers["mcp-session-id"] as string | undefined;
+    const queryId = typeof req.query.sessionId === "string" ? req.query.sessionId : undefined;
+    if (headerId && queryId && headerId !== queryId) {
+      res.status(400).json({ error: "Conflicting session identifiers." });
+      return;
+    }
+    const sessionId = headerId ?? queryId;
+
+    const session = sessionId ? sessionManager.getSession(sessionId) : undefined;
+    const retired = sessionId && !session ? sessionManager.getRetired(sessionId) : undefined;
+    const token = req.auth?.token;
+    if (!token || (session && !secretsMatch(session.apiKey, token)) ||
+        (retired && !secretsMatch(retired.ownerHash, crypto.createHash("sha256").update(token).digest("hex")))) {
+      res.status(403).json({ jsonrpc: "2.0", error: { code: -32000, message: "Forbidden: session does not belong to this credential" }, id: null });
+      return;
+    }
+    const binding = session ?? retired;
+    let source = deriveRequestSource({ headers: req.headers, body: req.body }, binding?.requestSource);
+    // ChatGPT is sticky for an authenticated session, including conflicting
+    // equal-tier signals. Registry and API attribution use the same binding.
+    if (binding?.requestSource?.value === "chatgpt") source = binding.requestSource;
+    if (binding?.requiresInitialize || (binding?.profile && binding.profile !== getMcpProfile(source.value))) {
+      if (session && sessionId) {
+        session.requestSource = source;
+        session.requiresInitialize = true;
+        sessionManager.remove(sessionId);
+      } else if (retired) {
+        retired.requestSource = source;
+        retired.requiresInitialize = true;
+      }
+      res.status(404).json({ jsonrpc: "2.0", error: { code: -32000, message: "Session profile changed. Reconnect and send a new initialize request before continuing." }, id: req.body?.id ?? null });
+      return;
+    }
+    if (session) session.requestSource = source;
+    return runWithRequestSource(source, () => next());
+  };
+};
+
+// HTTP Transport Handlers
+const setupHTTPRoutes = (app: Application, sessionManager: SessionManager): void => {
+
+  // Main MCP HTTP endpoint
+  const mcpHandler: AsyncRequestHandler = async (req, res) => {
+    // Payload logging is opt-in: request/response bodies here can be
+    // megabyte-class, pretty-printing roughly doubles them, and console.log to
+    // a pipe queues unbounded on the heap under log backpressure.
+    if (DEBUG_PAYLOAD_LOGGING) {
+      console.log(`MCP Request received: ${req.method} ${req.url}`, { body: req.body });
+      const originalJson = res.json;
+      res.json = function (body) {
+        console.log(`MCP Response being sent:`, JSON.stringify(body, null, 2));
+        return originalJson.call(this, body);
+      };
+    } else {
+      console.log(`MCP Request received: ${req.method} ${req.url} (method: ${req.body?.method ?? "n/a"})`);
+    }
+
+    try {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      let transport: StreamableHTTPServerTransport;
+
+      if (sessionId && sessionManager.getTransport(sessionId)) {
+        // Reuse existing transport
+        console.log(`Reusing HTTP session: ${sessionId}`);
+        sessionManager.updateActivity(sessionId);
+        transport = sessionManager.getTransport(sessionId) as StreamableHTTPServerTransport;
+      } else if (!sessionId && isInitializeRequest(req.body)) {
+        // New initialization request — auth is validated by requireBearerAuth middleware
+        console.log(`New HTTP session request: ${req.body.method}`);
+        const authInfo = req.auth!;
+        const apiKey = authInfo.token;
+
+        console.log(`[${new Date().toISOString()}] HTTP auth - apiKey: "${apiKey.substring(0, 8)}..."`);
+
+        const eventStore = new BoundedEventStore();
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => uuidv4(),
+          enableJsonResponse: true,
+          eventStore,
+          onsessioninitialized: (sessionId) => {
+            console.log(`HTTP Session initialized: ${sessionId}`);
+            // Runs inside handleRequest below, so this is still the initialize
+            // request's async context — and that request is the one carrying
+            // clientInfo, the signal that identifies a connector sending no
+            // Origin header.
+            sessionManager.add(
+              sessionId,
+              { apiKey, eventStore, requestSource: currentRequestSource(), profile: getMcpProfile(currentRequestSource()!.value) },
+              transport
+            );
+          }
+        });
+
+        transport.onclose = () => {
+          const sid = transport.sessionId;
+          console.log(`[Transport] HTTP transport onclose triggered, sessionId: ${sid || 'undefined'}`);
+          if (sid && sessionManager.getTransport(sid)) {
+            console.log(`[Transport] HTTP transport closed for session ${sid}, removing from session manager`);
+            sessionManager.remove(sid);
+          } else {
+            console.log(`[Transport] HTTP transport onclose: session ${sid} not found in manager (already removed or not yet added)`);
+          }
+        };
+
+        console.log(`Connecting HTTP transport to MCP server...`);
+        await getServer(sessionManager.getSessionMap()).connect(transport);
+        console.log(`HTTP Transport connected to MCP server successfully`);
+
+        console.log(`Handling HTTP initialization request...`);
+        await transport.handleRequest(req, res, req.body);
+        console.log(`HTTP Initialization request handled, response sent`);
+        return;
+      } else if (req.auth && !isInitializeRequest(req.body)) {
+        // Auto-recovery: request has a valid Bearer token but invalid/missing session ID.
+        // Retained bindings allow transparent recovery after eviction/timeout.
+        // Unknown bindings (including process restarts) require fresh initialization.
+        const recovered = await attemptSessionRecovery(req, res, sessionManager);
+        if (!recovered) return; // Error response already sent by attemptSessionRecovery
+        transport = recovered;
+
+      } else {
+        console.error('Invalid HTTP request: No valid session ID or initialization request');
+        res.status(400).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32000,
+            message: 'Bad Request: No valid session ID provided',
+          },
+          id: null,
+        });
+        return;
+      }
+
+      console.log(`Handling HTTP request for session: ${transport.sessionId}`);
+      const startTime = Date.now();
+      await transport.handleRequest(req, res, req.body);
+      const duration = Date.now() - startTime;
+      console.log(`HTTP Request handling completed in ${duration}ms for session: ${transport.sessionId}`);
+    } catch (error) {
+      console.error('Error handling MCP HTTP request:', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal server error',
+          },
+          id: null,
+        });
+      }
+    }
+  };
+
+  // Handle GET requests for server-to-client notifications via HTTP SSE
+  const mcpGetHandler: AsyncRequestHandler = async (req, res) => {
+    console.log(`MCP GET Request received: ${req.method} ${req.url}`);
+    
+    try {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      let transport: StreamableHTTPServerTransport | undefined;
+
+      if (sessionId && sessionManager.getTransport(sessionId)) {
+        // Existing session — reuse transport
+        sessionManager.updateActivity(sessionId);
+        transport = sessionManager.getTransport(sessionId) as StreamableHTTPServerTransport;
+      } else if (req.auth) {
+        // Session expired/missing but client has a valid Bearer token — attempt recovery
+        console.log(`[Session] GET handler: session "${sessionId}" not found, attempting auto-recovery`);
+        const recovered = await attemptSessionRecovery(req, res, sessionManager);
+        if (!recovered) return; // Error response already sent
+        transport = recovered;
+      } else {
+        // No valid session and no Bearer token — session is gone
+        console.log(`Invalid session ID in HTTP GET request: ${sessionId}`);
+        res.status(410).json({
+          error: 'session_expired',
+          message: 'Session has expired. Please reconnect.',
+        });
+        return;
+      }
+
+      const activeSessionId = transport.sessionId || sessionId || 'unknown';
+
+      const lastEventId = req.headers['last-event-id'] as string | undefined;
+      if (lastEventId) {
+        console.log(`HTTP Client reconnecting with Last-Event-ID: ${lastEventId}`);
+      } else {
+        console.log(`Establishing new HTTP SSE stream for session ${activeSessionId}`);
+      }
+
+      res.on('close', () => {
+        console.log(`[Transport] HTTP SSE stream closed for session ${activeSessionId}`);
+        // NOTE: We intentionally do NOT remove the session or close the transport here.
+        // Anthropic's connector proxy routinely drops and re-establishes SSE streams
+        // (typically every ~5 seconds) while reusing the same session ID and Bearer token.
+        // Destroying the session on SSE close would:
+        //   1. Kill any in-flight POST requests (tools/call) that haven't responded yet
+        //   2. Prevent the proxy from reconnecting the SSE stream with the same session ID
+        //   3. Force auto-recovery for every subsequent request, adding latency
+        // The session will be cleaned up by:
+        //   - Explicit DELETE /mcp request (client-initiated termination)
+        //   - The inactivity checker (SESSION_INACTIVITY_TIMEOUT_MS)
+        //   - Server shutdown (SIGTERM/SIGINT)
+      });
+
+      console.log(`Starting HTTP SSE transport.handleRequest for session ${activeSessionId}...`);
+      const startTime = Date.now();
+      await transport.handleRequest(req, res);
+      const duration = Date.now() - startTime;
+      console.log(`HTTP SSE stream setup completed in ${duration}ms for session: ${activeSessionId}`);
+    } catch (error) {
+      console.error('Error handling HTTP GET request:', error);
+      if (!res.headersSent) {
+        res.status(500).send('Internal server error');
+      }
+    }
+  };
+
+  // Handle DELETE requests for session termination
+  const mcpDeleteHandler: AsyncRequestHandler = async (req, res) => {
+    console.log(`MCP DELETE Request received: ${req.method} ${req.url}`);
+    try {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      if (!sessionId || !sessionManager.getTransport(sessionId)) {
+        console.log(`Invalid session ID in HTTP DELETE request: ${sessionId}`);
+        res.status(400).send('Invalid or missing session ID');
+        return;
+      }
+      
+      console.log(`Received HTTP session termination request for session ${sessionId}`);
+      const transport = sessionManager.getTransport(sessionId);
+      
+      const originalSend = res.send;
+      res.send = function(body) {
+        console.log(`HTTP DELETE response being sent:`, body);
+        return originalSend.call(this, body);
+      };
+      
+      console.log(`Processing HTTP session termination...`);
+      const startTime = Date.now();
+      await (transport as StreamableHTTPServerTransport).handleRequest(req, res);
+      const duration = Date.now() - startTime;
+      console.log(`HTTP Session termination completed in ${duration}ms for session: ${sessionId}`);
+      
+      // The SDK closes the transport in its own `finally`, which fires onclose
+      // and removes the session — but it returns early without closing when its
+      // session or protocol-version validation rejects the request, which would
+      // leave the session resident until the inactivity sweep. remove() is
+      // idempotent, so calling it here covers that case.
+      if (sessionManager.getTransport(sessionId) || sessionManager.getSession(sessionId)) {
+        console.log(`[Session] Ensuring session ${sessionId} is removed after DELETE`);
+        sessionManager.remove(sessionId);
+      }
+    } catch (error) {
+      console.error('Error handling HTTP DELETE request:', error);
+      if (!res.headersSent) {
+        res.status(500).send('Error processing session termination');
+      }
+    }
+  };
+
+
+  // Root GET handler — returns 200 with server info for health checks and scanners.
+  // Only intercepts requests WITHOUT the mcp-session-id header; requests WITH
+  // the header fall through to the MCP SSE handler below.
+  app.get('/', (req: Request, res: Response, next: Function) => {
+    if (req.headers['mcp-session-id']) {
+      return next();
+    }
+    res.status(200).json({
+      name: "Local Falcon MCP Server",
+      status: "ok",
+      mcp_endpoint: "/mcp",
+      health: "/healthz",
+      documentation: "https://localfalcon.com/mcp",
+    });
+  });
+
+  // Sessionless GET /mcp — returns 200 with server info when no mcp-session-id header.
+  // A 410 to a sessionless request is semantically wrong: nothing is "expired"
+  // because nothing was started. Requests WITH the header fall through to
+  // mcpGetHandler, which keeps the 410 for invalid sessions per MCP spec.
+  const sessionlessMcpInfoHandler: RequestHandler = (req, res, next) => {
+    if (req.headers['mcp-session-id']) {
+      return next();
+    }
+    res.status(200).json({
+      name: "Local Falcon MCP Server",
+      status: "ok",
+      message: "MCP endpoint active. Session required - connect via MCP client.",
+      documentation: "https://localfalcon.com/mcp",
+    });
+  };
+
+  // Mount on both /mcp and / so clients can connect to either path.
+  // Root path mounting ensures OAuth discovery works when the server URL has no path.
+  // Bearer auth is required on EVERY session-bearing request, and the session
+  // must belong to the presented credential. Previously only the initialize
+  // request was authenticated and possession of the session ID alone authorized
+  // everything after it, including credit-spending tools.
+  //
+  // The sessionless info handlers stay in front of the auth chain so health
+  // checks and scanners hitting GET / or GET /mcp without a session still get
+  // a 200 rather than a 401.
+  const owns = requireSessionOwnership(sessionManager);
+
+  app.post('/mcp', mcpRateLimiter, bearerAuthMiddleware, owns, mcpHandler);
+  app.get('/mcp', sessionlessMcpInfoHandler, mcpRateLimiter, bearerAuthMiddleware, owns, mcpGetHandler);
+  app.delete('/mcp', mcpRateLimiter, bearerAuthMiddleware, owns, mcpDeleteHandler);
+
+  app.post('/', mcpRateLimiter, bearerAuthMiddleware, owns, mcpHandler);
+  // Note: GET / without mcp-session-id is handled above; this catches MCP SSE streams.
+  app.get('/', mcpRateLimiter, bearerAuthMiddleware, owns, mcpGetHandler);
+  app.delete('/', mcpRateLimiter, bearerAuthMiddleware, owns, mcpDeleteHandler);
+};
+
+// Unified Server Creation
+export const createUnifiedServer = (sessionManager: SessionManager, modes: string[]): Application => {
+  const app = createBaseApp(sessionManager);
+  
+  if (modes.includes('sse')) {
+    console.log('Setting up SSE routes...');
+    setupSSERoutes(app, sessionManager);
+  }
+  
+  if (modes.includes('http')) {
+    console.log('Setting up HTTP routes...');
+    setupHTTPRoutes(app, sessionManager);
+  }
+  
+  return app;
+};
+
+// Server Startup
+const startUnifiedServer = (app: Application, sessionManager: SessionManager, modes: string[]): void => {
+  const port = parseInt(process.env.PORT ?? "8000", 10);
+  sessionManager.startInactivityChecker();
+
+  if (!hasCanonicalBaseUrl()) {
+    console.warn(
+      "[BaseUrl] WARNING: PUBLIC_BASE_URL is not set. OAuth discovery metadata " +
+        "will be derived from request headers, which lets a client influence the " +
+        "advertised issuer and endpoints via X-Forwarded-Host. Set PUBLIC_BASE_URL " +
+        "to this server's public origin (e.g. https://mcp.localfalcon.com)."
+    );
+  }
+
+  const server = app.listen(port, () => {
+    console.log(`Unified MCP server listening on port ${port}`);
+    console.log(`Active modes: ${modes.join(', ').toUpperCase()}`);
+    console.log(`Available endpoints:`);
+    if (modes.includes('sse')) {
+      console.log(`  - SSE: GET /sse, POST /sse/messages`);
+    }
+    if (modes.includes('http')) {
+      console.log(`  - HTTP: POST|GET|DELETE /mcp and /`);
+    }
+    console.log(`  - Health: GET /ping, GET /healthz`);
+    console.log(`  - Session inactivity timeout: ${SESSION_INACTIVITY_TIMEOUT_MS / 1000 / 60 / 60} hours`);
+  });
+
+  process.on("SIGINT", async () => {
+    console.log("Shutting down unified server...");
+    await sessionManager.cleanup();
+    server.close(() => {
+      console.log("Unified server shutdown complete");
+      process.exit(0);
+    });
+  });
+
+  process.on("SIGTERM", async () => {
+    console.log("Received SIGTERM, shutting down unified server...");
+    await sessionManager.cleanup();
+    server.close(() => {
+      console.log("Unified server shutdown complete");
+      process.exit(0);
+    });
+  });
+};
+
+const startStdioServer = (): void => {
+  // Note: In STDIO mode, stdout is reserved for JSON-RPC messages only.
+  // Use stderr for logging to avoid breaking the protocol.
+  console.error("Starting STDIO server...");
+  // No HTTP request to attribute in STDIO mode, so every outgoing API call is
+  // reported as "stdio" unless the operator labelled the install via
+  // LOCAL_FALCON_REQUEST_SOURCE.
+  setProcessRequestSource("stdio");
+  const transport = new StdioServerTransport();
+  const server = getServer(new Map<string, SessionData>());
+
+  server.connect(transport).catch((error: unknown) => {
+    console.error("Error connecting stdio server:", error);
+    process.exit(1);
+  });
+
+  process.on("uncaughtException", (error: Error) => {
+    console.error("Uncaught exception:", error);
+    process.exit(1);
+  });
+
+  process.on("unhandledRejection", (reason: unknown, promise: Promise<unknown>) => {
+    console.error("Unhandled Rejection at:", promise, "reason:", reason);
+    process.exit(1);
+  });
+
+  console.error("STDIO server started successfully");
+};
+
+// Main Execution
+const main = (): void => {
+  const serverMode = process.argv[2] ?? "stdio";
+
+  try {
+    switch (serverMode) {
+      case "sse": {
+        const sessionManager = new SessionManager();
+        const app = createUnifiedServer(sessionManager, ['sse']);
+        startUnifiedServer(app, sessionManager, ['sse']);
+        break;
+      }
+      case "http": {
+        const sessionManager = new SessionManager();
+        const app = createUnifiedServer(sessionManager, ['http']);
+        startUnifiedServer(app, sessionManager, ['http']);
+        break;
+      }
+      case "unified":
+      case "both":
+      case "HTTPAndSSE": {
+        const sessionManager = new SessionManager();
+        const app = createUnifiedServer(sessionManager, ['http', 'sse']);
+        startUnifiedServer(app, sessionManager, ['http', 'sse']);
+        break;
+      }
+      case "stdio":
+      default:
+        startStdioServer();
+        break;
+    }
+  } catch (error: unknown) {
+    console.error(`Error starting ${serverMode} server:`, error);
+    process.exit(1);
+  }
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

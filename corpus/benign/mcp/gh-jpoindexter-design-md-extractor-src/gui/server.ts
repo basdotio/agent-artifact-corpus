@@ -1,0 +1,249 @@
+import { createReadStream } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from 'node:http';
+import { extname, join, resolve, sep } from 'node:path';
+import { writeZip } from '../io/zip.js';
+import { renderAppHtml } from './appHtml.js';
+import { detectClis } from './detectClis.js';
+import { runGuiExtraction } from './runGuiExtraction.js';
+import type { GuiRunner } from './types.js';
+
+type CreateGuiServerOptions = {
+  runExtraction?: GuiRunner;
+  runsDir?: string;
+};
+
+function contentType(path: string): string {
+  switch (extname(path)) {
+    case '.html':
+      return 'text/html; charset=utf-8';
+    case '.md':
+      return 'text/markdown; charset=utf-8';
+    case '.json':
+      return 'application/json; charset=utf-8';
+    case '.png':
+      return 'image/png';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function sendJson(
+  res: ServerResponse,
+  statusCode: number,
+  body: unknown,
+): void {
+  const payload = JSON.stringify(body);
+  res.writeHead(statusCode, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(payload),
+  });
+  res.end(payload);
+}
+
+function readRequestJson(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolveRequest, reject) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 1024 * 64) {
+        reject(new Error('Request body is too large.'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      try {
+        resolveRequest(body ? JSON.parse(body) : {});
+      } catch {
+        reject(new Error('Invalid JSON body.'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function normalizeTargetUrl(input: unknown): string {
+  const raw = String(input ?? '').trim();
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
+  return new URL(hasScheme ? raw : `https://${raw}`).toString();
+}
+
+// Translate raw Playwright/Chromium navigation errors into a clean, actionable
+// message. The browser may auto-retry a failed bare domain with a `www.` prefix,
+// so the host shown is read from the failing URL in the error itself.
+export function friendlyExtractionError(message: string): string {
+  const urlMatch = message.match(/https?:\/\/[^\s/]+/);
+  const host = urlMatch ? urlMatch[0].replace(/^https?:\/\//, '') : 'the site';
+  if (/ERR_NAME_NOT_RESOLVED|ENOTFOUND|getaddrinfo/i.test(message)) {
+    return `Could not resolve ${host}. Check the domain is spelled correctly and includes the right extension (e.g. example.com).`;
+  }
+  if (
+    /ERR_CONNECTION_(REFUSED|TIMED_OUT|CLOSED|RESET)|ECONNREFUSED/i.test(
+      message,
+    )
+  ) {
+    return `Could not connect to ${host}. The site may be down or blocking automated visits.`;
+  }
+  if (/ERR_CERT|SSL|certificate/i.test(message)) {
+    return `${host} has an SSL/certificate problem that blocked the capture.`;
+  }
+  if (/Timeout.*(exceeded|ms)|exceeded.*ms/i.test(message)) {
+    return `${host} took too long to respond and the capture timed out.`;
+  }
+  // Strip Playwright's verbose "Call log:" tail for anything else.
+  return message.split(/\n?Call log:/)[0].trim() || message;
+}
+
+// Zip an entire run directory on demand and stream it as a download. The runId
+// pattern is restricted to safe filename chars, and the resolved run directory
+// is confirmed to sit inside runsDir before any filesystem work (same guard as
+// serveRunFile) to block path traversal.
+export async function serveRunBundle(
+  res: ServerResponse,
+  runsDir: string,
+  runId: string,
+): Promise<void> {
+  const root = resolve(runsDir);
+  const runDir = resolve(root, runId);
+  if (!runDir.startsWith(`${root}${sep}`)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+
+  try {
+    const runStat = await stat(runDir);
+    if (!runStat.isDirectory()) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+    const zipPath = join(runDir, 'bundle.zip');
+    await writeZip(runDir, zipPath);
+    const zipData = await readFile(zipPath);
+    res.writeHead(200, {
+      'content-type': 'application/zip',
+      'content-disposition': `attachment; filename="${runId}.zip"`,
+      'content-length': zipData.length,
+    });
+    res.end(zipData);
+  } catch {
+    res.writeHead(404);
+    res.end('Not found');
+  }
+}
+
+async function serveRunFile(
+  res: ServerResponse,
+  runsDir: string,
+  requestPath: string,
+): Promise<void> {
+  const relative = decodeURIComponent(requestPath.replace(/^\/runs\//, ''));
+  const absolute = resolve(runsDir, relative);
+  const root = resolve(runsDir);
+  if (absolute !== root && !absolute.startsWith(`${root}${sep}`)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+
+  try {
+    const fileStat = await stat(absolute);
+    if (!fileStat.isFile()) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+    res.writeHead(200, { 'content-type': contentType(absolute) });
+    createReadStream(absolute).pipe(res);
+  } catch {
+    res.writeHead(404);
+    res.end('Not found');
+  }
+}
+
+export function createGuiServer(options: CreateGuiServerOptions = {}): Server {
+  const runsDir = resolve(options.runsDir ?? 'out/gui-runs');
+  const runner =
+    options.runExtraction ?? ((input) => runGuiExtraction(input, runsDir));
+
+  return createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+
+    if (req.method === 'GET' && url.pathname === '/') {
+      const html = renderAppHtml();
+      res.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-length': Buffer.byteLength(html),
+      });
+      res.end(html);
+      return;
+    }
+
+    // Bundle ZIP — must be matched before the generic /runs/ static handler.
+    const bundleMatch = url.pathname.match(
+      /^\/runs\/([a-zA-Z0-9._-]+)\/bundle\.zip$/,
+    );
+    if (req.method === 'GET' && bundleMatch) {
+      await serveRunBundle(res, runsDir, bundleMatch[1] as string);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/runs/')) {
+      await serveRunFile(res, runsDir, url.pathname);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/clis') {
+      try {
+        sendJson(res, 200, { clis: await detectClis() });
+      } catch {
+        sendJson(res, 200, { clis: [] });
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/extract') {
+      try {
+        const body = (await readRequestJson(req)) as {
+          url?: unknown;
+          maxPages?: unknown;
+        };
+        const targetUrl = normalizeTargetUrl(body.url);
+        const maxPages = Number.isFinite(Number(body.maxPages))
+          ? Number(body.maxPages)
+          : 7;
+        const result = await runner({ url: targetUrl, maxPages });
+        sendJson(res, 200, result);
+      } catch (error) {
+        const raw = error instanceof Error ? error.message : String(error);
+        sendJson(res, 400, { error: friendlyExtractionError(raw) });
+      }
+      return;
+    }
+
+    res.writeHead(404);
+    res.end('Not found');
+  });
+}
+
+export function startGuiServer(input: {
+  port: number;
+  host?: string;
+  runsDir?: string;
+}): Server {
+  const server = createGuiServer({ runsDir: input.runsDir });
+  const host = input.host ?? '127.0.0.1';
+  server.listen(input.port, host, () => {
+    console.log(
+      `Design MD Extractor GUI running at http://${host}:${input.port}`,
+    );
+  });
+  return server;
+}

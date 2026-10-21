@@ -1,0 +1,162 @@
+import type { BrowserInterface, TabRef, Tab, TabContent } from "./browser.js";
+import { bindApplication, executeJXA, jsonLiteral } from "./osascript.js";
+
+/*
+Why JXA instead of AppleScript:
+
+When multiple processes share the same bundle id (e.g., the user's Google Chrome
+and a headless Chrome launched by Playwright MCP), AppleScript's
+`tell application "Google Chrome"` resolves to the newest-launched process,
+which may not be the user's foreground Chrome.
+
+JXA has been observed to resolve `Application("Google Chrome")` to the
+oldest-launched process, which usually points to the user's primary Chrome.
+This is a startup-order heuristic: if the headless process starts first, it is
+selected instead. There is no public API to target a specific PID without ObjC
+bridging, so we rely on this behavior documented at
+https://www.deanishe.net/snippet/multiple-app-instances/
+*/
+
+// Tabs that changed under the listing before it was read consistently
+const tabsChangedMessage = "Tabs kept changing while listing them";
+
+async function getChromeTabList(applicationName: string): Promise<Tab[]> {
+  const script = `
+    ${bindApplication(applicationName)}
+    const out = [];
+    // Windows come front to back, so the first active tab that is not blank
+    // is the one reading the active tab would return
+    let activeFound = false;
+    for (const w of app.windows()) {
+      const windowId = String(w.id());
+      // Each property is read for all tabs in one Apple Event, which is far
+      // fewer round trips than reading each tab. The reads are still separate
+      // events, so a tab closed or moved in between would pair one tab's title
+      // with another's URL. The IDs are read again afterwards; a difference
+      // means the lists are not from the same tab set, so read them again.
+      let ids, titles, urls;
+      for (let attempt = 0; ; attempt++) {
+        ids = w.tabs.id();
+        titles = w.tabs.title();
+        urls = w.tabs.url();
+        const idsAfter = w.tabs.id();
+        const same =
+          idsAfter.length === ids.length &&
+          idsAfter.every((id, i) => id === ids[i]);
+        if (same) break;
+        if (attempt === 2) throw new Error(${jsonLiteral(tabsChangedMessage)});
+      }
+      const activeIndex = w.activeTabIndex();
+      for (let i = 0; i < ids.length; i++) {
+        const active =
+          !activeFound && i === activeIndex - 1 && urls[i] !== "about:blank";
+        if (active) activeFound = true;
+        out.push({
+          windowId,
+          tabId: String(ids[i]),
+          title: titles[i],
+          url: urls[i],
+          active,
+        });
+      }
+    }
+    JSON.stringify(out);
+  `;
+
+  const result = await executeJXA(script);
+  const parsed = JSON.parse(result) as Tab[];
+  return parsed.filter((t) => /^https?:\/\//.test(t.url));
+}
+
+// JXA that binds targetWindow and targetTab to the given tab, or to the first
+// window's active tab that is not blank
+function resolveTargetTab(tab?: TabRef | null): string {
+  return `
+    const target = ${tab ? jsonLiteral(tab) : "null"};
+    let targetWindow;
+    let targetTab;
+    if (target) {
+      targetWindow = app.windows.byId(Number(target.windowId));
+      targetTab = targetWindow.tabs.byId(Number(target.tabId));
+    } else {
+      for (const w of app.windows()) {
+        const t = w.activeTab();
+        if (t.url() !== "about:blank") {
+          targetWindow = w;
+          targetTab = t;
+          break;
+        }
+      }
+      if (!targetTab) throw new Error("No active tab found");
+    }
+  `;
+}
+
+async function getTabInfo(
+  applicationName: string,
+  tab?: TabRef | null
+): Promise<Tab> {
+  const script = `
+    ${bindApplication(applicationName)}
+    ${resolveTargetTab(tab)}
+    JSON.stringify({
+      windowId: String(targetWindow.id()),
+      tabId: String(targetTab.id()),
+      title: targetTab.title(),
+      url: targetTab.url(),
+    });
+  `;
+
+  const result = await executeJXA(script);
+  return JSON.parse(result) as Tab;
+}
+
+async function getPageContent(
+  applicationName: string,
+  tab?: TabRef | null
+): Promise<TabContent> {
+  const script = `
+    ${bindApplication(applicationName)}
+    ${resolveTargetTab(tab)}
+
+    // Chrome's "execute javascript" may hang on suspended tabs. JXA cannot
+    // express AppleScript's "with timeout" block, so use a short process
+    // timeout and do not retry this operation.
+
+    const result = {
+      title: targetTab.title(),
+      url: targetTab.url(),
+      content: app.execute(targetTab, { javascript: "document.documentElement.outerHTML" }),
+    };
+    JSON.stringify(result);
+  `;
+
+  const result = await executeJXA(script, {
+    timeout: 3 * 1000,
+    maxRetries: 0,
+  });
+  return JSON.parse(result) as TabContent;
+}
+
+async function openURL(applicationName: string, url: string): Promise<TabRef> {
+  const script = `
+    ${bindApplication(applicationName, { launch: true })}
+    const win = app.windows[0];
+    const newTab = app.Tab({ url: ${jsonLiteral(url)} });
+    win.tabs.push(newTab);
+    JSON.stringify({
+      windowId: String(win.id()),
+      tabId: String(newTab.id()),
+    });
+  `;
+
+  const result = await executeJXA(script);
+  return JSON.parse(result) as TabRef;
+}
+
+export const chromeBrowser: BrowserInterface = {
+  getTabList: getChromeTabList,
+  getTabInfo,
+  getPageContent,
+  openURL,
+};

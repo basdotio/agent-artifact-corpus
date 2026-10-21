@@ -6,7 +6,7 @@ backgrounds, infer body anchors, or certify a button's visual correctness.
 Exit 0: requested checks pass; 1: review needed; 2: invalid input/dependency/I/O.
 """
 import argparse
-from pathlib import Path
+from grea.host.paths import Path
 import sys
 from grea.tools._artifact_common import digest, validate_output, write_report
 

@@ -27,7 +27,7 @@
 - **Tasks.** Every `### Task` heading of the run's `PLAN.md`, in file order. A task is closed when its ledger row says `done` or `blocked`. Closed tasks are skipped, so rerunning continues where it stopped.
 - **Prompt.** The runner extracts the task's section, and the section whose heading contains `Rules for every task`, and sends both on stdin with the working rules. The prompt is saved as `.runlogs/<run>/<task>.prompt.md`. The session does not open the plan unless the task cites another section.
 - **Model and effort.** These come from the task's `**Model:**` and `**Effort:**` lines, else from `runner.json` (default: Sonnet at low effort).
-- **Tools.** The lean set (Bash, PowerShell, Read, Edit, Write, Grep, Glob) and no MCP servers. Measured: 11K tokens of starting context instead of 35K with every tool. `**Tools: default**` on a task restores the full set.
+- **Tools.** Without a `**Tools:**` line: the lean set (Bash, PowerShell, Read, Edit, Write, Grep, Glob) and no MCP servers. Measured: 11K tokens of starting context instead of 35K with every tool. A `**Tools:**` line replaces the built-in set with the tools it names, and every tool it names is pre-approved. `Browser` loads the MCP server from `runs/browser-mcp.json` for that task only. `**Tools: default**` restores every built-in tool.
 - **Turn budget.** The prompt gives about 8 / 20 / 50 turns for S / M / L. It is guidance, not a hard stop.
 - **Headless rules.** Commands run in the foreground, at most 30 minutes each. Output over 20 000 characters is cut. Background tasks are off. `git push` is denied.
 

@@ -2,7 +2,8 @@
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
+from grea.host.paths import Path
 import re
 import stat
 import unicodedata
@@ -62,7 +63,7 @@ class Reader:
     """Never traverses symlinks, follows special files, or imports project code."""
     def __init__(self, root, max_files, max_bytes, cancel):
         supplied = Path(root).expanduser().absolute()
-        if supplied.is_symlink() or not supplied.is_dir():
+        if supplied.is_symlink() or (supplied.exists() and getattr(supplied.lstat(),'st_file_attributes',0)&0x400) or not supplied.is_dir():
             raise GreaError('INVALID_PROJECT_ROOT', 'Project root must be an existing non-symlink directory.')
         self.root = supplied.resolve()
         self.root_identity = (self.root.stat().st_dev, self.root.stat().st_ino)
@@ -80,7 +81,7 @@ class Reader:
         path = self.root
         for part in PurePosixPath(rel).parts:
             path /= part
-            if path.is_symlink():
+            if path.is_symlink() or (path.exists() and getattr(path.lstat(),'st_file_attributes',0)&0x400):
                 raise GreaError('UNSAFE_PROJECT_ENTRY', 'Symlink paths are not inspected.', details={'path': rel})
             if path.exists() and path != self.root / rel and not path.is_dir():
                 raise GreaError('PATH_CONFLICT', 'A parent component is not a directory.', details={'path': rel})
@@ -110,7 +111,9 @@ class Reader:
             finally:
                 if descriptor is not None:
                     os.close(descriptor)
-        # Windows path checks are portable candidates; native Windows remains unverified.
+        if os.name=='nt':
+            from .host.windows_files import open_fd
+            return open_fd(self.path(rel))
         return os.open(self.path(rel), os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
 
     @staticmethod
@@ -129,16 +132,21 @@ class Reader:
             raise GreaError('UNSAFE_PROJECT_ENTRY', 'Only regular files can be inspected.', details={'path': rel})
         if len(self.identities) >= self.max_files or self.bytes + before.st_size > self.max_bytes or (json_file and before.st_size > 1048576):
             raise GreaError('RESOURCE_LIMIT', 'Inspection budget exceeded; no complete plan was produced.', details={'path': rel})
+        if os.name=='nt':
+            from .host.windows_files import path_token,fd_token
+            original=path_token(path)
         with os.fdopen(self.open_fd(rel), 'rb') as handle:
-            if self.token(os.fstat(handle.fileno())) != self.token(before):
+            if (fd_token(handle.fileno()) != original) if os.name=='nt' else (self.token(os.fstat(handle.fileno())) != self.token(before)):
                 raise GreaError('STALE_INPUT', 'File changed before it could be inspected.', details={'path': rel})
             data = handle.read(min(before.st_size + 1, self.max_bytes - self.bytes + 1))
             after = os.fstat(handle.fileno())
-        if self.token(before) != self.token(after) or self.token(path.lstat()) != self.token(before) or len(data) != before.st_size:
+            if os.name=='nt':opened=fd_token(handle.fileno())
+        changed=(original!=opened or path_token(path)!=original) if os.name=='nt' else (self.token(before)!=self.token(after) or self.token(path.lstat())!=self.token(before))
+        if changed or len(data)!=before.st_size:
             raise GreaError('STALE_INPUT', 'File changed during inspection.', details={'path': rel})
         self.path(rel)
         self.bytes += len(data)
-        self.tokens[rel] = self.token(after)
+        self.tokens[rel] = opened if os.name=='nt' else self.token(after)
         self.data[rel] = data
         guid = re.search(rb'^guid: ([0-9a-f]{32})\s*$', data, re.M) if rel.endswith('.meta') else None
         self.identities[rel] = {'path': rel, 'kind': 'file', 'bytes': len(data),
@@ -194,7 +202,11 @@ class Reader:
                 raise GreaError('STALE_INPUT', 'Previously absent input appeared during inspection.', details={'path': rel})
         for rel, token in self.tokens.items():
             self.check_cancel()
-            if self.token(self.path(rel).lstat()) != token:
+            if os.name=='nt':
+                from .host.windows_files import path_token
+                current=path_token(self.path(rel))
+            else:current=self.token(self.path(rel).lstat())
+            if current != token:
                 raise GreaError('STALE_INPUT', 'Input changed before report completion.', details={'path': rel})
         for rel, names in list(self.directories.items()):
             if self.children(rel) != names:

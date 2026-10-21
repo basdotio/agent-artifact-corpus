@@ -1,0 +1,341 @@
+<title>JSON Logic Playground</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  :root{
+    --line:#e4e4e4;
+    --pane:#fcfcfc;
+    --pane-out:#f4f4f4;
+    --cur:#f0f0f0;
+    --ink:#1f1c24;
+    --punct:#a39cad;
+    --op:#a3199a;
+    --key:#5a3fc0;
+    --str:#2c7a4b;
+    --num:#b4580a;
+    --lit:#1f63c4;
+    --bad:#c23b3b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --line:#2b2732;
+      --pane:#16141b;
+      --pane-out:#1d1a24;
+      --cur:#201d28;
+      --ink:#ebe7f2;
+      --punct:#6d6679;
+      --op:#e27adb;
+      --key:#a99bff;
+      --str:#8fd4a5;
+      --num:#f3b073;
+      --lit:#7fb4ff;
+      --bad:#ff7b7b;
+    }
+  }
+  :root[data-theme="dark"]{
+    --line:#2b2732;
+    --pane:#16141b;
+    --pane-out:#1d1a24;
+    --cur:#201d28;
+    --ink:#ebe7f2;
+    --punct:#6d6679;
+    --op:#e27adb;
+    --key:#a99bff;
+    --str:#8fd4a5;
+    --num:#f3b073;
+    --lit:#7fb4ff;
+    --bad:#ff7b7b;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--line);
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    display:grid;
+    gap:1px;
+    grid-template:"rule" 2fr "data" 1fr "result" 1fr / 1fr;
+  }
+  @media (min-width:768px){
+    body{ grid-template:"rule data" 3fr "result result" 1fr / 3fr 2fr; }
+  }
+  .pane{
+    position:relative;
+    min-width:0;
+    min-height:0;
+    overflow:hidden;
+    background:var(--pane);
+    color:var(--ink);
+    font:15px/1.5 'JetBrains Mono',ui-monospace,monospace;
+  }
+  .pane.out{background:var(--pane-out);}
+  /* Editable panes: a highlighted <pre> sits under a transparent <textarea> with identical metrics. */
+  .pane pre,.pane textarea{
+    position:absolute;
+    inset:0;
+    margin:0;
+    border:0;
+    padding:14px 16px;
+    font:inherit;
+    white-space:pre;
+    tab-size:2;
+    overflow:hidden;
+  }
+  .pane textarea{
+    background:transparent;
+    color:transparent;
+    caret-color:var(--ink);
+    resize:none;
+    outline:none;
+  }
+  /* IDE look: line-number gutter (width follows digit count via --g) and a current-line band (--ln). */
+  .code{--g:1; --ln:0;}
+  .code pre.hl,.code textarea{padding-left:calc(var(--g) * 1ch + 36px);}
+  .pane pre.gutter{
+    right:auto;
+    width:calc(var(--g) * 1ch + 22px);
+    padding-left:0;
+    padding-right:10px;
+    text-align:right;
+    color:var(--punct);
+    border-right:1px solid var(--line);
+  }
+  .cur{
+    position:absolute;
+    left:0;
+    right:0;
+    top:calc(14px + var(--ln) * 1.5em);
+    height:1.5em;
+    background:var(--cur);
+    display:none;
+  }
+  .code:focus-within .cur{display:block;}
+  .errline{
+    position:absolute;
+    left:0;
+    right:0;
+    top:calc(14px + var(--el) * 1.5em);
+    height:1.5em;
+    background:color-mix(in srgb,var(--bad) 16%,transparent);
+    display:none;
+  }
+  .code.has-err .errline{display:block;}
+  /* Icon-only pane tools, top-right; faded until the pane is hovered or focused. */
+  .tools{
+    position:absolute;
+    top:6px;
+    right:6px;
+    display:flex;
+    gap:2px;
+    opacity:.35;
+    transition:opacity .15s;
+  }
+  .pane:hover .tools,.pane:focus-within .tools{opacity:1;}
+  @media (hover:none){ .tools{opacity:1;} }
+  .tools button{
+    display:grid;
+    place-items:center;
+    width:28px;
+    height:28px;
+    padding:0;
+    border:0;
+    border-radius:6px;
+    background:transparent;
+    color:var(--punct);
+    cursor:pointer;
+  }
+  .tools button:hover{background:var(--cur); color:var(--ink);}
+  .tools button:focus-visible{outline:2px solid var(--key); outline-offset:-2px;}
+  .tools svg{width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round;}
+  .pane textarea::selection{background:color-mix(in srgb,var(--key) 30%,transparent);}
+  .p{color:var(--punct);}
+  .o{color:var(--op);}
+  .k{color:var(--key);}
+  .s{color:var(--str);}
+  .n{color:var(--num);}
+  .l{color:var(--lit);}
+  .err{color:var(--bad);}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap">
+
+<div class="pane code" style="grid-area:rule"><div class="cur"></div><div class="errline"></div><pre class="gutter" aria-hidden="true"></pre><pre class="hl" aria-hidden="true"></pre><textarea id="rule" wrap="off" spellcheck="false" aria-label="Rule"></textarea></div>
+<div class="pane code" style="grid-area:data"><div class="cur"></div><div class="errline"></div><pre class="gutter" aria-hidden="true"></pre><pre class="hl" aria-hidden="true"></pre><textarea id="data" wrap="off" spellcheck="false" aria-label="Data"></textarea></div>
+<div class="pane out" style="grid-area:result"><pre id="result" aria-label="Result" aria-live="polite"></pre></div>
+
+<script type="module">
+// Loaded dynamically so the editors still render if the CDN is unreachable.
+let engine = null, engineError = "";
+import("https://cdn.jsdelivr.net/npm/json-logic-engine@5.0.7/dist/esm/index.js").then(
+  m => { engine = new m.LogicEngine(); render(); },
+  () => { engineError = "json-logic-engine failed to load from cdn.jsdelivr.net"; render(); }
+);
+
+const ruleEl = document.getElementById("rule");
+const dataEl = document.getElementById("data");
+const resultEl = document.getElementById("result");
+const panes = document.querySelectorAll(".pane");
+
+// Tolerant JSON tokenizer: half-typed input still highlights whatever it can.
+const TOKEN = /("(?:\\.|[^"\\\n])*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b|([{}\[\],:])/g;
+const esc = s => s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"})[c]);
+function highlight(src, keyClass){
+  return esc(src).replace(TOKEN, (m, str, colon, num, lit, punct) =>
+    str ? `<span class="${colon ? keyClass : "s"}">${str}</span>${colon ? `<span class="p">${colon}</span>` : ""}`
+    : num ? `<span class="n">${num}</span>`
+    : lit ? `<span class="l">${lit}</span>`
+    : `<span class="p">${punct}</span>`) + "\n";
+}
+
+// No scrolling: shrink each pane's font until its whole text fits.
+// ponytail: linear 0.5px steps, binary search if panes ever get huge.
+function fit(pane, size = 15){
+  const pre = pane.querySelector("pre:not(.gutter)");
+  pane.style.fontSize = size + "px";
+  while(size > 4 && (pre.scrollHeight > pre.clientHeight || pre.scrollWidth > pre.clientWidth)){
+    size -= 0.5;
+    pane.style.fontSize = size + "px";
+  }
+  return size;
+}
+function fitAll(){
+  const editors = [...panes].filter(p => p.querySelector("textarea"));
+  const size = Math.min(...editors.map(p => fit(p)));
+  editors.forEach(p => p.style.fontSize = size + "px");
+  fit(resultEl.parentElement, 13);
+}
+
+// Error line from JSON.parse's message: Chrome/Firefox give "line N", older engines
+// "position N"; Safari gives neither, so no line is marked there.
+function errLine(src, msg){
+  const line = msg.match(/line (\d+)/);
+  if(line) return +line[1] - 1;
+  const pos = msg.match(/position (\d+)/);
+  return pos ? src.slice(0, +pos[1]).split("\n").length - 1 : -1;
+}
+
+function gutter(ta, bad){
+  const n = ta.value.split("\n").length;
+  const pane = ta.parentElement;
+  pane.querySelector(".gutter").innerHTML = Array.from({length:n}, (_, i) => i === bad ? `<span class="err">${i + 1}</span>` : i + 1).join("\n");
+  pane.style.setProperty("--el", bad);
+  pane.classList.toggle("has-err", bad >= 0);
+}
+
+const parse = ta => { try{ return {value: JSON.parse(ta.value)}; }catch(error){ return {error}; } };
+const markLine = ta => ta.parentElement.style.setProperty("--ln", ta.value.slice(0, ta.selectionStart).split("\n").length - 1);
+
+function render(){
+  const rule = parse(ruleEl), data = parse(dataEl);
+  gutter(ruleEl, rule.error ? errLine(ruleEl.value, rule.error.message) : -1);
+  gutter(dataEl, data.error ? errLine(dataEl.value, data.error.message) : -1);
+  const g = String(Math.max(ruleEl.value.split("\n").length, dataEl.value.split("\n").length)).length;
+  for(const ta of [ruleEl, dataEl]) ta.parentElement.style.setProperty("--g", g);
+  // In the rule every key is an operator; in the data it's a field name.
+  ruleEl.previousElementSibling.innerHTML = highlight(ruleEl.value, "o");
+  dataEl.previousElementSibling.innerHTML = highlight(dataEl.value, "k");
+  try{
+    if(rule.error) throw rule.error;
+    if(data.error) throw data.error;
+    if(!engine) throw new Error(engineError);
+    resultEl.innerHTML = highlight(JSON.stringify(engine.run(rule.value, data.value), null, 2) ?? "", "k");
+    resultEl.className = "";
+  }catch(e){
+    // The engine throws plain objects like {type:"Unknown Operator", key:"foo"}.
+    resultEl.textContent = e.message ?? JSON.stringify(e);
+    resultEl.className = "err";
+  }
+  fitAll();
+}
+
+// __INITIAL_RULE__ / __INITIAL_DATA__ are replaced with JSON literals before publishing.
+// Left untouched, the reference throws and the built-in example is used instead.
+let seedRule, seedData;
+try{ seedRule = __INITIAL_RULE__; seedData = __INITIAL_DATA__; }
+catch{
+  seedRule = {"if":[{"<":[{"var":"cart.total"},50]}, "no discount", {">=":[{"var":"cart.total"},200]}, "15% off", "5% off"]};
+  seedData = {cart:{total:120}};
+}
+ruleEl.value = JSON.stringify(seedRule, null, 2);
+dataEl.value = JSON.stringify(seedData, null, 2);
+// Editor keys: Tab indents, Enter keeps the indent (one level deeper after { or [),
+// Esc leaves the field so Tab can move focus again. insertText keeps native undo.
+const insert = text => document.execCommand("insertText", false, text);
+function format(ta){
+  let out;
+  try{ out = JSON.stringify(JSON.parse(ta.value), null, 2); }catch{ return; } // invalid JSON is already flagged
+  if(out === ta.value) return;
+  ta.focus();
+  ta.select();
+  insert(out);
+}
+function onKey(e){
+  const ta = e.target;
+  if(e.key === "Escape") return ta.blur();
+  if(e.code === "KeyF" && e.shiftKey && e.altKey){ e.preventDefault(); return format(ta); }
+  if(e.key === "Tab" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey){
+    e.preventDefault();
+    insert("  ");
+  }else if(e.key === "Enter" && !e.isComposing){
+    const before = ta.value.slice(0, ta.selectionStart);
+    const indent = before.slice(before.lastIndexOf("\n") + 1).match(/^ */)[0];
+    e.preventDefault();
+    insert("\n" + indent + (/[{[]\s*$/.test(before) ? "  " : ""));
+  }
+}
+
+for(const ta of [ruleEl, dataEl]){
+  ta.addEventListener("input", render);
+  ta.addEventListener("keydown", onKey);
+  for(const ev of ["input", "keyup", "click", "focus"]) ta.addEventListener(ev, () => markLine(ta));
+}
+// Pane tools: format (editors only) and copy (every pane), as icon buttons.
+const svg = d => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  format: svg('<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>'),
+  copy: svg('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
+  ok: svg('<path d="M20 6 9 17l-5-5"/>'),
+  fail: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
+  theme: svg('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/>'),
+};
+const root = document.documentElement;
+try{ const t = localStorage.getItem("theme"); if(t) root.dataset.theme = t; }catch{}
+function toggleTheme(){
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  try{ localStorage.setItem("theme", root.dataset.theme); }catch{}
+}
+async function copyText(text){
+  try{ await navigator.clipboard.writeText(text); return true; }
+  catch{ // clipboard API can be blocked in sandboxed frames; fall back to execCommand
+    const tmp = Object.assign(document.createElement("textarea"), {value: text});
+    document.body.append(tmp);
+    tmp.select();
+    const ok = document.execCommand("copy");
+    tmp.remove();
+    return ok;
+  }
+}
+for(const pane of panes){
+  const ta = pane.querySelector("textarea");
+  const tools = document.createElement("div");
+  tools.className = "tools";
+  tools.innerHTML = (ta ? `<button type="button" data-act="format" aria-label="Format" title="Format (Shift+Alt+F)">${ICON.format}</button>` : "")
+    + `<button type="button" data-act="copy" aria-label="Copy" title="Copy">${ICON.copy}</button>`;
+  tools.addEventListener("click", async e => {
+    const btn = e.target.closest("button");
+    if(!btn) return;
+    if(btn.dataset.act === "format") return format(ta);
+    btn.innerHTML = (await copyText(ta ? ta.value : resultEl.textContent)) ? ICON.ok : ICON.fail;
+    setTimeout(() => { btn.innerHTML = ICON.copy; }, 1200);
+  });
+  pane.append(tools);
+}
+
+const themeTool = Object.assign(document.createElement("div"), {className: "tools", style: "top:auto; bottom:6px; opacity:1"});
+themeTool.innerHTML = `<button type="button" aria-label="Toggle dark theme" title="Toggle dark theme">${ICON.theme}</button>`;
+themeTool.onclick = toggleTheme;
+resultEl.parentElement.append(themeTool);
+
+addEventListener("resize", fitAll);
+document.fonts.ready.then(fitAll);
+render();
+</script>

@@ -1,8 +1,8 @@
 """Canonical CLI/MCP contracts. Catalogs and advertised schemas derive from here."""
 from . import __version__
 
-MODES = ('recover', 'fix', 'reskin', 'refactor', 'performance', 'deliver', 'maintain')
-DIMENSIONS = ('rules', 'runtime', 'visual', 'identity', 'performance', 'platform')
+MODES = ('recover', 'port', 'fix', 'reskin', 'refactor', 'performance', 'deliver', 'maintain', 'assess', 'evidence')
+DIMENSIONS = ('rules', 'runtime', 'visual', 'identity', 'performance', 'platform', 'native')
 KINDS = ('original_static', 'original_runtime', 'candidate_runtime', 'approved_design', 'test_report', 'build_manifest')
 
 def obj(properties=None, required=()):
@@ -29,13 +29,23 @@ CONTRACTS = {
  'describe_tool': ('Read one registered tool contract, effects, command and limitations.', obj({'tool_id': TOOL}, ['tool_id']), []),
  'doctor': ('Inspect installation presence; only run explicit selected version/help probes when probe=true.', obj({'tool_ids': array(TOOL), 'probe': {'type':'boolean','default':False}}), ['process_when_probe_requested']),
  'inspect_target': ('Inventory a supplied artifact with content digests and explicit partial coverage; never execute it.', obj({'path': PATH, 'max_files': integer(1000,1,100000), 'max_bytes': integer(268435456,1,17179869184)}, ['path']), ['filesystem_read']),
- 'plan_workflow': ('Select scoped Unity recovery steps, evidence dimensions, tools and canonical references; does not execute the plan.', obj({'mode': string(enum=MODES), 'source_engine': string(enum=('unity','laya','other'))}, ['mode']), []),
+ 'plan_workflow': ('Select scoped Unity recovery steps, evidence dimensions, tools and canonical references; does not execute the plan.', obj({'mode': string(enum=MODES), 'source_engine': string(enum=('unknown','unity','cocos','laya','other')), 'engine_version': string(), 'source_format': string(), 'target_platform': string(), 'acceptance_profile': string(enum=('scoped','migration_no_regression','final_native_exit'))}, ['mode']), []),
  'run_tool': ('Run one exact registered command with explicit argv and a new log directory; preserve nonzero/timeout/partial outcomes. Does not grant approval or assert game parity.', obj({'tool_id': TOOL, 'arguments': array({'type':'string'}), 'working_directory': string('Optional existing absolute cwd; default is the new run directory. argv is never guessed or rewritten.'), 'run_dir': PATH, 'timeout_seconds': integer(120,1,3600), 'max_output_bytes': integer(16777216,1024,1073741824), 'max_inline_bytes': integer(32768,256,1048576)}, ['tool_id','arguments','run_dir']), ['process','filesystem_write','provider_declared_effects']),
- 'init_case': ('Create a project-local immutable baseline and explicit required acceptance dimensions. Existing cases are not overwritten.', obj({'project_dir': PATH, 'source': PATH, 'mode': string(enum=MODES), 'required_dimensions': array(string(enum=DIMENSIONS))}, ['project_dir','source','mode']), ['filesystem_write']),
- 'add_evidence': ('Register an existing evidence file and its source/candidate role with a verified digest. The role is caller-declared, not authenticated original gameplay.', obj({'case_dir': CASE,'kind':string(enum=KINDS),'path':PATH,'description':string()}, ['case_dir','kind','path','description']), ['filesystem_read','filesystem_write']),
- 'record_verification': ('Record an explicit reviewer verdict for one dimension, bound to existing evidence IDs. It records a claim; it does not run tests or inspect images.', obj({'case_dir':CASE,'dimension':string(enum=DIMENSIONS),'status':string(enum=('passed','failed','not_run','not_applicable')),'evidence_ids':array(string()),'note':string()}, ['case_dir','dimension','status','evidence_ids','note']), ['filesystem_write']),
- 'case_status': ('Recheck source/evidence integrity and report declared verdicts, missing coverage and contradictions. Static evidence cannot substitute for runtime/visual proof.', obj({'case_dir':CASE}, ['case_dir']), ['filesystem_read']),
+ 'init_case': ('Create a project-local immutable baseline and explicit required acceptance dimensions. Existing cases are not overwritten.', obj({'project_dir': PATH, 'source': PATH, 'mode': string(enum=MODES), 'required_dimensions': array(string(enum=DIMENSIONS)), 'source_engine': string(enum=('unknown','unity','cocos','laya','other')), 'engine_version': string(), 'source_format': string(), 'target_platform': string(), 'acceptance_profile': string(enum=('scoped','migration_no_regression','final_native_exit'))}, ['project_dir','source','mode']), ['filesystem_write']),
+ 'add_evidence': ('Register an existing evidence file and its source/candidate role with a verified digest. The role is caller-declared, not authenticated original gameplay.', obj({'case_dir': CASE,'kind':string(enum=KINDS),'path':PATH,'description':string(),'revision_id':string(),'run_instance':string()}, ['case_dir','kind','path','description']), ['filesystem_read','filesystem_write']),
+ 'record_verification': ('Record an explicit reviewer verdict for one dimension, bound to existing evidence IDs. It records a claim; it does not run tests or inspect images.', obj({'case_dir':CASE,'dimension':string(enum=DIMENSIONS),'status':string(enum=('passed','failed','not_run','not_applicable')),'evidence_ids':array(string()),'note':string(),'revision_id':string()}, ['case_dir','dimension','status','evidence_ids','note']), ['filesystem_write']),
+ 'case_status': ('Recheck source/evidence integrity and report declared verdicts, missing coverage and contradictions. Static evidence cannot substitute for runtime/visual proof.', obj({'case_dir':CASE,'revision_id':string(),'max_hash_bytes':{'type':'integer','minimum':1,'maximum':68719476736}}, ['case_dir']), ['filesystem_read']),
 }
+
+CONTRACTS['start_case_revision'] = (
+ 'Freeze an explicit candidate selection and optional build identity as a new immutable revision; preserves old records.',
+ obj({'case_dir': CASE, 'candidate_root': PATH,
+      'candidate_files': dict(array(PATH), minItems=1, maxItems=1000, uniqueItems=True),
+      'platform': string(), 'qa_profile': string(), 'build_manifest': PATH, 'build_id': string(),
+      'source': PATH, 'mode': string(enum=MODES),
+      'required_dimensions_override': dict(array(string(enum=DIMENSIONS)),minItems=1,uniqueItems=True)},
+     ['case_dir','candidate_root','candidate_files','platform','qa_profile']),
+ ['filesystem_read','filesystem_write'])
 
 # Typed Unity outcomes reuse existing adapters; generic argv remains only the compatibility/advanced surface.
 _RUN = {k: v for k, v in CONTRACTS['run_tool'][1]['properties'].items() if k in ('run_dir','timeout_seconds','max_output_bytes','max_inline_bytes')}

@@ -1,0 +1,47 @@
+# Tutorial freshness check
+#
+# Copy to .github/workflows/tutorial-freshness.yml and edit the three values under `env:`.
+# It runs the codebase-tutorial plugin's mechanical checkers (no AI, no API keys, no cost):
+#   - which chapters depend on source files that have changed since generation
+#   - whether verbatim code snippets still match the repository
+#   - whether links, anchors and quartodoc interlinks still resolve
+#
+# Snippet and link failures fail the job. Stale chapters are reported in the job summary
+# but only fail the job when STRICT is "true".
+name: Tutorial freshness
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"        # weekly, catches drift from dependency or doc changes
+  workflow_dispatch:
+
+env:
+  TUTORIAL_DIR: docs/tutorial  # the folder that contains _generation.json
+  PLUGIN_REPO: https://github.com/Bergam0t/tutorial-codebase-knowledge-claude-code-skill
+  PLUGIN_REF: v2.0.0           # a release tag of the plugin; update it when you upgrade the plugin
+  STRICT: "false"              # "true" = fail when any chapter is stale
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # the drift check compares against the recorded commit
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch the checkers
+        run: git clone --depth 1 --branch "$PLUGIN_REF" "$PLUGIN_REPO" "$RUNNER_TEMP/codebase-tutorial"
+
+      - name: Check the tutorial
+        run: |
+          flags=""
+          if [ "$STRICT" = "true" ]; then flags="--strict"; fi
+          python "$RUNNER_TEMP/codebase-tutorial/skills/write/scripts/check_tutorial.py" \
+            --repo . --tutorial "$TUTORIAL_DIR" $flags

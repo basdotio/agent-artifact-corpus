@@ -47,10 +47,13 @@ keeps only the voice. A long file is cut to its best minute first, and it takes 
 **Find a new voice** makes voices that belong to nobody: the model invents a different one each time.
 
 1. Pick the **Language** and **How many** (2, 4 or 6). Each takes about 8 seconds. The list shows the languages your
-   downloaded voice models speak: Qwen3-TTS's 10, and with S2 Pro 80+ (those voices are found with S2 Pro, about
-   15 seconds each). For a language without a ready sample sentence, type one in **What the voices say**.
+   downloaded voice models speak: Qwen3-TTS's 10, with OmniVoice 96, with S2 Pro 80+. A language your default
+   model doesn't speak is found with another downloaded one that does (S2 Pro takes about 15 seconds a voice). For a language without a ready sample sentence, type one in **What the voices say**.
 2. Click **Find voices** and listen to each one.
 3. Type a name under the one you like and click **Keep**.
+
+With **Kokoro** downloaded, its own 15 voices are added to your library too, marked **Kokoro**. Kokoro speaks
+only with those (it can't copy a clip); the other models can copy them like any voice.
 
 A kept voice is saved like any other and sounds the same from then on. Because it's nobody's real voice, no
 permission is needed, which makes found voices a safe choice for monetized channels. Voices you don't keep are
@@ -62,8 +65,9 @@ Each voice has a card with its clip, its language and length, and:
 
 - **Hear it speak** — reads a sample sentence in the voice's language, so you hear the voice as the model makes it
   (not just the original clip).
-- **Edit** — change the name, language or notes, or prepare the clip again (below). With S2 Pro downloaded, it
-  also shows **What the clip says**: S2 Pro copies a voice from the clip *and* its words. Whisper writes them down
+- **Edit** — change the name, language or notes, or prepare the clip again (below). With S2 Pro,
+  OmniVoice, VoxCPM2, CosyVoice 3 or MOSS-TTS Nano downloaded, it also shows **What the clip says**: they copy a voice
+  from the clip *and* its words. Whisper writes them down
   by itself; fix a word it got wrong, or empty the box to have it heard again.
 - **Make default** (star icon) — the voice picked for you on the Create page. The default voice has a *Default*
   label and a filled star.

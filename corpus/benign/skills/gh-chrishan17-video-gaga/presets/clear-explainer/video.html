@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>复利：让时间替你工作（video-gaga · Clear Explainer）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   CLEAR EXPLAINER — knowledge / infographic.
+   Clean white stock, navy ink, cobalt for the point, green for the evidence
+   and a real highlighter yellow behind the words that matter. Every visual
+   appears on the word that introduces it. Charts draw in the direction you
+   read them. One idea per scene, no chrome: the content is the layout.
+   Rhythm: a bright 100 BPM bed; the voice starts on the beat, cuts land on the
+   beat, and one music-only beat lets the payoff number sink in.
+   ============================================================================= */
+const { ease, clamp, lerp, fx, draw, color } = CV;
+
+// === THEME ===================================================================
+const T = {
+  paper: '#FCFCFB',
+  ink: '#16213A',
+  muted: '#677086',
+  rule: 'rgba(22,33,58,0.12)',
+  point: '#1F4FFF',     // the point (cobalt)
+  evidence: '#0E9F6E',  // the evidence (green)
+  hi: '#FFD84D',        // highlighter, behind ink type
+  sans: '"Noto Sans SC", "PingFang SC", sans-serif',
+};
+const F = (w, px, fam = T.sans) => `${w} ${px}px ${fam}`;
+const L = 160; // left margin (grid column 1)
+
+// === KIT: highlighter ========================================================
+// Highlighter pill that grows behind a word (drawn before the text).
+function pill(ctx, x, y, w, h, p, fill) {
+  fx.highlight(ctx, x - 12, y - h * 0.82, w + 24, h * 1.08, p, { color: fill, radius: 14 });
+}
+
+// === EXAMPLE: compound-interest chart ========================================
+// Chart geometry (shared by the curve and the breath that zooms out of it)
+const X0 = L + 90, X1 = 1500, Y0 = 880, Y1 = 250, MAXV = 11;
+const px = (yr) => lerp(X0, X1, yr / 30);
+const py = (v) => lerp(Y0, Y1, v / MAXV);
+// line progress: starts on "一万", reaches year 30 on "十万"
+const curveYears = (s) => {
+  const a = s.when('一万', 0.6), b = s.when('十万', 5.0);
+  return 30 * ease.inOutQuad(clamp((s.t - a) / Math.max(0.5, b - a)));
+};
+// local time at which the line passes a given year (for the marker ticks)
+const yearTime = (s, yr) => {
+  const a = s.when('一万', 0.6), b = s.when('十万', 5.0);
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (30 * ease.inOutQuad(m) < yr) lo = m; else hi = m; }
+  return a + (b - a) * lo;
+};
+
+// === VIDEO ===================================================================
+CV.create({
+  width: 1920, height: 1080, fps: 30,
+  background: T.paper,
+  lang: 'zh-CN',
+  // the score designed for this video: bright and curious: major sevenths, syncopated key stabs, a light shaker groove
+  music: {
+    bpm: 100, seed: 3, key: 'D', mode: 'major', progression: [0, 5, 3, 4], sevenths: true,
+    layers: [
+      { name: 'pad', inst: 'pad', notes: 'chord', pattern: 'X---', vel: 0.06, cutoff: [900, 1500], attack: 0.4 },
+      { name: 'stabs', inst: 'keys', notes: 'chord', pattern: 'X..X..X.', gate: 2.2, vel: [0.07, 0.1], bright: 0.8, from: 0.25 },
+      { name: 'bass', inst: 'bass', notes: ['root', 'fifth', 'root'], octave: -1, pattern: 'X--.X-.x', vel: 0.3, from: 0.35 },
+      { name: 'shaker', inst: 'shaker', pattern: 'xXxXxXxX', vel: 0.08, from: 0.4 },
+      { name: 'kick', inst: 'kick', pattern: 'X... ..x. X... ....', vel: 0.5, from: 0.5 },
+      { name: 'rim', inst: 'rim', pattern: '.X.X', vel: 0.12, from: 0.5 },
+      { name: 'clap', inst: 'clap', pattern: '.X.X', vel: 0.16, from: 0.75 },
+    ],
+    lead: { inst: 'bell', kind: 'glock', range: [74, 88], rhythm: 'melodic', vel: 0.1, echo: 0.15 },
+  },
+  transition: { type: 'push', direction: 'left', duration: 0.6, ease: ease.swift },
+  subtitles: {
+    style: { font: F(500, 42), color: T.paper, box: 'rgba(29,36,51,0.9)', y: 0.92, radius: 8 },
+  },
+  scenes: [
+    // --- 1. Hook: one bar of music builds the "30 years" ruler, then the question
+    {
+      id: 'hook', voiceDelay: 2.1, energy: 0.35,
+      draw(ctx, s) {
+        const { t, W } = s;
+        // the ruler: 30 ticks, one per year, laid down across the first bar
+        const RY = 860, b0 = s.onBeat(0), span = s.beatLen * 3;
+        for (let i = 0; i <= 30; i++) {
+          const x = lerp(L, W - L, i / 30);
+          const q = ease.outCubic(clamp((t - b0 - (i / 30) * span) / 0.25));
+          if (q <= 0) continue;
+          const major = i % 10 === 0;
+          ctx.fillStyle = major ? T.ink : color.rgba(T.ink, 0.35);
+          const h = (major ? 34 : 16) * q;
+          ctx.fillRect(x - (major ? 2 : 1), RY - h, major ? 4 : 2, h);
+          if (major) {
+            ctx.font = F(400, 24);
+            ctx.textAlign = 'center';
+            ctx.globalAlpha = q;
+            ctx.fillStyle = T.muted;
+            ctx.fillText(`${i}年`, x, RY + 44);
+            ctx.globalAlpha = 1;
+          }
+        }
+        // when "三十年" is spoken the years fill in green, left to right
+        const t30 = s.when('三十', 3.2);
+        const fill = ease.inOutCubic(clamp((t - t30) / 0.9));
+        if (fill > 0) {
+          ctx.fillStyle = T.evidence;
+          ctx.fillRect(L, RY + 6, (W - L * 2) * fill, 6);
+        }
+        // headline: each word lands as it is said
+        ctx.font = F(900, 118);
+        ctx.fillStyle = T.ink;
+        const y1 = 470, y2 = 630;
+        const pre = '每年 ', hi = '8%', post = '';
+        const xHi = L + ctx.measureText(pre).width, wHi = ctx.measureText(hi).width;
+        pill(ctx, xHi, y1, wHi, 118, ease.enter(clamp((t - s.when('8', 2.6) - 0.15) / 0.45)), T.hi);
+        ctx.fillStyle = T.ink;
+        const out = s.out(0.45, ease.exit, 0.3);
+        fx.wordReveal(ctx, pre + hi + post, L, y1, t, { sync: s, dur: 0.4, rise: 0.25, exit: out });
+        fx.wordReveal(ctx, '30 年后会怎样？', L, y2, t, { sync: s, dur: 0.4, rise: 0.25, exit: out });
+      },
+    },
+    // --- 2. Rule of 72: the equation assembles on the words -----------------
+    {
+      id: 'rule', energy: 0.5,
+      sfx: [{ at: (s) => s.when('翻倍', 4.4) - 0.05, type: 'pop' }],
+      draw(ctx, s) {
+        const { W, t } = s;
+        const parts = [
+          { txt: '72', at: s.when('七十二', 0.8), col: T.ink },
+          { txt: '÷', at: s.when('除以', 2.4), col: T.muted },
+          { txt: '8%', at: s.when('收益率', 3.0), col: T.point },
+          { txt: '=', at: s.when('就是', 3.8), col: T.muted },
+          { txt: '9', at: s.when('翻倍', 4.4), col: T.evidence },
+        ];
+        ctx.font = F(900, 220);
+        const gap = 60;
+        const widths = parts.map((p) => ctx.measureText(p.txt).width);
+        const total = widths.reduce((a, b) => a + b, 0) + gap * (parts.length - 1);
+        let x = W / 2 - total / 2;
+        const y = 600;
+        parts.forEach((p, i) => {
+          const lt = t - p.at + 0.1;
+          const q = ease.enter(clamp(lt / 0.55));
+          if (q <= 0) { x += widths[i] + gap; return; }
+          ctx.fillStyle = p.col;
+          ctx.textAlign = 'left';
+          if (i === 4) {
+            // the answer rolls into place like a counter
+            fx.roll(ctx, '9', x, y, clamp(lt / 0.7), { spins: 1 });
+            ctx.font = F(700, 44);
+            ctx.fillStyle = T.evidence;
+            ctx.globalAlpha = ease.enter(clamp((lt - 0.5) / 0.5)) * (1 - s.out(0.3, ease.exit, 0.35));
+            ctx.textAlign = 'center';
+            ctx.fillText('年翻一倍', x + widths[i] / 2, y + 100);
+            ctx.globalAlpha = 1;
+            ctx.font = F(900, 220);
+          } else {
+            // terms rise out of a mask on their word
+            fx.mask(ctx, x - 20, y - 230, widths[i] + 40, 290, () => ctx.fillText(p.txt, x, y + (1 - q) * 220));
+          }
+          x += widths[i] + gap;
+        });
+        ctx.textAlign = 'left';
+        ctx.font = F(400, 30);
+        ctx.fillStyle = T.muted;
+        ctx.globalAlpha = s.at(s.voiceEnd - 0.4, 0.6) * (1 - s.out(0.3, ease.exit, 0.35));
+        ctx.fillText('72 ÷ 年化收益率(%) ≈ 本金翻倍所需年数', L, 900);
+        ctx.globalAlpha = 1;
+      },
+    },
+    // --- 3. The curve: draws in step with the sentence; the camera follows it -
+    {
+      id: 'curve', tail: 0.5, energy: 0.6,
+      sfx: [9, 18, 27].map((yr) => ({ at: (s) => yearTime(s, yr), type: 'tick', gain: 0.8 })),
+      draw(ctx, s) {
+        const { t, W, H } = s;
+        const years = curveYears(s);
+        const head = [px(years), py(Math.pow(1.08, years))];
+        // slow push toward the head of the line (where the news is)
+        const z = lerp(1, 1.05, ease.inOutSine(clamp(years / 30)));
+        draw.camera(ctx, W, H, { zoom: z, focusX: lerp(W / 2, head[0], 0.25), focusY: lerp(H / 2, head[1], 0.2) }, () => {
+          // axes + grid draw on first
+          const ax = s.at(0.1, 0.7, ease.inOutCubic);
+          ctx.strokeStyle = T.rule;
+          ctx.lineWidth = 2;
+          for (let v = 2; v <= 10; v += 2) draw.drawOn(ctx, [[X0, py(v)], [X1, py(v)]], ax);
+          ctx.strokeStyle = T.ink;
+          ctx.lineWidth = 3;
+          draw.drawOn(ctx, [[X0, Y0], [X1, Y0]], ax);
+          ctx.font = F(400, 26);
+          ctx.fillStyle = T.muted;
+          ctx.globalAlpha = ax;
+          ctx.textAlign = 'right';
+          for (let v = 2; v <= 10; v += 2) ctx.fillText(`${v}万`, X0 - 24, py(v) + 9);
+          ctx.textAlign = 'center';
+          for (let yr = 0; yr <= 30; yr += 10) ctx.fillText(`${yr}年`, px(yr), Y0 + 48);
+          ctx.globalAlpha = 1;
+          const pts = [];
+          for (let yr = 0; yr <= years + 1e-6; yr += 0.25) pts.push([px(yr), py(Math.pow(1.08, yr))]);
+          pts.push(head);
+          if (pts.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(px(0), Y0);
+            pts.forEach(([x, y]) => ctx.lineTo(x, y));
+            ctx.lineTo(px(years), Y0);
+            ctx.closePath();
+            const g = ctx.createLinearGradient(0, Y1, 0, Y0);
+            g.addColorStop(0, color.rgba(T.evidence, 0.22));
+            g.addColorStop(1, color.rgba(T.evidence, 0.02));
+            ctx.fillStyle = g;
+            ctx.fill();
+            ctx.strokeStyle = T.evidence;
+            ctx.lineWidth = 7;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            draw.drawOn(ctx, pts, 1);
+          }
+          // doubling markers pop as the line passes them, each with a "×2" hop
+          let prev = [px(0), py(1)];
+          [[9, '2万'], [18, '4万'], [27, '8万']].forEach(([yr, lab]) => {
+            const q = ease.outBack(clamp((years - yr) / 1.6));
+            if (q <= 0) return;
+            const x = px(yr), y = py(Math.pow(1.08, yr));
+            ctx.strokeStyle = color.rgba(T.point, 0.75);
+            ctx.lineWidth = 3;
+            draw.arrow(ctx, prev[0] + 14, prev[1] - 24, x - 10, y - 30, ease.inOutCubic(clamp((years - yr) / 2.2)), { bend: -40, head: 12 });
+            ctx.font = F(700, 28);
+            ctx.fillStyle = T.point;
+            ctx.textAlign = 'center';
+            ctx.globalAlpha = clamp((years - yr - 0.8) / 1);
+            ctx.fillText('×2', (prev[0] + x) / 2, Math.min(prev[1], y) - 74);
+            ctx.globalAlpha = 1;
+            prev = [x, y];
+            ctx.fillStyle = T.paper;
+            ctx.strokeStyle = T.evidence;
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(x, y, 13 * q, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.font = F(700, 34);
+            ctx.fillStyle = T.ink;
+            ctx.textAlign = 'left';
+            ctx.globalAlpha = clamp(q);
+            ctx.fillText(lab, x + 24, y + 12);
+            ctx.globalAlpha = 1;
+          });
+          // live value riding the head of the line
+          if (years > 0.05) {
+            const v = Math.pow(1.08, years), done = years >= 29.9;
+            ctx.fillStyle = T.point;
+            ctx.beginPath();
+            ctx.arc(head[0], head[1], 11 + (done ? 0 : 3 * s.pulse(0.12)), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.font = F(900, done ? 76 : 48);
+            ctx.textAlign = 'left';
+            ctx.fillStyle = done ? T.point : T.ink;
+            ctx.fillText(`${v.toFixed(2)} 万`, head[0] + 28, head[1] + 16);
+          }
+        });
+        ctx.font = F(400, 24);
+        ctx.fillStyle = T.muted;
+        ctx.textAlign = 'right';
+        ctx.globalAlpha = s.at(0.3, 0.5);
+        ctx.fillText('示意计算：本金 1 万元，年化 8%，按年复利，不含税费', 1920 - L, 150);
+        ctx.globalAlpha = 1;
+      },
+    },
+    // --- 3b. A breath: no voice, the music lifts and the result stands alone --
+    {
+      id: 'breath', narration: false, beats: 6, energy: 0.8,
+      transition: { type: 'iris', x: px(30) / 1920, y: py(10.06) / 1080, duration: 0.7, ease: ease.inOutCubic },
+      sfx: [{ at: (s) => s.onBeat(2), type: 'shimmer' }],
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        ctx.fillStyle = T.point;
+        ctx.fillRect(0, 0, W, H);
+        const b = (i) => s.onBeat(i);
+        // "1 万" on beat 1, the arrow on beat 2, "10 万" lands on beat 3
+        const p1 = ease.enter(clamp((t - b(0)) / 0.5)), pa = ease.inOutCubic(clamp((t - b(1)) / 0.55)), p2 = clamp((t - b(2)) / 0.8);
+        ctx.textAlign = 'center';
+        ctx.font = F(700, 96);
+        ctx.fillStyle = color.rgba(T.paper, 0.55 * p1);
+        ctx.fillText('1 万', W * 0.17, H * 0.55 + (1 - p1) * 30);
+        ctx.strokeStyle = color.rgba(T.paper, 0.4);
+        ctx.lineWidth = 5;
+        draw.arrow(ctx, W * 0.26, H * 0.52, W * 0.42, H * 0.52, pa, { head: 22 });
+        ctx.font = F(400, 30);
+        ctx.fillStyle = color.rgba(T.paper, 0.5 * clamp((t - b(1) - 0.3) / 0.4));
+        ctx.fillText('30 年', W * 0.34, H * 0.46);
+        if (p2 > 0) {
+          ctx.font = F(900, 220);
+          ctx.fillStyle = T.hi;
+          ctx.textAlign = 'right';
+          // 1 万 grows into 10.06 万: the number counts, it doesn't just appear
+          const v = fx.countUp(ease.outQuart(p2), 1, 10.06, { decimals: 2 });
+          ctx.fillText(v, W * 0.8, H * 0.6);
+          const r = ctx.measureText('10.06').width;
+          ctx.font = F(900, 110);
+          ctx.textAlign = 'left';
+          ctx.globalAlpha = clamp((p2 - 0.4) / 0.4);
+          ctx.fillText('万', W * 0.81, H * 0.6);
+          ctx.font = F(500, 36);
+          ctx.fillStyle = T.paper;
+          ctx.fillText('≈ ×10', W * 0.8 - r, H * 0.6 + 80);
+          ctx.globalAlpha = 1;
+        }
+      },
+    },
+    // --- 4. Takeaway -----------------------------------------------------------
+    {
+      id: 'takeaway', tail: 1.6, energy: 0.45,
+      draw(ctx, s) {
+        const { t } = s;
+        ctx.font = F(900, 150);
+        ctx.fillStyle = T.ink;
+        const t2 = s.when('时间', 1.4);
+        const w = ctx.measureText('时间').width;
+        pill(ctx, L, 660, w, 150, ease.enter(clamp((t - t2 - 0.35) / 0.5)), color.rgba(T.hi, 0.9));
+        ctx.fillStyle = T.ink;
+        fx.wordReveal(ctx, '越早开始，', L, 470, t, { sync: s, dur: 0.45, rise: 0.25 });
+        fx.wordReveal(ctx, '时间越站在你这边。', L, 660, t, { sync: s, dur: 0.45, rise: 0.25 });
+        // sign-off line arrives as the voice ends, on the beat
+        const so = ease.enter(clamp((t - s.nextBeat(s.voiceEnd)) / 0.6));
+        ctx.font = F(500, 28);
+        ctx.fillStyle = T.muted;
+        ctx.globalAlpha = so;
+        ctx.fillText('七十二法则 · 1 万元按 8% 复利 30 年 ≈ 100,627 元', L, 860 + (1 - so) * 16);
+        ctx.globalAlpha = 1;
+      },
+    },
+  ],
+  // Paper grain
+  overlay(ctx, g) {
+    draw.grain(ctx, g.frame, 0.05, { blend: 'multiply' });
+  },
+});
+</script>
+</body>
+</html>

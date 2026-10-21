@@ -1,9 +1,10 @@
 """Create a labelled contact sheet from a local recording; times are nominal samples."""
+from grea.host.files import temporary_directory
 import argparse
 import math
 import subprocess
 import tempfile
-from pathlib import Path
+from grea.host.paths import Path
 from PIL import Image, ImageDraw
 
 
@@ -23,7 +24,7 @@ def main():
         p.error('Dimensions, rate and duration must be positive; start must be nonnegative')
     if a.output.exists():
         p.error('Output already exists')
-    with tempfile.TemporaryDirectory(prefix='game-frames-') as tmp:
+    with temporary_directory(prefix='game-frames-') as tmp:
         subprocess.run([a.ffmpeg, '-v', 'error', '-ss', str(a.start), '-i', str(a.source),
                         '-t', str(a.duration), '-vf', f'fps={a.fps}', str(Path(tmp)/'%06d.png')], check=True)
         frames = sorted(Path(tmp).glob('*.png'))

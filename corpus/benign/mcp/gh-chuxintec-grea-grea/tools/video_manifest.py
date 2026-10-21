@@ -8,7 +8,7 @@ Exit 0: requested checks pass, 1: reported media issues, 2: input/tool failure.
 import argparse
 import json
 import math
-from pathlib import Path
+from grea.host.paths import Path
 import subprocess
 import sys
 from grea.tools._artifact_common import digest, validate_output, write_report

@@ -238,7 +238,7 @@ measures.
   needs a script under `scripts/` between the fetch and the derive. The scripts are pinned and
   seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
   entries in one command.
-- **The benign side is a sample; the malicious side is a census, with one exception.** 4,167
+- **The benign side is a sample; the malicious side is a census, with one exception.** 4,506
   benign samples are drawn from stated populations under stated designs; 300 of the 540
   malicious samples are everything their upstreams had, and the 240 from SkillHarm are a
   seeded draw of 20 per risk from 641. A recall figure and a false-positive figure from this corpus

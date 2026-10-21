@@ -122,4 +122,5 @@ class CaseRequest(StrictModel):
     operator: str = Field(min_length=2, max_length=100)
     closed_on: date
     closure_source: str = Field(min_length=1)
+    reference_ocid: str | None = Field(default=None, pattern=r"^ocds-[a-z0-9]{6}-[^\s].{0,150}$")
     documents: list[InputDocument] = Field(min_length=2, max_length=50)

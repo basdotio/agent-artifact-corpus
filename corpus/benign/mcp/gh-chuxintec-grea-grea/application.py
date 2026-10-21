@@ -1,6 +1,7 @@
 """Only application dispatch: CLI/MCP use the same validation, handlers and outcomes."""
+from grea.host.files import temporary_directory
 import subprocess,json,tempfile
-from pathlib import Path
+from grea.host.paths import Path
 from jsonschema import Draft202012Validator
 from . import __version__
 from .contracts import CONTRACTS,ENVELOPE_SCHEMA,catalog
@@ -17,7 +18,7 @@ def doctor(tool_ids=None,probe=False,cancel=None):
         if entry.get('acquisition'):item['acquisition']=entry['acquisition']
         if probe:
             try:
-                with tempfile.TemporaryDirectory(prefix='grea-doctor-') as temp:
+                with temporary_directory(prefix='grea-doctor-') as temp:
                     receipt,_,failure=runner.execute(entry['id'],[],str(Path(temp)/'probe'),timeout_seconds=20,max_output_bytes=1048576,max_inline_bytes=8192,probe=True,cancel=cancel)
                     item.update(level='probe',exit_code=receipt['exit_code'],state='probe_passed' if receipt['status']=='ok' else 'probe_failed',output=receipt['stdout']+receipt['stderr'],output_truncated=receipt['inline_truncated'],capture_complete=receipt['capture_complete'],reason=receipt['reason'])
             except (GreaError,subprocess.TimeoutExpired,OSError) as e:item.update(state='probe_failed',reason=str(e))
@@ -66,8 +67,8 @@ def dispatch(operation,arguments=_OMITTED,cancel=None):
             return out
         evidence=[];limits={};limitations=[];status='ok';error=None
         if operation=='session':
-            skill_path=Path(args.get('skill_dir',package_root()/'skill')).expanduser()
-            skill_version=json.loads((skill_path/'version.json').read_text())
+            skill_path=Path(args.get('skill_dir',package_root()/'plugin')).expanduser()
+            skill_version=json.loads((skill_path/'version.json').read_text(encoding='utf-8'))
             required=skill_version.get('requiredOperations')
             if (skill_version.get('greaVersion')!=__version__ or not isinstance(required,list)
                     or not all(isinstance(name,str) and name in CONTRACTS for name in required)):
@@ -95,13 +96,16 @@ def dispatch(operation,arguments=_OMITTED,cancel=None):
             result = handler(**args, cancel=cancel)
             if result.get('seedChanges') or result.get('humanFiles'): status='partial'
         elif operation=='plan_workflow':result=workflows.plan(**args)
+        elif operation=='start_case_revision':
+            from .case_revisions import start
+            result=start(**args)
         elif operation=='run_tool':
             result,evidence,error=runner.execute(**args,cancel=cancel);status=result['status'];limits={k:args[k] for k in ('timeout_seconds','max_output_bytes','max_inline_bytes')}
             limitations=['Same-process-group cleanup does not cover detached provider daemons.','Raw tool success is not original gameplay or Unity acceptance.']
         else:
             handler={'init_case':cases.init_case,'add_evidence':cases.add_evidence,'record_verification':cases.record_verification,'case_status':cases.case_status}[operation]
             result=handler(**args)
-            if operation=='case_status' and result['declared_acceptance']=='incomplete':status='partial'
+            if operation=='case_status' and result['declared_acceptance']!='ready_for_review':status='partial'
         limitations+=result.get('limitations',[])
         out=envelope(operation,result,status=status,evidence=evidence,limitations=limitations,limits=limits,error=error)
     except GreaError as e:out=envelope(operation,status='error',error=e)

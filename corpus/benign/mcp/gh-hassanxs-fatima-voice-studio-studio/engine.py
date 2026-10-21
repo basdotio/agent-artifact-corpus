@@ -1,10 +1,12 @@
-"""Runs llama-tts.exe (llama.cpp) once per segment and reports its progress; S2 Pro parts go to s2engine.
+"""Runs llama-tts.exe (llama.cpp) once per segment and reports its progress; S2 Pro parts go to s2engine,
+OmniVoice parts to omniengine, audio.cpp's models to acppengine. Only one of them holds the graphics card at a time.
 
 llama.cpp has no "stay loaded" mode for speech yet, so every segment starts the engine, loads the model
 (about 5 s on an NVIDIA GPU, the files stay in the Windows file cache after the first time), speaks the text and
 exits. Segments are about 40 seconds of speech, which keeps that overhead near 10%.
 """
 import asyncio
+import contextlib
 import logging
 import re
 import subprocess
@@ -14,7 +16,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import config, hardware, runtime, s2engine, text as textmod
+from . import acppengine, config, hardware, omniengine, runtime, s2engine, text as textmod
 
 log = logging.getLogger("studio.engine")
 
@@ -46,13 +48,18 @@ class Engine:
         self._cancel = False
         self._job = _KillOnCloseJob() if sys.platform == "win32" else None
         self.s2 = s2engine.S2Server(cfg, self._job)  # the second engine (S2 Pro), loaded only while it's used
-        self._s2_active = False
+        self.omni = omniengine.OmniServer(cfg, self._job)  # the third (OmniVoice), the same way
+        self.acpp = acppengine.AcppServer(cfg, self._job)  # the fourth (audio.cpp: Chatterbox, Kokoro…)
+        self._active: str | None = None  # "s2", "omni" or "acpp" while one of those speaks a part (progress)
 
     def status(self) -> dict:
         return {"state": self.state, "error": self.error, "engine": self.cfg["engine"],
                 "installed": config.installed_engines(self.cfg),
-                "frames": self.s2.frames if self._s2_active else self.frames, "frames_expected": self.frames_expected,
-                "s2_loaded": self.s2.running(),
+                "frames": (self.s2.frames if self._active == "s2"
+                           else int(self.omni.progress * self.frames_expected) if self._active == "omni"
+                           else int(self.acpp.progress * self.frames_expected) if self._active == "acpp" else self.frames),
+                "frames_expected": self.frames_expected,
+                "s2_loaded": self.s2.running(), "omni_loaded": self.omni.running(), "acpp_loaded": self.acpp.running(),
                 "elapsed": round(time.monotonic() - self.started, 1) if self.state == "busy" else None}
 
     def ready_problem(self, model: str) -> str | None:
@@ -70,17 +77,50 @@ class Engine:
                         "Switch to one on Setup.")
             if not (config.s2_dir(engine) / config.S2_EXE).exists():
                 return f"{config.MODELS[model]['label']}'s engine part is missing. Open Models and click Get it."
+        if config.MODELS[model].get("runtime") == "omni":
+            build = config.omni_build(self.cfg)
+            if not build:
+                return f"{config.MODELS[model]['label']} doesn't run on this engine. Switch to another one on Setup."
+            if not (config.omni_dir(build) / config.OMNI_EXE).exists():
+                return f"{config.MODELS[model]['label']}'s engine part is missing. Open Models and click Get it."
+        if config.MODELS[model].get("runtime") == "acpp":
+            build = config.acpp_build(self.cfg)
+            if not build:
+                return f"{config.MODELS[model]['label']} doesn't run on this engine. Switch to another one on Setup."
+            if not (config.acpp_dir(build) / config.ACPP_EXE).exists():
+                return f"{config.MODELS[model]['label']}'s engine part is missing. Open Models and click Get it."
+            if config.MODELS[model].get("espeak") and not (config.espeak_dir() / "libespeak-ng.dll").exists():
+                return f"{config.MODELS[model]['label']}'s pronunciation part is missing. Open Models and click Get it."
         return None
+
+    @contextlib.contextmanager
+    def gpu_turn(self):
+        """Whisper's turn on the graphics card: S2 Pro and OmniVoice each make room on cards too small for both."""
+        with self.s2.gpu_turn(), self.omni.gpu_turn(), self.acpp.gpu_turn():
+            yield
+
+    def stop_servers(self, keep: str | None = None) -> None:
+        """Unload the voice servers except `keep` ("s2", "omni" or "acpp"): one voice engine on the card at a time."""
+        if keep != "s2" and self.s2.running():
+            self.s2.stop()
+        if keep != "omni" and self.omni.running():
+            self.omni.stop()
+        if keep != "acpp" and self.acpp.running():
+            self.acpp.stop()
 
     def cancel_current(self) -> None:
         self._cancel = True
         self.s2.cancel()
+        self.omni.cancel()
+        self.acpp.cancel()
         proc = self.proc
         if proc and proc.poll() is None:
             proc.kill()
 
-    async def speak(self, model: str, text: str, *, language: str, voice: Path | None, seed: int, out: Path) -> float:
-        """Speak `text` into the WAV file `out`; returns the seconds it took."""
+    async def speak(self, model: str, text: str, *, language: str, voice: Path | None, seed: int, out: Path,
+                    preset: str | None = None) -> float:
+        """Speak `text` into the WAV file `out`; returns the seconds it took. `preset`: a model's own voice (Kokoro)
+        for a voice that isn't in the library yet."""
         if model in config.MODELS and language not in (config.MODELS[model].get("languages") or config.LANGUAGES):
             raise EngineError(f"{config.MODELS[model]['label']} doesn't speak "
                               f"{config.LANGUAGE_NAMES.get(language, language)}. Pick another model for this script.")
@@ -88,11 +128,15 @@ class Engine:
             self.state, self.error = "error", problem
             raise EngineError(problem)
         async with self._lock:
-            self._cancel = self.s2._cancel = False  # a Stop from here on counts, even while S2 Pro waits or loads
-            started = time.monotonic()
+            self._cancel = self.s2._cancel = self.omni._cancel = self.acpp._cancel = False  # a Stop counts, even while
+            started = time.monotonic()                                     # a voice server waits or loads
             try:
                 if config.MODELS[model].get("runtime") == "s2":
                     await asyncio.to_thread(self._run_s2, model, text, voice, seed, out)
+                elif config.MODELS[model].get("runtime") == "omni":
+                    await asyncio.to_thread(self._run_omni, model, text, language, voice, seed, out)
+                elif config.MODELS[model].get("runtime") == "acpp":
+                    await asyncio.to_thread(self._run_acpp, model, text, language, voice, seed, out, preset)
                 else:
                     await asyncio.to_thread(self._run, model, text, language, voice, seed, out)
             except Cancelled:
@@ -107,7 +151,8 @@ class Engine:
     def _run_s2(self, model: str, text: str, voice: Path | None, seed: int, out: Path) -> None:
         self.state, self.frames, self.started = "busy", 0, time.monotonic()
         self.frames_expected = int(textmod.estimate_seconds(text) * s2engine.FRAME_RATE)
-        self._s2_active = True
+        self.stop_servers(keep="s2")
+        self._active = "s2"
         try:
             self.s2.speak(model, text, Path(voice).resolve() if voice else None, seed, Path(out).resolve())
         except s2engine.S2Cancelled:
@@ -115,14 +160,49 @@ class Engine:
         except s2engine.S2Error as e:
             raise EngineError(str(e))
         finally:
-            self._s2_active = False
+            self._active = None
+        if self._cancel:
+            Path(out).unlink(missing_ok=True)
+            raise Cancelled()
+
+    def _run_omni(self, model: str, text: str, language: str, voice: Path | None, seed: int, out: Path) -> None:
+        self.state, self.frames, self.started = "busy", 0, time.monotonic()
+        self.frames_expected = int(textmod.estimate_seconds(text) * FRAME_RATE)
+        self.stop_servers(keep="omni")
+        self._active = "omni"
+        try:
+            self.omni.speak(model, text, language, Path(voice).resolve() if voice else None, seed, Path(out).resolve())
+        except omniengine.OmniCancelled:
+            raise Cancelled()
+        except (omniengine.OmniError, s2engine.S2Error) as e:  # S2Error: the voice's words couldn't be heard
+            raise EngineError(str(e))
+        finally:
+            self._active = None
+        if self._cancel:
+            Path(out).unlink(missing_ok=True)
+            raise Cancelled()
+
+    def _run_acpp(self, model: str, text: str, language: str, voice: Path | None, seed: int, out: Path,
+                  preset: str | None) -> None:
+        self.state, self.frames, self.started = "busy", 0, time.monotonic()
+        self.frames_expected = int(textmod.estimate_seconds(text) * FRAME_RATE)
+        self.stop_servers(keep="acpp")
+        self._active = "acpp"
+        try:
+            self.acpp.speak(model, text, language, Path(voice).resolve() if voice else None, seed, Path(out).resolve(),
+                            preset)
+        except acppengine.AcppCancelled:
+            raise Cancelled()
+        except (acppengine.AcppError, s2engine.S2Error) as e:  # S2Error: the voice's words couldn't be heard
+            raise EngineError(str(e))
+        finally:
+            self._active = None
         if self._cancel:
             Path(out).unlink(missing_ok=True)
             raise Cancelled()
 
     def _run(self, model: str, text: str, language: str, voice: Path | None, seed: int, out: Path) -> None:
-        if self.s2.running():
-            self.s2.stop()  # S2 Pro and Qwen3-TTS won't both fit on an 8 GB card
+        self.stop_servers()  # S2 Pro and Qwen3-TTS won't both fit on an 8 GB card; OmniVoice is unloaded too
         m = config.MODELS[model]
         models_dir = Path(self.cfg["models_dir"]).resolve()
         out = Path(out).resolve()  # the engine runs in its own folder

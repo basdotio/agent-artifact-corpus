@@ -1,0 +1,41 @@
+name: Release Extension for Chime NPM Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Create release assets
+        run: |
+          chmod +x scripts/package.sh
+          EXT_NAME=chime npm run package
+          ls -al release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            release/darwin.arm64.chime.tar.gz
+            release/linux.x64.chime.tar.gz
+            release/win32.x64.chime.zip

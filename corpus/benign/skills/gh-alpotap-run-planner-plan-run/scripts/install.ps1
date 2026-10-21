@@ -8,6 +8,7 @@ param(
 #   tools/run-planner/run_plan.ps1, run_task.ps1, new_run.ps1, VERSION   always replaced
 #   runs/runner.json                                                      created once, never overwritten
 #   runs/PROJECT.md                                                       created once from the template
+#   runs/browser-mcp.json                                                 created once; the MCP server a task's "Browser" tools use
 #   .gitignore                                                            gains .runlogs/ if missing
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +25,7 @@ Set-Content -Path (Join-Path $dest "VERSION") -Value $version -Encoding ASCII
 
 $runs = Join-Path $Project "runs"
 New-Item -ItemType Directory -Force -Path $runs | Out-Null
-foreach ($t in "runner.json", "PROJECT.md") {
+foreach ($t in "runner.json", "PROJECT.md", "browser-mcp.json") {
   $target = Join-Path $runs $t
   if (-not (Test-Path $target)) {
     Copy-Item (Join-Path $skillDir "templates\$t") $target

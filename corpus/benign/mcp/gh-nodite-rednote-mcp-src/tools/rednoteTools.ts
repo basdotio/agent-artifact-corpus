@@ -1,0 +1,312 @@
+import { AuthManager } from '../auth/authManager'
+import { Browser, BrowserContext, Page } from 'rebrowser-playwright'
+import logger from '../utils/logger'
+import { GetNoteDetail, NoteDetail } from './noteDetail'
+import { BrowserFactory } from '../browser/browserFactory'
+
+export interface Note {
+  title: string
+  content: string
+  tags: string[]
+  url: string
+  author: string
+  likes?: number
+  collects?: number
+  comments?: number
+}
+
+export interface Comment {
+  author: string
+  content: string
+  likes: number
+  time: string
+}
+
+export class RedNoteTools {
+  private authManager: AuthManager
+  private readonly config: { headless: boolean }
+  private browser: Browser | null = null
+  private context: BrowserContext | null = null
+  private page: Page | null = null
+
+  constructor(config: { headless?: boolean } = {}) {
+    logger.info('Initializing RedNoteTools')
+    this.config = { headless: config.headless ?? false }
+    this.authManager = new AuthManager()
+  }
+
+  async initialize(): Promise<void> {
+    logger.info('Initializing browser and page')
+    // BrowserFactory.launch returns Promise<Browser> and throws on failure — no null check needed
+    this.browser = await BrowserFactory.launch(this.config.headless)
+
+    try {
+      this.context = await BrowserFactory.newStealthContext(this.browser)
+      this.page = await this.context.newPage()
+      
+      // Load cookies if available
+      const cookies = await this.authManager.getCookies()
+      if (cookies.length > 0) {
+        logger.info(`Loading ${cookies.length} cookies`)
+        await this.context.addCookies(cookies)
+      }
+
+      // Check login status
+      logger.info('Checking login status')
+      await this.page.goto('https://www.xiaohongshu.com')
+      const isLoggedIn = await this.page.evaluate(() => {
+        const sidebarUser = document.querySelector('.user.side-bar-component .channel')
+        return sidebarUser?.textContent?.trim() === '我'
+      })
+
+      // If not logged in, perform login
+      if (!isLoggedIn) {
+        logger.error('Not logged in, please login first')
+        throw new Error('Not logged in. Please run: rednote-mcp init')
+      }
+      logger.info('Login status verified')
+    } catch (error) {
+      // 初始化过程中出错，确保清理资源
+      await this.cleanup()
+      throw error
+    }
+  }
+
+  async cleanup(): Promise<void> {
+    logger.info('Cleaning up browser resources')
+    try {
+      if (this.page) {
+        await this.page.close().catch(err => logger.error('Error closing page:', err))
+        this.page = null
+      }
+
+      if (this.context) {
+        await this.context.close().catch(err => logger.error('Error closing context:', err))
+        this.context = null
+      }
+
+      if (this.browser) {
+        await this.browser.close().catch(err => logger.error('Error closing browser:', err))
+        this.browser = null
+      }
+    } catch (error) {
+      logger.error('Error during cleanup:', error)
+    } finally {
+      this.page = null
+      this.context = null
+      this.browser = null
+    }
+  }
+
+  extractRedBookUrl(shareText: string): string {
+    // 匹配 http://xhslink.com/ 开头的链接
+    const xhslinkRegex = /(https?:\/\/xhslink\.com\/[a-zA-Z0-9\/]+)/i
+    const xhslinkMatch = shareText.match(xhslinkRegex)
+
+    if (xhslinkMatch && xhslinkMatch[1]) {
+      return xhslinkMatch[1]
+    }
+
+    // 匹配 https://www.xiaohongshu.com/ 开头的链接
+    const xiaohongshuRegex = /(https?:\/\/(?:www\.)?xiaohongshu\.com\/[^，\s]+)/i
+    const xiaohongshuMatch = shareText.match(xiaohongshuRegex)
+
+    if (xiaohongshuMatch && xiaohongshuMatch[1]) {
+      return xiaohongshuMatch[1]
+    }
+
+    return shareText
+  }
+
+  async searchNotes(keywords: string, limit: number = 10): Promise<Note[]> {
+    logger.info(`Searching notes with keywords: ${keywords}, limit: ${limit}`)
+    try {
+      await this.initialize()
+      if (!this.page) throw new Error('Page not initialized')
+
+      // Navigate to search page
+      logger.info('Navigating to search page')
+      await this.page.goto(`https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keywords)}`)
+
+      // Wait for search results to load
+      logger.info('Waiting for search results')
+      await this.page.waitForSelector('.feeds-container', {
+        timeout: 30000
+      })
+
+      // Get all note items
+      let noteItems = await this.page.$$('.feeds-container .note-item')
+      logger.info(`Found ${noteItems.length} note items`)
+      const notes: Note[] = []
+
+      // Process each note
+      for (let i = 0; i < Math.min(noteItems.length, limit); i++) {
+        logger.info(`Processing note ${i + 1}/${Math.min(noteItems.length, limit)}`)
+        try {
+          // Click on the note cover to open detail
+          const coverHandle = await noteItems[i].$('a.cover.mask.ld')
+          if (coverHandle) {
+            await coverHandle.click()
+          } else {
+            logger.warn(`No cover link found for note ${i + 1}, skipping`)
+            continue
+          }
+
+          // Wait for the note page to load
+          logger.info('Waiting for note page to load')
+          await this.page.waitForSelector('#noteContainer', {
+            timeout: 30000
+          })
+
+          await this.randomDelay(0.5, 1.5)
+
+          // Extract note content
+          const note = await this.page.evaluate(() => {
+            const article = document.querySelector('#noteContainer')
+            if (!article) return null
+
+            // Get title
+            const titleElement = article.querySelector('#detail-title')
+            const title = titleElement?.textContent?.trim() || ''
+
+            // Get content
+            const contentElement = article.querySelector('#detail-desc .note-text')
+            const content = contentElement?.textContent?.trim() || ''
+
+            // Get author info
+            const authorElement = article.querySelector('.author-wrapper .username')
+            const author = authorElement?.textContent?.trim() || ''
+
+            // Get interaction counts from engage-bar
+            const engageBar = document.querySelector('.engage-bar-style')
+            const likesElement = engageBar?.querySelector('.like-wrapper .count')
+            const likes = parseInt(likesElement?.textContent?.replace(/[^\d]/g, '') || '0')
+
+            const collectElement = engageBar?.querySelector('.collect-wrapper .count')
+            const collects = parseInt(collectElement?.textContent?.replace(/[^\d]/g, '') || '0')
+
+            const commentsElement = engageBar?.querySelector('.chat-wrapper .count')
+            const comments = parseInt(commentsElement?.textContent?.replace(/[^\d]/g, '') || '0')
+
+            return {
+              title,
+              content,
+              url: window.location.href,
+              author,
+              likes,
+              collects,
+              comments
+            }
+          })
+
+          if (note) {
+            logger.info(`Extracted note: ${note.title}`)
+            notes.push(note as Note)
+          }
+
+          // Add random delay before closing
+          await this.randomDelay(0.5, 1)
+
+          // Close note by clicking the close button
+          logger.info('Closing note dialog')
+          try {
+            await this.page.click('.close-circle')
+            await this.page.waitForSelector('#noteContainer', { state: 'detached', timeout: 30000 })
+          } catch {
+            // .close-circle may be absent if dialog auto-closed; proceed to next note
+          }
+        } catch (error) {
+          logger.error(`Error processing note ${i + 1}:`, error)
+          logger.info('Attempting to close note dialog after error')
+          try {
+            await this.page.click('.close-circle')
+            await this.page.waitForSelector('#noteContainer', { state: 'detached', timeout: 30000 })
+          } catch (closeErr) {
+            logger.warn(`Could not close note dialog after error: ${(closeErr as Error).message}`)
+          }
+        } finally {
+          // Add random delay before next note
+          await this.randomDelay(0.5, 1.5)
+        }
+      }
+
+      logger.info(`Successfully processed ${notes.length} notes`)
+      return notes
+    } catch (error) {
+      logger.error('Error searching notes:', error)
+      throw error
+    } finally {
+      await this.cleanup()
+    }
+  }
+
+  async getNoteContent(url: string): Promise<NoteDetail> {
+    logger.info(`Getting note content for URL: ${url}`)
+    try {
+      await this.initialize()
+      if (!this.page) throw new Error('Page not initialized')
+
+      const actualURL = this.extractRedBookUrl(url)
+      await this.page.goto(actualURL)
+      let note = await GetNoteDetail(this.page)
+      note.url = url
+      logger.info(`Successfully extracted note: ${note.title}`)
+      return note
+    } catch (error) {
+      logger.error('Error getting note content:', error)
+      throw error
+    } finally {
+      await this.cleanup()
+    }
+  }
+
+  async getNoteComments(url: string): Promise<Comment[]> {
+    logger.info(`Getting comments for URL: ${url}`)
+    try {
+      await this.initialize()
+      if (!this.page) throw new Error('Page not initialized')
+
+      await this.page.goto(url)
+
+      // Wait for comments to load
+      logger.info('Waiting for comments to load')
+      await this.page.waitForSelector('[role="dialog"] [role="list"]')
+
+      // Extract comments
+      const comments = await this.page.evaluate(() => {
+        const items = document.querySelectorAll('[role="dialog"] [role="list"] [role="listitem"]')
+        const results: Comment[] = []
+
+        items.forEach((item) => {
+          const author = item.querySelector('[data-testid="user-name"]')?.textContent?.trim() || ''
+          const content = item.querySelector('[data-testid="comment-content"]')?.textContent?.trim() || ''
+          const likes = parseInt(item.querySelector('[data-testid="likes-count"]')?.textContent || '0')
+          const time = item.querySelector('time')?.textContent?.trim() || ''
+
+          results.push({ author, content, likes, time })
+        })
+
+        return results
+      })
+
+      logger.info(`Successfully extracted ${comments.length} comments`)
+      return comments
+    } catch (error) {
+      logger.error('Error getting note comments:', error)
+      throw error
+    } finally {
+      await this.cleanup()
+    }
+  }
+
+  /**
+   * Wait for a random duration between min and max seconds
+   * @param min Minimum seconds to wait
+   * @param max Maximum seconds to wait
+   */
+  private async randomDelay(min: number, max: number): Promise<void> {
+    const delay = Math.random() * (max - min) + min
+    logger.debug(`Adding random delay of ${delay.toFixed(2)} seconds`)
+    await new Promise((resolve) => setTimeout(resolve, delay * 1000))
+  }
+}

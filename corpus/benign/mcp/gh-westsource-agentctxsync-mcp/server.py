@@ -1,0 +1,1760 @@
+"""
+Agent Context Sync MCP Server (multi-agent)
+- Adapter framework: HERMES_SYNC_AGENT selects the local store adapter
+  (hermes | dsh | workbuddy | opencode | reasonix | openclaw | omp); every
+  agent gets its own deployment (each instance manages one local store)
+- Auto-pull on startup (background); bootstrap push when remote is empty
+- Periodic sync every N minutes (HERMES_SYNC_INTERVAL)
+- Tools: sync_status / sync_pull / sync_push / sync_full (+ hermes_sync_*
+  aliases for backwards compatibility)
+- Authenticated via workspace API key
+"""
+
+import asyncio
+import json
+import os
+import sqlite3
+import sys
+import time
+import urllib.request
+import urllib.error
+from pathlib import Path
+
+# Allow running as ``python <abs path>/server.py`` from ANY working
+# directory: host agents (Hermes, reasonix plugins, ...) do not guarantee
+# the cwd is the mcp/ folder, and ``from adapters import ...`` below needs
+# this package on sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent
+
+# mcp SDK v2 (the 2026-07-28 spec rework, mcp>=2.0.0) removed the low-level
+# decorator API: ``Server.list_tools()`` / ``Server.call_tool()`` no longer
+# exist, handlers register via ``add_request_handler`` with ``(ctx, params)
+# -> result`` signatures. Detect the era once; the v1 path keeps the
+# historical decorators, the v2 path registers the same handlers with v2
+# signatures. Everything else (Server, stdio_server, mcp.types, run(),
+# create_initialization_options()) is shared by both.
+SDK_V2 = not hasattr(Server, "list_tools")
+
+from adapters import get_adapter, available_agents
+from adapters.base import (AGENT_PREFIXES, LOCAL_ONLY_SESSION_FIELDS,
+                           PROJECT_USER_EDIT_FIELDS, USER_EDIT_FIELDS,
+                           _path_key, align_path_to_local, build_path_map,
+                           strip_root_project_paths)
+import updater
+
+
+SYNC_SERVER = os.environ.get("HERMES_SYNC_SERVER", "https://www.agentctxsync.com")
+SYNC_API_KEY = os.environ.get("HERMES_SYNC_API_KEY", "ws_placeholder")
+SYNC_INTERVAL = int(os.environ.get("HERMES_SYNC_INTERVAL", "300"))
+# Background auto-sync (startup pull + periodic sync) can be disabled so the
+# client never competes for the local store locks; manual tool calls still
+# work. Hermes on SQLite < 3.51.3 uses journal_mode=DELETE where a write
+# blocks concurrent readers -- set to 0 to keep Hermes' own reads (e.g.
+# session.resume) entirely lock-free.
+AUTO_SYNC = os.environ.get("HERMES_SYNC_AUTO_SYNC", "1") != "0"
+# Client auto-update: check once shortly after startup, then every
+# HERMES_SYNC_UPDATE_INTERVAL seconds (default 1h). Files are replaced in
+# the background and take effect on the next agent restart. Set
+# HERMES_SYNC_AUTO_UPDATE=0 to disable.
+AUTO_UPDATE = os.environ.get("HERMES_SYNC_AUTO_UPDATE", "1") != "0"
+UPDATE_INTERVAL = int(os.environ.get("HERMES_SYNC_UPDATE_INTERVAL", "3600"))
+MCP_DIR = Path(__file__).resolve().parent
+VERSION_FILE = MCP_DIR / updater.VERSION_FILE_NAME
+AGENT = os.environ.get("HERMES_SYNC_AGENT", "hermes")
+if AGENT not in available_agents():
+    sys.stderr.write(
+        f"[hermes-sync] Unknown agent {AGENT!r}; "
+        f"falling back to 'hermes'. Known agents: {available_agents()}\n")
+    AGENT = "hermes"
+adapter = get_adapter(AGENT)
+DEVICE_ID = f"local-{os.environ.get('COMPUTERNAME', 'unknown')}"
+# Version of this client installation (persisted by the updater, falling
+# back to the built-in constant). Sent with every sync request so the
+# server can show each device's MCP client version at last sync.
+CLIENT_VERSION = updater.local_version(VERSION_FILE)
+
+# Single-writer guard for the BACKGROUND sync loops (startup pull + periodic
+# sync). The Hermes desktop app runs two `serve` instances (Hermes.exe →
+# serve(venv) → serve(.hermes-runtime)), each spawning its own copy of this
+# MCP server — so two processes can otherwise run the sync concurrently and
+# race on the same local store. Only the process holding the lockfile runs
+# the background loops; the other skips. Explicit tool calls are NOT guarded.
+# Lock files are per-agent so independent agent deployments never block each
+# other (hermes keeps its legacy lock name).
+_lock_name = "hermes-sync" if AGENT == "hermes" else f"hermes-sync-{AGENT}"
+LOCK_FILE = Path(os.environ.get(
+    "HERMES_SYNC_LOCK_FILE",
+    str(Path.home() / "AppData/Local/hermes" / (_lock_name + ".lock"))))
+UPDATE_LOCK_FILE = Path(os.environ.get(
+    "HERMES_SYNC_UPDATE_LOCK_FILE",
+    str(Path.home() / "AppData/Local/hermes" / (_lock_name + "-update.lock"))))
+# Durable lease naming the process that OWNS the background sync loops. The
+# per-cycle lockfile above is released between cycles, so it cannot decide a
+# role: a copy starting later would win the freed lock and call itself primary
+# too (duplicate startup syncs), while a copy that lost a simultaneous race
+# stayed standby for its whole life -- closing the window that owned the loops
+# silently stopped background sync for every surviving window. The lease
+# carries the owner pid + a heartbeat; a standby re-checks it every cycle and
+# promotes itself once the owner is gone.
+LEASE_FILE = Path(os.environ.get(
+    "HERMES_SYNC_LEASE_FILE",
+    str(Path.home() / "AppData/Local/hermes" / (_lock_name + ".primary.json"))))
+# Hard bound on trusting a lease: past this the role is free even if the pid
+# still answers, which is what covers pid reuse (a reused pid answers "alive"
+# forever). Between one SYNC_INTERVAL and this bound the pid probe decides --
+# see _lease_owner_alive.
+LEASE_STALE_S = float(os.environ.get(
+    "HERMES_SYNC_LEASE_STALE_S", str(SYNC_INTERVAL + 120)))
+# Delay the first background sync after startup so the host agent's own
+# startup/read burst (e.g. Hermes session.resume) is over before we take
+# SQLite locks.
+STARTUP_DELAY_S = float(os.environ.get("HERMES_SYNC_STARTUP_DELAY_S", "8"))
+# Server-side log file. The host owns our stderr and commonly drops it (omp
+# keeps no MCP stderr anywhere), which left crashes -- e.g. the "MCP transport
+# lost" seen in the field -- with no readable trace.
+LOG_FILE = Path(os.environ.get(
+    "HERMES_SYNC_LOG_FILE",
+    str(Path.home() / "AppData/Local/hermes" / (_lock_name + ".log"))))
+LOG_MAX_BYTES = int(os.environ.get("HERMES_SYNC_LOG_MAX_BYTES",
+                                   str(512 * 1024)))
+
+if sys.platform == "win32":
+    # Windows liveness probe. os.kill(pid, 0) is NOT usable for this: it raises
+    # SystemError for some pids, reports a live process as dead when
+    # OpenProcess(PROCESS_ALL_ACCESS) is refused (WinError 87, seen in the
+    # field on sibling MCP-server processes), and reports a just-exited process
+    # as alive while its parent still holds the handle. OpenProcess + a
+    # zero-timeout wait on the process handle is what tasklist/psutil do and
+    # answers all three correctly. An inconclusive probe (access denied)
+    # returns True -- assuming alive: stealing a live writer's lock, or
+    # promoting a second primary, is worse than waiting, and the lease
+    # heartbeat bounds how long a false "alive" can hold a role.
+    import ctypes
+    from ctypes import wintypes
+
+    _SYNCHRONIZE = 0x00100000
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    _WAIT_TIMEOUT = 258
+    _ERROR_INVALID_PARAMETER = 87
+    _ERROR_NOT_FOUND = 1168
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL,
+                                      wintypes.DWORD]
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    _kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    _kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+
+    def _pid_alive(pid: int) -> bool:
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        handle = _kernel32.OpenProcess(
+            _SYNCHRONIZE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return ctypes.get_last_error() not in (_ERROR_INVALID_PARAMETER,
+                                                   _ERROR_NOT_FOUND)
+        try:
+            return _kernel32.WaitForSingleObject(handle, 0) == _WAIT_TIMEOUT
+        finally:
+            _kernel32.CloseHandle(handle)
+else:
+    def _pid_alive(pid: int) -> bool:
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+        except Exception:
+            # Inconclusive probe: assume alive (see the Windows note above).
+            return True
+
+def _try_acquire_lock(lock_path: Path | None = None) -> bool:
+    """Create the lockfile atomically (O_EXCL). Steal it if the previous
+    holder's PID is dead (crashed process would otherwise block sync forever)."""
+    lock_path = lock_path or LOCK_FILE
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        try:
+            holder = int(lock_path.read_text().strip())
+        except Exception:
+            return False
+        if not _pid_alive(holder):
+            try:
+                lock_path.unlink()
+            except OSError:
+                return False
+            return _try_acquire_lock(lock_path)
+        return False
+
+def _release_lock(lock_path: Path | None = None):
+    lock_path = lock_path or LOCK_FILE
+    try:
+        lock_path.unlink()
+    except OSError:
+        pass
+
+# ---------------------------------------------------------------------------
+# Instance role + tool-call locking
+#
+# Hermes/omp spawn one copy of this MCP server per host window, and every copy
+# can mutate the same local store. The lockfile above serializes one CYCLE at
+# a time; the lease below makes the role (which copy runs the background loops
+# at all) durable across cycles, so a widow — the only surviving window — keeps
+# syncing after the owner's window closes instead of silently stopping. The
+# same lock is extended to EXPLICIT tool calls (previously unguarded, so two
+# copies could mutate the store at once), and each copy's role is visible in
+# mcp-stderr plus the on-disk log so ops can tell which process does the work.
+# ---------------------------------------------------------------------------
+
+#: Runtime role of THIS copy. "primary" = owns the background sync loops
+#: (holds the lease); "standby" = another live copy owns them (tools still
+#: served, so a standby must not exit); "starting" = the startup task has not
+#: decided yet. Re-read every cycle: a standby promotes itself when the lease
+#: owner disappears.
+_role = "starting"
+
+#: How long a mutating tool call waits for the cross-process sync lock before
+#: refusing with a busy hint. Background cycles finish in seconds; 20s covers
+#: a slow full resync without hanging the caller.
+TOOL_LOCK_WAIT_S = float(os.environ.get("HERMES_SYNC_TOOL_LOCK_WAIT_S", "20"))
+TOOL_LOCK_POLL_S = 0.5
+
+
+def _lock_holder_pid(lock_path: Path | None = None) -> int | None:
+    """PID currently recorded in the lock file, or None when absent/empty."""
+    lock_path = lock_path or LOCK_FILE
+    try:
+        return int(lock_path.read_text().strip())
+    except Exception:
+        return None
+
+
+# --- background-sync lease -------------------------------------------------
+# {pid, host, started_at, heartbeat, last_sync_ok, last_sync_error,
+#  role_reason, client_version}. Written atomically (tmp + os.replace) by the
+# owner at election and refreshed every cycle; read by everyone. Concurrent
+# writers are possible (a standby stamping last_sync_ok while the owner
+# refreshes its heartbeat) and harmless: last writer wins, and every field is
+# a monotone timestamp or a liveness hint, so a lost heartbeat cannot change a
+# role -- the owner writes it again at the start of its next cycle.
+
+def _read_lease() -> dict | None:
+    """Parsed lease, or None when absent/unreadable/malformed."""
+    try:
+        lease = json.loads(LEASE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return lease if isinstance(lease, dict) else None
+
+
+def _lease_write(fields: dict) -> None:
+    """Merge ``fields`` into the lease file atomically."""
+    lease = _read_lease() or {}
+    lease.update(fields)
+    tmp = LEASE_FILE.with_name(LEASE_FILE.name + ".tmp")
+    try:
+        LEASE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(lease, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, LEASE_FILE)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _lease_owner_alive() -> tuple[bool, dict | None]:
+    """(owner_is_alive, lease).
+
+    The heartbeat is the primary signal and the pid probe only a cross-check:
+    a probe NEGATIVE can be a false alarm (Windows refuses OpenProcess for some
+    live pids, which reads exactly like a dead one), while the heartbeat is
+    written by the owner itself. A lease therefore only counts as ownerless
+    once the owner has missed a full cycle (``SYNC_INTERVAL``) AND its pid no
+    longer answers -- or once the heartbeat is stale past ``LEASE_STALE_S``,
+    which is also the bound for pid reuse (a reused pid answers positively
+    forever)."""
+    lease = _read_lease()
+    if not lease:
+        return False, None
+    pid = lease.get("pid")
+    if not isinstance(pid, int):
+        return False, lease
+    if pid == os.getpid():
+        return True, lease
+    heartbeat = lease.get("heartbeat")
+    age = (time.time() - heartbeat) if isinstance(heartbeat, (int, float)) \
+        else None
+    if age is not None and age < SYNC_INTERVAL:
+        return True, lease          # cycled recently: the probe cannot outvote
+    if age is None or age >= LEASE_STALE_S:
+        return False, lease         # missed a cycle plus slack, or no clock
+    return _pid_alive(pid), lease
+
+
+def _owner_pid_or_none() -> int | None:
+    """pid of the LIVE other copy that owns background sync, else None."""
+    alive, lease = _lease_owner_alive()
+    pid = (lease or {}).get("pid")
+    if alive and isinstance(pid, int) and pid != os.getpid():
+        return pid
+    return None
+
+
+def _claim_lease(reason: str) -> None:
+    """Record THIS process as the background-sync owner. The caller must hold
+    the per-cycle lock, so simultaneous starts still elect exactly one owner;
+    existing fields (e.g. last_sync_ok) are preserved for the freshness test."""
+    now = time.time()
+    _lease_write({"pid": os.getpid(), "host": DEVICE_ID, "started_at": now,
+                  "heartbeat": now, "role_reason": reason,
+                  "client_version": CLIENT_VERSION})
+
+
+def _stamp_sync_ok(fields: dict | None = None) -> None:
+    """Refresh the lease heartbeat, and last_sync_ok on a clean cycle.
+
+    Never touches pid: a standby running a manual tool call may stamp the
+    freshness it achieved, but it must not claim ownership."""
+    payload = {"heartbeat": time.time()}
+    if fields:
+        payload.update(fields)
+    _lease_write(payload)
+
+
+def _stamp_after_tool(result) -> None:
+    """A successful manual sync is a real sync: stamp it so a window starting
+    right after it can skip its (now redundant) startup sync."""
+    if isinstance(result, dict) and "error" not in result:
+        _stamp_sync_ok({"last_sync_ok": time.time(), "last_sync_error": None})
+
+
+def instance_status() -> dict:
+    """This copy's role plus the shared lock/lease state.
+
+    Surfaced through sync_status so "who is syncing, and is anything running
+    twice?" is answerable from the agent without reading stderr -- which the
+    host owns and normally drops."""
+    alive, lease = _lease_owner_alive()
+    return {
+        "pid": os.getpid(),
+        "role": _role,
+        "background_sync": "disabled" if not AUTO_SYNC else _role,
+        "host": DEVICE_ID,
+        "client_version": CLIENT_VERSION,
+        "sync_interval_s": SYNC_INTERVAL,
+        "lock_file": str(LOCK_FILE),
+        "lock_holder_pid": _lock_holder_pid(),
+        "lease_file": str(LEASE_FILE),
+        "lease_owner_pid": (lease or {}).get("pid"),
+        "lease_owner_alive": alive,
+        "lease": lease,
+        "log_file": str(LOG_FILE),
+    }
+
+
+async def _acquire_tool_lock() -> bool:
+    """Bounded exclusive access to the sync lock for ONE mutating tool call.
+
+    Serializes against (a) this process's own background cycle (the lock file
+    then holds our pid) and (b) other server copies (a live foreign pid).
+    Returns True when the caller now owns the lock — it MUST be released with
+    ``_release_lock()``. Returns False once the wait budget (TOOL_LOCK_WAIT_S)
+    elapses without the lock becoming free.
+    """
+    deadline = asyncio.get_event_loop().time() + TOOL_LOCK_WAIT_S
+    warned = False
+    while True:
+        # Attempt every iteration: _try_acquire_lock steals a stale lockfile
+        # (dead holder) and fails fast on a live one (our own background
+        # cycle or another copy).
+        if _try_acquire_lock():
+            return True
+        holder = _lock_holder_pid()
+        if holder is not None and holder != os.getpid() and not warned:
+            warned = True
+            log(f"Sync tool waiting for the sync lock (held by pid {holder})...")
+        if asyncio.get_event_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(TOOL_LOCK_POLL_S)
+
+
+async def _locked_tool(loop, fn):
+    """Run blocking ``fn`` under the cross-process sync lock.
+
+    Returns fn's result, or a busy dict when the lock could not be obtained
+    in time (another copy or the background cycle is mid-sync).
+    """
+    if not await _acquire_tool_lock():
+        holder = _lock_holder_pid()
+        detail = "另一个实例或后台同步正在进行，请稍后重试"
+        if holder:
+            detail += f"（当前持有者 pid {holder}）"
+        return {"error": "sync_busy", "detail": detail + "。"}
+    try:
+        return await loop.run_in_executor(None, fn)
+    finally:
+        _release_lock()
+
+
+class _SyncServer(Server):
+    """MCP server that keeps a handle on the active session so background
+    sync tasks can push log notifications (notifications/message) to the
+    host agent. Hosts may or may not surface them in their UI — they are
+    best-effort; failures are swallowed."""
+
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.active_session = None
+        self._session_ready = asyncio.Event()
+        if SDK_V2:
+            # v2 hands us no run() hook that exposes the connection session,
+            # so capture the per-request ServerSession on the first inbound
+            # message (request or notification). Background sync
+            # notifications then use its standalone outbound channel -- the
+            # same shape v1's active_session had. The middleware list only
+            # exists on v2.
+            async def _capture_session(ctx, call_next):
+                self.active_session = ctx.session
+                self._session_ready.set()
+                return await call_next(ctx)
+            self.middleware.append(_capture_session)
+
+    async def run(self, read_stream, write_stream, initialization_options,
+                  raise_exceptions: bool = False, stateless: bool = False):
+        if SDK_V2:
+            # v2 SDK owns the connection loop (handshake + modern eras); the
+            # capture middleware above already stashed the session. Its
+            # run() takes no `stateless` kwarg.
+            await super().run(read_stream, write_stream, initialization_options,
+                              raise_exceptions=raise_exceptions)
+            return
+        # v1: mirrors mcp.server.Server.run (mcp SDK 1.28.1) so we can
+        # capture the ServerSession for background notifications.
+        from contextlib import AsyncExitStack
+        import anyio
+        from mcp.server.session import ServerSession
+        async with AsyncExitStack() as stack:
+            lifespan_context = await stack.enter_async_context(self.lifespan(self))
+            self.active_session = await stack.enter_async_context(
+                ServerSession(read_stream, write_stream, initialization_options,
+                              stateless=stateless))
+            self._session_ready.set()
+            task_support = (self._experimental_handlers.task_support
+                            if self._experimental_handlers else None)
+            if task_support is not None:
+                task_support.configure_session(self.active_session,
+                                               stateless=stateless)
+                await stack.enter_async_context(task_support.run())
+            async with anyio.create_task_group() as tg:
+                try:
+                    async for message in self.active_session.incoming_messages:
+                        tg.start_soon(self._handle_message, message,
+                                      self.active_session, lifespan_context,
+                                      raise_exceptions)
+                finally:
+                    tg.cancel_scope.cancel()
+            self.active_session = None
+
+
+server = _SyncServer("hermes-session-sync")
+
+
+async def _notify_host(message: str, level: str = "info"):
+    """Best-effort MCP log notification after background sync. Waits up to
+    30s for the session (startup sync may finish before the stdio handshake)
+    and never raises: hosts that don't surface log notifications just ignore
+    them."""
+    try:
+        await asyncio.wait_for(server._session_ready.wait(), timeout=30)
+        if server.active_session is None:
+            return
+        from mcp.types import (LoggingMessageNotification,
+                               LoggingMessageNotificationParams)
+        await server.active_session.send_notification(LoggingMessageNotification(
+            params=LoggingMessageNotificationParams(
+                level=level, logger="hermes-sync", data=message)))
+    except Exception:
+        pass
+
+def _rotate_log() -> None:
+    """Single-generation rotation: <agent>.log -> <agent>.log.1 once the file
+    outgrows LOG_MAX_BYTES. Best-effort: a failed rotation (Windows replace
+    against a file another copy is appending to) only keeps growing the
+    current file."""
+    if not LOG_FILE.name:       # HERMES_SYNC_LOG_FILE="" disables the file copy
+        return
+    try:
+        if LOG_FILE.stat().st_size <= LOG_MAX_BYTES:
+            return
+    except OSError:
+        return
+    try:
+        os.replace(LOG_FILE, LOG_FILE.with_name(LOG_FILE.name + ".1"))
+    except OSError:
+        pass
+
+def log(msg):
+    line = f"[hermes-sync] {msg}"
+    # utf-8 on purpose: MCP hosts read our stderr with a utf-8 reader (the
+    # SDK's own stdio client does), while a Chinese Windows locale would encode
+    # an embedded urllib/sqlite error message as GBK and break that reader.
+    buffer = getattr(sys.stderr, "buffer", None)
+    try:
+        if buffer is not None:
+            buffer.write((line + "\n").encode("utf-8", "replace"))
+        else:
+            sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+    except (OSError, ValueError):
+        pass
+    # Same lines on disk: the host owns stderr and usually drops it, so a
+    # crash (role election, transport loss, sync failure) would otherwise
+    # leave no trace anywhere.
+    try:
+        if not LOG_FILE.name:   # HERMES_SYNC_LOG_FILE="" disables the file copy
+            return
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_log()
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+        with open(LOG_FILE, "a", encoding="utf-8") as fh:
+            fh.write(f"{stamp} {line}\n")
+    except OSError:
+        pass
+
+def api_call(method, path, data=None):
+    url = f"{SYNC_SERVER}{path}"
+    headers = {"Authorization": f"Bearer {SYNC_API_KEY}", "Content-Type": "application/json",
+               "User-Agent": "hermes-sync-client/1.0"}
+    try:
+        # Encoded INSIDE the try: a payload the encoder rejects is a failure of
+        # this one request, reported to the caller like any transport error, so
+        # a bad value cannot abort an entire push/pull cycle (see the
+        # _partition_encodable pre-check, which names the offending field).
+        body = json.dumps(data).encode() if data else None
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        resp = urllib.request.urlopen(req, timeout=120)
+        return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        return {"error": e.code, "detail": e.read().decode()}
+    except Exception as e:
+        return {"error": str(e)}
+
+# Quota rejections come back as HTTP 403 with our machine-readable code in
+# {"detail": "<code>"}. Translate them into a human-readable hint so the
+# Agent user understands WHY the push was refused, without losing the code.
+QUOTA_ERROR_HINTS = {
+    "agent_not_allowed": "同步被拒：当前套餐不支持该 Agent 类型的会话同步（如需启用请联系管理员）",
+    "quota_exceeded_sessions": "同步被拒：会话数量已达当前套餐上限，请清理旧会话或升级套餐",
+}
+
+def explain_quota_error(result):
+    """Return ``result`` with a friendly ``error`` hint when it is a quota
+    rejection (403 + our code), keeping the machine-readable ``code``."""
+    if not isinstance(result, dict) or result.get("error") != 403:
+        return result
+    try:
+        detail = json.loads(result.get("detail", "{}")).get("detail", "")
+    except Exception:
+        return result
+    hint = QUOTA_ERROR_HINTS.get(detail)
+    if hint:
+        return {**result, "error": hint, "code": detail}
+    return result
+
+# ---- Field-level optimistic concurrency sidecar (see ARCHITECTURE.md) ----
+# Per-agent persistent store of {session_id: {field: {"base": server_rev,
+# "val": last_known_value}}}. base is the server's per-field logical clock;
+# a field is "dirty" when the local store value differs from "val". Lazy
+# populate: entries appear only after the first pull/push contact. Absent
+# entry == base unknown -> the server stays authoritative for that field.
+PROJECT_FIELD_META_PATH = getattr(adapter, "project_field_meta_path",
+                                  lambda: None)()
+FIELD_META_PATH = getattr(adapter, "field_meta_path", lambda: None)()
+# Push fingerprint sidecar (sibling of the field meta): {session_id:
+# [message_count, max_timestamp, mtime]} recorded after a successful push.
+# The push loop skips sessions whose fingerprint is unchanged, so a full
+# store is not re-uploaded every cycle. `None` (no field meta) disables
+# the optimization and falls back to push-everything.
+PUSH_FINGERPRINT_PATH = None
+if FIELD_META_PATH is not None:
+    PUSH_FINGERPRINT_PATH = FIELD_META_PATH.with_name(
+        FIELD_META_PATH.stem + "-push-fingerprint.json")
+
+
+def _load_push_fingerprint() -> dict:
+    if PUSH_FINGERPRINT_PATH is None:
+        return {}
+    try:
+        data = json.loads(PUSH_FINGERPRINT_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+    except (OSError, ValueError):
+        return {}
+    # Server-bound (mirrors the pull watermark): a fingerprint recorded
+    # against a DIFFERENT sync server must not suppress a re-push, or
+    # sessions pushed to an old server/workspace are silently skipped on
+    # the new one. Old flat-dict files (predating identity recording) are
+    # treated stale whenever an identity is known -> one full re-push (the
+    # server dedupes, so this only costs bandwidth, never duplicates).
+    if "server" in data:
+        if SYNC_SERVER and data.get("server") != SYNC_SERVER:
+            return {}
+        sessions = data.get("sessions")
+        return sessions if isinstance(sessions, dict) else {}
+    if SYNC_SERVER:
+        return {}  # legacy flat dict + known identity: stale -> full re-push
+    return data
+
+
+def _save_push_fingerprint(fp: dict):
+    if PUSH_FINGERPRINT_PATH is None:
+        return
+    try:
+        PUSH_FINGERPRINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        PUSH_FINGERPRINT_PATH.write_text(
+            json.dumps({"server": SYNC_SERVER or None, "sessions": fp},
+                       ensure_ascii=False),
+            encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _session_fingerprint(s: dict) -> tuple:
+    """Fingerprint of one session for the push skip-check: message count +
+    max message timestamp, plus the backing file mtime when the adapter
+    provides it (covers in-place edits that change neither)."""
+    msgs = s.get("messages") or []
+    count = len(msgs)
+    max_ts = max((m.get("timestamp") or 0 for m in msgs), default=0)
+    fp: tuple = (count, max_ts)
+    mtime_fn = getattr(adapter, "session_mtime", None)
+    if mtime_fn is not None:
+        try:
+            m = mtime_fn(str(s["id"]))
+            if m is not None:
+                fp = (count, max_ts, round(m, 3))
+        except Exception:
+            pass
+    return fp
+
+
+def _load_field_meta():
+    if FIELD_META_PATH is None:
+        return {}
+    try:
+        data = json.loads(FIELD_META_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_field_meta(meta: dict):
+    if FIELD_META_PATH is None:
+        return
+    try:
+        FIELD_META_PATH.parent.mkdir(parents=True, exist_ok=True)
+        FIELD_META_PATH.write_text(json.dumps(meta, ensure_ascii=False),
+                                   encoding="utf-8")
+    except OSError:
+        pass
+_PATH_FIELDS = frozenset(("cwd", "git_repo_root", "primary_path"))
+
+
+def _field_dirty(field: str, local_val, sidecar_val) -> bool:
+    """Field-level dirty check for the optimistic-merge sidecars.
+
+    A missing/empty LOCAL value is never a local edit: none of the agents
+    can express "user deleted this field" (a dsh log without a
+    ``session/title`` event is a never-titled session, not a title removal;
+    hermes titles are never user-cleared). Counting None as dirty made the
+    pull DROP the server's authoritative value for exactly those sessions --
+    every sync-written log that lacked the event yet read "dirty" against
+    its sidecar anchor, so the incoming title was popped on every pull and
+    the session stayed permanently untitled (and on the desktop list fell
+    back to the workspace/dir name). Missing local == adopt the server.
+
+    Path fields (cwd/git_repo_root/primary_path) compare case- and
+    separator-insensitively: Windows local stores spell the same directory
+    differently (E:\\a\\b vs E:/a/b, case-folded), and a spelling-only
+    difference must never look like a local edit -- it would make the pull
+    drop the field (falling back to the process cwd on write) and keep the
+    session permanently dirty. Everything else stays exact-match.
+    """
+    if local_val is None or local_val == "":
+        return False
+    if field in _PATH_FIELDS and isinstance(local_val, str) \
+            and isinstance(sidecar_val, str):
+        return _path_key(local_val) != _path_key(sidecar_val)
+    return local_val != sidecar_val
+
+
+def _strip_local_only(session: dict) -> dict:
+    """Drop device-local fields (``LOCAL_ONLY_SESSION_FIELDS``) in place.
+
+    ``model`` is the model the user picked for this session: a per-device
+    setting, not shared conversation content (decision record 2026.10.06.1).
+    It is removed from outgoing payloads BEFORE the push fingerprint (a
+    model switch then neither reaches the server nor counts as a change)
+    and from every incoming page BEFORE the adapter writes it (so a peer --
+    or an older server that still echoes the column -- can never overwrite
+    this device's choice). Message dicts are stripped as well: the wire
+    contract carries no per-message model either.
+    """
+    for f in LOCAL_ONLY_SESSION_FIELDS:
+        session.pop(f, None)
+    for m in session.get("messages") or ():
+        for f in LOCAL_ONLY_SESSION_FIELDS:
+            m.pop(f, None)
+    return session
+
+
+def _annotate_push_session(s, meta: dict):
+    """Return a push copy of session ``s`` containing only the user-edit
+    fields this device is asserting (dirty / first-contact), tagged with
+    their base in ``field_meta``. Non-dirty user-edit fields are omitted so
+    the server never overwrites them from this (possibly stale) device."""
+    sid = str(s["id"])
+    sm = meta.get(sid, {})
+    out, field_meta = {}, {}
+    for k, v in s.items():
+        if k in USER_EDIT_FIELDS:
+            entry = sm.get(k)
+            if entry is None:
+                field_meta[k] = None            # base unknown -> server authority
+                out[k] = v
+            elif not _field_dirty(k, v, entry.get("val")):
+                continue                         # not dirty: omit entirely
+            else:
+                field_meta[k] = entry.get("base")  # dirty: push with known base
+                out[k] = v
+        else:
+            out[k] = v
+    out["field_meta"] = field_meta
+    return out
+
+
+def _anchor_push_meta(meta: dict, chunk, session_revs):
+    """After a successful push, record the accepted base/val per field so the
+    device stops treating them as dirty. base=None fields (server-authoritative
+    once) are NOT anchored -- the next pull adopts the server value instead."""
+    for so in chunk:
+        sid = str(so["id"])
+        revmap = (session_revs.get(sid) or {}).get("field_rev") or {}
+        for f, B in (so.get("field_meta") or {}).items():
+            if B is not None and f in revmap and f in so:
+                meta.setdefault(sid, {})[f] = {"base": revmap[f], "val": so[f]}
+
+
+def _load_project_field_meta():
+    if PROJECT_FIELD_META_PATH is None:
+        return {}
+    try:
+        data = json.loads(PROJECT_FIELD_META_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_project_field_meta(meta: dict):
+    if PROJECT_FIELD_META_PATH is None:
+        return
+    try:
+        PROJECT_FIELD_META_PATH.parent.mkdir(parents=True, exist_ok=True)
+        PROJECT_FIELD_META_PATH.write_text(json.dumps(meta, ensure_ascii=False),
+                                           encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _annotate_push_project(p, meta: dict) -> dict:
+    """Push copy of project ``p`` asserting only dirty / first-contact scalar
+    user-edit fields (tagged with their base in ``field_meta``). Non-dirty
+    fields are omitted so this device never overwrites a peer's value."""
+    pid = str(p["id"])
+    pm = meta.get(pid, {})
+    out, field_meta = {}, {}
+    for k, v in p.items():
+        if k == "folders":
+            out["folders"] = v
+            continue
+        if k in PROJECT_USER_EDIT_FIELDS:
+            entry = pm.get(k)
+            if entry is None:
+                field_meta[k] = None            # base unknown -> server authority
+            elif not _field_dirty(k, v, entry.get("val")):
+                continue                         # not dirty: omit
+            else:
+                field_meta[k] = entry.get("base")  # dirty: known base
+            out[k] = v
+        else:
+            out[k] = v
+    out["field_meta"] = field_meta
+    return out
+
+
+def _anchor_push_project_meta(meta: dict, projects, project_revs):
+    """Record accepted base/val after a successful project push so those
+    fields stop reading dirty. base=None fields are NOT anchored -- the next
+    pull adopts the server value instead."""
+    for po in projects:
+        pid = str(po["id"])
+        revmap = (project_revs.get(pid) or {}).get("field_rev") or {}
+        for f, B in (po.get("field_meta") or {}).items():
+            if B is not None and f in revmap and f in po:
+                meta.setdefault(pid, {})[f] = {"base": revmap[f], "val": po[f]}
+
+
+def _reconcile_sidecar_titles(local_by_id: dict) -> int:
+    """Write server-accepted titles into local sessions that never got one.
+
+    Heals the title-loss loop: a session whose sync-written log lacked a
+    ``session/title`` event used to read "dirty" against its sidecar anchor
+    (see ``_field_dirty``), so every pull popped the incoming title and the
+    log stayed untitled -- the desktop list fell back to the workspace/dir
+    name until a manual rename. The anchor IS the last value this device
+    accepted from the server, so writing it back adopts server state rather
+    than inventing a local edit; with the dirty semantics fixed, sessions
+    the server re-serves adopt on pull normally and only idle ones need
+    this pass. No-op once every local title is in place. Runs after every
+    pull; best-effort (never fails the sync).
+    """
+    if FIELD_META_PATH is None:
+        return 0
+    meta = _load_field_meta()
+    patches = []
+    for sid, sm in meta.items():
+        entry = sm.get("title") if isinstance(sm, dict) else None
+        if not isinstance(entry, dict):
+            continue
+        val = entry.get("val")
+        if not isinstance(val, str) or not val.strip():
+            continue
+        s = local_by_id.get(str(sid))
+        if s is None or (s.get("title") or "").strip():
+            continue
+        p = dict(s)
+        p["title"] = val
+        patches.append(p)
+    if not patches:
+        return 0
+    healed = 0
+    for start in range(0, len(patches), 15):
+        batch = patches[start:start + 15]
+        for gap in (0, 2, 5, 10):
+            if gap:
+                time.sleep(gap)
+            try:
+                stats = adapter.write_sessions(batch)
+                healed += int(stats.get("updated", 0) or 0) \
+                    + int(stats.get("imported", 0) or 0)
+                break
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e).lower() or gap == 10:
+                    log(f"Title reconcile failed (locked): {e}")
+                    return healed
+            except Exception as e:  # adapters differ; heal is best-effort
+                log(f"Title reconcile failed: {e}")
+                return healed
+    if healed:
+        log(f"Healed {healed} local session title(s) from sidecar anchors")
+    return healed
+
+
+#: Sessions per /pull request. One request returns FULL sessions (all
+#: messages), so a big batch is slow and risks the HTTP timeout (observed:
+#: ~60s for a 50-session page). Keep pages small so a full resync never
+#: times out; the missing-session repair pages the same way.
+PULL_PAGE = 15
+
+
+def _apply_pull_page(sessions, local_by_id, local_cwd_map, meta):
+    """Write one received page to the local store and anchor its sidecar.
+
+    Field-level merge BEFORE writing: never overwrite a user-edit field this
+    device changed locally since its last sync (dirty). The server stays
+    authoritative for both unanchored fields (no sidecar entry) and fields we
+    do not locally differ on -- those we adopt here. Shared by the
+    incremental pull and the missing-session repair, so a restored session
+    goes through exactly the same merge/dedupe/anchor path as a normal page.
+
+    Returns the adapter's write stats dict.
+    """
+    for s in sessions:
+        sid = str(s["id"])
+        # Device-local fields never arrive from a current server; an older
+        # server (or a peer still on an old client) may still send them, so
+        # they are dropped before the adapter can write them over this
+        # device's own value (decision record 2026.10.06.1).
+        _strip_local_only(s)
+        fr = s.get("field_rev") or {}
+        sm = meta.get(sid) or {}
+        local = local_by_id.get(sid, {})
+        for f in USER_EDIT_FIELDS:
+            if f in s and isinstance(s.get(f), str):
+                entry = sm.get(f)
+                if entry is not None and _field_dirty(
+                        f, local.get(f), entry.get("val")):
+                    s.pop(f, None)   # locally edited since last sync
+        # Align pull-side path fields (cwd/git_repo_root) to the local
+        # separator spelling where a local path already exists with only
+        # a different separator — keeps local storage consistent and
+        # merges instead of splitting the same path.
+        for _pk in ("cwd", "git_repo_root"):
+            if isinstance(s.get(_pk), str) and s[_pk]:
+                s[_pk] = align_path_to_local(s[_pk], local_cwd_map)
+    # Retry the write a few times when the local store is locked by the
+    # host agent (Hermes on SQLite < 3.51.3 uses journal_mode=DELETE,
+    # where a write contends with concurrent readers). Each attempt
+    # fails fast (busy_timeout=5s); short gaps between attempts catch
+    # brief idle windows instead of deferring to the next sync cycle.
+    stats = None
+    for gap in (0, 2, 5, 10):
+        if gap:
+            log(f"Local store locked during pull write; "
+                f"retrying in {gap}s...")
+            time.sleep(gap)
+        try:
+            stats = adapter.write_sessions(sessions)
+            break
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() or gap == 10:
+                raise
+    # Anchor sidecar base/val for fields adopted from the server (they
+    # now read clean), so this device stops treating them as dirty and
+    # does not needlessly re-push them.
+    for s in sessions:
+        sid = str(s["id"])
+        fr = s.get("field_rev") or {}
+        for f in USER_EDIT_FIELDS:
+            if f in s and isinstance(s.get(f), str) and f in fr:
+                meta.setdefault(sid, {})[f] = {"base": fr[f], "val": s[f]}
+    return stats
+
+
+def _restore_missing_sessions(ids, local_by_id, local_cwd_map, meta, budget=None):
+    """Put back sessions the server still holds but the local store lost.
+
+    A local delete is not a delete signal: `hidden` is the server-side way
+    to retire a session, so a row the server keeps visible is restored on
+    the next pull instead of staying absent locally -- and then being
+    re-pushed by this device. ``ids`` come from the server's completeness
+    report (see pull_sessions); each request asks for at most one page of
+    them, and the server answers with the ones it still has visible.
+
+    Best-effort by design: a failing chunk is logged and ends the pass
+    (the next pull retries) rather than failing the whole sync.
+    """
+    ids = [i for i in dict.fromkeys(ids) if isinstance(i, str) and i]
+    if budget is not None:
+        ids = ids[:budget]
+    if not ids:
+        return None
+    imported = new_messages = restored = unfiled = 0
+    for start in range(0, len(ids), PULL_PAGE):
+        chunk = ids[start:start + PULL_PAGE]
+        result = api_call("POST", "/pull", {
+            "device_id": DEVICE_ID,
+            "client_version": CLIENT_VERSION,
+            "agent": AGENT,
+            "ids": chunk, "limit": len(chunk),
+        })
+        if "error" in result:
+            log(f"Session restore failed for {len(chunk)} id(s): "
+                f"{result['error']}")
+            break
+        sessions = result.get("sessions") or []
+        if not sessions:
+            continue
+        stats = _apply_pull_page(sessions, local_by_id, local_cwd_map, meta)
+        imported += stats.get("imported", 0)
+        new_messages += stats.get("new_messages", 0)
+        # Count what actually LANDED, not what the server sent: an adapter
+        # that cannot file a session (unknown profile, read-only store)
+        # returns all-zero stats while the row stays absent -- counting the
+        # request would log "Restored N" every cycle for a store that is
+        # still missing them.
+        written = int(stats.get("imported", 0) or 0) + int(stats.get("updated", 0) or 0)
+        restored += written
+        unfiled += max(0, len(sessions) - written)
+        # Keep the snapshot current: the title heal and later chunks see the
+        # restored rows as local state (not as missing).
+        local_by_id.update({str(s["id"]): s for s in sessions})
+    if restored:
+        log(f"Restored {restored} session(s) the server still holds")
+    if unfiled:
+        log(f"{unfiled} session(s) the server still holds could not be filed "
+            f"locally (unknown profile / read-only store) -- see the adapter "
+            f"warnings above; they will be requested again next pull")
+    return {"imported": imported, "new_messages": new_messages,
+            "restored": restored, "unfiled": unfiled}
+
+
+def pull_sessions(last_sync_at=None, limit=None):
+    """Pull remote sessions into the local store via the agent adapter.
+
+    ``last_sync_at=None`` (default) pulls incrementally from the adapter's
+    own ``last_synced_at()`` watermark; pass 0 for a full pull. Paginates
+    over the remote /pull endpoint so ALL sessions are fetched; ``limit=N``
+    caps the total (the MCP tool uses this). Each page is written with
+    stable (session_id, role, timestamp) dedupe in the adapter; remote
+    message ids are dropped so the local store assigns fresh ids.
+
+    The store converges on the server's VISIBLE session set: the first page
+    reports this device's inventory, the server answers with the visible ids
+    we are missing, and those are fetched afterwards -- a session deleted
+    locally comes back instead of staying absent until a peer re-pushes it
+    (docs/ARCHITECTURE.md "本地删除不是删除信号").
+    """
+    if adapter.discover() is None:
+        return {"error": f"Local store not found for agent {AGENT}"}
+    if last_sync_at is None:
+        # Incremental from the local watermark, with a 5-min grace window:
+        # the watermark is a LOCAL timestamp while remote last_synced_at
+        # values are written by OTHER devices' clocks, so a strict cutoff
+        # could silently skip sessions pushed by a clock-skewed peer.
+        last_sync_at = max(0.0, adapter.last_synced_at() - 300)
+
+    imported, new_messages = 0, 0
+    total_remote = 0
+    restored = 0
+    unfiled = 0
+    missing_ids: list[str] = []
+    written_ids: set[str] = set()
+
+    # One pull request returns `limit` FULL sessions (all messages) -- see
+    # PULL_PAGE for the page-size rationale.
+    fetched = 0
+    prev_page_ids = None
+    meta = _load_field_meta()
+    # Snapshot local user-edit values once: a pull must NEVER overwrite a
+    # field this device edited locally since its last sync (dirty == local
+    # value != sidecar last-known). The same read also feeds the
+    # path-separator alignment below, and it IS the inventory the
+    # completeness check is computed against.
+    _local = adapter.read_sessions()
+    local_by_id = {str(s["id"]): s for s in _local}
+    local_cwd_map = build_path_map(
+        s.get("cwd") for s in _local if isinstance(s.get("cwd"), str))
+    # Ask the server what we are missing only when the answer can be acted
+    # on: an incremental pull (a full pull delivers every visible session
+    # anyway, and reporting the pre-pull inventory as missing would fetch the
+    # store twice), a non-empty local store, and an adapter that stores
+    # pulled sessions at all (a read-only uploader has no local target for
+    # them -- see Adapter.stores_pulled_sessions).
+    known_ids = list(local_by_id) \
+        if last_sync_at and local_by_id and adapter.stores_pulled_sessions \
+        else None
+    while True:
+        page_limit = PULL_PAGE if limit is None else max(min(PULL_PAGE, limit - fetched), 0)
+        if page_limit <= 0:
+            break
+        body = {
+            "device_id": DEVICE_ID,
+            "client_version": CLIENT_VERSION,
+            "agent": AGENT,
+            "last_sync_at": last_sync_at, "limit": page_limit, "offset": fetched,
+            # Full-pool pull: no agent filter (decision record 2026.08.22.4,
+            # see docs/ARCHITECTURE.md "全池拉取契约"). Every client in the
+            # workspace pulls ALL sessions (every agent) and pushes only its
+            # own; the server deliberately ignores the `agent` field on pull
+            # and merges by canonical id. Do NOT rely on it to filter — it is
+            # sent for device/version reporting only.
+        }
+        if known_ids and fetched == 0:
+            body["known_ids"] = known_ids
+        result = api_call("POST", "/pull", body)
+        if "error" in result:
+            if fetched == 0:
+                _save_field_meta(meta)
+                return result
+            _save_field_meta(meta)
+            return {"imported": imported, "new_messages": new_messages,
+                    "total_remote_sessions": total_remote,
+                    "error": f"partial pull after {fetched} sessions: {result['error']}"}
+
+        sessions = result.get("sessions", [])
+        total_remote = result.get("total_sessions") or result.get("session_count") or 0
+        if fetched == 0 and known_ids is not None:
+            # Completeness report (see known_ids above): visible server
+            # sessions this device does not hold. Only meaningful for the
+            # inventory we actually sent -- a response we did not ask for
+            # must not start a repair pass.
+            missing_ids = [i for i in (result.get("missing_ids") or [])
+                           if isinstance(i, str) and i]
+        if not sessions:
+            break
+        # Guard against a server that ignores `offset` and repeats the same
+        # page forever (old deployments): stop when the page is unchanged.
+        page_ids = tuple(s["id"] for s in sessions)
+        if page_ids == prev_page_ids:
+            break
+        prev_page_ids = page_ids
+
+        stats = _apply_pull_page(sessions, local_by_id, local_cwd_map, meta)
+        imported += stats.get("imported", 0)
+        new_messages += stats.get("new_messages", 0)
+        written_ids.update(str(s["id"]) for s in sessions)
+
+        fetched += len(sessions)
+        if len(sessions) < page_limit:
+            break  # last page
+        if limit is not None and fetched >= limit:
+            break
+
+    if "error" not in result and result.get("sync_at"):
+        adapter.save_sync_watermark(result["sync_at"])
+    # Completeness repair: restore the sessions the server still holds (and
+    # has not soft-hidden) whose local rows are gone. Sessions this pull
+    # already delivered are dropped from the list first. ``limit`` stays
+    # authoritative: an explicitly capped pull restores at most its
+    # remaining budget, never more than the caller asked for.
+    budget = None if limit is None else max(0, limit - fetched)
+    pending = [i for i in missing_ids if i not in written_ids]
+    if pending and (budget is None or budget > 0):
+        try:
+            repair = _restore_missing_sessions(
+                pending, local_by_id, local_cwd_map, meta, budget)
+        except Exception as e:  # repair is best-effort; never fail the pull
+            log(f"Session restore failed: {e}")
+            repair = None
+        if repair:
+            imported += repair["imported"]
+            new_messages += repair["new_messages"]
+            restored = repair["restored"]
+            unfiled = repair["unfiled"]
+    # Heal any local session whose title the server stopped re-serving
+    # before this device ever adopted it (see _reconcile_sidecar_titles).
+    healed = _reconcile_sidecar_titles(local_by_id)
+    _save_field_meta(meta)
+    return {"imported": imported, "new_messages": new_messages,
+            "total_remote_sessions": total_remote,
+            "restored": restored, "unfiled": unfiled, "titles_healed": healed}
+
+def push_sessions():
+    if adapter.discover() is None:
+        return {"error": f"Local store not found for agent {AGENT}"}
+
+    sessions_data = adapter.read_sessions()
+    if not sessions_data:
+        return {"message": "No local sessions to push"}
+    # Push EVERYTHING the local store holds, own sessions and foreign ones
+    # pulled from the shared pool. A foreign session may have been continued
+    # locally (e.g. a hermes session edited in workbuddy gains new messages)
+    # and those additions MUST flow back to the server. Tag each session
+    # with the agent that OWNS it: with the prefix-free id scheme the owner
+    # is the adapter's own agent_type for local sessions and the recorded
+    # owner in the foreign-id registry for pulled ones (the server never
+    # overwrites agent_type on re-push, so re-pushing pulled content is
+    # idempotent and only locally-added messages insert).
+    for s in sessions_data:
+        sid = str(s["id"])
+        agent = adapter.agent_type
+        if adapter._is_foreign(sid):
+            agent = adapter._foreign_agent(sid) or "hermes"
+        s["agent_type"] = agent
+        # Device-local fields (the model choice) are stripped before the
+        # fingerprint below, so a model switch is not a push trigger and
+        # never reaches the server (decision record 2026.10.06.1).
+        _strip_local_only(s)
+
+    # Batch pushes so each request stays small and fast: the remote server
+    # does a per-message dedup SELECT for every row, so one giant request
+    # (50 sessions, thousands of messages) can exceed the HTTP timeout as
+    # the workspace grows (observed: 31s on a ~6k-message push with a 30s
+    # timeout). Push the WHOLE local store (the pool contract: "pushes
+    # everything it holds"); _chunk_sessions bounds every request by
+    # session count + message count, so large stores never time out and
+    # no session starves behind a per-cycle cap.
+    totals = {"imported": 0, "updated": 0, "new_messages": 0, "sync_at": None}
+    processed = 0
+    paused_all: set = set()
+    errors: list[str] = []
+    meta = _load_field_meta()
+    fp = _load_push_fingerprint()
+    try:
+        # Skip sessions whose fingerprint is unchanged since the last
+        # successful push (see _session_fingerprint): the server dedupes
+        # re-pushes, but a full store re-upload every cycle is wasteful
+        # (measured 1.6GB/cycle here). Fingerprints update only on success,
+        # so a failed push retries next cycle. Filtering BEFORE chunking also
+        # keeps the byte-size measuring (json.dumps per session) off the
+        # unchanged majority.
+        changed = [s for s in sessions_data
+                   if _session_fingerprint(s)
+                   != tuple(fp.get(str(s["id"])) or ())]
+        # A session the encoder cannot serialize must not abort the cycle:
+        # the chunker sizes every session with the same json.dumps, so one
+        # raw bytes value (e.g. a SQLite BLOB column) used to kill the whole
+        # push before anything was sent (CHANGELOG 2026.09.12.4). Isolate it,
+        # name the offending field, and keep the rest of the store syncing.
+        sendable, unsendable = _partition_encodable(changed)
+        if unsendable:
+            log(f"Push skipped {len(unsendable)} session(s) whose payload is "
+                f"not JSON-encodable: {'; '.join(unsendable[:3])}"
+                + ("..." if len(unsendable) > 3 else ""))
+        for chunk in _chunk_sessions(sendable):
+            # field-level merge: only dirty/first-contact user-edit fields are
+            # asserted (others omitted so this device never clobbers a peer)
+            outgoing = [_annotate_push_session(s, meta) for s in chunk]
+            result = api_call("POST", "/push",
+                              {"device_id": DEVICE_ID,
+                               "client_version": CLIENT_VERSION,
+                               "agent": AGENT,
+                               "sessions": outgoing})
+            if "error" in result:
+                # A failing chunk (413 oversized payload, quota, timeout) must
+                # NOT starve the rest of the store: record it and keep pushing
+                # so sessions behind the failing one still sync this cycle.
+                result = explain_quota_error(result)
+                err = result.get("error")
+                errors.append(f"{len(chunk)} sessions: {err}")
+                log(f"Push chunk failed ({len(chunk)} sessions, "
+                    f"{len(errors)} failed so far): {err}")
+                continue
+            # anchor accepted base/val so these fields stop reading dirty
+            _anchor_push_meta(meta, outgoing, result.get("session_revs") or {})
+            for k in ("imported", "updated", "new_messages"):
+                totals[k] += result.get(k, 0)
+            totals["sync_at"] = result.get("sync_at", totals["sync_at"])
+            # Sessions the user paused in the Web UI: the server refused every
+            # write for them (see docs/ARCHITECTURE.md "暂停/恢复同步"). They
+            # must NOT get a push fingerprint -- a fingerprint means "the
+            # server already holds this content", so recording one here would
+            # leave the server frozen forever after the user resumes (nothing
+            # changes locally to trigger a re-push). No fingerprint = the
+            # session is re-sent every cycle, and the resume lands the whole
+            # content on the next one.
+            paused_now = {str(i) for i in (result.get("paused_ids") or [])}
+            paused_all |= paused_now
+            processed += len(chunk) - len(paused_now)
+            for s in chunk:
+                if str(s["id"]) in paused_now:
+                    continue
+                fp[str(s["id"])] = _session_fingerprint(s)
+    finally:
+        _save_field_meta(meta)
+        _save_push_fingerprint(fp)
+    if paused_all:
+        log(f"{len(paused_all)} session(s) are paused in the Web UI: skipped "
+            f"by the server, re-sent every cycle until the user resumes")
+        totals["paused"] = len(paused_all)
+        totals["paused_ids"] = sorted(paused_all)
+    if unsendable:
+        totals["unsendable"] = [r.split(" (", 1)[0] for r in unsendable]
+    if errors:
+        return {**totals, "error": f"{len(errors)} chunk(s) failed: "
+                                f"{'; '.join(errors[:3])}"
+                                + ("..." if len(errors) > 3 else "")}
+    return totals
+
+def _json_offender(value, path: str = "") -> str | None:
+    """First JSON-unencodable value in ``value``, as ``path (type)``.
+
+    Diagnostics only (run for the few sessions that fail to encode): names the
+    exact field so an operator can find what the adapter leaked into the
+    canonical payload.
+    """
+    if isinstance(value, dict):
+        for k, v in value.items():
+            found = _json_offender(v, f"{path}.{k}" if path else str(k))
+            if found:
+                return found
+        return None
+    if isinstance(value, (list, tuple)):
+        for i, v in enumerate(value):
+            found = _json_offender(v, f"{path}[{i}]")
+            if found:
+                return found
+        return None
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return None
+    return f"{path or '<root>'} ({type(value).__name__})"
+
+def _partition_encodable(sessions: list[dict]) -> tuple[list[dict], list[str]]:
+    """Split sessions into (encodable, ``"<id> (<field path>)"`` reasons).
+
+    The push body is JSON; a session holding anything else can never be sent,
+    and both the chunker and the request encoder would raise on it -- which
+    used to abort the WHOLE cycle. Isolating the offenders keeps every other
+    session syncing and gives the operator a named cause.
+    """
+    sendable: list[dict] = []
+    reasons: list[str] = []
+    for s in sessions:
+        try:
+            json.dumps(s, ensure_ascii=False)
+        except (TypeError, ValueError):
+            reasons.append(f"{s.get('id')} ({_json_offender(s) or 'unencodable'})")
+            continue
+        sendable.append(s)
+    return sendable, reasons
+
+def _chunk_sessions(sessions: list[dict],
+                    max_sessions: int = 20,
+                    max_messages: int = 3000,
+                    max_bytes: int = 8 * 1024 * 1024) -> list[list[dict]]:
+    """Split sessions into push batches bounded by session count, total
+    message count AND approximate payload bytes. A few huge sessions (e.g. a
+    10MB workbuddy session with thousands of events) must not ride along
+    with a full batch of average ones -- the per-message dedup on the server
+    makes one request cost scale with message count, and a giant request
+    times out or trips the proxy body limit (413). A single session larger
+    than any bound gets its own batch (a session cannot be split)."""
+    chunks: list[list[dict]] = []
+    cur: list[dict] = []
+    cur_msgs = 0
+    cur_bytes = 0
+    sizes: dict[str, int] = {}
+    def _size(s: dict) -> int:
+        sid = str(s["id"])
+        if sid not in sizes:
+            sizes[sid] = len(json.dumps(s, ensure_ascii=False).encode("utf-8"))
+        return sizes[sid]
+    for s in sessions:
+        msgs = len(s.get("messages") or [])
+        sz = _size(s)
+        if cur and (len(cur) >= max_sessions or cur_msgs + msgs > max_messages
+                    or cur_bytes + sz > max_bytes):
+            chunks.append(cur)
+            cur, cur_msgs, cur_bytes = [], 0, 0
+        cur.append(s)
+        cur_msgs += msgs
+        cur_bytes += sz
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+def full_sync():
+    # pull first, then push: the pull anchors this device's per-field base
+    # (and adopts server values) before it pushes only its dirty fields, so
+    # a device's own state never clobbers a peer's newer metadata and an
+    # un-pushed local edit is never overwritten by the pull. (Field-level
+    # optimistic concurrency -- see ARCHITECTURE.md.)
+    pull_result = pull_sessions()
+    push_result = push_sessions()
+    return {"push": push_result, "pull": pull_result}
+
+def push_projects():
+    """Push local projects (all profiles) to the server.
+
+    field_meta (Phase 2): only dirty / first-contact scalar
+    user-edit project fields (name/primary_path/archived/description) are
+    asserted, tagged with their base. Non-dirty fields and folders are omitted
+    so this device never overwrites a peer's newer metadata; folders remain
+    server-merged by union (multidevice coexist)."""
+    if not adapter.supports_projects:
+        return {"error": f"Agent {AGENT} has no local project store to push"}
+    if adapter.discover() is None:
+        return {"error": f"Local store not found for agent {AGENT}"}
+    # Root-shaped paths never enter the shared pool (see base.py
+    # is_root_project_path): a folder the Web prefix-matches sessions against
+    # must express a project boundary, and a root is every session's ancestor.
+    # A project left without any path is a pure root entry -> not pushed.
+    projects = [p for p in (strip_root_project_paths(p)
+                            for p in adapter.read_projects()) if p]
+    if not projects:
+        return {"message": "No local projects to push"}
+    meta = _load_project_field_meta()
+    outgoing = [_annotate_push_project(p, meta) for p in projects]
+    result = api_call("POST", "/api/projects/push",
+                      {"device_id": DEVICE_ID,
+                       "client_version": CLIENT_VERSION,
+                       "agent": AGENT,
+                       "projects": outgoing})
+    if "error" not in result:
+        _anchor_push_project_meta(meta, outgoing,
+                                  result.get("project_revs") or {})
+    _save_project_field_meta(meta)
+    return result
+
+def pull_projects():
+    """Pull remote projects + remap records into local projects.db.
+
+    Field-level merge (Phase 2): a locally-dirty scalar user-edit project
+    field is kept (never overwritten by the pull) and pushed next cycle;
+    fields we do not locally differ on are adopted and their base anchored."""
+    if not adapter.supports_projects:
+        return {"error": f"Agent {AGENT} has no local project store to pull into"}
+    if adapter.discover() is None:
+        return {"error": f"Local store not found for agent {AGENT}"}
+    meta = _load_project_field_meta()
+    try:
+        # Snapshot local project scalar values once for dirty detection and
+        # local separator spellings for path alignment.
+        local_projects = [dict(p) for p in (adapter.read_projects() or [])]
+        local_proj = {str(p["id"]): p for p in local_projects}
+        local_paths = set()
+        for _lp in local_projects:
+            if isinstance(_lp.get("primary_path"), str) and _lp["primary_path"]:
+                local_paths.add(_lp["primary_path"])
+            for _f in _lp.get("folders", []) or []:
+                if isinstance(_f.get("path"), str) and _f["path"]:
+                    local_paths.add(_f["path"])
+        # Full-pool pull (decision record 2026.08.22.4): the server returns
+        # the workspace's ENTIRE visible project set regardless of `agent` —
+        # the field is for device/version reporting only, never a filter.
+        result = api_call("POST", "/api/projects/pull",
+                          {"device_id": DEVICE_ID,
+                           "client_version": CLIENT_VERSION,
+                           "agent": AGENT})
+        if "error" in result:
+            return result
+        projects = result.get("projects", []) or []
+        # Mirror of the push filter: a root-shaped path is not a project
+        # boundary, so it must not become this machine's local project
+        # identity either. A project left with no path (a pure root entry
+        # pushed before this rule existed) is not materialised locally at
+        # all -- it stays server-side and untouched.
+        projects = [p for p in (strip_root_project_paths(p)
+                                for p in projects) if p]
+        for p in projects:
+            pid = str(p["id"])
+            sm = meta.get(pid) or {}
+            local = local_proj.get(pid, {})
+            fr = p.get("field_rev") or {}
+            # skip locally-dirty scalar fields (keep local; push next cycle)
+            for f in PROJECT_USER_EDIT_FIELDS:
+                if f in p and isinstance(p.get(f), str):
+                    entry = sm.get(f)
+                    if entry is not None and _field_dirty(
+                            f, local.get(f), entry.get("val")):
+                        p.pop(f, None)
+            # Align remaining pull-side paths to the local separator spelling
+            # where a local path already exists modulo separators, so a folder
+            # path that already exists locally is updated/merged instead of
+            # inserted as a duplicate spelling.
+            if isinstance(p.get("primary_path"), str) and p["primary_path"]:
+                p["primary_path"] = align_path_to_local(
+                    p["primary_path"], local_paths)
+            for f in p.get("folders", []) or []:
+                if isinstance(f.get("path"), str) and f["path"]:
+                    f["path"] = align_path_to_local(f["path"], local_paths)
+            # anchor adopted fields so they stop reading dirty
+            for f in PROJECT_USER_EDIT_FIELDS:
+                if f in p and isinstance(p.get(f), str) and f in fr:
+                    meta.setdefault(pid, {})[f] = {"base": fr[f], "val": p[f]}
+        stats = adapter.write_projects(projects, result.get("remaps", []))
+        return {"imported": stats.get("imported", 0),
+                "projects": len(projects)}
+    finally:
+        _save_project_field_meta(meta)
+
+# Tool names: neutral `sync_*` for any agent; `hermes_sync_*` aliases kept
+# for existing Hermes registrations.
+TOOL_SPECS = [
+    ("sync_status", "Show sync status: local store totals and remote server status."),
+    ("sync_pull", "Pull latest sessions from remote server into the local store (a session deleted locally comes back while the server still holds it and it is not soft-hidden).",
+     {"limit": {"type": "integer", "description": "Max sessions to pull (default: 50; a full pull is uncapped unless set)"},
+      "full": {"type": "boolean", "description": "Full pull ignoring the sync watermark (default: false)"}}),
+    ("sync_push", "Push local sessions to remote server."),
+    ("sync_full", "Full sync: pull remote changes then push local ones (the pull anchors this device's per-field bases first, see docs/ARCHITECTURE.md)."),
+    ("project_push", "Push local projects (all profiles) to the remote server."),
+    ("project_pull", "Pull remote projects into the local projects.db (applies remaps)."),
+]
+
+def _build_tools() -> list[Tool]:
+    """MCP tool surface: canonical sync_* plus hermes_sync_* aliases."""
+    tools = []
+    for name, desc, *rest in TOOL_SPECS:
+        props = rest[0] if rest else {}
+        tools.append(Tool(name=name, description=desc,
+                          inputSchema={"type": "object", "properties": props}))
+        # aliases (hermes_sync_*)
+        tools.append(Tool(name="hermes_" + name, description=desc + " (alias)",
+                          inputSchema={"type": "object", "properties": props}))
+    return tools
+
+
+async def _dispatch_tool(name: str, arguments: dict) -> str:
+    """Run one tool, returning the human-readable result text."""
+    loop = asyncio.get_event_loop()
+    base = name[len("hermes_"):] if name.startswith("hermes_") else name
+    if base == "sync_status":
+        local = adapter.status()
+        remote = api_call("GET", f"/status/{DEVICE_ID}")
+        result = {"agent": adapter.agent_type, "instance": instance_status(),
+                  "local": local, "remote": remote}
+        text = json.dumps(result, indent=2, ensure_ascii=False)
+    elif base == "sync_pull":
+        # A FULL pull means "everything": the default limit=50 would
+        # silently cap it and drop the oldest sessions. Only cap when the
+        # caller explicitly passes `limit`.
+        limit = arguments.get("limit")
+        full = bool(arguments.get("full", False))
+        if limit is None:
+            limit = None if full else 50
+        result = await _locked_tool(
+            loop, lambda: pull_sessions(last_sync_at=0 if full else None,
+                                        limit=limit))
+        _stamp_after_tool(result)
+        text = json.dumps(result, indent=2, ensure_ascii=False)
+    elif base == "sync_push":
+        result = await _locked_tool(loop, push_sessions)
+        _stamp_after_tool(result)
+        text = json.dumps(result, indent=2, ensure_ascii=False)
+    elif base == "sync_full":
+        result = await _locked_tool(loop, full_sync)
+        _stamp_after_tool(result)
+        text = json.dumps(result, indent=2, ensure_ascii=False)
+    elif base == "project_push":
+        result = await _locked_tool(loop, push_projects)
+        text = json.dumps(result, indent=2, ensure_ascii=False)
+    elif base == "project_pull":
+        result = await _locked_tool(loop, pull_projects)
+        text = json.dumps(result, indent=2, ensure_ascii=False)
+    else:
+        raise ValueError(f"Unknown tool: {name}")
+    return text
+
+
+if SDK_V2:
+    # v2 handlers: (ctx, params) -> typed result, registered by method name
+    # (PaginatedRequestParams / CallToolRequestParams are v2-era wire types).
+    from mcp.types import (CallToolRequestParams, CallToolResult,
+                           ListToolsResult, PaginatedRequestParams)
+
+    async def list_tools(ctx, params: PaginatedRequestParams) -> ListToolsResult:
+        return ListToolsResult(tools=_build_tools())
+
+    async def call_tool(ctx, params: CallToolRequestParams) -> CallToolResult:
+        text = await _dispatch_tool(params.name, dict(params.arguments or {}))
+        return CallToolResult(content=[TextContent(type="text", text=text)])
+
+    server.add_request_handler("tools/list", PaginatedRequestParams, list_tools)
+    server.add_request_handler("tools/call", CallToolRequestParams, call_tool)
+else:
+    @server.list_tools()
+    async def list_tools() -> list[Tool]:
+        return _build_tools()
+
+    @server.call_tool()
+    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+        text = await _dispatch_tool(name, arguments)
+        return [TextContent(type="text", text=text)]
+
+async def periodic_sync():
+    global _role
+    if not AUTO_SYNC:
+        log("Background periodic sync disabled (HERMES_SYNC_AUTO_SYNC=0)")
+        return
+    # Wait for the startup task (runs at +8s) to resolve this copy's role:
+    # until then _role is still "starting" and the gate below would misfire.
+    # Startup always sets primary/standby when AUTO_SYNC is on.
+    while _role == "starting":
+        await asyncio.sleep(1)
+    if _role != "primary":
+        log(f"Standby instance (pid {os.getpid()}): not the sync owner; "
+            f"waiting for the lease to free up")
+    while True:
+        await asyncio.sleep(SYNC_INTERVAL)
+        # Standby: wake every cycle, but only contend for the lock once the
+        # lease looks ownerless (dead pid / stale heartbeat). A standby that
+        # grabbed the lock merely because it woke first would steal a healthy
+        # primary's cycle, delaying the sync by one whole interval.
+        if _role != "primary":
+            owner = _owner_pid_or_none()
+            if owner is not None:
+                log(f"Standby (pid {os.getpid()}): pid {owner} still owns "
+                    f"background sync")
+                continue
+        if not _try_acquire_lock():
+            log("Periodic sync skipped: another server process holds the lock")
+            continue
+        try:
+            if _role != "primary":
+                # Re-check under the lock: a sibling may have promoted while
+                # we were waiting for it.
+                owner = _owner_pid_or_none()
+                if owner is not None:
+                    continue
+                previous = (_read_lease() or {}).get("pid")
+                _role = "primary"
+                _claim_lease(f"promoted from standby (owner pid {previous})")
+                log(f"Primary (pid {os.getpid()}): promoted from standby "
+                    f"(previous owner pid {previous}); taking over background "
+                    f"sync")
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, full_sync)
+            imported = result.get("pull", {}).get("imported", 0)
+            pushed = result.get("push", {}).get("imported", 0) + result.get("push", {}).get("updated", 0)
+            msgs = result.get("pull", {}).get("new_messages", 0)
+            log(f"Periodic sync: pulled {imported} sessions, pushed {pushed} sessions")
+            if "error" in result.get("pull", {}) or "error" in result.get("push", {}):
+                _stamp_sync_ok({"last_sync_error": str(result)})
+                await _notify_host(f"Sync finished with errors: {result}",
+                                   level="warning")
+            else:
+                _stamp_sync_ok({"last_sync_ok": time.time(),
+                                "last_sync_error": None})
+                await _notify_host(
+                    f"Sync complete: pulled {imported} session(s), "
+                    f"pushed {pushed} session(s), {msgs} new message(s)")
+            # projects sync (same cycle, best-effort; skipped for agents
+            # without a local project store)
+            try:
+                if adapter.supports_projects:
+                    pp = await loop.run_in_executor(None, push_projects)
+                    pl = await loop.run_in_executor(None, pull_projects)
+                    log(f"Projects sync: push={pp.get('imported', pp.get('updated', 0))}, "
+                        f"pull={pl.get('projects', 0)}")
+            except Exception as e:
+                log(f"Projects sync error: {e}")
+        except Exception as e:
+            log(f"Periodic sync error: {e}")
+            # Keep the heartbeat fresh even on failure: this copy is alive and
+            # working, so a standby must not promote over it.
+            _stamp_sync_ok({"last_sync_error": str(e)})
+        finally:
+            _release_lock()
+
+async def background_startup_sync():
+    global _role
+    if not AUTO_SYNC:
+        log("Background startup sync disabled (HERMES_SYNC_AUTO_SYNC=0)")
+        return
+    # Delay the first sync so the host agent's own startup/read burst (e.g.
+    # Hermes session.resume) has finished before we take SQLite locks.
+    await asyncio.sleep(STARTUP_DELAY_S)
+    # Role: a live lease owner (another window's server on this machine) keeps
+    # the loops. Only an ownerless lease runs the election below, and the
+    # O_EXCL lockfile -- not this process -- is what makes simultaneous starts
+    # pick exactly one owner.
+    owner = _owner_pid_or_none()
+    if owner is not None:
+        _role = "standby"
+        log(f"Standby (pid {os.getpid()}): pid {owner} owns background sync "
+            f"({LEASE_FILE.name}); tools still served")
+        return
+    if not _try_acquire_lock():
+        _role = "standby"
+        holder = _lock_holder_pid()
+        log(f"Standby (pid {os.getpid()}): another server process "
+            f"(pid {holder}) runs background sync; tools still served")
+        return
+    _role = "primary"
+    _claim_lease("startup election won")
+    log(f"Primary (pid {os.getpid()}): starting auto-sync from {SYNC_SERVER} "
+        f"(agent: {adapter.agent_type})...")
+    try:
+        loop = asyncio.get_event_loop()
+        # A copy that synced within half an interval already caught this store
+        # up (every window on a machine shares it), so re-pulling the store at
+        # each window start is duplicate work; the periodic loop takes over.
+        last_ok = (_read_lease() or {}).get("last_sync_ok")
+        if isinstance(last_ok, (int, float)) and \
+                (time.time() - last_ok) < SYNC_INTERVAL / 2:
+            log(f"Startup sync skipped: last success "
+                f"{time.time() - last_ok:.0f}s ago (freshness window "
+                f"{SYNC_INTERVAL / 2:.0f}s)")
+            _stamp_sync_ok()
+            return
+        # pull first, then push (matches periodic full_sync). The pull
+        # anchors this device's per-field base/adopts server values BEFORE
+        # it pushes only its genuinely-dirty fields, so:
+        #   * a local move (cwd -> new project) is never overwritten by the
+        #     pull (it is locally dirty and excluded), and it is pushed next;
+        #   * a stale/unmodified device never clobbers a peer's newer value
+        #     (only dirty fields are pushed; the server rejects unknown-base
+        #     writes). Call this the field-level optimistic concurrency model
+        #     (see docs/ARCHITECTURE.md).
+        # An empty remote on a fresh pairing is seeded naturally: pull returns
+        # nothing, push inserts this device's sessions (idempotent dedupe).
+        result = await loop.run_in_executor(None, pull_sessions)
+        push_result = await loop.run_in_executor(None, push_sessions)
+        push_err = push_result.get("error") if isinstance(push_result, dict) else None
+        log(f"Initial sync: pull={result} | push={push_result}")
+        if push_err or "error" in result:
+            _stamp_sync_ok({"last_sync_error": str(push_err or result.get("error"))})
+            await _notify_host(
+                f"Startup sync failed: pull={result.get('error')} "
+                f"push={push_err or 'ok'}", level="warning")
+        else:
+            _stamp_sync_ok({"last_sync_ok": time.time(),
+                            "last_sync_error": None})
+            pushed = (push_result.get("imported", 0) + push_result.get("updated", 0)) \
+                if isinstance(push_result, dict) else 0
+            await _notify_host(
+                f"Startup sync complete: pulled {result.get('imported', 0)} "
+                f"session(s), pushed {pushed} session(s), "
+                f"{result.get('new_messages', 0)} new message(s)")
+    except Exception as e:
+        log(f"Initial sync failed: {e}")
+        _stamp_sync_ok({"last_sync_error": str(e)})
+        await _notify_host(f"Startup sync failed: {e}", level="warning")
+    finally:
+        _release_lock()
+
+def _run_update_check():
+    if not AUTO_UPDATE:
+        return False
+    if not _try_acquire_lock(UPDATE_LOCK_FILE):
+        log("Update check skipped: another server process holds the update lock")
+        return False
+    try:
+        # synchronous urllib work; callers run this in an executor
+        applied = updater.check_and_update(
+            SYNC_SERVER, SYNC_API_KEY, AGENT, MCP_DIR, VERSION_FILE, log)
+        if applied:
+            log(f"Client updated to {updater.local_version(VERSION_FILE)}; "
+                f"restart the agent to activate")
+        return applied
+    except Exception as e:
+        log(f"Update check error: {e}")
+        return False
+    finally:
+        _release_lock(UPDATE_LOCK_FILE)
+
+async def background_update_check():
+    """Lazy update check: once 1 minute after startup, then every
+    UPDATE_INTERVAL seconds (default 1 hour). Replaced files activate on
+    agent restart."""
+    if not AUTO_UPDATE:
+        log("Client auto-update disabled (HERMES_SYNC_AUTO_UPDATE=0)")
+        return
+    await asyncio.sleep(60)  # clear of the host agent's startup burst
+    applied = await asyncio.get_event_loop().run_in_executor(
+        None, _run_update_check)
+    if applied:
+        await _notify_host(
+            f"Client updated to {updater.local_version(VERSION_FILE)} — "
+            f"restart the agent to activate", level="notice")
+    while True:
+        await asyncio.sleep(UPDATE_INTERVAL)
+        applied = await asyncio.get_event_loop().run_in_executor(
+            None, _run_update_check)
+        if applied:
+            await _notify_host(
+                f"Client updated to {updater.local_version(VERSION_FILE)} — "
+                f"restart the agent to activate", level="notice")
+
+async def main():
+    asyncio.create_task(background_startup_sync())
+    asyncio.create_task(periodic_sync())
+    asyncio.create_task(background_update_check())
+    log(f"Device: {DEVICE_ID}")
+    log(f"Agent: {adapter.agent_type} (local store: {adapter.discover()})")
+    log(f"PID: {os.getpid()} (sync lock: {LOCK_FILE.name}, "
+        f"lease: {LEASE_FILE.name}, tool lock wait: {TOOL_LOCK_WAIT_S:.0f}s)")
+    log(f"Log file: {LOG_FILE}")
+    log(f"Periodic sync enabled: every {SYNC_INTERVAL}s ({SYNC_INTERVAL//60}min)")
+    log(f"Client version: {updater.local_version(VERSION_FILE)} "
+        f"(auto-update: {'on' if AUTO_UPDATE else 'off'}, "
+        f"check every {UPDATE_INTERVAL//3600}h)")
+
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,552 @@
+{{define "board"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claudeweaver</title>
+<style>
+:root {
+  --ink: #1A1C2B; --frost: #EEF1F6; --paper: #FFFFFF; --raspberry: #3550F0; --cherry: #E8344E;
+  --graphite: #5D6274; --blocked: #B91C1C; --line: #E1E5EE; --hover: #E4E8F0; --selected: #DCE2FD;
+  --page: var(--frost); --text: var(--ink); --on-accent: #fff; --shadow: 0 1px 2px rgba(26,28,43,.06);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #0F1019; --frost: #171925; --paper: #1D1F2D; --raspberry: #6F82FF; --cherry: #FF5A70;
+    --graphite: #9499AD; --blocked: #FF7A7A; --line: #2A2D3E; --hover: #24273A; --selected: #262D55;
+    --text: #E7E9F2; --shadow: none; --on-accent: #0F1019; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ink: #0F1019; --frost: #171925; --paper: #1D1F2D; --raspberry: #6F82FF; --cherry: #FF5A70;
+  --graphite: #9499AD; --blocked: #FF7A7A; --line: #2A2D3E; --hover: #24273A; --selected: #262D55;
+  --text: #E7E9F2; --shadow: none; --on-accent: #0F1019; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--page); color: var(--text); font: 15px/1.47 system-ui, sans-serif; display: flex; flex-direction: column; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--raspberry); outline-offset: 2px; }
+code, .mono { font-family: ui-monospace, monospace; font-size: 13px; }
+a { color: var(--raspberry); }
+
+header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--paper); flex-wrap: wrap; }
+header h1 { margin: 0 12px 0 0; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
+header h1 span { color: var(--graphite); font-weight: 500; letter-spacing: 0; margin-left: 6px; font-size: 14px; }
+.filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 1; }
+.field { height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.field:focus { border-color: var(--raspberry); outline: none; }
+input[type=search].field { width: 220px; }
+.toggle { display: flex; align-items: center; gap: 6px; color: var(--graphite); font-size: 14px; cursor: pointer; }
+.btn { height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); cursor: pointer; font-weight: 600; font-size: 14px; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--raspberry); border-color: var(--raspberry); color: var(--on-accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+
+#columns { flex: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(264px, 1fr); gap: 12px; padding: 16px 20px; overflow-x: auto; min-height: 0; scroll-snap-type: x proximity; }
+.col { display: flex; flex-direction: column; min-height: 0; border-radius: 12px; scroll-snap-align: start; }
+.col h2 { margin: 0; padding: 4px 6px 10px; font-size: 14px; font-weight: 700; display: flex; gap: 8px; align-items: baseline; }
+.col h2 .n { color: var(--graphite); font-weight: 500; }
+.col ol { list-style: none; margin: 0; padding: 4px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; border-radius: 10px; transition: background .12s; }
+.col.over ol { background: var(--selected); }
+body:not(.closed) .col[data-status=wontfix] { display: none; }
+.empty { color: var(--graphite); font-size: 13px; padding: 8px 6px; }
+
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 9px; cursor: pointer; box-shadow: var(--shadow); }
+.card:hover { border-color: color-mix(in srgb, var(--raspberry) 35%, var(--line)); }
+.card.dragging { opacity: .4; }
+.card h3 { margin: 0 0 6px; font-size: 14px; line-height: 1.38; font-weight: 600; overflow-wrap: anywhere; }
+.col[data-status=done] .card h3, .col[data-status=wontfix] .card h3 { color: var(--graphite); font-weight: 500; }
+.meta { display: flex; gap: 10px; align-items: center; font-size: 12px; font-weight: 500; color: var(--graphite); }
+.meta .age { margin-left: auto; }
+.kind { display: inline-flex; align-items: center; gap: 5px; }
+.kind::before { content: ""; width: 8px; height: 8px; display: inline-block; }
+.kind.bug::before { background: var(--cherry); border-radius: 50%; }
+.kind.feature::before { background: var(--raspberry); border-radius: 2px; }
+.kind.chore::before { border: 1.5px solid var(--graphite); border-radius: 50%; width: 7px; height: 7px; }
+.prio.p1 { color: var(--cherry); font-weight: 700; }
+.prio.p3 { opacity: .7; }
+.pin { color: var(--raspberry); }
+
+#panel { position: fixed; inset: 0 0 0 auto; width: min(600px, 100vw); background: var(--paper); border-left: 1px solid var(--line); box-shadow: -12px 0 32px rgba(15,16,25,.12); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .15s ease-out; z-index: 10; }
+#panel.open { transform: none; }
+/* Blocked waits for the human, so its header is red and has a stop sign. */
+.col[data-status=blocked] h2 { color: var(--blocked); }
+.col h2 .stop { align-self: center; flex: none; }
+.spin { align-self: center; flex: none; color: var(--raspberry); animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #panel, .col ol { transition: none; } .spin { animation: none; } }
+#panel .top { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+#panel .top .id { color: var(--graphite); font-weight: 600; }
+#panel .top .file { color: var(--graphite); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+#panel .scroll { overflow-y: auto; padding: 16px 20px 32px; flex: 1; display: flex; flex-direction: column; gap: 14px; }
+#title { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; border: 1px solid transparent; border-radius: 8px; padding: 4px 8px; margin: 0 -8px; background: transparent; width: calc(100% + 16px); }
+#title:hover { border-color: var(--line); }
+#title:focus { border-color: var(--raspberry); outline: none; }
+.selects { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.selects label, .label { font-size: 13px; font-weight: 600; color: var(--graphite); display: flex; flex-direction: column; gap: 4px; }
+.tabs { display: flex; gap: 4px; align-items: center; }
+.tabs button { border: 0; background: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; color: var(--graphite); font-weight: 600; font-size: 13px; }
+.tabs button[aria-selected=true] { background: var(--hover); color: var(--text); }
+.tabs .label { margin-right: auto; }
+textarea.field { height: auto; min-height: 160px; padding: 10px; resize: vertical; line-height: 1.5; width: 100%; }
+.md { font-size: 15px; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md pre { background: var(--frost); padding: 10px; border-radius: 8px; overflow-x: auto; }
+.md h1, .md h2, .md h3 { font-size: 15px; margin: 14px 0 6px; }
+.preview { border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 160px; }
+.context { background: var(--frost); border-radius: 10px; padding: 12px 14px; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
+.context dt { color: var(--graphite); font-weight: 600; font-size: 13px; }
+.context dd { margin: 0; overflow-wrap: anywhere; }
+.context img { max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+.notes ul { padding-left: 18px; margin: 0; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+.msg { color: var(--graphite); font-size: 13px; }
+.msg.err { color: var(--cherry); }
+#quick { padding: 0 4px 8px; }
+#quick .field { width: 100%; }
+#quick.drop .field, #panel.drop .scroll { outline: 2px dashed var(--raspberry); outline-offset: -2px; }
+#quick .msg { font-size: 12px; padding: 4px 2px 0; }
+#quick .msg:empty { display: none; }
+.card h3[contenteditable=plaintext-only] { cursor: text; outline: 2px solid var(--raspberry); outline-offset: 2px; border-radius: 4px; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.thumb { padding: 0; width: 120px; height: 84px; border: 1px solid var(--line); border-radius: 8px; background: var(--frost); overflow: hidden; cursor: zoom-in; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.md img { max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+#lightbox { padding: 0; border: 0; background: transparent; max-width: 94vw; max-height: 94vh; cursor: zoom-out; }
+#lightbox img { display: block; max-width: 94vw; max-height: 94vh; border-radius: 8px; }
+#lightbox::backdrop { background: rgba(15,16,25,.72); }
+kbd { font: 500 11px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--paper); }
+.hint { color: var(--graphite); font-size: 12px; padding: 0 20px 12px; }
+@media (max-width: 720px) {
+  header { padding: 12px 16px; }
+  header h1 { flex: 1; }
+  .filters { order: 1; flex-basis: 100%; }
+  .filters .field { flex: 1; min-width: 0; }
+  .filters .toggle { flex-basis: 100%; }
+  input[type=search].field { flex-basis: 100%; }
+  #columns { padding: 12px 16px; grid-auto-columns: 84vw; }
+  .selects { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tickets<span id="total">{{.Total}}</span></h1>
+  <div class="filters" role="search">
+    <input type="search" class="field" id="q" placeholder="Search" aria-label="Search tickets">
+    <select class="field" id="f-area" aria-label="Area"><option value="">All areas</option>{{range .Areas}}<option>{{.}}</option>{{end}}</select>
+    <select class="field" id="f-type" aria-label="Type"><option value="">All types</option>{{range .Types}}<option>{{.}}</option>{{end}}</select>
+    <select class="field" id="f-prio" aria-label="Priority"><option value="">All priorities</option>{{range .Priorities}}<option>{{.}}</option>{{end}}</select>
+    <label class="toggle"><input type="checkbox" id="f-closed"> Show won't fix</label>
+  </div>
+  <button class="btn primary" id="new" title="Shortcut: N">New ticket</button>
+</header>
+<form id="quick" hidden autocomplete="off">
+  <input class="field" id="quick-in" aria-label="New ticket" placeholder="Title, then Enter. Paste a screenshot.">
+  <div class="msg" id="quick-msg" role="status"></div>
+</form>
+{{template "columns" .}}
+<div class="hint"><kbd>N</kbd> new &nbsp; <kbd>J</kbd> <kbd>K</kbd> move between cards &nbsp; <kbd>Enter</kbd> open &nbsp; <kbd>1</kbd>&ndash;<kbd>6</kbd> move to column &nbsp; <kbd>E</kbd> edit title (or double-click it) &nbsp; Drag cards between columns. Paste or drop a screenshot into quick add or the panel.</div>
+<dialog id="lightbox"><img alt="Screenshot"></dialog>
+
+<aside id="panel" aria-label="Ticket" aria-hidden="true">
+  <div class="top">
+    <span class="id" id="p-id"></span><span class="file mono" id="p-file"></span>
+    <span class="msg" id="p-msg" role="status"></span>
+    <button class="btn" id="p-close" aria-label="Close">Close</button>
+  </div>
+  <form class="scroll" id="p-form">
+    <input id="title" aria-label="Title" placeholder="Title" required>
+    <div class="selects">
+      <label>Status<select class="field" id="p-status">{{range .Statuses}}<option value="{{.}}">{{index $.Labels .}}</option>{{end}}</select></label>
+      <label>Type<select class="field" id="p-type">{{range .Types}}<option>{{.}}</option>{{end}}</select></label>
+      <label>Priority<select class="field" id="p-priority">{{range .Priorities}}<option>{{.}}</option>{{end}}</select></label>
+      <label>Area<select class="field" id="p-area">{{range .Areas}}<option>{{.}}</option>{{end}}</select></label>
+    </div>
+    <div>
+      <div class="tabs" role="tablist"><span class="label">Description</span>
+        <button type="button" role="tab" id="t-write" aria-selected="true">Write</button>
+        <button type="button" role="tab" id="t-preview" aria-selected="false">Preview</button>
+      </div>
+      <textarea class="field" id="p-body" aria-label="Description" placeholder="What happened, what you expected. Markdown works."></textarea>
+      <div class="preview md" id="p-preview" hidden></div>
+    </div>
+    <div>
+      <div class="label" style="margin-bottom:6px">Screenshots</div>
+      <div class="thumbs" id="p-thumbs"></div>
+    </div>
+    <dl class="context" id="p-context" hidden></dl>
+    <div class="notes" id="p-notes-wrap">
+      <div class="label">Notes</div>
+      <div class="md" id="p-notes"></div>
+      <textarea class="field" id="p-note" aria-label="Add a note" placeholder="Add a note" style="min-height:70px;margin-top:8px"></textarea>
+      <div class="actions"><button type="button" class="btn" id="p-addnote">Add note</button></div>
+    </div>
+  </form>
+</aside>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const STATUSES = ["inbox", "todo", "doing", "blocked", "review", "done", "wontfix"];
+  const AREAS = [...$("#p-area").options].map((o) => o.value);
+  const api = async (method, path, body) => {
+    const r = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+    if (!r.ok) throw new Error((await r.text()).trim() || r.statusText);
+    return r.json();
+  };
+  const upload = async (id, file) => {
+    const r = await fetch(`/api/tickets/${id}/screenshot`, { method: "POST", headers: { "Content-Type": file.type }, body: file });
+    if (!r.ok) throw new Error((await r.text()).trim() || r.statusText);
+    return r.json();
+  };
+  const hasFiles = (dt) => !!dt && [...dt.types].includes("Files");
+  const imagesIn = (dt) => [...(dt?.files || [])].filter((f) => /^image\/(png|jpeg|webp)$/.test(f.type));
+  const typing = (el) => el.isContentEditable || !!el.closest?.("input, textarea, select");
+
+  // ---- filters ----
+  function applyFilters() {
+    const q = $("#q").value.trim().toLowerCase(), area = $("#f-area").value, type = $("#f-type").value, prio = $("#f-prio").value;
+    document.body.classList.toggle("closed", $("#f-closed").checked);
+    for (const col of document.querySelectorAll(".col")) {
+      let n = 0;
+      for (const c of col.querySelectorAll(".card")) {
+        const show = (!area || c.dataset.area === area) && (!type || c.dataset.type === type) && (!prio || c.dataset.priority === prio) &&
+          (!q || c.dataset.search.toLowerCase().includes(q) || ("#" + c.dataset.id) === q || c.dataset.id === q);
+        c.hidden = !show; n += show;
+      }
+      col.querySelector(".n").textContent = n;
+    }
+  }
+  for (const id of ["#q", "#f-area", "#f-type", "#f-prio", "#f-closed"]) $(id).addEventListener("input", applyFilters);
+
+  // ---- refresh ----
+  async function refresh() {
+    try {
+      const html = await (await fetch("/columns")).text();
+      if (document.activeElement?.isContentEditable) return; // an inline title edit is open
+      const focused = document.activeElement?.closest?.(".card")?.dataset.id;
+      const qFocus = document.activeElement === qin && [qin.selectionStart, qin.selectionEnd];
+      const tmp = document.createElement("div"); tmp.innerHTML = html;
+      $("#columns").replaceWith(tmp.firstElementChild);
+      $("#total").textContent = document.querySelectorAll(".card").length;
+      applyFilters();
+      if (!quick.hidden) placeQuick();
+      if (qFocus) { qin.focus(); qin.setSelectionRange(...qFocus); }
+      else if (focused) document.querySelector(`.card[data-id="${focused}"]`)?.focus();
+      if (current && !dirty) openTicket(current, true);
+    } catch {}
+  }
+  setInterval(async () => {
+    try {
+      const v = await (await fetch("/version")).text();
+      if (v !== $("#columns").dataset.version) refresh();
+    } catch {}
+  }, 2000);
+
+  // ---- quick add: N or C, one line, Enter creates and stays open ----
+  const quick = $("#quick"), qin = $("#quick-in");
+  function placeQuick() { const col = document.querySelector('.col[data-status="inbox"]'); if (col && quick.parentNode !== col) col.insertBefore(quick, col.querySelector("ol")); }
+  function openQuick() { quick.hidden = false; placeQuick(); qin.focus(); }
+  function closeQuick() { quick.hidden = true; qin.value = ""; $("#quick-msg").textContent = ""; qin.blur(); }
+  // "feat: Rail jumps p1 #web" -> {type: feature, priority: p1, area: web, title: "Rail jumps"}
+  function parseQuick(s) {
+    const t = { type: "bug", priority: "p2", area: $("#f-area").value || AREAS[0] };
+    const m = s.match(/^\s*(feat|feature|bug|chore)\s*:\s*/i);
+    if (m) { t.type = { feat: "feature", feature: "feature" }[m[1].toLowerCase()] || m[1].toLowerCase(); s = s.slice(m[0].length); }
+    s = s.replace(/(^|\s)(p[1-3])(?=\s|$)/i, (_, a, p) => { t.priority = p.toLowerCase(); return a; });
+    s = s.replace(/(^|\s)#([a-z]+)(?=\s|$)/i, (all, a, area) => AREAS.includes(area.toLowerCase()) ? ((t.area = area.toLowerCase()), a) : all);
+    t.title = s.replace(/\s+/g, " ").trim();
+    return t;
+  }
+  function qmsg(text, err) { $("#quick-msg").textContent = text; $("#quick-msg").classList.toggle("err", !!err); }
+  async function quickCreate(files) {
+    const text = qin.value, t = parseQuick(text);
+    if (!t.title && !files.length) return;
+    t.title ||= "Screenshot";
+    qin.value = "";
+    try {
+      const tk = await api("POST", "/api/tickets", t);
+      qmsg(`Created #${tk.id}` + (files.length ? ", uploading…" : "."));
+      for (const f of files) await upload(tk.id, f);
+      if (files.length) qmsg(`Created #${tk.id} with ${files.length > 1 ? files.length + " screenshots" : "a screenshot"}.`);
+    } catch (e) { if (!qin.value) qin.value = text; qmsg(e.message, true); }
+    refresh();
+  }
+  quick.addEventListener("submit", (e) => { e.preventDefault(); quickCreate([]); });
+  qin.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); closeQuick(); } });
+  qin.addEventListener("paste", (e) => { const f = imagesIn(e.clipboardData); if (f.length) { e.preventDefault(); quickCreate(f); } });
+  quick.addEventListener("dragover", (e) => { if (hasFiles(e.dataTransfer)) { e.preventDefault(); e.stopPropagation(); quick.classList.add("drop"); } });
+  quick.addEventListener("dragleave", () => quick.classList.remove("drop"));
+  quick.addEventListener("drop", (e) => {
+    quick.classList.remove("drop"); if (!hasFiles(e.dataTransfer)) return;
+    e.preventDefault(); e.stopPropagation();
+    const f = imagesIn(e.dataTransfer); f.length ? quickCreate(f) : qmsg("Only PNG, JPEG or WebP images.", true);
+  });
+  $("#new").onclick = openQuick;
+
+  // ---- moving cards ----
+  async function move(id, status) {
+    const card = document.querySelector(`.card[data-id="${id}"]`);
+    const list = document.querySelector(`.col[data-status="${status}"] ol`);
+    if (card && list) { list.querySelector(".empty")?.remove(); list.prepend(card); card.focus(); applyFilters(); }
+    try { await api("PATCH", `/api/tickets/${id}`, { status }); } catch (e) { alert("Could not move #" + id + ": " + e.message); }
+    refresh();
+  }
+  document.addEventListener("dragstart", (e) => {
+    const c = e.target.closest?.(".card"); if (!c) return;
+    e.dataTransfer.setData("text/plain", c.dataset.id); e.dataTransfer.effectAllowed = "move"; c.classList.add("dragging");
+  });
+  document.addEventListener("dragend", (e) => { e.target.classList?.remove("dragging"); document.querySelectorAll(".over").forEach((x) => x.classList.remove("over")); });
+  document.addEventListener("dragover", (e) => {
+    if (hasFiles(e.dataTransfer)) { e.preventDefault(); return; } // so a stray image drop does not navigate away
+    const col = e.target.closest?.(".col"); if (!col) return;
+    e.preventDefault();
+    document.querySelectorAll(".over").forEach((x) => x !== col && x.classList.remove("over")); col.classList.add("over");
+  });
+  document.addEventListener("drop", (e) => {
+    if (hasFiles(e.dataTransfer)) { e.preventDefault(); return; }
+    const col = e.target.closest?.(".col"); if (!col) return;
+    e.preventDefault(); col.classList.remove("over");
+    const id = e.dataTransfer.getData("text/plain");
+    const card = document.querySelector(`.card[data-id="${id}"]`);
+    if (id && card && card.closest(".col") !== col) move(id, col.dataset.status);
+  });
+
+  // ---- inline title edit (double-click or E) ----
+  function editTitle(card) {
+    const h = card.querySelector("h3"), old = h.textContent;
+    card.draggable = false; h.contentEditable = "plaintext-only"; h.focus(); getSelection().selectAllChildren(h);
+    const done = async (save) => {
+      h.removeEventListener("blur", onBlur); h.onkeydown = null; h.contentEditable = "false"; card.draggable = true;
+      const title = h.textContent.replace(/\s+/g, " ").trim();
+      card.focus();
+      if (!save || !title || title === old) { h.textContent = old; return; }
+      try { await api("PATCH", `/api/tickets/${card.dataset.id}`, { title }); } catch (e) { h.textContent = old; alert("Could not rename #" + card.dataset.id + ": " + e.message); }
+      refresh();
+    };
+    const onBlur = () => done(true);
+    h.addEventListener("blur", onBlur);
+    h.onkeydown = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); done(true); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(false); }
+    };
+  }
+  let clickTimer;
+  document.addEventListener("click", (e) => {
+    const c = e.target.closest?.(".card"); if (!c || e.target.isContentEditable) return;
+    clearTimeout(clickTimer);
+    if (e.target.closest("h3")) clickTimer = setTimeout(() => openTicket(c.dataset.id), 250); // wait to see if it is a double-click
+    else openTicket(c.dataset.id);
+  });
+  document.addEventListener("dblclick", (e) => {
+    const h = e.target.closest?.(".card h3"); if (!h || h.isContentEditable) return;
+    clearTimeout(clickTimer); editTitle(h.closest(".card"));
+  });
+
+  // ---- keyboard ----
+  function step(d) {
+    const cards = [...document.querySelectorAll(".card")].filter((c) => c.offsetParent);
+    if (!cards.length) return;
+    const at = cards.indexOf(document.activeElement.closest?.(".card") || document.querySelector(`.card[data-id="${current}"]`));
+    const c = cards[at < 0 ? 0 : Math.max(0, Math.min(cards.length - 1, at + d))];
+    c.focus(); c.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (current) openTicket(c.dataset.id, true);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || typing(e.target) || $("#lightbox").open) return;
+    const card = e.target.closest?.(".card"), k = e.key.toLowerCase();
+    if (card && e.key === "Enter") { e.preventDefault(); openTicket(card.dataset.id); return; }
+    if (card && e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      e.preventDefault();
+      const visible = STATUSES.filter((s) => s !== "wontfix" || $("#f-closed").checked);
+      const i = visible.indexOf(card.closest(".col").dataset.status) + (e.key === "ArrowRight" ? 1 : -1);
+      if (i >= 0 && i < visible.length) move(card.dataset.id, visible[i]);
+      return;
+    }
+    if (e.altKey) return;
+    if (k === "n" || k === "c") { e.preventDefault(); openQuick(); }
+    else if (k === "j" || k === "k") { e.preventDefault(); step(k === "j" ? 1 : -1); }
+    else if (/^[1-6]$/.test(e.key) && (current || card)) { e.preventDefault(); move(current || card.dataset.id, STATUSES[+e.key - 1]); }
+    else if (k === "e" && current) { e.preventDefault(); $("#title").focus(); $("#title").select(); }
+    else if (k === "e" && card) { e.preventDefault(); editTitle(card); }
+  });
+
+  // ---- markdown (small subset, escaped first) ----
+  const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/!\[([^\]]*)\]\((assets\/[\w.-]+)\)/g, '<img alt="$1" src="/$2">')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  function md(src) {
+    const out = []; let list = null, para = [], code = null;
+    const flush = () => { if (para.length) out.push("<p>" + para.map(inline).join("<br>") + "</p>"); para = []; if (list) { out.push(`</${list}>`); list = null; } };
+    for (const line of src.split("\n")) {
+      if (code !== null) { if (line.startsWith("```")) { out.push("<pre><code>" + esc(code) + "</code></pre>"); code = null; } else code += (code ? "\n" : "") + line; continue; }
+      if (line.startsWith("```")) { flush(); code = ""; continue; }
+      let m;
+      if ((m = line.match(/^(#{1,6})\s+(.*)/))) { flush(); out.push(`<h3>${inline(m[2])}</h3>`); continue; }
+      if ((m = line.match(/^\s*([-*]|\d+\.)\s+(.*)/))) {
+        if (para.length) { const l = list; list = null; flush(); list = l; }
+        const kind = /\d/.test(m[1]) ? "ol" : "ul";
+        if (list !== kind) { if (list) out.push(`</${list}>`); out.push(`<${kind}>`); list = kind; }
+        out.push(`<li>${inline(m[2])}</li>`); continue;
+      }
+      if (/^\s+\S/.test(line) && list) { out[out.length - 1] = out[out.length - 1].replace(/<\/li>$/, "<br>" + inline(line.trim()) + "</li>"); continue; }
+      if (!line.trim()) { flush(); continue; }
+      if (list) { out.push(`</${list}>`); list = null; }
+      para.push(line);
+    }
+    if (code !== null) out.push("<pre><code>" + esc(code) + "</code></pre>");
+    flush();
+    return out.join("");
+  }
+
+  // ---- detail panel: saves on its own ----
+  let current = null, loaded = null, dirty = false, timer, saving = Promise.resolve();
+  const panel = $("#panel"), form = $("#p-form");
+  const fields = ["status", "type", "priority", "area"];
+  function setTab(preview) {
+    $("#t-write").setAttribute("aria-selected", !preview); $("#t-preview").setAttribute("aria-selected", preview);
+    $("#p-body").hidden = preview; $("#p-preview").hidden = !preview;
+    if (preview) $("#p-preview").innerHTML = md($("#p-body").value) || '<span class="empty">Nothing to preview.</span>';
+  }
+  $("#t-write").onclick = () => setTab(false);
+  $("#t-preview").onclick = () => setTab(true);
+  function msg(text, err) { $("#p-msg").textContent = text; $("#p-msg").classList.toggle("err", !!err); }
+  function changes() {
+    const out = {};
+    if (!loaded) return out;
+    const now = { title: $("#title").value, body: $("#p-body").value };
+    for (const f of fields) now[f] = $("#p-" + f).value;
+    for (const k in now) if (now[k] !== loaded[k]) out[k] = now[k];
+    return out;
+  }
+  function saveNow() {
+    clearTimeout(timer);
+    return (saving = saving.then(async () => {
+      const id = current, p = changes();
+      if (!id || !Object.keys(p).length) return;
+      if (p.title !== undefined && !p.title.trim()) { msg("Title is required.", true); return; }
+      msg("Saving…");
+      try {
+        const t = await api("PATCH", `/api/tickets/${id}`, p);
+        if (current !== id) return;
+        loaded = t; dirty = Object.keys(changes()).length > 0; msg("Saved.");
+        $("#p-file").textContent = t.file;
+        refresh();
+      } catch (err) { msg(err.message, true); }
+    }));
+  }
+  form.addEventListener("input", (e) => {
+    if (e.target.id === "p-note") return;
+    dirty = true; clearTimeout(timer); timer = setTimeout(saveNow, 700);
+  });
+  form.addEventListener("change", (e) => { if (e.target.tagName === "SELECT") saveNow(); });
+  form.addEventListener("focusout", (e) => { if (e.target.id === "title" || e.target.id === "p-body") saveNow(); });
+  form.addEventListener("submit", (e) => { e.preventDefault(); saveNow(); });
+  form.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.target.id === "p-note" ? $("#p-addnote").click() : saveNow(); } });
+
+  function show() { panel.classList.add("open"); panel.setAttribute("aria-hidden", "false"); }
+  async function close() {
+    await saveNow();
+    panel.classList.remove("open"); panel.setAttribute("aria-hidden", "true");
+    const id = current; current = null; loaded = null; dirty = false;
+    history.replaceState(null, "", location.pathname);
+    if (id) document.querySelector(`.card[data-id="${id}"]`)?.focus();
+  }
+  $("#p-close").onclick = close;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && panel.classList.contains("open") && !$("#lightbox").open) close(); });
+
+  const setVal = (el, v) => { if (el.value !== v) el.value = v; }; // keeps the caret when nothing changed
+  function fill(t) {
+    loaded = t;
+    $("#p-id").textContent = "#" + t.id;
+    $("#p-file").textContent = t.file;
+    setVal($("#title"), t.title);
+    for (const f of fields) setVal($("#p-" + f), t[f]);
+    setVal($("#p-body"), t.body);
+    $("#p-notes").innerHTML = t.notes ? md(t.notes) : '<div class="empty">No notes yet.</div>';
+    const th = $("#p-thumbs"), imgs = t.images || [];
+    if (th.dataset.list !== imgs.join(" ")) {
+      th.dataset.list = imgs.join(" "); th.innerHTML = "";
+      for (const src of imgs) {
+        const b = document.createElement("button"), img = document.createElement("img");
+        b.type = "button"; b.className = "thumb"; b.title = src; img.alt = "Screenshot"; img.src = "/" + src;
+        b.onclick = () => { $("#lightbox img").src = img.src; $("#lightbox").showModal(); };
+        b.append(img); th.append(b);
+      }
+      th.insertAdjacentHTML("beforeend", `<span class="msg">${imgs.length ? "" : "None yet. "}Paste or drop an image here to add one.</span>`);
+    }
+    const ctx = $("#p-context"); ctx.innerHTML = "";
+    const row = (k, node) => { const dt = document.createElement("dt"); dt.textContent = k; const dd = document.createElement("dd"); dd.append(node); ctx.append(dt, dd); };
+    const text = (s, cls) => { const e = document.createElement(cls ? "code" : "span"); e.textContent = s; return e; };
+    if (t.url && /^https?:/.test(t.url)) { const a = document.createElement("a"); a.href = t.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = t.url; row("Page", a); }
+    if (t.selector) row("Element", text(t.selector, true));
+    if (t.element_text) row("Text", text(t.element_text));
+    if (t.viewport) row("Viewport", text(t.viewport));
+    row("Source", text(t.source || "unknown"));
+    for (const [k, v] of Object.entries(t.extra || {})) row(k, text(v));
+  }
+  $("#lightbox").onclick = () => $("#lightbox").close();
+  async function openTicket(id, quiet) {
+    if (current && current !== String(id)) await saveNow();
+    try {
+      const t = await api("GET", `/api/tickets/${id}`);
+      if (quiet && dirty && current === String(t.id)) return;
+      current = String(t.id); dirty = false; fill(t); if (!quiet) { setTab(false); msg(""); }
+      history.replaceState(null, "", "#t=" + t.id); show(); // focus stays put so 1-6, j/k and e keep working
+    } catch (e) { if (!quiet) alert("Could not open #" + id + ": " + e.message); }
+  }
+  async function attach(files) {
+    const id = current; if (!id) return;
+    if (!files.length) { msg("Only PNG, JPEG or WebP images.", true); return; }
+    await saveNow(); msg("Uploading…");
+    try {
+      let t; for (const f of files) t = await upload(id, f);
+      if (current === id) { fill(t); dirty = false; msg(files.length > 1 ? `Added ${files.length} screenshots.` : "Added the screenshot."); }
+      refresh();
+    } catch (err) { msg(err.message, true); }
+  }
+  panel.addEventListener("paste", (e) => { const f = imagesIn(e.clipboardData); if (f.length) { e.preventDefault(); attach(f); } });
+  panel.addEventListener("dragover", (e) => { if (hasFiles(e.dataTransfer)) { e.preventDefault(); e.stopPropagation(); panel.classList.add("drop"); } });
+  panel.addEventListener("dragleave", (e) => { if (!panel.contains(e.relatedTarget)) panel.classList.remove("drop"); });
+  panel.addEventListener("drop", (e) => {
+    panel.classList.remove("drop"); if (!hasFiles(e.dataTransfer)) return;
+    e.preventDefault(); e.stopPropagation(); attach(imagesIn(e.dataTransfer));
+  });
+  $("#p-addnote").onclick = async () => {
+    const text = $("#p-note").value.trim(); if (!text || !current) return;
+    try { const t = await api("POST", `/api/tickets/${current}/notes`, { text, by: "human" }); $("#p-note").value = ""; $("#p-notes").innerHTML = md(t.notes); }
+    catch (err) { msg(err.message, true); }
+  };
+
+  applyFilters();
+  const m = location.hash.match(/^#t=(\d+)$/); if (m) openTicket(m[1]);
+})();
+</script>
+</body>
+</html>
+{{end}}
+
+{{define "columns"}}<main id="columns" data-version="{{.Version}}">
+{{range .Columns}}<section class="col" data-status="{{.Status}}" aria-label="{{.Label}}">
+  <h2>{{if eq .Status "doing"}}<svg class="spin" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M10.1 2.182a10 10 0 0 1 3.8 0"/><path d="M13.9 21.818a10 10 0 0 1-3.8 0"/><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"/><path d="M2.182 13.9a10 10 0 0 1 0-3.8"/><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"/><path d="M21.818 10.1a10 10 0 0 1 0 3.8"/><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"/><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"/></svg>{{end}}{{if eq .Status "blocked"}}<svg class="stop" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16h.01"/><path d="M12 8v4"/><path d="M15.312 2a2 2 0 0 1 1.414.586l4.688 4.688A2 2 0 0 1 22 8.688v6.624a2 2 0 0 1-.586 1.414l-4.688 4.688a2 2 0 0 1-1.414.586H8.688a2 2 0 0 1-1.414-.586l-4.688-4.688A2 2 0 0 1 2 15.312V8.688a2 2 0 0 1 .586-1.414l4.688-4.688A2 2 0 0 1 8.688 2z"/></svg>{{end}}{{.Label}} <span class="n">{{len .Tickets}}</span></h2>
+  <ol>{{range .Tickets}}
+    <li class="card" draggable="true" tabindex="0" data-id="{{.ID}}" data-area="{{.Area}}" data-type="{{.Type}}" data-priority="{{.Priority}}" data-search="{{.Title}} {{.Body}}">
+      <h3>{{.Title}}</h3>
+      <div class="meta">
+        <span class="kind {{.Type}}">{{.Type}}</span>
+        <span class="prio {{.Priority}}">{{.Priority}}</span>
+        {{if .Area}}<span>{{.Area}}</span>{{end}}
+        {{if eq .Source "devnote"}}<span class="pin" title="Dropped as a sticky note">note</span>{{end}}
+        <span class="age" title="Created {{.Created}}">#{{.ID}}{{with age .Created}}, {{.}}{{end}}</span>
+      </div>
+    </li>{{else}}<li class="empty">Nothing here.</li>{{end}}
+  </ol>
+</section>{{end}}
+</main>{{end}}

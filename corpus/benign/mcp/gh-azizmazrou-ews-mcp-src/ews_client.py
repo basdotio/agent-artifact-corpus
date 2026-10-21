@@ -1,0 +1,344 @@
+"""Exchange Web Services client wrapper."""
+
+from exchangelib import Account, Configuration, DELEGATE, IMPERSONATION, FaultTolerance, Version, EWSTimeZone
+from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_not_exception_type
+import logging
+import pytz
+from typing import Optional, Dict
+
+from .config import Settings
+from .auth import AuthHandler
+from .exceptions import EWSConnectionError, AuthenticationError
+
+
+class EWSClient:
+    """Exchange Web Services client wrapper with connection management."""
+
+    def __init__(self, config: Settings, auth_handler: AuthHandler):
+        self.config = config
+        self.auth_handler = auth_handler
+        self.logger = logging.getLogger(__name__)
+        self._account: Optional[Account] = None
+        self._impersonated_accounts: Dict[str, Account] = {}
+
+        # v4.0: unified per-mailbox SQLite cache (body_format, attachment_text,
+        # embedding tables). Tools that want caching reach for it via
+        # `self.ews_client.sqlite_cache`. Initialised lazily on first access
+        # so unit tests that don't need it don't pay the file-create cost.
+        self._sqlite_cache = None
+
+        # TLS verification: verified by default. Only disable when the operator
+        # explicitly sets EWS_INSECURE_SKIP_VERIFY=true (e.g. internal Exchange
+        # with a private CA that cannot be installed into the container trust
+        # store). Downgrading to NoVerifyHTTPAdapter opens a MITM risk for
+        # credentials and tokens — log loudly.
+        if getattr(self.config, "ews_insecure_skip_verify", False):
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            BaseProtocol.HTTP_ADAPTER_CLS = NoVerifyHTTPAdapter
+            self.logger.warning(
+                "EWS_INSECURE_SKIP_VERIFY=true: TLS certificate verification "
+                "DISABLED for all Exchange traffic. This is unsafe on untrusted "
+                "networks. Prefer installing your internal CA bundle."
+            )
+
+    @property
+    def account(self) -> Account:
+        """Lazy load account connection."""
+        if self._account is None:
+            self._account = self._create_account()
+        return self._account
+
+    @property
+    def sqlite_cache(self):
+        """Lazy unified SQLite cache (body_format + attachment_text + embedding).
+
+        Stored at <data_dir>/ews_mcp_<mailbox>.sqlite. On first access in a
+        container that has a v3.4 ``data/embeddings/embeddings.json`` next
+        to it, the legacy embedding cache is auto-imported (idempotent —
+        the file is renamed .migrated after a successful import).
+        """
+        if self._sqlite_cache is None:
+            from pathlib import Path
+            from .cache.sqlite_cache import SQLiteCache
+            data_dir = Path(getattr(self.config, "data_dir", "data"))
+            mailbox_slug = (
+                self.config.ews_email.replace("@", "_at_").replace(".", "_")
+            )
+            db_path = data_dir / f"ews_mcp_{mailbox_slug}.sqlite"
+            self._sqlite_cache = SQLiteCache(db_path)
+            # One-shot migration of the v3.4 JSON embeddings cache.
+            legacy = data_dir / "embeddings" / "embeddings.json"
+            if legacy.exists():
+                legacy_model = (
+                    getattr(self.config, "ai_embedding_model", None)
+                    or "nomic-embed-text"
+                )
+                stats = self._sqlite_cache.import_legacy_embeddings_json(
+                    legacy, legacy_model
+                )
+                self.logger.info(
+                    "Embedding cache migrated to SQLite: %s", stats
+                )
+        return self._sqlite_cache
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_not_exception_type(AuthenticationError)
+    )
+    def _create_account(self) -> Account:
+        """Create Exchange account with retry logic."""
+        try:
+            self.logger.info(f"Connecting to Exchange for {self.config.ews_email}")
+            self.logger.info(f"Using timezone: {self.config.timezone}")
+
+            # Get credentials
+            credentials = self.auth_handler.get_credentials()
+
+            # Get timezone - use EWSTimeZone from exchangelib
+            try:
+                tz = EWSTimeZone(self.config.timezone)
+                self.logger.info(f"Successfully loaded timezone: {self.config.timezone}")
+            except Exception as e:
+                self.logger.warning(f"Failed to load timezone {self.config.timezone}, falling back to UTC: {e}")
+                tz = EWSTimeZone('UTC')
+
+            # Use manual configuration when server URL is provided, otherwise autodiscovery
+            # IMPORTANT: If EWS_SERVER_URL is set, always use it (bypass autodiscovery)
+            # This prevents autodiscovery failures when the server URL is explicitly known
+            use_manual_config = bool(self.config.ews_server_url)
+
+            if not use_manual_config and self.config.ews_autodiscover:
+                self.logger.info("Using autodiscovery (no EWS_SERVER_URL provided)")
+
+                # Set timeout for autodiscovery
+                BaseProtocol.TIMEOUT = self.config.request_timeout
+
+                account = Account(
+                    primary_smtp_address=self.config.ews_email,
+                    credentials=credentials,
+                    autodiscover=True,
+                    access_type=DELEGATE,
+                    default_timezone=tz
+                )
+            elif use_manual_config:
+                # Server URL provided - use manual configuration
+
+                self.logger.info(f"Using manual configuration: {self.config.ews_server_url}")
+
+                # Construct the full EWS endpoint URL
+                # Users can provide:
+                #   - Full URL: https://mail.company.com/EWS/Exchange.asmx
+                #   - Partial URL: https://mail.company.com
+                #   - Just hostname: mail.company.com
+                ews_input = self.config.ews_server_url.strip()
+
+                # Normalize the URL to always be a full EWS endpoint
+                if ews_input.endswith('/EWS/Exchange.asmx'):
+                    # Already a full endpoint
+                    ews_url = ews_input
+                elif '/EWS/' in ews_input:
+                    # Has /EWS/ but might be missing Exchange.asmx
+                    if not ews_input.endswith('.asmx'):
+                        ews_url = ews_input.rstrip('/') + '/Exchange.asmx'
+                    else:
+                        ews_url = ews_input
+                else:
+                    # Just a hostname or URL without /EWS/ path
+                    # Strip protocol and trailing slashes
+                    server = ews_input.replace('https://', '').replace('http://', '').rstrip('/')
+                    # Construct full EWS endpoint URL
+                    ews_url = f"https://{server}/EWS/Exchange.asmx"
+
+                self.logger.info(f"Using EWS endpoint: {ews_url}")
+
+                # Always use service_endpoint to bypass autodiscovery completely.
+                # FaultTolerance covers transient EWS soap-shape failures we
+                # observed against EWS-Org Exchange under sustained traffic
+                # (occasional "No Body element in SOAP response" — load balancer
+                # returning HTML instead of SOAP). Outer tenacity retry on
+                # _create_account handles auth-time / connect-time errors.
+                config = Configuration(
+                    service_endpoint=ews_url,
+                    credentials=credentials,
+                    retry_policy=FaultTolerance(max_wait=30),
+                    max_connections=self.config.connection_pool_size
+                )
+
+                # Set timeout on the protocol
+                BaseProtocol.TIMEOUT = self.config.request_timeout
+
+                account = Account(
+                    primary_smtp_address=self.config.ews_email,
+                    config=config,
+                    autodiscover=False,
+                    access_type=DELEGATE,
+                    default_timezone=tz
+                )
+            else:
+                # No server URL and autodiscover disabled
+                raise EWSConnectionError(
+                    "No EWS_SERVER_URL provided and EWS_AUTODISCOVER is disabled. "
+                    "Either provide EWS_SERVER_URL or enable EWS_AUTODISCOVER."
+                )
+
+            # Test the connection
+            _ = account.root.tree()
+            self.logger.info("Successfully connected to Exchange")
+
+            return account
+
+        except AuthenticationError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to create account: {e}")
+            raise EWSConnectionError(f"Failed to connect to Exchange: {e}")
+
+    def test_connection(self) -> bool:
+        """Test EWS connection."""
+        try:
+            # Try a simple operation
+            _ = self.account.inbox.total_count
+            self.logger.info("Connection test successful")
+            return True
+        except Exception as e:
+            self.logger.error(f"Connection test failed: {e}")
+            return False
+
+    def close(self) -> None:
+        """Close all connections and cleanup."""
+        # Close impersonated accounts first
+        self.clear_impersonation_cache()
+
+        # Close primary account
+        if self._account:
+            self.logger.info("Closing EWS connection")
+            self._account.protocol.close()
+            self._account = None
+
+    def get_account(self, target_mailbox: Optional[str] = None) -> Account:
+        """
+        Get Exchange account, optionally for a different mailbox.
+
+        Args:
+            target_mailbox: Email address to impersonate/delegate.
+                           If None, returns primary account.
+
+        Returns:
+            Account object for the specified mailbox
+
+        Raises:
+            EWSConnectionError: If impersonation is not enabled or fails
+        """
+        # Return primary account if no target specified
+        if not target_mailbox or target_mailbox.lower() == self.config.ews_email.lower():
+            return self.account
+
+        # Check if impersonation is enabled
+        if not self.config.ews_impersonation_enabled:
+            raise EWSConnectionError(
+                f"Impersonation not enabled. Set EWS_IMPERSONATION_ENABLED=true "
+                f"to access mailbox: {target_mailbox}"
+            )
+
+        # Check cache first
+        cache_key = target_mailbox.lower()
+        if cache_key in self._impersonated_accounts:
+            self.logger.debug(f"Using cached account for {target_mailbox}")
+            return self._impersonated_accounts[cache_key]
+
+        # Create impersonated account
+        try:
+            self.logger.info(f"Creating impersonated account for {target_mailbox}")
+
+            # Determine access type
+            access_type = (
+                IMPERSONATION
+                if self.config.ews_impersonation_type == "impersonation"
+                else DELEGATE
+            )
+
+            # Get timezone
+            try:
+                tz = EWSTimeZone(self.config.timezone)
+            except Exception:
+                tz = EWSTimeZone('UTC')
+
+            # Get credentials
+            credentials = self.auth_handler.get_credentials()
+
+            # Create account with same config but different target
+            # Use same logic as primary account: if server URL provided, use it
+            use_manual_config = bool(self.config.ews_server_url)
+
+            if use_manual_config:
+                # Reuse existing configuration with same endpoint
+                config = Configuration(
+                    service_endpoint=self._get_ews_url(),
+                    credentials=credentials,
+                    retry_policy=FaultTolerance(max_wait=30),
+                    max_connections=self.config.connection_pool_size
+                )
+
+                impersonated_account = Account(
+                    primary_smtp_address=target_mailbox,
+                    config=config,
+                    autodiscover=False,
+                    access_type=access_type,
+                    default_timezone=tz
+                )
+            elif self.config.ews_autodiscover:
+                impersonated_account = Account(
+                    primary_smtp_address=target_mailbox,
+                    credentials=credentials,
+                    autodiscover=True,
+                    access_type=access_type,
+                    default_timezone=tz
+                )
+            else:
+                raise EWSConnectionError(
+                    "No EWS_SERVER_URL provided and EWS_AUTODISCOVER is disabled."
+                )
+
+            # Test connection
+            _ = impersonated_account.root.tree()
+
+            # Cache the account
+            self._impersonated_accounts[cache_key] = impersonated_account
+            self.logger.info(f"Successfully connected to mailbox: {target_mailbox}")
+
+            return impersonated_account
+
+        except Exception as e:
+            self.logger.error(f"Failed to access mailbox {target_mailbox}: {e}")
+            raise EWSConnectionError(
+                f"Failed to access mailbox {target_mailbox}: {e}. "
+                f"Ensure the service account has ApplicationImpersonation role "
+                f"or delegate access to this mailbox."
+            )
+
+    def _get_ews_url(self) -> str:
+        """Get normalized EWS endpoint URL."""
+        ews_input = self.config.ews_server_url.strip()
+        if ews_input.endswith('/EWS/Exchange.asmx'):
+            return ews_input
+        elif '/EWS/' in ews_input:
+            if not ews_input.endswith('.asmx'):
+                return ews_input.rstrip('/') + '/Exchange.asmx'
+            return ews_input
+        else:
+            server = ews_input.replace('https://', '').replace('http://', '').rstrip('/')
+            return f"https://{server}/EWS/Exchange.asmx"
+
+    def clear_impersonation_cache(self) -> None:
+        """Clear cached impersonated accounts."""
+        for email, account in self._impersonated_accounts.items():
+            try:
+                account.protocol.close()
+                self.logger.debug(f"Closed impersonated connection for {email}")
+            except Exception:
+                pass
+        self._impersonated_accounts.clear()
+        self.logger.info("Impersonation cache cleared")

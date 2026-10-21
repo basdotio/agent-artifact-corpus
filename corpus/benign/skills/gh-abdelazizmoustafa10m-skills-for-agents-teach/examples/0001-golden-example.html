@@ -1,0 +1,1277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 · Spotting O(n²) before it bites</title>
+<meta name="teach:lesson" content="0001">
+<meta name="teach:contract" content="v1">
+<meta name="description" content="Recognise quadratic time complexity in code before it becomes a performance bug.">
+<style id="kit">
+/* ==========================================================================
+   teach · lesson-kit.css  —  the shared authoring source for every lesson.
+   This file is the SOURCE OF TRUTH. Lessons INLINE a copy of it into a <style>
+   tag (see references/HTML-LESSON.md §Embedding). Do not <link> it in the
+   default single-file lesson — inlining keeps each lesson self-contained,
+   offline, portable, and print-safe with zero broken-link / version-drift risk.
+
+   Constraints honoured: offline (system fonts, no CDN, no @import), printable
+   (@media print forces high-contrast ink-on-white and reveals hidden answers),
+   accessible (WCAG 4.5:1 body / 3:1 large; :focus-visible rings; reduced-motion),
+   Tufte-restraint (one focal accent, sparse semantic colour, high data-ink).
+   ========================================================================== */
+
+/* ---- Tokens: primitive → semantic, OKLCH, tinted neutrals -------------- */
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces & ink (warm paper, warm near-black — never #fff / #000) */
+  --bg:            oklch(0.985 0.006 85);
+  --surface:       oklch(0.998 0.004 85);
+  --surface-2:     oklch(0.955 0.008 85);   /* recessed */
+  --ink:           oklch(0.255 0.018 60);   /* body text */
+  --ink-dim:       oklch(0.435 0.018 60);   /* secondary text (>=4.5:1 on --bg) */
+  --border:        color-mix(in oklch, var(--ink) 15%, transparent);
+  --border-strong: color-mix(in oklch, var(--ink) 28%, transparent);
+
+  /* One focal accent (muted teal — deliberately NOT AI-purple / baby-blue) */
+  --accent:        oklch(0.52 0.09 205);
+  --accent-ink:    oklch(0.40 0.10 205);    /* accent used as text on --bg */
+  --accent-soft:   color-mix(in oklch, var(--accent) 12%, transparent);
+
+  /* Sparse semantic roles — used only to signal, never to decorate */
+  --ok:            oklch(0.52 0.12 150);
+  --ok-soft:       color-mix(in oklch, var(--ok) 12%, transparent);
+  --warn:          oklch(0.60 0.12 70);
+  --warn-soft:     color-mix(in oklch, var(--warn) 14%, transparent);
+  --danger:        oklch(0.52 0.17 25);
+  --danger-soft:   color-mix(in oklch, var(--danger) 12%, transparent);
+  --info:          oklch(0.50 0.09 245);
+  --info-soft:     color-mix(in oklch, var(--info) 12%, transparent);
+  --code-bg:       color-mix(in oklch, var(--ink) 6%, var(--bg));
+
+  /* Type — system stacks only (offline). Serif reads; sans = chrome; mono = code/labels */
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  --font-sans:  system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:  ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --text-sm: 0.833rem;
+  --text-base: 1.0625rem;          /* ~17px */
+  --text-lg: 1.5rem;
+  --text-xl: clamp(2rem, 1.4rem + 2.6vw, 2.9rem);
+  --leading-body: 1.6;
+  --leading-tight: 1.2;
+  --measure: 65ch;                 /* reading column cap */
+
+  /* Spacing (4→48), radii, shadows, motion */
+  --sp-1: 0.25rem; --sp-2: 0.5rem; --sp-3: 0.75rem; --sp-4: 1rem;
+  --sp-5: 1.5rem;  --sp-6: 2rem;   --sp-7: 3rem;
+  --r-sm: 6px; --r: 10px; --r-lg: 14px;
+  --shadow-elevated: 0 1px 2px -1px color-mix(in oklch, var(--ink) 22%, transparent),
+                     0 3px 10px -3px color-mix(in oklch, var(--ink) 16%, transparent);
+  --shadow-recessed: inset 0 1px 3px color-mix(in oklch, var(--ink) 12%, transparent);
+  --dur-1: 100ms; --dur-2: 250ms; --dur-3: 500ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:            oklch(0.205 0.012 255);   /* warm near-black, not pure */
+    --surface:       oklch(0.245 0.014 255);
+    --surface-2:     oklch(0.285 0.016 255);
+    --ink:           oklch(0.925 0.008 85);    /* off-white, not pure #fff */
+    --ink-dim:       oklch(0.735 0.012 85);
+    --border:        color-mix(in oklch, var(--ink) 18%, transparent);
+    --border-strong: color-mix(in oklch, var(--ink) 34%, transparent);
+    --accent:        oklch(0.72 0.10 200);     /* lifted for dark surfaces */
+    --accent-ink:    oklch(0.80 0.09 200);
+    --ok:            oklch(0.74 0.13 150);
+    --warn:          oklch(0.80 0.12 75);
+    --danger:        oklch(0.70 0.16 25);
+    --info:          oklch(0.72 0.10 240);
+    --code-bg:       color-mix(in oklch, var(--ink) 10%, var(--bg));
+    --shadow-elevated: 0 1px 2px -1px oklch(0 0 0 / 0.5), 0 4px 14px -4px oklch(0 0 0 / 0.45);
+  }
+}
+
+/* ---- Base / prose ------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+.lesson {
+  max-width: 72ch;
+  margin-inline: auto;
+  padding: var(--sp-6) var(--sp-5) var(--sp-7);
+}
+.lesson :is(p, ul, ol, blockquote) { max-width: var(--measure); }
+.lesson p { margin: 0 0 var(--sp-4); text-wrap: pretty; hyphens: auto; }
+.lesson :is(h1, h2, h3) {
+  font-family: var(--font-serif);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
+  margin: var(--sp-6) 0 var(--sp-3);
+  letter-spacing: -0.01em;
+}
+.lesson h1 { font-size: var(--text-xl); margin-top: 0; }
+.lesson h2 { font-size: var(--text-lg); }
+.lesson h3 { font-size: 1.15rem; }
+.lesson a { color: var(--accent-ink); text-underline-offset: 2px; text-decoration-thickness: 1px; }
+.lesson a:hover { text-decoration-thickness: 2px; }
+.lesson strong { font-weight: 650; }
+.lesson :not(pre) > code {
+  font-family: var(--font-mono); font-size: 0.9em;
+  background: var(--code-bg); padding: 0.1em 0.35em; border-radius: var(--r-sm);
+}
+.lesson pre {
+  font-family: var(--font-mono); font-size: 0.9rem; line-height: 1.5;
+  background: var(--code-bg); color: var(--ink);
+  padding: var(--sp-4); border-radius: var(--r); overflow-x: auto;
+  border: 1px solid var(--border); max-width: 100%;
+}
+:where(a, button, summary, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm);
+}
+
+/* ---- Lesson head, TOC, lede, citation ---------------------------------- */
+.lesson-head { margin-bottom: var(--sp-5); }
+.lesson-head .ordinal {
+  font-family: var(--font-mono); font-size: var(--text-sm);
+  color: var(--ink-dim); letter-spacing: 0.08em; text-transform: uppercase;
+}
+.lesson-head .mission {
+  color: var(--ink-dim); font-style: italic; margin-top: var(--sp-2);
+}
+.lede {
+  font-size: 1.15rem; color: var(--ink);
+  border-left: 3px solid var(--accent); padding-left: var(--sp-4);
+  margin: var(--sp-5) 0 var(--sp-6);
+}
+.cite {
+  margin-top: var(--sp-7); padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-sm); color: var(--ink-dim);
+}
+.cite a { color: var(--accent-ink); }
+
+/* ---- Section label (uppercase mono + leading dot) ---------------------- */
+.section-label {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-family: var(--font-mono); font-size: var(--text-sm);
+  text-transform: uppercase; letter-spacing: 0.09em; color: var(--ink-dim);
+  margin: var(--sp-6) 0 var(--sp-3);
+}
+.section-label::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); flex: none;
+}
+
+/* ---- Cards & window-chrome framing ------------------------------------- */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); padding: var(--sp-4); margin: var(--sp-4) 0;
+}
+.card--elevated { box-shadow: var(--shadow-elevated); border-color: transparent; }
+.card--recessed { background: var(--surface-2); box-shadow: var(--shadow-recessed); }
+.window {
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  overflow: hidden; margin: var(--sp-5) 0; background: var(--surface);
+  box-shadow: var(--shadow-elevated);
+}
+.window__bar {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4); background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ink-dim);
+}
+.window__dots { display: inline-flex; gap: 6px; }
+.window__dots i { width: 10px; height: 10px; border-radius: 50%;
+  background: var(--border-strong); } /* neutral grey — never mac red/yellow/green */
+.window__body { padding: var(--sp-5); }
+
+/* ---- Callouts (left-border, semantic) ---------------------------------- */
+.callout {
+  border-left: 3px solid var(--ink-dim); background: var(--surface-2);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: var(--sp-3) var(--sp-4); margin: var(--sp-4) 0;
+}
+.callout > :first-child { margin-top: 0; }
+.callout > :last-child { margin-bottom: 0; }
+.callout .callout__k { font-family: var(--font-mono); font-size: var(--text-sm);
+  text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: var(--sp-1); }
+.callout--info    { border-color: var(--info);   background: var(--info-soft); }
+.callout--rule    { border-color: var(--accent); background: var(--accent-soft); }
+.callout--warn    { border-color: var(--warn);   background: var(--warn-soft); }
+.callout--success { border-color: var(--ok);     background: var(--ok-soft); }
+
+/* ---- KPI card (oversized serif numeral) -------------------------------- */
+.kpi { display: flex; flex-direction: column; gap: var(--sp-1); }
+.kpi__value { font-family: var(--font-serif); font-size: clamp(2.2rem, 5vw, 3.2rem);
+  line-height: 1; font-variant-numeric: tabular-nums; }
+.kpi__label { font-family: var(--font-mono); font-size: var(--text-sm);
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-dim); }
+
+/* ---- Diff-panel (before / after, two columns) -------------------------- */
+.diff { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin: var(--sp-4) 0; }
+.diff__side { min-width: 0; border: 1px solid var(--border); border-radius: var(--r); padding: var(--sp-4);
+  background: var(--surface); }
+.diff__side h4 { margin: 0 0 var(--sp-2); font-family: var(--font-mono); font-size: var(--text-sm);
+  text-transform: uppercase; letter-spacing: 0.07em; }
+.diff__before { border-top: 3px solid var(--danger); }
+.diff__after  { border-top: 3px solid var(--ok); }
+@media (max-width: 640px) { .diff { grid-template-columns: 1fr; } }
+
+/* ---- Pipeline / step cards --------------------------------------------- */
+.pipeline { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-4) 0;
+  counter-reset: step; align-items: stretch; }
+.pipeline__step { flex: 1 1 8rem; min-width: 7rem; position: relative;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); padding: var(--sp-4); }
+.pipeline__step::before { counter-increment: step; content: counter(step);
+  font-family: var(--font-mono); font-size: var(--text-sm); color: var(--accent-ink);
+  font-weight: 700; }
+
+/* ---- Data table (sticky head, zebra, tabular numerals) ----------------- */
+.data-table { width: 100%; border-collapse: collapse; margin: var(--sp-4) 0;
+  font-variant-numeric: tabular-nums; font-size: 0.97rem; }
+.data-table caption { text-align: left; color: var(--ink-dim);
+  font-family: var(--font-mono); font-size: var(--text-sm); margin-bottom: var(--sp-2); }
+.data-table th, .data-table td { padding: var(--sp-2) var(--sp-3); text-align: left;
+  border-bottom: 1px solid var(--border); }
+.data-table thead th { background: var(--surface-2); border-bottom: 2px solid var(--border-strong); }
+/* sticky header is OPT-IN — only for long tables inside a scroll container. On a short
+   table on a normal page it detaches and floats over rows; never make it the default. */
+.data-table--sticky thead th { position: sticky; top: 0; z-index: 1; }
+.data-table tbody tr:nth-child(even) { background: color-mix(in oklch, var(--ink) 3%, transparent); }
+.data-table td.num { text-align: right; }
+
+/* ---- Figure wrapper + caption ------------------------------------------ */
+.figure { margin: var(--sp-5) 0; }
+.figure > :first-child { margin-top: 0; }
+.figure > :last-child { margin-bottom: 0; }
+.figure :is(svg, img) { max-width: 100%; height: auto; display: block; }
+.figure__cap {
+  margin-top: var(--sp-2);
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+/* ---- Timeline / horizontal rail ---------------------------------------- */
+.timeline {
+  position: relative;
+  display: flex;
+  gap: var(--sp-4);
+  margin: var(--sp-5) 0;
+  padding: var(--sp-5) 0 0;
+  list-style: none;
+  counter-reset: timeline;
+}
+.timeline::before {
+  content: "";
+  position: absolute;
+  inset: var(--sp-3) 0 auto;
+  border-top: 2px solid var(--border-strong);
+}
+.timeline__item {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  padding-top: var(--sp-3);
+  color: var(--ink);
+}
+.timeline__item::before {
+  counter-increment: timeline;
+  content: counter(timeline);
+  position: absolute;
+  inset: calc(-1 * var(--sp-5)) auto auto 0;
+  display: grid;
+  place-items: center;
+  width: var(--sp-5);
+  height: var(--sp-5);
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.timeline__item strong { display: block; line-height: var(--leading-tight); }
+.timeline__item p { margin: var(--sp-1) 0 0; font-size: 0.95rem; color: var(--ink-dim); }
+@media (max-width: 720px) {
+  .timeline { display: block; padding: 0 0 0 var(--sp-5); }
+  .timeline::before {
+    inset: 0 auto 0 var(--sp-2);
+    border-top: none;
+    border-left: 2px solid var(--border-strong);
+  }
+  .timeline__item { padding: 0 0 var(--sp-4) var(--sp-3); }
+  .timeline__item::before { inset: 0 auto auto calc(-1 * var(--sp-5)); }
+}
+
+/* ---- Inline SVG tree / relationship helper ----------------------------- */
+.svg-tree { width: 100%; height: auto; display: block; color: var(--ink); }
+.svg-tree__edge {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.svg-tree__node {
+  fill: var(--surface);
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+.svg-tree__node--accent {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+}
+.svg-tree text {
+  fill: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+.svg-tree .muted { fill: var(--ink-dim); font-size: 11px; }
+
+/* ---- Annotated code block ---------------------------------------------- */
+.code-annot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem);
+  gap: var(--sp-3);
+  align-items: start;
+  margin: var(--sp-5) 0;
+}
+.code-annot pre { margin: 0; }
+.code-annot__line {
+  display: block;
+  margin-inline: calc(-1 * var(--sp-4));
+  padding-inline: var(--sp-4);
+}
+.code-annot__line--hi {
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  padding-left: calc(var(--sp-4) - 3px);
+}
+.code-annot__note {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  padding: var(--sp-3);
+}
+.code-annot__note + .code-annot__note { margin-top: var(--sp-2); }
+@media (max-width: 760px) { .code-annot { grid-template-columns: 1fr; } }
+
+/* ---- Sidenote / margin note -------------------------------------------- */
+.sidenote {
+  display: block;
+  margin: var(--sp-3) 0;
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--border-strong);
+  color: var(--ink-dim);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.sidenote__num {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+@media (min-width: 1260px) {
+  .sidenote {
+    float: right;
+    clear: right;
+    width: 16rem;
+    margin: 0 calc(-16rem - var(--sp-5)) var(--sp-3) var(--sp-4);
+  }
+}
+
+/* ---- CSS tabs, gated so JS-off shows all panels ------------------------ */
+.tabs {
+  margin: var(--sp-5) 0;
+  border-top: 1px solid var(--border);
+}
+.tabs__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.tabs__tab {
+  display: block;
+  margin-top: var(--sp-3);
+  font-family: var(--font-sans);
+  font-weight: 650;
+}
+.tabs__panel {
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+html.js .tabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  align-items: end;
+  border-top: none;
+}
+html.js .tabs__tab {
+  grid-row: 1;
+  margin-top: 0;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-bottom-color: var(--border-strong);
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  padding: var(--sp-2) var(--sp-3);
+  text-align: center;
+}
+html.js .tabs__input:focus-visible + .tabs__tab {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+html.js .tabs__input:checked + .tabs__tab {
+  background: var(--surface);
+  color: var(--ink);
+  border-bottom-color: var(--surface);
+}
+html.js .tabs__panel {
+  display: none;
+  grid-column: 1 / -1;
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--r) var(--r);
+  background: var(--surface);
+}
+html.js .tabs__input:checked + .tabs__tab + .tabs__panel { display: block; }
+
+/* ==========================================================================
+   INTERACTIVE COMPONENTS  (progressive enhancement — see lesson-kit.js)
+   Every one has a defined JS-off state and a print state (see @media print).
+   ========================================================================== */
+
+/* reveal — native <details>, zero-JS */
+.reveal { border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface); padding: 0 var(--sp-4); margin: var(--sp-4) 0; }
+.reveal > summary { cursor: pointer; padding: var(--sp-3) 0; font-family: var(--font-sans);
+  font-size: 0.95rem; list-style: none; display: flex; align-items: center; gap: var(--sp-2); }
+.reveal > summary::-webkit-details-marker { display: none; }
+.reveal > summary::before { content: "▸"; color: var(--accent); transition: transform var(--dur-1) var(--ease); }
+.reveal[open] > summary::before { transform: rotate(90deg); }
+.reveal > summary + * { margin-top: 0; }
+.reveal[open] > :last-child { padding-bottom: var(--sp-4); }
+
+/* quiz (MCQ) — .quiz > .quiz__q + .quiz__option[data-correct] ... + .quiz__why */
+.quiz { border: 1px solid var(--border); border-radius: var(--r); background: var(--surface);
+  padding: var(--sp-4); margin: var(--sp-4) 0; }
+.quiz__q { font-weight: 650; margin: 0 0 var(--sp-3); }
+.quiz__option { display: block; width: 100%; text-align: left; font: inherit; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: var(--sp-3); margin-bottom: var(--sp-2); color: inherit;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+.quiz__option:hover { border-color: var(--border-strong); }
+.quiz__option:active { transform: translateY(1px); }
+.quiz__option.is-correct { border-color: var(--ok); background: var(--ok-soft); }
+.quiz__option.is-wrong   { border-color: var(--danger); background: var(--danger-soft); }
+.quiz__option[disabled]  { cursor: default; }
+.quiz__why { margin: var(--sp-3) 0 0; padding: var(--sp-3); border-radius: var(--r-sm);
+  background: var(--accent-soft); font-size: 0.95rem; }
+.quiz__why[hidden] { display: none; }
+
+/* cloze (fill-in-the-blank) — <span class="cloze"><input data-answer="…"></span> */
+.cloze input { font: inherit; font-family: var(--font-mono); width: 9ch;
+  border: none; border-bottom: 2px solid var(--border-strong); background: transparent;
+  color: inherit; text-align: center; padding: 0 var(--sp-1); }
+.cloze input.is-correct { border-color: var(--ok); color: var(--ok); }
+.cloze input.is-wrong   { border-color: var(--danger); }
+
+/* flip — flashcard, OPACITY crossfade (never 3D). JS-gated: with JS off (and in
+   print) both faces stack and stay readable — progressive enhancement, not a dead card. */
+.flip { position: relative; margin: var(--sp-4) 0; text-align: center;
+  border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); }
+.flip > * { padding: var(--sp-5); }
+.flip__back { border-top: 1px dashed var(--border); }
+html.js .flip { display: grid; min-height: 6rem; cursor: pointer; }
+html.js .flip > * { grid-area: 1 / 1; display: flex; align-items: center;
+  justify-content: center; transition: opacity var(--dur-2) var(--ease); }
+html.js .flip__back { opacity: 0; border-top: none; }
+html.js .flip.is-flipped .flip__front { opacity: 0; }
+html.js .flip.is-flipped .flip__back  { opacity: 1; }
+.flip__hint { position: absolute; top: var(--sp-2); right: var(--sp-3);
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-dim);
+  transition: opacity var(--dur-1) var(--ease); }
+html.js .flip.is-flipped .flip__hint { opacity: 0; }  /* hint retreats once flipped */
+
+/* worked example — faded steps (full → blank → solo) */
+.worked { border: 1px solid var(--border); border-radius: var(--r); background: var(--surface);
+  padding: var(--sp-4); margin: var(--sp-4) 0; }
+.worked__step { padding: var(--sp-3) 0; border-bottom: 1px dashed var(--border); }
+.worked__step:last-child { border-bottom: none; }
+.worked__step .worked__answer[hidden] { display: none; }
+.worked__reveal { font: inherit; font-family: var(--font-sans); font-size: 0.9rem;
+  cursor: pointer; background: var(--accent-soft); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 0.15em 0.6em; color: var(--accent-ink); }
+
+/* sequence ordering */
+.sequence, .match, .predict, .self-rate {
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  padding: var(--sp-4);
+  margin: var(--sp-4) 0;
+}
+.sequence__q, .match__q, .predict__q, .self-rate__q {
+  font-weight: 650;
+  margin: 0 0 var(--sp-3);
+}
+.sequence__list { margin: 0 0 var(--sp-3); padding-left: var(--sp-5); }
+.sequence__item {
+  padding: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+html.js .sequence__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.sequence__controls { display: inline-flex; gap: var(--sp-1); flex: none; }
+.sequence__move, .sequence__check, .predict__check {
+  font: inherit;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  padding: 0.25em 0.65em;
+}
+.sequence__move { min-width: 2.2em; padding-inline: 0; }
+.sequence.is-correct { border-color: var(--ok); background: var(--ok-soft); }
+.sequence.is-wrong { border-color: var(--danger); background: var(--danger-soft); }
+.sequence__feedback, .predict__feedback, .self-rate__feedback {
+  margin: var(--sp-3) 0 0;
+  color: var(--ink-dim);
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+}
+.sequence__answer[hidden], .match__answer[hidden], .predict__answer[hidden],
+.predict__why[hidden], .sequence__why[hidden] { display: none; }
+
+/* matching pairs */
+.match__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+.match__col {
+  display: grid;
+  gap: var(--sp-2);
+  align-content: start;
+}
+.match__label {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-dim);
+}
+.match__button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: inherit;
+  padding: var(--sp-3);
+}
+.match__button.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.match__button.is-correct { border-color: var(--ok); background: var(--ok-soft); }
+.match__button.is-wrong { border-color: var(--danger); background: var(--danger-soft); }
+@media (max-width: 640px) { .match__grid { grid-template-columns: 1fr; } }
+
+/* predict the output */
+.predict__input {
+  display: block;
+  width: 100%;
+  min-height: 4rem;
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: inherit;
+  font: inherit;
+  font-family: var(--font-mono);
+}
+.predict__input.is-correct { border-color: var(--ok); background: var(--ok-soft); }
+.predict__input.is-wrong { border-color: var(--danger); background: var(--danger-soft); }
+.predict__answer, .predict__why, .sequence__answer, .sequence__why, .match__answer {
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  font-size: 0.95rem;
+}
+
+/* self rating, opt-in signal only */
+.self-rate__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.self-rate__button {
+  font: inherit;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: inherit;
+  padding: var(--sp-2) var(--sp-3);
+}
+.self-rate__button.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* recall score chip (optional, populated by JS) */
+.recall-score { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ink-dim); }
+
+/* ---- Motion: one signature entrance for INTERACTIVE tiles only ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal, .quiz, .flip, .worked, .sequence, .match, .predict, .self-rate {
+    animation: tile-in var(--dur-3) var(--ease) backwards;
+  }
+  @keyframes tile-in { from { opacity: 0; transform: translateY(8px); } }
+}
+/* NOTE: never animate-on-mount static text (h1/p) — only interactive tiles above. */
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal > summary::before,
+  .quiz__option,
+  html.js .flip > *,
+  .flip__hint {
+    transition: none !important;
+  }
+  .reveal[open] > summary::before {
+    content: "▾";
+    transform: none;
+  }
+  .quiz__option:active {
+    transform: none;
+  }
+}
+
+/* ---- Print: force high-contrast ink-on-white, reveal answers ----------- */
+@media print {
+  :root {
+    --bg: #fff; --surface: #fff; --surface-2: #f4f2ee;
+    --ink: #111; --ink-dim: #333; --border: #bbb; --border-strong: #888;
+    --accent: #0d5c63; --accent-ink: #0d5c63; --code-bg: #f4f2ee;
+    --shadow-elevated: none; --shadow-recessed: none;
+  }
+  body { font-size: 11pt; }
+  .lesson { max-width: 100%; padding: 0; }
+  .flip__hint, .worked__reveal, .recall-score, .sequence__controls,
+  .sequence__check, .predict__check, .self-rate { display: none !important; }
+  .sidenote { float: none !important; width: auto !important; margin: var(--sp-3) 0 !important; }
+  .reveal, .reveal[open] { border-color: #bbb; }
+  /* reveal closed <details> answers in print. Modern engines hide the subtree via
+     ::details-content/content-visibility (display:revert can't reach it); older ones
+     hide children by display. Cover both; JS also force-opens them on beforeprint. */
+  details.reveal::details-content { content-visibility: visible !important; }
+  details.reveal:not([open]) > *:not(summary) { display: revert !important; }
+  .quiz__why { display: block !important; }
+  /* flashcard: undo the JS grid/crossfade so both faces stack instead of overlapping */
+  html.js .flip, .flip { display: block !important; min-height: 0 !important; }
+  html.js .flip > *, .flip > * { position: static !important; opacity: 1 !important; padding: var(--sp-2) var(--sp-3); }
+  .flip__back { border-top: 1px dashed #bbb !important; }
+  .flip__back::before { content: "→ "; }
+  .worked__answer { display: inline !important; }
+  .sequence__answer, .sequence__why, .match__answer, .predict__answer, .predict__why {
+    display: block !important;
+  }
+  html.js .tabs { display: block !important; }
+  html.js .tabs__tab { border: 0 !important; text-align: left !important; padding: 0 !important; background: transparent !important; }
+  html.js .tabs__panel { display: block !important; border: 0 !important; padding: var(--sp-2) 0 !important; }
+  .timeline::before { border-color: #888 !important; }
+  .timeline__item::before { border-color: #0d5c63 !important; background: #fff !important; color: #0d5c63 !important; }
+  .data-table thead th { position: static !important; }  /* sticky header must not float over rows in print */
+  .card, .window, .quiz, .reveal, .worked, .sequence, .match, .predict, .pipeline__step,
+  .timeline, .timeline__item,
+  .diff__side, .figure, .code-annot, .tabs__panel { break-inside: avoid; }
+  a { color: #0d5c63; }
+}
+</style>
+<style id="page">
+  /* page-specific layout (kit stays generic) */
+  .split { display: grid; grid-template-columns: 1.2fr 1fr; gap: var(--sp-4); align-items: center; }
+  @media (max-width: 40rem) { .split { grid-template-columns: 1fr; } }
+  .chart { width: 100%; height: auto; display: block; }
+  .chart text:not([fill]) { font-family: var(--font-mono); font-size: 0.6875rem; fill: var(--ink-dim); }
+  .chart text[fill] { font-family: var(--font-mono); font-size: 0.6875rem; }
+</style>
+</head>
+<body>
+<main class="lesson">
+
+  <header class="lesson-head">
+    <span class="ordinal">Lesson 0001 · Complexity</span>
+    <h1>Spotting O(n²) before it bites</h1>
+    <p class="mission">Toward your mission: ship code that stays fast as the data grows.</p>
+  </header>
+
+  <p class="lede">By the end of this lesson you'll glance at a loop and know, in one breath,
+    whether it will crawl when the input gets big, then what to reach for instead.</p>
+
+  <div class="section-label">The shape of the problem</div>
+  <div class="split">
+    <div>
+      <p>“Quadratic” means the work grows with the <em>square</em> of the input. Double the
+        data and you don't double the work; you <strong>quadruple</strong> it. That is fine
+        for ten items and catastrophic for ten thousand.</p>
+      <table class="data-table">
+        <caption>Operations as input size <code>n</code> grows</caption>
+        <thead><tr><th>n</th><th class="num">O(n)</th><th class="num">O(n²)</th></tr></thead>
+        <tbody>
+          <tr><td>10</td><td class="num">10</td><td class="num">100</td></tr>
+          <tr><td>100</td><td class="num">100</td><td class="num">10,000</td></tr>
+          <tr><td>1,000</td><td class="num">1,000</td><td class="num">1,000,000</td></tr>
+          <tr><td>10,000</td><td class="num">10,000</td><td class="num">100,000,000</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card card--elevated kpi">
+      <span class="kpi__value">100M</span>
+      <span class="kpi__label">operations at n = 10,000, O(n²)</span>
+    </div>
+  </div>
+
+  <div class="window">
+    <div class="window__bar"><span class="window__dots"><i></i><i></i><i></i></span>growth · O(n) vs O(n²)</div>
+    <div class="window__body">
+      <svg class="chart" viewBox="0 0 320 180" role="img" aria-label="A straight line for O(n) rising gently, and a curve for O(n squared) that stays flat then shoots upward.">
+        <line x1="40" y1="158" x2="308" y2="158" stroke="currentColor" stroke-opacity="0.25"/>
+        <line x1="40" y1="158" x2="40" y2="20" stroke="currentColor" stroke-opacity="0.25"/>
+        <path d="M40,158 L300,84" fill="none" stroke="var(--info)" stroke-width="2.5"/>
+        <path d="M40,158 Q252,158 300,26" fill="none" stroke="var(--danger)" stroke-width="2.5"/>
+        <text x="238" y="80" fill="var(--info)">O(n)</text>
+        <text x="250" y="44" fill="var(--danger)">O(n²)</text>
+        <text x="150" y="174">input size →</text>
+      </svg>
+    </div>
+  </div>
+
+  <div class="section-label">Spot it in code</div>
+  <p>The tell is <strong>a loop inside a loop over the same data</strong>. Here are two versions
+    of the same task: “does this array contain duplicates?”</p>
+  <div class="diff">
+    <div class="diff__side diff__before">
+      <h4>O(n²) · every pair</h4>
+      <pre><code>for (let i = 0; i &lt; a.length; i++)
+  for (let j = i+1; j &lt; a.length; j++)
+    if (a[i] === a[j]) return true;
+return false;</code></pre>
+    </div>
+    <div class="diff__side diff__after">
+      <h4>O(n) · one pass</h4>
+      <pre><code>const seen = new Set();
+for (const x of a) {
+  if (seen.has(x)) return true;
+  seen.add(x);
+}
+return false;</code></pre>
+    </div>
+  </div>
+  <div class="callout callout--rule">
+    <span class="callout__k">Heuristic</span>
+    Trading <em>time</em> for <em>memory</em>: a hash set remembers what you've seen so you never
+    re-scan. Most O(n²) scans hide an O(n) solution behind a Set or a Map.
+  </div>
+
+  <div class="section-label">Read complexity, step by step</div>
+  <div class="worked">
+    <p>Work out the complexity of this snippet. Try each step before revealing it.</p>
+    <pre><code>for (const row of grid)        // A
+  for (const cell of row)      // B
+    total += cell;             // C</code></pre>
+    <div class="worked__step" data-id="w-loops">
+      <strong>1. Count the loops that scale with input.</strong>
+      <button class="worked__reveal">reveal</button>
+      <span class="worked__answer">Two nested loops: A over <code>n</code> rows, B over <code>m</code> cells.</span>
+    </div>
+    <div class="worked__step" data-id="w-inner">
+      <strong>2. What does the inner body cost?</strong>
+      <button class="worked__reveal">reveal</button>
+      <span class="worked__answer">Line C is O(1): one addition, independent of size.</span>
+    </div>
+    <div class="worked__step" data-id="w-total">
+      <strong>3. Combine.</strong>
+      <button class="worked__reveal">reveal</button>
+      <span class="worked__answer">O(n·m), or O(n²) for a square grid. Nested ≠ automatically n²; it's the
+        <em>product of what each loop scales over</em>.</span>
+    </div>
+  </div>
+
+  <div class="section-label">The four-step read</div>
+  <div class="pipeline">
+    <div class="pipeline__step"><strong>Count</strong><p>loops that grow with input</p></div>
+    <div class="pipeline__step"><strong>Nest</strong><p>multiply nested, add sequential</p></div>
+    <div class="pipeline__step"><strong>Dominate</strong><p>keep the fastest-growing term</p></div>
+    <div class="pipeline__step"><strong>Drop</strong><p>constants &amp; lower orders</p></div>
+  </div>
+
+  <details class="reveal">
+    <summary>Why do we drop constants and lower-order terms?</summary>
+    <p>Big-O describes <em>growth</em>, not exact counts. As <code>n</code> heads to infinity, <code>3n² + 5n + 7</code>
+      is dominated entirely by the <code>n²</code> term; the <code>5n</code> and <code>7</code> become rounding error.
+      We care how the curve <em>bends</em>, not where it starts.</p>
+  </details>
+
+  <div class="section-label">Recall <span class="recall-score"></span></div>
+
+  <div class="quiz" data-id="q-nested">
+    <p class="quiz__q">Two nested loops, each iterating over the same n-sized array. Time complexity?</p>
+    <button class="quiz__option" data-correct="false">O(n)</button>
+    <button class="quiz__option" data-correct="true">O(n²)</button>
+    <button class="quiz__option" data-correct="false">O(2n)</button>
+    <button class="quiz__option" data-correct="false">O(log n)</button>
+    <p class="quiz__why" hidden>Each element is paired with every element → n × n comparisons → O(n²).</p>
+  </div>
+
+  <p class="card">Simplify by dropping lower-order terms: <code>3n² + 5n + 7</code> is
+    O(<span class="cloze"><input data-id="c-drop" data-answer="n^2|n²|n2|n squared" aria-label="complexity" placeholder="?"></span>).</p>
+
+  <div class="flip" data-id="f-nlogn">
+    <div class="flip__front"><strong>O(n log n)</strong></div>
+    <div class="flip__back">Linearithmic: the speed of a good comparison sort (merge sort, heapsort).</div>
+  </div>
+
+  <div class="callout callout--info">
+    <span class="callout__k">Ask your teacher</span>
+    Stuck, or want this applied to code you're actually writing? Ask a follow-up. That's what I'm here for.
+  </div>
+
+  <footer class="cite">
+    Primary source: <a href="https://www.bigocheatsheet.com/">Big-O Cheat Sheet</a> ·
+    deeper: Cormen et&nbsp;al., <em>Introduction to Algorithms</em>, ch. 3 “Growth of Functions.”
+    <br>Related: <a href="#">0002 · Hash maps in one pass</a> (next lesson).
+  </footer>
+
+</main>
+<script id="kit">
+/* ==========================================================================
+   teach · lesson-kit.js  —  shared authoring source, INLINED into each lesson.
+   Progressive enhancement ONLY: every component is fully usable / legible with
+   this script disabled (see lesson-kit.css @media print and the JS-off column
+   in references/HTML-LESSON.md). No dependencies, no network, no storage.
+   Grading emits a `teach:graded` CustomEvent {id, correct, type} on document so
+   an optional future module (progress/SRS) can listen without this file knowing.
+   ========================================================================== */
+(function () {
+  "use strict";
+  // Mark that JS is live, so CSS can gate JS-only behaviour (e.g. the flashcard
+  // crossfade) and fall back to a readable stacked layout when scripting is off.
+  document.documentElement.classList.add("js");
+
+  var ready = function (fn) {
+    if (document.readyState !== "loading") fn();
+    else document.addEventListener("DOMContentLoaded", fn);
+  };
+
+  // Normalise free-text answers: Unicode NFC, trim, collapse spaces, fold case,
+  // strip typographic quotes. (Umlauts/accents preserved — only quotes normalised.)
+  function normalise(s) {
+    return (s || "")
+      .normalize("NFC")
+      .trim()
+      .replace(/\s+/g, " ")
+      .replace(/[‘’‛]/g, "'")
+      .replace(/[“”]/g, '"')
+      .toLocaleLowerCase();
+  }
+
+  function emit(el, id, correct, type, extra) {
+    var detail = { id: id || null, correct: !!correct, type: type };
+    if (extra) {
+      Object.keys(extra).forEach(function (key) { detail[key] = extra[key]; });
+    }
+    document.dispatchEvent(new CustomEvent("teach:graded", { detail: detail }));
+  }
+
+  function button(text, className, label) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = className;
+    btn.textContent = text;
+    if (label) btn.setAttribute("aria-label", label);
+    return btn;
+  }
+
+  function reveal(el) {
+    if (el) el.hidden = false;
+  }
+
+  function toArray(list) {
+    return Array.prototype.slice.call(list);
+  }
+
+  ready(function () {
+    // ---- MCQ ------------------------------------------------------------
+    document.querySelectorAll(".quiz").forEach(function (quiz) {
+      var why = quiz.querySelector(".quiz__why");
+      var id = quiz.getAttribute("data-id");
+      quiz.querySelectorAll(".quiz__option").forEach(function (opt) {
+        opt.setAttribute("type", "button");
+        opt.addEventListener("click", function () {
+          if (quiz.dataset.answered) return;
+          quiz.dataset.answered = "1";
+          var correct = opt.getAttribute("data-correct") === "true";
+          opt.classList.add(correct ? "is-correct" : "is-wrong");
+          quiz.querySelectorAll(".quiz__option").forEach(function (o) {
+            o.disabled = true;
+            if (o.getAttribute("data-correct") === "true") o.classList.add("is-correct");
+          });
+          if (why) why.hidden = false;
+          emit(quiz, id, correct, "mcq");
+        });
+      });
+    });
+
+    // ---- Cloze (fill-in-the-blank) -------------------------------------
+    document.querySelectorAll(".cloze input").forEach(function (input) {
+      var answers = (input.getAttribute("data-answer") || "").split("|").map(normalise);
+      var check = function () {
+        var val = normalise(input.value);
+        if (!val) {
+          input.classList.remove("is-correct", "is-wrong");
+          input.__teachLastClozeGrade = "";
+          return;
+        }
+        var ok = answers.indexOf(val) !== -1;
+        input.classList.toggle("is-correct", ok);
+        input.classList.toggle("is-wrong", !ok);
+        var gradeKey = val + ":" + ok;
+        if (input.__teachLastClozeGrade === gradeKey) return;
+        input.__teachLastClozeGrade = gradeKey;
+        emit(input, input.getAttribute("data-id"), ok, "cloze");
+      };
+      input.addEventListener("change", check);
+      input.addEventListener("blur", check);
+    });
+
+    // ---- Flashcard flip (opacity crossfade) ----------------------------
+    document.querySelectorAll(".flip").forEach(function (card) {
+      if (!card.querySelector(".flip__hint")) {
+        var hint = document.createElement("span");
+        hint.className = "flip__hint"; hint.textContent = "click to flip";
+        card.appendChild(hint);
+      }
+      card.setAttribute("role", "button");
+      card.setAttribute("tabindex", "0");
+      var flip = function () { card.classList.toggle("is-flipped"); };
+      card.addEventListener("click", flip);
+      card.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); }
+      });
+    });
+
+    // ---- Faded worked example (reveal steps) ---------------------------
+    document.querySelectorAll(".worked__step").forEach(function (step) {
+      var ans = step.querySelector(".worked__answer");
+      var btn = step.querySelector(".worked__reveal");
+      if (ans && btn) {
+        ans.hidden = true;
+        btn.setAttribute("type", "button");
+        btn.addEventListener("click", function () {
+          ans.hidden = false; btn.hidden = true;
+          emit(step, step.getAttribute("data-id"), true, "worked");
+        });
+      }
+    });
+
+    // ---- Ordering / sequence ------------------------------------------
+    document.querySelectorAll(".sequence").forEach(function (seq) {
+      var id = seq.getAttribute("data-id");
+      var list = seq.querySelector(".sequence__list");
+      if (!list) return;
+      var check = seq.querySelector(".sequence__check");
+      if (!check) {
+        check = button("Check order", "sequence__check", null);
+        seq.appendChild(check);
+      } else {
+        check.type = "button";
+      }
+      var feedback = seq.querySelector(".sequence__feedback");
+      if (!feedback) {
+        feedback = document.createElement("p");
+        feedback.className = "sequence__feedback";
+        feedback.setAttribute("aria-live", "polite");
+        feedback.hidden = true;
+        seq.appendChild(feedback);
+      }
+      var answer = seq.querySelector(".sequence__answer");
+      var why = seq.querySelector(".sequence__why");
+
+      function items() {
+        return toArray(list.querySelectorAll(".sequence__item"));
+      }
+      function itemLabel(item) {
+        var explicit = item.getAttribute("data-label") || item.getAttribute("aria-label");
+        if (explicit) return explicit.trim();
+        var clone = item.cloneNode(true);
+        clone.querySelectorAll(".sequence__controls").forEach(function (node) { node.remove(); });
+        return clone.textContent.replace(/\s+/g, " ").trim() || "item";
+      }
+      function reset() {
+        seq.classList.remove("is-correct", "is-wrong");
+        feedback.hidden = true;
+      }
+      function move(item, dir) {
+        reset();
+        if (dir < 0 && item.previousElementSibling) {
+          list.insertBefore(item, item.previousElementSibling);
+        }
+        if (dir > 0 && item.nextElementSibling) {
+          list.insertBefore(item.nextElementSibling, item);
+        }
+        var position = items().indexOf(item) + 1;
+        feedback.textContent = "Moved " + itemLabel(item) + " to position " + position + " of " + items().length + ".";
+        feedback.hidden = false;
+      }
+
+      items().forEach(function (item) {
+        if (item.querySelector(".sequence__controls")) return;
+        var label = itemLabel(item);
+        var controls = document.createElement("span");
+        controls.className = "sequence__controls";
+        var up = button("↑", "sequence__move", "Move '" + label + "' up");
+        var down = button("↓", "sequence__move", "Move '" + label + "' down");
+        up.addEventListener("click", function () { move(item, -1); });
+        down.addEventListener("click", function () { move(item, 1); });
+        controls.appendChild(up);
+        controls.appendChild(down);
+        item.appendChild(controls);
+      });
+
+      check.addEventListener("click", function () {
+        var invalid = false;
+        var order = items().map(function (item) {
+          if (!item.hasAttribute("data-order")) {
+            invalid = true;
+            return NaN;
+          }
+          var n = Number(item.getAttribute("data-order"));
+          if (!Number.isFinite(n)) invalid = true;
+          return n;
+        });
+        if (invalid) {
+          if (window.console && console.warn) {
+            console.warn("teach sequence skipped: every .sequence__item needs a finite data-order value", seq);
+          }
+          seq.classList.remove("is-correct");
+          seq.classList.add("is-wrong");
+          feedback.textContent = "This sequence is missing order data, so it cannot be checked.";
+          feedback.hidden = false;
+          return;
+        }
+        var correct = order.every(function (n, i) {
+          return Number.isFinite(n) && (i === 0 || order[i - 1] <= n);
+        });
+        seq.classList.toggle("is-correct", correct);
+        seq.classList.toggle("is-wrong", !correct);
+        feedback.textContent = correct ? "Correct order." : "Not yet. Move the earliest step upward and try again.";
+        feedback.hidden = false;
+        if (correct) reveal(why);
+        reveal(answer);
+        emit(seq, id, correct, "sequence");
+      });
+    });
+
+    // ---- Matching pairs ------------------------------------------------
+    document.querySelectorAll(".match").forEach(function (match) {
+      var id = match.getAttribute("data-id");
+      var selected = null;
+      var left = toArray(match.querySelectorAll(".match__left .match__button"));
+      var right = toArray(match.querySelectorAll(".match__right .match__button"));
+      var answer = match.querySelector(".match__answer");
+      var matched = {};
+
+      function clearWrong() {
+        match.querySelectorAll(".is-wrong").forEach(function (el) {
+          el.classList.remove("is-wrong");
+        });
+      }
+      function clearSelected() {
+        if (selected) {
+          selected.classList.remove("is-selected");
+          selected.setAttribute("aria-pressed", "false");
+        }
+        selected = null;
+      }
+      function allMatched() {
+        return left.every(function (btn) { return matched[btn.getAttribute("data-key")]; });
+      }
+
+      left.concat(right).forEach(function (btn) { btn.type = "button"; });
+      left.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          if (btn.disabled) return;
+          clearWrong();
+          clearSelected();
+          selected = btn;
+          btn.classList.add("is-selected");
+          btn.setAttribute("aria-pressed", "true");
+        });
+      });
+      right.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          if (btn.disabled || !selected) return;
+          var key = selected.getAttribute("data-key");
+          var correct = key && key === btn.getAttribute("data-key");
+          clearWrong();
+          if (correct) {
+            matched[key] = true;
+            selected.classList.add("is-correct");
+            btn.classList.add("is-correct");
+            selected.disabled = true;
+            btn.disabled = true;
+            selected.setAttribute("aria-pressed", "false");
+            clearSelected();
+            if (allMatched()) reveal(answer);
+          } else {
+            selected.classList.add("is-wrong");
+            btn.classList.add("is-wrong");
+          }
+          emit(match, id, correct, "matching", { pair: key || null });
+        });
+      });
+    });
+
+    // ---- Predict the output -------------------------------------------
+    document.querySelectorAll(".predict").forEach(function (predict) {
+      var id = predict.getAttribute("data-id");
+      var input = predict.querySelector(".predict__input");
+      var check = predict.querySelector(".predict__check");
+      var answer = predict.querySelector(".predict__answer");
+      var why = predict.querySelector(".predict__why");
+      var feedback = predict.querySelector(".predict__feedback");
+      if (!input) return;
+      var answers = (input.getAttribute("data-answer") || "").split("|").map(normalise);
+      if (!check) {
+        check = button("Check prediction", "predict__check", null);
+        input.insertAdjacentElement("afterend", check);
+      } else {
+        check.type = "button";
+      }
+      if (!feedback) {
+        feedback = document.createElement("p");
+        feedback.className = "predict__feedback";
+        feedback.setAttribute("aria-live", "polite");
+        feedback.hidden = true;
+        check.insertAdjacentElement("afterend", feedback);
+      }
+      check.addEventListener("click", function () {
+        var val = normalise(input.value);
+        if (!val) {
+          input.classList.remove("is-correct", "is-wrong");
+          feedback.hidden = true;
+          return;
+        }
+        var correct = answers.indexOf(val) !== -1;
+        input.classList.toggle("is-correct", correct);
+        input.classList.toggle("is-wrong", !correct);
+        feedback.textContent = correct ? "Prediction matches." : "Not this time. Compare it with the revealed answer.";
+        feedback.hidden = false;
+        reveal(answer);
+        reveal(why);
+        emit(predict, id, correct, "predict");
+      });
+    });
+
+    // ---- Self rating ---------------------------------------------------
+    document.querySelectorAll(".self-rate").forEach(function (rate) {
+      var id = rate.getAttribute("data-id");
+      var feedback = rate.querySelector(".self-rate__feedback");
+      rate.querySelectorAll(".self-rate__button").forEach(function (btn) {
+        btn.type = "button";
+        btn.addEventListener("click", function () {
+          var rating = normalise(btn.getAttribute("data-rating") || btn.textContent);
+          rate.querySelectorAll(".self-rate__button").forEach(function (other) {
+            other.classList.remove("is-selected");
+            other.setAttribute("aria-pressed", "false");
+          });
+          btn.classList.add("is-selected");
+          btn.setAttribute("aria-pressed", "true");
+          if (feedback) {
+            feedback.textContent = "Marked " + rating + ".";
+            feedback.hidden = false;
+          }
+          emit(rate, id, rating !== "again", "self-rate", { rating: rating });
+        });
+      });
+    });
+
+    // ---- Optional recall tally (updates any .recall-score element) ------
+    var scoreEl = document.querySelector(".recall-score");
+    if (scoreEl) {
+      var gradable = document.querySelectorAll('.quiz[data-id], .cloze input[data-id]').length;
+      var seen = {}, correct = 0;
+      var render = function () {
+        scoreEl.textContent = correct + (gradable ? " / " + gradable : "") + " recalled";
+      };
+      render();
+      document.addEventListener("teach:graded", function (e) {
+        // Only MCQ + cloze count toward the tally (they form the denominator above).
+        // Worked-step reveals emit events for future modules but aren't tally items.
+        if (e.detail.type !== "mcq" && e.detail.type !== "cloze") return;
+        if (!e.detail.id) return;
+        var key = e.detail.type + ":" + (e.detail.id || "");
+        if (e.detail.correct && !seen[key]) { seen[key] = true; correct++; render(); }
+      });
+    }
+
+    // ---- Print: force-open closed reveals so their answers print, then restore.
+    // Belt-and-suspenders with the CSS ::details-content rule (covers browsers
+    // that don't support it yet, whenever JS is on).
+    var openedForPrint = [];
+    window.addEventListener("beforeprint", function () {
+      document.querySelectorAll("details.reveal:not([open])").forEach(function (d) {
+        openedForPrint.push(d); d.open = true;
+      });
+    });
+    window.addEventListener("afterprint", function () {
+      openedForPrint.forEach(function (d) { d.open = false; });
+      openedForPrint = [];
+    });
+  });
+})();
+</script>
+</body>
+</html>

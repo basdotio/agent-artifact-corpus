@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>第一关</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Long+Cang&family=Noto+Sans+SC:wght@700;900&family=Press+Start+2P&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+// 第一关: a seven-year-old draws her mother's workday as a game level on graph
+// paper. One graph square = one pixel. Pencil boots into Famicom colour when the
+// level is played; at the turn it goes back to paper, and the finish is a hug.
+const { ease, clamp, lerp, fx, draw, color } = CV;
+const W = 1920, H = 1080;
+
+// === THEME ===================================================================
+const T = {
+  paper: '#F4F1E6', grid: '#9FC0DA', graphite: '#3A3A44', crayon: '#D8342C',
+  desk: '#4E3B2C', margin: '#E59A9A',
+  hand: '"Long Cang", cursive', pix: '"Press Start 2P", monospace', sans: '"Noto Sans SC", sans-serif',
+  sky: { morning: '#5C94FC', noon: '#3CBCFC', after: '#FCA044', dusk: '#E45C10', violet: '#6844FC', late: '#24188C', night: '#101444' },
+};
+// Famicom palette: the only colours the game has.
+const PAL = {
+  K: '#000000', W: '#FCFCFC', S: '#FCBCB0', H: '#503000', T: '#008888', o: '#C84C0C', O: '#FCA044',
+  B: '#0058F8', b: '#0000BC', C: '#D82800', Y: '#F8B800', G: '#00A800', g: '#B8F818', D: '#7C7C7C',
+  L: '#BCBCBC', p: '#6844FC', P: '#F878F8', n: '#881400', E: '#FCE0A8', t: '#00A8A8', w: '#3CBCFC',
+};
+const GROUND = 48;           // top row of the ground
+const PAGE_EDGE = 440;       // page one ends here; the finish is on the next page
+
+// === BUFFERS =================================================================
+const bufs = {};
+function buf(key, w, h) {
+  let c = bufs[key];
+  if (!c) { c = document.createElement('canvas'); c._g = c.getContext('2d', { willReadFrequently: true }); bufs[key] = c; }
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  c._g.imageSmoothingEnabled = false;
+  return c;
+}
+
+// === SPRITES =================================================================
+function spr(rows, sub = {}) {
+  const h = rows.length, w = Math.max(...rows.map((r) => r.length));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'); const cells = [];
+  rows.forEach((r, y) => [...r].forEach((ch, x) => {
+    if (ch === '.' || ch === ' ') return;
+    const k = sub[ch] ?? ch, col = PAL[k] ?? k;
+    g.fillStyle = col; g.fillRect(x, y, 1, 1); cells.push({ x, y, col });
+  }));
+  c.cells = cells; c.w = w; c.h = h; return c;
+}
+function white(S) {
+  const c = document.createElement('canvas'); c.width = S.w; c.height = S.h;
+  const g = c.getContext('2d'); g.fillStyle = PAL.W; for (const k of S.cells) g.fillRect(k.x, k.y, 1, 1);
+  c.w = S.w; c.h = S.h; c.cells = S.cells; return c;
+}
+function put(g, S, x, y, flip = false) {
+  x = Math.round(x); y = Math.round(y);
+  if (!flip) { g.drawImage(S, x, y); return; }
+  g.save(); g.translate(x + S.w, y); g.scale(-1, 1); g.drawImage(S, 0, 0); g.restore();
+}
+
+const MOM_HEAD = [
+  '....HHHH....',
+  '..HHHHHHHH..',
+  '.HHHHHHHHHH.',
+  'HHHSSSSSSHH.',
+  'HHSSKSSKSSH.',
+  'HHSSKSSKSSH.',
+  '.HSSSSSSSS..',
+  '..SSSCCSSS..',
+  '...SSSSSS...',
+  '....SSSS....',
+];
+const MOM_BODY = [
+  '..TTTWWTTT..',
+  '.TTTTWWTTTT.',
+  'TTTTTTTTTTTo',
+  'STTTTTTTTToo',
+  'STTTTTTTTOoo',
+  'S.TTTTTTToOo',
+  '..TTTTTTT.oo',
+  '..TTTTTTT...',
+];
+const LEGS = {
+  stand: ['...BBB.BBB..', '...BBB.BBB..', '...BBB.BBB..', '..KKKK.KKKK.'],
+  walk:  ['...BBB..BBB.', '..BBB...BBB.', '..BBB....BB.', '.KKKK...KKKK'],
+  jump:  ['..BBBBBBBB..', '.BBB....BBB.', 'KKK......KKK', '............'],
+};
+function momPose(legs, headDx = 0, headDy = 0) {
+  const rows = []; for (let i = 0; i < 22; i++) rows.push('.'.repeat(14));
+  const stamp = (art, ox, oy) => art.forEach((r, y) => [...r].forEach((ch, x) => {
+    if (ch === '.') return; const row = rows[oy + y].split(''); row[ox + x] = ch; rows[oy + y] = row.join('');
+  }));
+  stamp(MOM_BODY, 0, 10); stamp(legs, 0, 18); stamp(MOM_HEAD, headDx, headDy);
+  return rows;
+}
+const MOM = {
+  stand: spr(momPose(LEGS.stand)),
+  walk: spr(momPose(LEGS.walk)),
+  jump: spr(momPose(LEGS.jump)),
+  bow: spr(momPose(LEGS.stand, 2, 2)),   // head dropped forward over the body
+};
+
+const KID = {
+  down: spr([
+    '....HHHHHH....', '..HHHHHHHHHH..', '..HHSSSSSSHH..', '..H.SKSSKS.H..', '....SSSSSS....',
+    '....SSCCSS....', '.....SSSS.....', '....CCCCCC....', '...SCCCCCCS...', '...SCCCCCCS...',
+    '....CCCCCC....', '...CCCCCCCC...', '..CCCCCCCCCC..', '.....SS.SS....', '.....SS.SS....', '....KKK.KKK...',
+  ]),
+  open: spr([
+    '....HHHHHH....', '..HHHHHHHHHH..', '..HHSSSSSSHH..', '..H.SKSSKS.H..', '....SSSSSS....',
+    'S...SSCCSS...S', '.S...SSSS...S.', '..S.CCCCCC.S..', '...SCCCCCCS...', '....CCCCCC....',
+    '....CCCCCC....', '...CCCCCCCC...', '..CCCCCCCCCC..', '.....SS.SS....', '.....SS.SS....', '....KKK.KKK...',
+  ]),
+};
+
+// the hug: she kneels, the kid leans in
+const MOM_KNEEL = spr([
+  '....HHHH......', '..HHHHHHHH....', '.HHHHHHHHHH...', 'HHHSSSSSSHH...', 'HHSSSSSSSSH...', 'HHSKKSKKSSH...',
+  '.HSSSSSSSS....', '..SSSCCSSS....', '...SSSSSS.....', '....SSSS......', '..TTTWWTTTT...', '.TTTTWWTTTTTSS',
+  'TTTTTTTTTTTTSS', 'TTTTTTTTTTT...', '.TTTTTTTTTT...', '.BBBBBBBBBB...', 'KKKBBBBBBBBB..', 'KKK.BBBBBBBB..',
+]);
+const KID_HUG = spr([
+  '....HHHHHH....', '..HHHHHHHHHH..', '..HHSSSSSSHH..', '..H.KKSKKS.H..', '....SSSSSS....', '....SCCSSS....',
+  '.....SSSS.....', 'SSS.CCCCCC....', 'SSSSCCCCCC....', '....CCCCCCS...', '....CCCCCCS...', '...CCCCCCCC...',
+  '..CCCCCCCCCC..', '.....SS.SS....', '.....SS.SS....', '....KKK.KKK...',
+]);
+function hugPair(g) {
+  put(g, MOM_KNEEL, 449, GROUND - 18);
+  put(g, KID_HUG, 458, GROUND - 16);
+  g.fillStyle = PAL.S; g.fillRect(468, GROUND - 7, 2, 2);   // her hand on the kid's back
+}
+
+const SHROOM = [
+  '...CCCCCC...', '.CCWWCCCCCC.', 'CCCWWCCCWWCC', 'CCCCCCCCWWCC', 'CCWWCCCCCCCC', 'CCWWCCCCCCCC', '.CCCCCCCCCC.',
+  '...SSSSSS...', '...SSSSSS...', '...SKSSKS...', '..DDDDDDDD..', '.DDDDDDDDDD.', '.DDDDDDDDDD.', '.DDDDDDDKKS.',
+  '.DDDDDDDKgS.', '.DDDDDDDDD..', '..DDDDDDDD..', '..DDDDDDDD..', '..DDDDDDDD..', '...bb..bb...', '...bb..bb...', '..KKK..KKK..',
+];
+const SHROOMS = [
+  spr(SHROOM), spr(SHROOM, { C: 'o', D: 'b' }), spr(SHROOM, { C: 'p', D: 'D' }),
+  spr(SHROOM, { C: 'G', D: 'n' }), spr(SHROOM, { C: 'C', D: 'T' }), spr(SHROOM, { C: 'o', D: 'D' }),
+];
+
+const BOSS = spr([
+  '.......KKKKKKKKKK.......', '.....KKKKKKKKKKKKKK.....', '....KKKKKKKKKKKKKKKK....', '....KSSSSSSSSSSSSSSK....',
+  '....SKKKKSSSSSSKKKKS....', '....SSSKKKSSSSKKKSSS....', '....SSWKKSSSSSSKKWSS....', '....SSSSSSSSSSSSSSSS....',
+  '....SSSSSSSOOSSSSSSS....', '....SSSKKKKKKKKKKSSS....', '....SSSKCCCCCCCCKSSS....', '.....SSKKKKKKKKKKSS.....',
+  '......SSSSSSSSSSSS......', '...KKKKKKWWCCWWKKKKKK...', '..KKKKKKKKWCCWKKKKKKKK..', '.KKKKKKKKKKCCKKKKKKKKKK.',
+  'KKKKKKKKKKKCCKKKKKKKKKKK', 'KKKKKKKKKKCCCCKKKKKKKKKK', 'KKKKKKKKKKCCCCKKKKKKKKKK', 'SSKKKKKKKKKCCKKKKKKKKKSS',
+  'SSKKKKKKKKKKKKKKKKKKKKSS', 'SS.KKKKKKKKKKKKKKKKKK.SS', '...KKKKKKKKKKKKKKKKKK...', '...KKKKKKKKKKKKKKKKKK...',
+  '...DDDDDDDDDDDDDDDDDD...', '...DDDDDDDD..DDDDDDDD...', '...DDDDDDDD..DDDDDDDD...', '...DDDDDDDD..DDDDDDDD...',
+  '...DDDDDDDD..DDDDDDDD...', '...DDDDDDDD..DDDDDDDD...', '..KKKKKKKKK..KKKKKKKKK..', '..KKKKKKKKK..KKKKKKKKK..',
+]);
+const BOSS_FLASH = white(BOSS);
+
+const CLOUD = spr([
+  '......LLLL..........', '....LLWWWWLL..LLL...', '...LWWWWWWWWLLWWWL..', '.LLWWWWWWWWWWWWWWWLL',
+  'LWWWWWWWWWWWWWWWWWWL', 'LWWWWWWWWWWWWWWWWWWL', '.LLWWWWWWWWWWWWWWLL.', '...LLLLLLLLLLLLLL...',
+]);
+
+// === THE LEVEL (static, painted once; one pixel = one graph square) ==========
+const WW = 600, WH = 60;
+const WORLD = document.createElement('canvas'); WORLD.width = WW; WORLD.height = WH;
+(function paintWorld() {
+  const g = WORLD.getContext('2d');
+  const R = (c, x, y, w, h) => { g.fillStyle = PAL[c] ?? c; g.fillRect(x, y, w, h); };
+  // clouds first, so buildings stand in front of them
+  for (const [cx, cy] of [[40, 8], [120, 11], [200, 7], [270, 12], [350, 8], [396, 5], [530, 6]]) g.drawImage(CLOUD, cx, cy);
+  // ground: Famicom bricks
+  for (let y = GROUND; y < WH; y++) for (let x = 0; x < WW; x++) {
+    const course = Math.floor((y - GROUND) / 4), off = course % 2 ? 4 : 0;
+    let c = 'o';
+    if (y === GROUND) c = 'O';
+    else if ((y - GROUND) % 4 === 0 || (x + off) % 8 === 0) c = 'n';
+    R(c, x, y, 1, 1);
+  }
+  // home: a block of flats with a door
+  R('L', 2, 12, 32, 36); R('D', 2, 12, 32, 2);
+  for (let wx = 5; wx < 32; wx += 7) for (let wy = 16; wy < 36; wy += 8) { R('b', wx, wy, 5, 5); R('w', wx + 1, wy + 1, 2, 2); }
+  R('H', 20, 38, 7, 10); R('Y', 25, 43, 1, 1);
+  // a bush and a lamp
+  for (let x = 36; x < 48; x++) for (let y = 42; y < 48; y++) if ((x - 42) ** 2 / 36 + (y - 48) ** 2 / 36 < 1) R(((x * 7 + y * 3) % 5) ? 'G' : 'g', x, y, 1, 1);
+  R('D', 72, 30, 2, 18); R('D', 70, 29, 6, 2); R('Y', 71, 31, 4, 2);
+  // the puddle
+  R('b', 52, 48, 11, 2); R('B', 53, 48, 9, 1); R('W', 55, 48, 2, 1); R('W', 59, 48, 1, 1);
+  // the train car (seen inside)
+  R('D', 82, 24, 110, 2); R('L', 82, 26, 110, 21); R('D', 82, 46, 110, 2);
+  for (let wx = 88; wx < 186; wx += 14) g.clearRect(wx, 29, 9, 8);
+  R('T', 82, 39, 110, 1);
+  for (let x = 84; x < 190; x++) R('D', x, 27, 1, 1);
+  for (let x = 87; x < 190; x += 6) { R('K', x, 28, 1, 2); R('K', x - 1, 30, 3, 1); }
+  for (let x = 95; x < 190; x += 26) R('Y', x, 26, 1, 20);
+  // office tower, then the boss's floor
+  R('E', 214, 10, 148, 38); R('D', 214, 10, 148, 2);
+  for (let wx = 220; wx < 296; wx += 12) { R('w', wx, 16, 8, 10); R('W', wx + 1, 17, 2, 2); }
+  for (let dx = 222; dx < 296; dx += 26) { R('H', dx, 40, 16, 2); R('H', dx + 1, 42, 2, 6); R('H', dx + 13, 42, 2, 6); R('K', dx + 4, 33, 8, 7); R('g', dx + 5, 34, 6, 4); }
+  g.clearRect(304, 14, 54, 18); R('D', 303, 13, 56, 1); R('D', 303, 32, 56, 1); R('D', 330, 14, 1, 18);
+  // the road home: low buildings, lamps and three things to jump
+  for (const [bx, bw, bh] of [[366, 16, 14], [386, 12, 20], [402, 18, 12]]) {
+    R('D', bx, GROUND - bh, bw, bh);
+    for (let wx = bx + 2; wx < bx + bw - 2; wx += 4) for (let wy = GROUND - bh + 2; wy < GROUND - 3; wy += 5) R('Y', wx, wy, 2, 2);
+  }
+  R('C', 380, 43, 4, 5); R('W', 381, 44, 1, 1); R('C', 379, 44, 6, 1);   // a hydrant
+  R('H', 397, 44, 10, 1); R('H', 398, 45, 1, 3); R('H', 405, 45, 1, 3); R('H', 397, 41, 10, 1); // a bench
+  R('G', 417, 42, 5, 6); R('g', 417, 42, 5, 1);                             // a bin
+  // the finish, on the next page: a little house, door open
+  for (let y = 28; y < 37; y++) { const half = (y - 28) * 2 + 2; R('C', 461 - half, y, half * 2, 1); }
+  R('O', 447, 37, 28, 11); R('Y', 450, 39, 6, 5); R('n', 452, 39, 1, 5); R('n', 450, 41, 6, 1);
+  R('K', 461, 38, 9, 10); R('H', 470, 38, 1, 10);
+})();
+
+// textures: graphite grain and paper fibre (seeded, painted once)
+const GRAIN = document.createElement('canvas'); GRAIN.width = GRAIN.height = 256;
+const FIBRE = document.createElement('canvas'); FIBRE.width = FIBRE.height = 512;
+(function () {
+  const r = CV.rand(7), g = GRAIN.getContext('2d');
+  g.strokeStyle = '#000';
+  for (let i = 0; i < 2600; i++) { const x = r() * 256, y = r() * 256, l = 2 + r() * 7; g.globalAlpha = 0.25 + r() * 0.6; g.lineWidth = 0.6 + r() * 1.1; g.beginPath(); g.moveTo(x, y); g.lineTo(x + l * 0.5, y - l * 0.86); g.stroke(); }
+  const r2 = CV.rand(11), f = FIBRE.getContext('2d');
+  for (let i = 0; i < 9000; i++) { f.fillStyle = r2() < 0.5 ? 'rgba(120,100,70,0.07)' : 'rgba(255,255,255,0.18)'; f.fillRect(r2() * 512, r2() * 512, 1 + r2() * 2, 1 + r2() * 2); }
+})();
+const STARS = (() => { const r = CV.rand(3), out = []; for (let i = 0; i < 60; i++) out.push([360 + Math.floor(r() * 170), 1 + Math.floor(r() * 26), r() < 0.3]); return out; })();
+
+// === THE VIEW: one renderer for paper and game ===============================
+function pencilize(L, crayon) {
+  const w = L.width, h = L.height, P = buf('P', w, h);
+  const id = L._g.getImageData(0, 0, w, h), d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3]; if (!a) continue;
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    if (crayon && r === 0xD8 && g === 0x28 && b === 0) { d[i] = 216; d[i + 1] = 52; d[i + 2] = 44; d[i + 3] = 235; continue; }
+    const lum = (0.3 * r + 0.59 * g + 0.11 * b) / 255;
+    const al = lum > 0.93 ? 0.05 : 0.14 + 0.72 * Math.pow(1 - lum, 0.85);
+    d[i] = 58; d[i + 1] = 58; d[i + 2] = 68; d[i + 3] = Math.round(al * a);
+  }
+  P._g.putImageData(id, 0, 0);
+  return P;
+}
+
+const sx = (V, x) => (x - V.cx) * V.cs + W / 2;
+const sy = (V, y) => (y - V.cy) * V.cs + H / 2;
+
+function view(ctx, V) {
+  const cs = V.cs;
+  const ox = Math.floor(V.cx - W / 2 / cs) - 1, oy = Math.floor(V.cy - H / 2 / cs) - 1;
+  const cols = Math.ceil(W / cs) + 3, rows = Math.ceil(H / cs) + 3;
+  const L = buf('L', cols, rows), g = L._g;
+  g.clearRect(0, 0, cols, rows);
+  g.save(); g.translate(-ox, -oy);
+  g.globalAlpha = V.worldAlpha ?? 1; g.drawImage(WORLD, 0, 0); g.globalAlpha = 1;
+  if (V.hideFinish) g.clearRect(PAGE_EDGE + 1, 0, 200, GROUND);
+  if (V.stars && (V.boot ?? 0) > 0) for (const [x, y, tw] of STARS) if (!tw || Math.floor(V.beat ?? 0) % 2) { g.fillStyle = PAL.W; g.fillRect(x, y, 1, 1); }
+  if (V.dyn) V.dyn(g);
+  g.restore();
+  const X0 = sx(V, ox), Y0 = sy(V, oy);
+  const shake = V.shake || { x: 0, y: 0 };
+  ctx.save(); ctx.translate(shake.x, shake.y);
+  ctx.imageSmoothingEnabled = false;
+
+  const scan = clamp(V.boot ?? 0, 0, 1) * H;
+  if (scan < H) {                                       // paper
+    ctx.save(); ctx.beginPath(); ctx.rect(-40, scan, W + 80, H - scan + 40); ctx.clip();
+    ctx.fillStyle = T.paper; ctx.fillRect(-40, -40, W + 80, H + 80);
+    paperGrain(ctx, V);
+    gridLines(ctx, V, ox, oy, cols, rows, X0, Y0, 1);
+    const P = pencilize(L, V.crayon);
+    const S = buf('S', W, H), sg = S._g;
+    sg.clearRect(0, 0, W, H);
+    sg.drawImage(P, X0, Y0, cols * cs, rows * cs);
+    sg.save(); sg.globalCompositeOperation = 'destination-out'; sg.globalAlpha = 0.42;
+    const k = Math.max(0.6, cs / 18);
+    sg.translate(X0 % (256 * k), Y0 % (256 * k)); sg.scale(k, k); sg.fillStyle = sg.createPattern(GRAIN, 'repeat'); sg.fillRect(-256, -256, W / k + 512, H / k + 512);
+    sg.restore();
+    ctx.drawImage(S, 0, 0);
+    gridLines(ctx, V, ox, oy, cols, rows, X0, Y0, 0.35);
+    if (V.flagSketch) flagSketch(ctx, V, V.flagSketch);
+    if (V.pageEdge) pageEdge(ctx, V);
+    ctx.restore();
+  }
+  if (scan > 0) {                                       // game
+    ctx.save(); ctx.beginPath(); ctx.rect(-40, -40, W + 80, scan + 40); ctx.clip();
+    ctx.fillStyle = V.sky; ctx.fillRect(-40, -40, W + 80, H + 80);
+    ctx.drawImage(L, X0, Y0, cols * cs, rows * cs);
+    ctx.restore();
+    if (scan < H) {                                     // the raster line
+      ctx.fillStyle = 'rgba(252,252,252,0.9)'; ctx.fillRect(-40, scan - cs * 0.5, W + 80, cs * 0.5);
+      ctx.fillStyle = 'rgba(60,188,252,0.5)'; ctx.fillRect(-40, scan, W + 80, cs * 0.35);
+    }
+  }
+  ctx.restore();
+  for (const n of V.notes || []) note(ctx, V, n);
+  if (V.hud) hud(ctx, V.hud);
+}
+
+function paperGrain(ctx, V) {
+  ctx.save();
+  const k = Math.max(0.5, V.cs / 18);
+  ctx.translate(sx(V, 0) % (512 * k), sy(V, 0) % (512 * k)); ctx.scale(k, k);
+  ctx.fillStyle = ctx.createPattern(FIBRE, 'repeat'); ctx.fillRect(-512, -512, W / k + 1024, H / k + 1024); ctx.restore();
+}
+
+function gridLines(ctx, V, ox, oy, cols, rows, X0, Y0, alpha) {
+  const cs = V.cs, a = clamp((cs - 2.5) / 9, 0.2, 0.9) * alpha;
+  ctx.save(); ctx.strokeStyle = T.grid;
+  for (const heavy of [false, true]) {
+    ctx.beginPath();
+    for (let i = 0; i <= cols; i++) if ((((ox + i) % 5) + 5) % 5 === 0 === heavy) { const x = Math.round(X0 + i * cs) + 0.5; ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let j = 0; j <= rows; j++) if ((((oy + j) % 5) + 5) % 5 === 0 === heavy) { const y = Math.round(Y0 + j * cs) + 0.5; ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.globalAlpha = heavy ? a : a * 0.5; ctx.lineWidth = heavy ? Math.max(1, cs * 0.07) : Math.max(0.8, cs * 0.04);
+    ctx.stroke();
+  }
+  // the notebook's red margin line
+  const mx = sx(V, -4);
+  if (mx > -10 && mx < W + 10) { ctx.globalAlpha = 0.8 * alpha; ctx.strokeStyle = T.margin; ctx.lineWidth = Math.max(1.5, cs * 0.12); ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, H); ctx.stroke(); }
+  ctx.restore();
+}
+
+function pageEdge(ctx, V) {
+  const x = sx(V, PAGE_EDGE);
+  if (x < W) {
+    ctx.save();
+    ctx.fillStyle = T.desk; ctx.fillRect(x, -40, W - x + 80, H + 80);
+    const sh = ctx.createLinearGradient(x, 0, x + 40, 0); sh.addColorStop(0, 'rgba(0,0,0,0.35)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sh; ctx.fillRect(x, -40, 40, H + 80);
+    ctx.fillStyle = '#E9E4D4'; ctx.fillRect(x, -40, Math.max(3, V.cs * 0.5), H + 80);   // the next page, under this one
+    ctx.restore();
+  }
+  const lx = sx(V, -14);
+  if (lx > -40) { ctx.save(); ctx.fillStyle = T.desk; ctx.fillRect(-40, -40, lx + 40, H + 80); ctx.restore(); }
+}
+
+// pencil strokes in world cells
+function pencilLine(ctx, V, pts, p = 1, wCells = 0.22, col = T.graphite) {
+  if (p <= 0) return;
+  ctx.save(); ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(2, V.cs * wCells); ctx.globalAlpha *= 0.85;
+  draw.drawOn(ctx, pts.map(([x, y]) => [sx(V, x), sy(V, y)]), p);
+  ctx.restore();
+}
+function flagSketch(ctx, V, f) {
+  const x = 428;
+  pencilLine(ctx, V, [[x, GROUND], [x, 14]], f.pole);
+  pencilLine(ctx, V, [[x, 14], [x + 7, 17], [x, 20]], f.flag);
+  pencilLine(ctx, V, [[x - 4, 11], [x + 10, 23]], f.cross, 0.32);
+  pencilLine(ctx, V, [[x + 10, 11], [x - 4, 23.5]], f.cross, 0.32);
+}
+
+// her pencil, seen from above: the tip at (x, y), body up and to the right
+function pencil(ctx, x, y, scale = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.85); ctx.scale(scale, scale);
+  const L = 980, w = 62, tip = 120;
+  ctx.save(); ctx.translate(26, 34); ctx.fillStyle = 'rgba(40,30,20,0.16)';
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(tip, -w / 2); ctx.lineTo(L, -w / 2); ctx.lineTo(L, w / 2); ctx.lineTo(tip, w / 2); ctx.closePath(); ctx.fill(); ctx.restore();
+  ctx.fillStyle = '#E8C99C'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(tip, -w / 2); ctx.lineTo(tip, w / 2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#34343C'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(tip * 0.3, -w * 0.15); ctx.lineTo(tip * 0.3, w * 0.15); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#F2B705'; ctx.fillRect(tip, -w / 2, L - tip - 110, w);
+  ctx.fillStyle = '#D99A00'; ctx.fillRect(tip, w * 0.12, L - tip - 110, w * 0.38);
+  ctx.fillStyle = '#FFD84A'; ctx.fillRect(tip, -w * 0.42, L - tip - 110, w * 0.14);
+  ctx.fillStyle = '#B9B9B4'; ctx.fillRect(L - 110, -w / 2 - 2, 46, w + 4);
+  ctx.fillStyle = '#E58C8C'; ctx.fillRect(L - 64, -w / 2, 64, w);
+  // wavy wood edge where the paint stops
+  ctx.fillStyle = '#F2B705';
+  for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(tip, -w / 2 + w / 6 + i * w / 3, w / 6, Math.PI / 2, -Math.PI / 2, false); ctx.fill(); }
+  ctx.restore();
+}
+
+// the kid's handwriting, anchored in the world
+function note(ctx, V, n) {
+  const p = clamp(n.p ?? 1, 0, 1), alpha = n.alpha ?? 1; if (p <= 0 || alpha <= 0) return;
+  const fs = n.size * V.cs, X = sx(V, n.x), Y = sy(V, n.y);
+  ctx.save(); ctx.translate(X, Y); ctx.rotate(n.rot ?? -0.03);
+  ctx.font = `${fs}px ${T.hand}`; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  const w = ctx.measureText(n.text).width;
+  ctx.beginPath(); ctx.rect(-fs * 0.2, -fs * 1.2, (w + fs * 0.4) * p, fs * 1.6); ctx.clip();
+  ctx.globalAlpha = alpha;
+  if (n.halo) { ctx.lineJoin = 'round'; ctx.strokeStyle = n.halo; ctx.lineWidth = fs * 0.16; ctx.strokeText(n.text, 0, 0); }
+  if (n.crayon) {                                       // wax: let the paper show through
+    const bw = Math.ceil(w + fs * 0.6), bh = Math.ceil(fs * 1.7), B = buf('crayon', bw, bh), bg = B._g;
+    bg.clearRect(0, 0, bw, bh); bg.save(); bg.font = ctx.font; bg.textBaseline = 'alphabetic';
+    bg.fillStyle = n.color; bg.fillText(n.text, fs * 0.2, fs * 1.25);
+    bg.globalCompositeOperation = 'destination-out'; bg.globalAlpha = 0.4; bg.fillStyle = bg.createPattern(GRAIN, 'repeat'); bg.fillRect(0, 0, bw, bh); bg.restore();
+    ctx.imageSmoothingEnabled = true; ctx.drawImage(B, -fs * 0.2, -fs * 1.25);
+  } else { ctx.fillStyle = n.color ?? T.graphite; ctx.fillText(n.text, 0, 0); }
+  ctx.restore();
+}
+
+// the Famicom HUD
+function hud(ctx, h) {
+  const a = h.alpha ?? 1; if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a; ctx.font = `34px ${T.pix}`; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+  const txt = (s, x, y, c = PAL.W) => { ctx.fillStyle = '#000'; ctx.fillText(s, x + 4, y + 4); ctx.fillStyle = c; ctx.fillText(s, x, y); };
+  txt('MAMA', 150, 56);
+  const lp = clamp(h.livesP ?? 1, 0, 1);
+  if (lp > 0) { ctx.save(); const k = lp < 1 ? 1 + 0.6 * Math.sin(lp * Math.PI) : 1; ctx.translate(150, 108); ctx.scale(k, k); txt('×1', 0, 0, h.livesHot ? PAL.Y : PAL.W); ctx.restore(); }
+  txt('WORLD', 860, 56); txt('1-1', 894, 108);
+  txt('TIME', 1560, 56); if (!h.blink) txt(h.time, 1560, 108, h.timeHot ? PAL.Y : PAL.W);
+  ctx.restore();
+}
+
+// 1-bit Chinese, the way a Famicom cart would print it
+const pixCache = {};
+function pixText(str, colour) {
+  const key = str + colour; if (pixCache[key]) return pixCache[key];
+  const gp = 16, c = document.createElement('canvas'); c.width = gp * str.length + 4; c.height = gp + 4;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.font = `900 ${gp}px ${T.sans}`; g.textBaseline = 'top'; g.fillStyle = '#fff'; g.fillText(str, 2, 1);
+  const id = g.getImageData(0, 0, c.width, c.height), d = id.data, rgb = color.parse(colour);
+  for (let i = 0; i < d.length; i += 4) { const on = d[i + 3] > 120; d[i] = rgb[0]; d[i + 1] = rgb[1]; d[i + 2] = rgb[2]; d[i + 3] = on ? 255 : 0; }
+  g.putImageData(id, 0, 0);
+  return (pixCache[key] = c);
+}
+
+// === MOTION HELPERS ==========================================================
+const eighth = (s) => Math.floor((s.beat || 0) * 2) % 2;          // walk cycles step on eighth notes
+const walkPose = (s, moving) => (moving && eighth(s) ? MOM.walk : MOM.stand);
+const jumpY = (t, t0, dur, h) => { const u = (t - t0) / dur; return u > 0 && u < 1 ? Math.round(-4 * h * u * (1 - u)) : 0; };
+const timeStr = (m) => { const hh = Math.floor(m / 60), mm = Math.floor(m % 60); return String(hh).padStart(2, '0') + String(mm).padStart(2, '0'); };
+function fire(g, s, mx, my, reach) {
+  const f = Math.floor((s.beat || 0) * 4);
+  for (let k = 0; k < 9; k++) {
+    const d = k * 3.2; if (d > reach) break;
+    const r = Math.max(1, 3.6 - k * 0.3) + ((f + k) % 2 ? 0.6 : 0), cx = Math.round(mx - d), cy = Math.round(my + ((f + k) % 3) - 1);
+    g.fillStyle = k < 1 ? PAL.W : k < 3 ? PAL.Y : k < 6 ? PAL.O : PAL.C;
+    for (let y = -Math.ceil(r); y <= r; y++) for (let x = -Math.ceil(r); x <= r; x++) if (x * x + y * y <= r * r) g.fillRect(cx + x, cy + y, 1, 1);
+  }
+}
+const MOM_Y = GROUND - 22;
+const HUG_WORDS = ['要', '抱', '一', '下'];
+const hugNote = (i, extra) => ({ x: 438 + i * 12, y: 23, size: 12.5, text: HUG_WORDS[i], color: T.crayon, crayon: true, rot: -0.04 + i * 0.015, ...extra });
+
+// === VIDEO ===================================================================
+CV.create({
+  width: W, height: H, fps: 30, background: T.paper, lang: 'zh-CN',
+  fonts: [`400 40px ${T.hand}`, `400 34px ${T.pix}`, `900 16px ${T.sans}`, `700 44px ${T.sans}`],
+  subtitles: { style: { font: `700 58px ${T.sans}`, color: '#FCFCFC', box: 'rgba(0,0,0,0.9)', radius: 0, y: 0.935, padX: 30, padY: 16 } },
+  // the score is one piece written for this film in score.mjs (docs/music-and-sound.md)
+  music: { bpm: 124, key: 'F', mode: 'major', kit: 'room', script: 'score.mjs' },
+  scenes: [
+    // 1 — the page: pencil fills the mother, square by square
+    {
+      id: 'page', voiceDelay: 2.0, tail: 1.1, energy: 0.25,
+      sfx: [{ at: 0.1, type: 'paper', gain: 0.6 }],
+      draw(ctx, s) {
+        const tg = s.when('游戏', 6.7), done = s.when('画了', 6.2) + 0.2;
+        const pull = s.at(tg - 0.1, 1.5, ease.inOutCubic);
+        const cs = Math.exp(lerp(Math.log(46), Math.log(6.2), pull));
+        const V = { cx: lerp(29, 152, pull), cy: lerp(37.5, 30, pull), cs, boot: 0, pageEdge: true, worldAlpha: lerp(0.4, 1, pull) };
+        const order = MOM.stand.cells.map((c, i) => ({ ...c, k: c.y + (((i * 37) % 11) / 11) * 2.5 })).sort((a, b) => a.k - b.k);
+        const n = Math.floor(order.length * clamp((s.t - 0.25) / (done - 0.25), 0, 1));
+        V.dyn = (g) => { for (let i = 0; i < n; i++) { g.fillStyle = order[i].col; g.fillRect(22 + order[i].x, MOM_Y + order[i].y, 1, 1); } };
+        V.notes = [
+          { x: 37, y: 31, size: 4.2, text: '妈妈', p: s.at(s.when('给我', 5.3) - 0.2, 0.5), rot: -0.06 },
+          { x: 0, y: -10, size: 16, text: '1-1  妈妈上班', rot: -0.02 },
+        ];
+        view(ctx, V);
+        if (pull < 0.5) pencilLine(ctx, V, [[36.5, 32.5], [35.6, 34.5], [34.6, 36]], s.at(s.when('给我', 5.3), 0.4), 0.12);
+        // her pencil, moving square to square, then lifting away
+        const last = order[Math.max(0, n - 1)], leave = s.at(done, 0.7, ease.exit);
+        const jx = CV.noise(s.t * 9, 1) * cs * 0.3, jy = CV.noise(s.t * 9, 2) * cs * 0.3;
+        const tx = n ? sx(V, 22 + last.x + 0.5) : sx(V, 27), ty = n ? sy(V, MOM_Y + last.y + 0.5) : sy(V, MOM_Y - 3);
+        if (leave < 1) pencil(ctx, tx + jx + leave * 900, ty + jy - leave * 1100 - (n ? 0 : 40) * (1 - s.at(0, 0.3)), 1);
+      },
+    },
+    // 2 — the drawing boots into the game
+    {
+      id: 'hero', voiceDelay: 0.75, tail: 0.5, energy: 0.45,
+      draw(ctx, s) {
+        const b0 = s.when('主角', 0.85) - 0.15;
+        const V = { cx: 46 + s.t * 0.6, cy: 30, cs: 18, boot: s.at(b0, 0.55, ease.inOutSine), sky: T.sky.morning };
+        V.dyn = (g) => put(g, MOM.stand, 22, MOM_Y);
+        V.notes = [{ x: 37, y: 31, size: 4.2, text: '妈妈', rot: -0.06, alpha: 1 - V.boot }];
+        V.hud = { alpha: s.at(b0 + 0.45, 0.2), time: '0710', livesP: s.at(s.when('一条', 2.3), 0.35), livesHot: s.t > s.when('一条', 2.3) };
+        view(ctx, V);
+      },
+    },
+    // 3 — the title card
+    {
+      id: 'title', voiceDelay: 0.3, tail: 0.6, energy: 0.5, background: '#000',
+      draw(ctx, s) {
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+        ctx.imageSmoothingEnabled = false;
+        ctx.font = `64px ${T.pix}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = PAL.W;
+        ctx.fillText('WORLD 1-1', W / 2, 170);
+        const k = 10; ctx.drawImage(MOM.stand, W / 2 - 200, 300, MOM.stand.w * k, MOM.stand.h * k);
+        ctx.font = `56px ${T.pix}`; ctx.textAlign = 'left'; ctx.fillText('× 1', W / 2 + 10, 460);
+        const name = '妈妈上班', t0 = s.when('妈妈', 1.3), step = (s.beatLen || 0.48) / 2, sc = 10;
+        for (let i = 0; i < 4; i++) {
+          if (s.t < t0 + i * step - 0.04) continue;
+          const c = pixText(name[i], PAL.Y);
+          ctx.drawImage(c, W / 2 - 2 * 16 * sc + i * 16 * sc - 2 * sc, 610, c.width * sc, c.height * sc);
+        }
+      },
+    },
+    // 4 — out of the door, over the puddle
+    {
+      id: 'puddle', voiceDelay: 0.3, tail: 0.45, energy: 0.6,
+      draw(ctx, s) {
+        const tj = s.when('水坑', 2.2) - 0.25, jd = 0.6;
+        const v = 26 / Math.max(0.6, tj - 0.15);
+        const x = s.t < 0.15 ? 22 : s.t < tj ? 22 + v * (s.t - 0.15) : s.t < tj + jd ? 48 + 18 * (s.t - tj) / jd : 66 + 18 * (s.t - tj - jd);
+        const jumping = s.t >= tj && s.t < tj + jd;
+        const V = { cx: Math.max(22, x - 4) + 26, cy: 30, cs: 18, boot: 1, sky: T.sky.morning };
+        V.dyn = (g) => put(g, jumping ? MOM.jump : walkPose(s, s.t > 0.15), x, MOM_Y + jumpY(s.t, tj, jd, 9));
+        V.notes = [{ x: 46, y: 22.5, size: 4.2, text: '小心！昨天鞋湿了', p: s.at(0.25, 0.7), halo: 'rgba(252,252,252,0.7)', rot: -0.05 }];
+        V.hud = { time: timeStr(7 * 60 + 10 + s.t * 0.8), livesP: 1 };
+        view(ctx, V);
+        pencilLine(ctx, V, [[57, 24.5], [58, 36], [57, 46.5]], s.at(0.6, 0.4), 0.14);
+      },
+    },
+    // 5 — the train: mushroom commuters, a bow for each one
+    {
+      id: 'subway', voiceDelay: 0.3, tail: 0.5, energy: 0.65,
+      draw(ctx, s) {
+        const bows = [s.when('碰到', 2.0), s.when('要', 2.9), s.when('对不起', 3.2) + 0.1];
+        const bowLen = 0.36, v = 15;
+        const stall = bows.reduce((a, b) => a + clamp(s.t - b, 0, bowLen), 0);
+        const x = 84 + v * Math.max(0, s.t - stall);
+        const bowing = bows.some((b) => s.t >= b && s.t < b + bowLen);
+        const V = { cx: x + 22, cy: 30, cs: 18, boot: 1, sky: T.sky.morning };
+        const xs = [96, 108, 121, 135, 147, 161, 174, 186];
+        V.dyn = (g) => {
+          xs.forEach((cx, i) => {
+            const near = bowing && Math.abs(x - cx) < 10;
+            put(g, SHROOMS[i % SHROOMS.length], cx + (near ? 1 : 0), GROUND - 22 - (near ? 1 : 0), i % 3 === 1);
+          });
+          put(g, bowing ? MOM.bow : walkPose(s, true), x, MOM_Y);
+        };
+        V.notes = [{ x: 112, y: 18, size: 3.6, text: '蘑菇怪不是坏人，他们也要上班', p: s.at(s.when('蘑菇', 1.1) + 0.1, 0.9), halo: 'rgba(252,252,252,0.75)', rot: -0.025 }];
+        V.hud = { time: timeStr(7 * 60 + 45 + s.t * 1.5), livesP: 1 };
+        view(ctx, V);
+      },
+    },
+    // 6 — the boss lands
+    {
+      id: 'boss', voiceDelay: 0.45, tail: 0.3, energy: 0.7,
+      draw(ctx, s) {
+        const land = s.when('老板', 1.6), burn = s.when('喷火', 2.5);
+        const fall = clamp((s.t - (land - 0.35)) / 0.35, 0, 1);
+        const by = s.t < land ? lerp(-34, 16, fall * fall) : 16;
+        const V = { cx: 332, cy: 30, cs: 18, boot: 1, sky: T.sky.noon, shake: s.t > land ? fx.shake(s.t, land, 18, { decay: 6, freq: 14, seed: 2 }) : null };
+        const flinch = s.t > burn + 0.15;
+        V.dyn = (g) => {
+          put(g, flinch ? MOM.bow : MOM.stand, flinch ? 306 : 308, MOM_Y);
+          if (s.t > land - 0.35) put(g, BOSS, 336, by);
+          if (s.t > burn) fire(g, s, 344, 26, clamp((s.t - burn) / 0.45, 0, 1) * 24);
+        };
+        V.notes = [{ x: 304, y: 10, size: 3.6, text: '火 = 加班', p: s.at(burn + 0.6, 0.5), halo: 'rgba(252,252,252,0.75)', rot: -0.04 }];
+        V.hud = { time: '1000', livesP: 1 };
+        view(ctx, V);
+      },
+    },
+    // 7 — press A three times
+    {
+      id: 'pressa', voiceDelay: 0.25, tail: 1.3, energy: 0.75,
+      draw(ctx, s) {
+        const p0 = s.nextBeat(s.when('次', 2.3) - 0.05), bl = s.beatLen || 0.484;
+        const hits = [p0, p0 + bl, p0 + 2 * bl];
+        const n = hits.filter((h) => s.t >= h).length;
+        const flash = hits.some((h) => s.t >= h && s.t < h + 0.2 && Math.floor((s.t - h) * 15) % 2 === 0);
+        const scales = [1, 0.72, 0.48, 0.3];
+        const away = clamp((s.t - hits[2] - 0.35) / 0.9, 0, 1);
+        const V = { cx: 332, cy: 30, cs: 18, boot: 1, sky: T.sky.noon };
+        const hop = hits.reduce((a, h) => a + jumpY(s.t, h - 0.12, 0.3, 4), 0);
+        V.dyn = (g) => {
+          put(g, hop ? MOM.jump : MOM.stand, 302 + n * 2, MOM_Y + hop);
+          const sc = scales[n], S = flash ? BOSS_FLASH : BOSS;
+          const w = Math.round(S.w * sc), h = Math.round(S.h * sc);
+          g.drawImage(S, Math.round(348 - w / 2 + away * 40), GROUND - h, w, h);
+          if (n === 0) fire(g, s, 344, 26, 16);
+        };
+        const down = hits.some((h) => s.t >= h && s.t < h + 0.16);
+        V.notes = [{ x: 292, y: 17, size: 5.4, text: '按A三次！', p: s.at(s.when('写', 0.9) - 0.1, 0.8), halo: 'rgba(252,252,252,0.8)', rot: -0.05 }];
+        V.hud = { time: '1000', livesP: 1 };
+        view(ctx, V);
+        // her A button, drawn in pencil, pressed on the beat
+        const ap = s.at(s.when('A', 1.7) - 0.15, 0.4);
+        if (ap > 0) {
+          const bx = sx(V, 322), by = sy(V, 28) + (down ? 8 : 0), r = 4.6 * V.cs;
+          ctx.save(); ctx.fillStyle = down ? 'rgba(58,58,68,0.85)' : 'rgba(252,252,252,0.8)';
+          ctx.beginPath(); ctx.arc(bx, by, r * ap, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          const ring = []; for (let i = 0; i <= 26; i++) { const a = i / 24 * Math.PI * 2 - 1.6; ring.push([322 + Math.cos(a) * 4.8, 28 + (down ? 8 / V.cs : 0) + Math.sin(a) * 4.6]); }
+          pencilLine(ctx, V, ring, ap, 0.16);
+          ctx.save(); ctx.font = `${6 * V.cs}px ${T.hand}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.globalAlpha = ap; ctx.fillStyle = down ? PAL.W : T.graphite; ctx.fillText('A', bx, by + 4); ctx.restore();
+          for (let i = 0; i < n; i++) pencilLine(ctx, V, [[318 + i * 3, 34.5], [319 + i * 3, 37.5]], 1, 0.2);
+        }
+      },
+    },
+    // 8 — the afternoon goes by: four shots on the beat, the sky turning
+    {
+      id: 'day', narration: false, beats: 12, energy: 0.9,
+      draw(ctx, s) {
+        const bl = s.beatLen || 0.484, k = clamp(Math.floor(s.t / (3 * bl)), 0, 3), tt = s.t - k * 3 * bl;
+        const shot = [
+          { x0: 364, obst: 380, sky: T.sky.noon, time: 13 * 60 + 2 },
+          { x0: 382, obst: 398, sky: T.sky.after, time: 16 * 60 + 5 },
+          { x0: 400, obst: 417, sky: T.sky.dusk, time: 18 * 60 + 1 },
+          { x0: 414, obst: 999, sky: T.sky.violet, time: 18 * 60 + 33 },
+        ][k];
+        const v = 13, x = shot.x0 + v * tt;
+        const tj = (shot.obst - 9 - shot.x0) / v, jd = 0.5;
+        const jumping = tt > tj && tt < tj + jd;
+        const V = { cx: shot.x0 + 26 + v * tt * 0.75, cy: 30, cs: 18, boot: 1, sky: shot.sky, stars: k === 3, beat: s.beat, hideFinish: true };
+        V.dyn = (g) => put(g, jumping ? MOM.jump : walkPose(s, true), x, MOM_Y + jumpY(tt, tj, jd, 8));
+        V.hud = { time: timeStr(shot.time + tt * 4), livesP: 1 };
+        view(ctx, V);
+      },
+    },
+    // 9 — the last square: back to paper, a flag crossed out
+    {
+      id: 'flag', snap: 'bar', voiceDelay: 0.5, tail: 0.7, energy: 0.3,
+      draw(ctx, s) {
+        const t0 = s.when('最后', 0.9) - 0.1, pull = s.at(t0, 1.4, ease.inOutCubic);
+        const look = s.at(s.when('旗子', 3.2) - 0.3, 1.0, ease.inOutSine);
+        const x = 400 + Math.min(s.t, t0 + 0.6) * 6;
+        const cs = Math.exp(lerp(Math.log(18), Math.log(7.5), pull) + lerp(0, Math.log(1.7), look));
+        const V = {
+          cx: lerp(x + 18, 382, pull) + look * 16, cy: lerp(30, 30, pull), cs,
+          boot: 1 - s.at(t0 + 0.1, 0.7, ease.inOutSine), sky: T.sky.late, stars: true, beat: s.beat,
+          pageEdge: true, hideFinish: true, flagSketch: { pole: 1, flag: 1, cross: 1 },
+        };
+        V.dyn = (g) => put(g, walkPose(s, s.t < t0 + 0.6), x, MOM_Y);
+        V.hud = { time: '1852', livesP: 1, alpha: 1 - s.at(t0, 0.4) };
+        view(ctx, V);
+      },
+    },
+    // 10 — her rule
+    {
+      id: 'rule', voiceDelay: 0.5, tail: 1.0, energy: 0.18,
+      draw(ctx, s) {
+        const push = s.at(0, s.dur, ease.inOutSine);
+        const V = { cx: 421 + push * 4, cy: 31 - push * 3, cs: 17 * (1 + push * 0.3), boot: 0, pageEdge: true, hideFinish: true, flagSketch: { pole: 1, flag: 1, cross: 1 } };
+        V.dyn = (g) => put(g, MOM.stand, 410, MOM_Y);
+        view(ctx, V);
+        // the page corner begins to lift
+        const lift = s.out(0.7, ease.inQuad);
+        if (lift > 0) {
+          const ex = sx(V, PAGE_EDGE), d = lift * 260;
+          ctx.save(); ctx.fillStyle = '#E7E1CF';
+          ctx.beginPath(); ctx.moveTo(ex - d, H); ctx.lineTo(ex, H - d); ctx.lineTo(ex, H); ctx.closePath(); ctx.fill();
+          ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.moveTo(ex - d, H); ctx.lineTo(ex, H - d); ctx.lineTo(ex - d * 0.2, H - d * 0.2); ctx.closePath(); ctx.fill();
+          ctx.restore();
+        }
+      },
+    },
+    // 11 — the next page: the finish
+    {
+      id: 'hug', voiceDelay: 1.0, tail: 1.5, energy: 0.35, captions: 'file',
+      transition: {
+        duration: 0.7, sfx: 'paper', sfxGain: 0.6, ease: ease.inOutCubic,
+        type: (ctx, A, B, p) => {
+          ctx.drawImage(B, 0, 0);
+          const x = -p * W * 1.05;
+          ctx.save(); ctx.drawImage(A, x, 0);
+          const g = ctx.createLinearGradient(x + W, 0, x + W + 90, 0); g.addColorStop(0, 'rgba(0,0,0,0.28)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = g; ctx.fillRect(x + W, 0, 90, H); ctx.restore();
+        },
+      },
+      draw(ctx, s) {
+        const hugT = s.when('抱', 1.3), t1 = s.when('要', 1.1), t3 = s.when('一下', 1.5);
+        const V = { cx: 461 + s.t * 0.2, cy: 31, cs: 19, boot: 0, crayon: true };
+        V.dyn = (g) => put(g, s.t > hugT - 0.05 ? KID.open : KID.down, 461, GROUND - 16);
+        V.notes = [0, 1, 2, 3].map((i) => hugNote(i, { p: s.at([t1, hugT, t3, t3 + 0.16][i] - 0.05, 0.22) }));
+        view(ctx, V);
+      },
+    },
+    // 12 — the game again, at night: she gets there
+    {
+      id: 'seven', voiceDelay: 0.9, tail: 0.8, energy: 0.38,
+      draw(ctx, s) {
+        const meet = s.when('终点', 4.3), arrive = meet - 0.2, today = s.when('今天', 3.0);
+        const x = s.t < arrive ? lerp(426, 447, clamp(s.t / arrive, 0, 1)) : 447;
+        const push = s.at(today, s.dur - today, ease.inOutSine);
+        const cs = Math.exp(lerp(Math.log(16), Math.log(25), push));
+        const V = { cx: lerp(460, 462, push), cy: lerp(30, 37, push), cs, boot: s.at(0.1, 0.6, ease.inOutSine), sky: T.sky.night, stars: true, beat: s.beat, crayon: true };
+        V.dyn = (g) => {
+          if (s.t >= meet) hugPair(g);
+          else { put(g, KID.open, 461, GROUND - 16); put(g, walkPose(s, s.t < arrive), x, MOM_Y); }
+        };
+        V.notes = [0, 1, 2, 3].map((i) => hugNote(i, { alpha: 1 - s.at(0.1, 0.4) }));
+        V.hud = { time: '1900', livesP: 1, alpha: s.at(0.5, 0.3) };
+        view(ctx, V);
+      },
+    },
+    // 13 — every day at seven: cleared, and one more tally mark
+    {
+      id: 'clear', voiceDelay: 0.4, tail: 3.0, energy: 0.44,
+      sfx: [{ at: (s) => s.nextBeat(s.voiceEnd + 1.2), type: 'tick', gain: 1.2 }],
+      draw(ctx, s) {
+        const clearT = s.when('通关', 2.4), back = s.voiceEnd + 0.15, seven = s.when('七点', 1.0);
+        const pull = s.at(back, 1.4, ease.inOutCubic);
+        const cs = Math.exp(lerp(Math.log(25), Math.log(16.5), pull));
+        const V = {
+          cx: lerp(462, 471, pull), cy: lerp(37, 29.5, pull), cs, boot: 1 - s.at(back, 0.7, ease.inOutSine),
+          sky: T.sky.night, stars: true, beat: s.beat, crayon: true,
+        };
+        V.dyn = hugPair;
+        V.hud = { time: '1900', livesP: 1, timeHot: s.t > seven, blink: s.t > seven && s.t < seven + 0.8 && eighth(s) === 1, alpha: 1 - s.at(back, 0.3) };
+        V.notes = [
+          ...[0, 1, 2, 3].map((i) => hugNote(i, { alpha: s.at(back + 0.3, 0.6) })),
+          { x: 490, y: 15, size: 5, text: '通关', rot: -0.03, alpha: s.at(back + 0.6, 0.5) },
+        ];
+        view(ctx, V);
+        // COURSE CLEAR in the game
+        const cp = s.at(clearT - 0.05, 0.25) * (1 - s.at(back, 0.3));
+        if (cp > 0) {
+          ctx.save(); ctx.font = `72px ${T.pix}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          const y = 300 - (1 - cp) * 40; ctx.globalAlpha = cp;
+          ctx.fillStyle = '#000'; ctx.fillText('COURSE CLEAR!', W / 2 + 6, y + 6); ctx.fillStyle = PAL.Y; ctx.fillText('COURSE CLEAR!', W / 2, y);
+          ctx.restore();
+        }
+        // her tally: one 正 for every five days, and today's stroke
+        const tp = s.at(back + 0.8, 0.4);
+        if (tp > 0) {
+          const strokes = (ox, oy, k) => {
+            const z = 4.6;
+            return [
+              [[ox, oy], [ox + z, oy]], [[ox + z / 2, oy], [ox + z / 2, oy + z * 1.1]], [[ox + z / 2, oy + z * 0.55], [ox + z * 0.9, oy + z * 0.55]],
+              [[ox + z * 0.12, oy + z * 0.45], [ox + z * 0.12, oy + z * 1.1]], [[ox - 0.2, oy + z * 1.1], [ox + z + 0.2, oy + z * 1.1]],
+            ].slice(0, k);
+          };
+          const today = s.nextBeat(s.voiceEnd + 1.2);
+          let all = [];
+          for (let i = 0; i < 4; i++) all = all.concat(strokes(491 + (i % 2) * 6.5, 19 + Math.floor(i / 2) * 7, 5));
+          all = all.concat(strokes(491, 33, 2));
+          ctx.save(); ctx.globalAlpha = tp;
+          for (const st of all) pencilLine(ctx, V, st, 1, 0.14);
+          ctx.restore();
+          pencilLine(ctx, V, strokes(491, 33, 3)[2], s.at(today - 0.05, 0.18), 0.16);
+        }
+      },
+    },
+  ],
+});
+</script>
+</body>
+</html>

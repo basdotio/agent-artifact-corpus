@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & imports
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install ruff
+          # server.py targets the mcp 1.x decorator API.
+          pip install "mcp>=1.0.0,<2"
+
+      - name: Ruff lint
+        run: ruff check . --select E,F,W,I --ignore E501
+
+      - name: Check imports resolve
+        run: |
+          python -c "import tools.utils"
+          python -c "import tools.reversing"
+          python -c "import tools.crypto"
+          python -c "import tools.web"
+          python -c "import tools.forensics"
+          python -c "import server"
+          echo "All imports OK"
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install test dependencies
+        run: |
+          pip install --upgrade pip
+          # Tests only need mcp (for mcp.types.Tool) + pytest; the run_* tools are
+          # stubbed, so the heavy runtime deps aren't required here.
+          pip install "mcp>=1.0.0,<2" pytest
+
+      - name: Run pytest
+        run: pytest -q
+
+  wheel:
+    name: Wheel build & installed-import check
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel
+        run: |
+          pip install --upgrade pip build
+          python -m build --wheel
+
+      - name: Confirm tools/ is present in the wheel
+        run: |
+          wheel_file="$(ls dist/*.whl)"
+          echo "Inspecting $wheel_file"
+          unzip -l "$wheel_file"
+          # Fail if the package failed to bundle the tools/ subpackage.
+          for f in crypto web reversing forensics utils; do
+            unzip -l "$wheel_file" | grep -q "tools/${f}.py"
+          done
+
+      - name: Install the wheel into a clean venv and import from outside the repo
+        run: |
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/pip install --upgrade pip
+          /tmp/wheeltest/bin/pip install "mcp>=1.0.0,<2"
+          # --no-deps: we only need to prove tools/ shipped and imports; the heavy
+          # runtime deps aren't needed for the import check.
+          /tmp/wheeltest/bin/pip install --no-deps dist/*.whl
+          # Run from /tmp so the repo checkout's tools/ dir can't satisfy the import.
+          cd /tmp
+          for m in tools.utils tools.reversing tools.crypto tools.web tools.forensics; do
+            /tmp/wheeltest/bin/python -c "import $m"
+          done
+          echo "Installed-wheel imports OK"
+
+  docker:
+    name: Docker build check
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t kademcp:ci .

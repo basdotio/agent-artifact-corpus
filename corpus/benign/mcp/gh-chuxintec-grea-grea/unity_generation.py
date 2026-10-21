@@ -3,7 +3,7 @@ import contextlib
 import hashlib
 import json
 import os
-from pathlib import Path
+from grea.host.paths import Path
 import re
 import unicodedata
 import ctypes
@@ -13,8 +13,14 @@ from .common import GreaError, digest, package_root, write_new
 from . import runner, registry
 from .unity_projects import Reader, relative, overlaps, strict_json, KEYWORDS
 from .unity_project_contracts import PROFILE, REFERENCE, MANIFEST as MANIFEST_SCHEMA
+from .tools import unity_framework_audit
+from .tools.unity_framework_audit import inspect as inspect_framework
 
-VERSION = '0.1.1'
+def boundary_implementation_hash():
+    return hashlib.sha256(Path(unity_framework_audit.__file__).read_bytes()).hexdigest()
+
+
+VERSION = '0.1.2'
 TEMPLATE = {'id': 'grea-minimal-2d', 'version': '0.1.0'}
 MANIFEST = 'Tools/Generated/manifests/project.json'
 MODULES = [{'name': 'Counter', 'layers': ['Domain', 'Gameplay', 'Presentation', 'Services']}]
@@ -82,6 +88,9 @@ def _recipe(p):
     root = package_root()
     files = {}
     package_dir = root / 'tools/unity/framework/packages'
+    boundary = inspect_framework(package_dir, root / 'tools/unity/templates/counter-composition/Assets')
+    if not boundary['ok']:
+        raise GreaError('FRAMEWORK_BOUNDARY', 'Bundled template violates source/assembly boundaries.', details={'findings': boundary['findings']})
     for source in sorted(package_dir.rglob('*')):
         if source.is_symlink():
             raise GreaError('UNSAFE_TEMPLATE', 'Template contains a symlink.')
@@ -92,15 +101,15 @@ def _recipe(p):
         if source.is_symlink():
             raise GreaError('UNSAFE_TEMPLATE', 'Sample contains a symlink.')
         if source.suffix in ('.cs', '.asmdef'):
-            files['Assets/Game/' + source.relative_to(sample).as_posix()] = source.read_text().replace('Game.', p['namespace'] + '.').encode()
+            files['Assets/Game/' + source.relative_to(sample).as_posix()] = source.read_text(encoding='utf-8').replace('Game.', p['namespace'] + '.').encode()
     assembly_path = 'Assets/Game/Bootstrap/Game.Bootstrap.asmdef'
     assembly = json.loads(files[assembly_path]); assembly['references'].append('Grea.Foundation.Runtime')
     files[assembly_path] = encoded(assembly)
     seed = root / 'tools/unity/templates/minimal-project/ProjectBootstrap.cs.txt'
-    files['Assets/Game/Bootstrap/ProjectBootstrap.cs'] = seed.read_text().replace('__NAMESPACE__', p['namespace']).encode()
+    files['Assets/Game/Bootstrap/ProjectBootstrap.cs'] = seed.read_text(encoding='utf-8').replace('__NAMESPACE__', p['namespace']).encode()
     files['Packages/manifest.json'] = encoded({'dependencies': {'com.unity.render-pipelines.universal': '17.6.0', 'com.unity.ugui': '2.6.0', 'com.unity.modules.audio': '1.0.0'}})
     # Unity resolves the same pinned built-in package graph; tests are opt-in, not player dependencies.
-    lock = json.loads((root / 'tools/unity/framework/test-packages-lock.json').read_text())
+    lock = json.loads((root / 'tools/unity/framework/test-packages-lock.json').read_text(encoding='utf-8'))
     files['Packages/packages-lock.json'] = encoded(lock)
     files['ProjectSettings/ProjectVersion.txt'] = b'm_EditorVersion: 6000.6.2f1\n'
     files['.gitignore'] = b'/Library/\n/Temp/\n/Logs/\n/Obj/\n/UserSettings/\n/Build/\n*.csproj\n*.sln\n.DS_Store\n'
@@ -155,7 +164,7 @@ def plan_generation(project_root, profile='grea-project.json', mode='new', cance
     reader = _reader(project_root, cancel); p = _profile(reader, profile)
     unity = p['paths']['unityProject']; files = _recipe(p)
     source = {name: sha(value) for name, value in files.items()}
-    identity = digest({'generator': VERSION, 'implementation': sha(Path(__file__).read_bytes()), 'profile': p,
+    identity = digest({'generator': VERSION, 'implementation': sha(Path(__file__).read_bytes()), 'boundaryImplementation': boundary_implementation_hash(), 'profile': p,
                        'source': source, 'provider': registry.tool('unity_cli')})
     current = _inventory(reader, unity)
     changed = []; unknown = []; manifest = None
@@ -206,16 +215,14 @@ def _atomic(path, value):
 
 @contextlib.contextmanager
 def _lock(root):
-    if os.name != 'posix':
-        raise GreaError('UNSUPPORTED_PLATFORM', '工程生成 mutation currently requires POSIX locking.')
-    import fcntl
-    fd = os.open(root / '.grea-generation.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    from .host.files import file_lock
+    path=root/'.grea-generation.lock'
+    if path.is_symlink() or (path.exists() and getattr(path.lstat(),'st_file_attributes',0)&0x400):
+        raise GreaError('UNSAFE_PROJECT_ENTRY','Generation lock may not be a link.')
+    path.touch(exist_ok=True)
     try:
-        try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError: raise GreaError('GENERATION_BUSY', 'Another generation/recovery owns the root lock.')
-        yield
-    finally:
-        os.close(fd)
+        with file_lock(path,blocking=False):yield
+    except BlockingIOError:raise GreaError('GENERATION_BUSY','Another generation/recovery owns the root lock.')
 
 
 def _checkpoint(stage):

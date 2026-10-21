@@ -1,0 +1,3270 @@
+import fetch from "node-fetch";
+import { rejectChatGptApiFailure } from "./chatgptPolicy.js";
+import { AbortController } from "abort-controller";
+// Attribution for outgoing API calls — resolved per inbound MCP request and
+// carried in async-local storage, so it needs no parameter threading here.
+import { REQUEST_SOURCE_PARAM, getRequestSource } from "./requestSource.js";
+
+export interface LocalFalconLocation {
+  place_id: string;
+  name: string;
+  address: string;
+  lat: string;
+  lng: string;
+  rating: string;
+  reviews: string;
+  store_code: string;
+}
+
+export interface LocalFalconReport {
+  report_key: string;
+  timestamp: string;
+  date: string;
+  type: string;
+  place_id: string;
+  location: LocalFalconLocation;
+  keyword: string;
+  lat: string;
+  lng: string;
+  grid_size: string;
+  radius: string;
+  measurement: string;
+  data_points: string;
+  found_in: string;
+  arp: string;
+  atrp: string;
+  solv: string;
+}
+
+export interface LocalFalconTrendReport {
+  id: string;
+  checksum: string;
+  report_key: string;
+  timestamp: string;
+  date: string;
+  looker_date: string;
+  type: string;
+  campaign_name: string;
+  campaign_key: string;
+  place_id: string;
+  location: LocalFalconLocation;
+  keyword: string;
+  lat: string;
+  lng: string;
+  grid_size: string;
+  radius: string;
+  measurement: string;
+  data_points: string;
+  found_in: string;
+  arp: string;
+  atrp: string;
+  solv: string;
+  image: string;
+  heatmap: string;
+  pdf: string;
+  public_url: string;
+}
+
+export interface LocalFalconAutoScan {
+  autoscan_key: string;
+  nickname: string;
+  place_id: string;
+  location: LocalFalconLocation;
+  keyword: string;
+  lat: string;
+  lng: string;
+  grid_size: string;
+  radius: string;
+  measurement: string;
+  data_points: string;
+  frequency: string;
+  last_run_timestamp: string;
+  last_run_date: string;
+  next_run_timestamp: string | false;
+  next_run_date: string | false;
+  status: string;
+}
+
+export interface Place {
+  place_id: string;
+  name: string;
+  address: string;
+  phone: string;
+  display_url: string;
+  rating: string;
+  reviews: string;
+  arp: string;
+  atrp: string;
+  solv: string;
+}
+
+export interface LocalFalconReportsResponse {
+  code: number;
+  success: boolean;
+  message: string | false;
+  parameters: any[];
+  data: {
+    count: number;
+    next_token?: string;
+    ai_analysis: any;
+    places: Record<string, Place>;
+  };
+}
+
+export interface LocalFalconTrendReportsResponse {
+  code: number;
+  success: boolean;
+  message: string | false;
+  parameters: any[];
+  data: {
+    count: number;
+    next_token?: string;
+    reports: LocalFalconTrendReport[];
+  };
+}
+
+const API_BASE = "https://api.localfalcon.com/v1";
+const API_BASE_V2 = "https://api.localfalcon.com/v2";
+
+/**
+ * Build request headers with Bearer Token authentication for the Local Falcon API.
+ * @param apiKey - Local Falcon API key sent as a Bearer token
+ * @param formData - When true, omits Content-Type so fetch can set the multipart boundary
+ */
+function buildHeaders(apiKey: string, formData = false): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+  };
+  if (!formData) {
+    headers["Content-Type"] = "application/json";
+  }
+  return headers;
+}
+
+// Configuration
+// Full payload logging is opt-in. Scan and full-grid responses are
+// megabyte-class, JSON.stringify(x, null, 2) roughly doubles them, and
+// console.* to a pipe (Render captures stdout) queues on the heap with no bound
+// if the log consumer applies backpressure — a credible OOM contributor.
+const debugPayloadLogging = (): boolean => process.env.DEBUG_PAYLOAD_LOGGING === "true";
+
+const DEFAULT_TIMEOUT_MS = 30000;
+const LONG_OPERATION_TIMEOUT_MS = 60000;
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 1000;
+const RATE_LIMIT_MAX_REQUESTS = 5;
+const RATE_LIMIT_WINDOW_MS = 1000;
+
+/**
+ * Client-side fieldmask filtering helper for list endpoints.
+ * Applies fieldmask filtering client-side by picking only the requested fields
+ * from each item in the response. Used as a fallback when the API doesn't support
+ * server-side fieldmask filtering for a particular endpoint.
+ * Supports dot notation (e.g., "location.name") for nested fields.
+ */
+function applyClientFieldmask(data: any, fieldmask: string): any {
+  const fields = fieldmask.split(',').map(f => f.trim());
+
+  function pickFields(obj: any): any {
+    if (!obj || typeof obj !== 'object') return obj;
+
+    const result: any = {};
+    for (const field of fields) {
+      const parts = field.split('.');
+      if (parts.length === 1) {
+        // Top-level field
+        if (field in obj) {
+          result[field] = obj[field];
+        }
+      } else {
+        // Nested field (e.g., "location.name")
+        const [parent, ...rest] = parts;
+        if (parent in obj && obj[parent] && typeof obj[parent] === 'object') {
+          if (!result[parent]) result[parent] = {};
+          const nestedKey = rest.join('.');
+          const value = rest.reduce((o: any, k: string) => o?.[k], obj[parent]);
+          if (value !== undefined) {
+            // Build nested structure
+            let target = result[parent];
+            for (let i = 0; i < rest.length - 1; i++) {
+              if (!target[rest[i]]) target[rest[i]] = {};
+              target = target[rest[i]];
+            }
+            target[rest[rest.length - 1]] = value;
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  // If data has a reports/scans array, filter each item
+  if (data && typeof data === 'object') {
+    const result = { ...data };
+    if (Array.isArray(data.reports)) {
+      result.reports = data.reports.map(pickFields);
+    }
+    if (Array.isArray(data.scans)) {
+      result.scans = data.scans.map(pickFields);
+    }
+    return result;
+  }
+
+  return data;
+}
+
+/**
+ * Auto-prefixes user fieldmask fields with the array wrapper key for list endpoints.
+ * The Local Falcon API requires wildcard syntax for fieldmask on list endpoints, e.g.,
+ * `reports.*.report_key` instead of just `report_key`.
+ * Fields already prefixed with the wrapper key are left unchanged.
+ * Also auto-includes pagination metadata fields (count, total, next_token) so that
+ * pagination info is preserved even when the user only requests data fields.
+ * Example: `report_key,arp` → `reports.*.report_key,reports.*.arp,count,total,next_token`
+ */
+function prefixFieldmaskForList(fieldmask: string, wrapperKey: string): string {
+  const PAGINATION_FIELDS = ['count', 'total', 'next_token'];
+
+  const prefixedUserFields = fieldmask
+    .split(',')
+    .map(f => f.trim())
+    .filter(f => f.length > 0)
+    .map(f => f.startsWith(`${wrapperKey}.`) ? f : `${wrapperKey}.*.${f}`);
+
+  // Always include pagination metadata at the root level
+  return [...prefixedUserFields, ...PAGINATION_FIELDS].join(',');
+}
+
+// Hostname of the Local Falcon API, used to scope request_source stamping.
+// Both API_BASE and API_BASE_V2 live here; app.localfalcon.com (the OAuth
+// authorization host) and image URLs deliberately do not.
+const API_HOSTNAME = "api.localfalcon.com";
+
+/**
+ * Stamp the calling client onto an outgoing Local Falcon API request.
+ *
+ * Applied here rather than in each of the ~100 exported functions because every
+ * request in this module funnels through fetchWithTimeout, so this is the one
+ * place that cannot be forgotten when an endpoint is added.
+ *
+ * The value goes on the query string for every API call and additionally into
+ * the body of the form-posting v2/gbp endpoints, so the field is readable
+ * whether the server reads it from the query or the post body.
+ *
+ * Non-API hosts are left untouched: fetchImageAsBase64 passes arbitrary image
+ * URLs through this helper, and those must not carry our parameters.
+ *
+ * Exported for tests; fetchWithTimeout is the only production caller.
+ */
+export function applyRequestSource(url: string, options: { body?: unknown }): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  if (parsed.hostname.toLowerCase() !== API_HOSTNAME) return url;
+
+  const source = getRequestSource();
+  if (!source) return url;
+
+  // set(), not append(): withRetry re-invokes its callback with the same
+  // FormData instance, so append would stack one duplicate field per retry.
+  if (options.body instanceof FormData) {
+    options.body.set(REQUEST_SOURCE_PARAM, source);
+  }
+  parsed.searchParams.set(REQUEST_SOURCE_PARAM, source);
+  return parsed.toString();
+}
+
+/**
+ * Enhanced fetch with timeout and cancellation support
+ * @param {string} url - The URL to fetch
+ * @param {Object} options - Fetch options
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @returns {Promise} - Fetch response
+ */
+async function fetchWithTimeout(url: string, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const { signal } = controller;
+
+  // Attribute the call to the client that caused it — see requestSource.ts.
+  const target = applyRequestSource(url, options);
+
+  // Create a timeout that will abort the request
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(target, { ...options, signal });
+    clearTimeout(timeout);
+    return response;
+  } catch (error) {
+    clearTimeout(timeout);
+    if ((error as Error).name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  }
+}
+
+// Matches both "timeout" (one word) and "timed out" (two words). The fetchWithTimeout
+// helper above throws "Request timed out after Nms", so a naive .includes('timeout')
+// check misses it — the bug that caused scan submissions to surface as errors instead
+// of the intended "submitted and processing" success response.
+export function isTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'AbortError') return true;
+  return /timeout|timed out/i.test(error.message ?? '');
+}
+
+// Parses a Local Falcon API error into a clearer MCP Error. Accepts either the raw
+// response body as a string (from `await res.text()`) or the already-parsed data
+// object (as used by scan/action endpoints that call safeParseJson before the
+// error check). Maps the server's status code to specific agent-facing guidance;
+// preserves the server's message as supplemental context.
+//
+// Mapping is driven by observed API behavior:
+//   - 404: server message conflates "not available / no permission"; MCP rewrites
+//     to "not found OR different account OR expired" so agents understand the
+//     options. Server message attached for transparency.
+//   - 403: similar conflation; MCP rewrites to be explicit about auth/account scope.
+//   - 400: server-side malformed input (schema-level Zod validation catches
+//     client-side malformed input before the request). Pass the server message through.
+//   - 401: auth failure — "Check your API key."
+//   - 429: rate-limited — "Wait a moment before retrying."
+//   - Non-JSON error body (e.g., reviewsAnalysis plain text): pass through with a
+//     generic "Local Falcon API error" prefix and status.
+//   - Unknown/5xx: generic fallback with status + server message.
+export function parseApiError(status: number, errorBody: string | any): Error {
+  let parsed: any = null;
+  if (typeof errorBody === 'string') {
+    try {
+      parsed = JSON.parse(errorBody);
+    } catch {
+      // Non-JSON body (e.g., plain-text error from some endpoints)
+    }
+  } else if (errorBody && typeof errorBody === 'object') {
+    parsed = errorBody;
+  }
+
+  rejectChatGptApiFailure(parsed ?? errorBody, true);
+
+  const rawMessage = typeof parsed?.message === 'string' ? parsed.message.trim() : '';
+  const serverMessage = rawMessage.length > 0 ? rawMessage : undefined;
+  const serverCode = typeof parsed?.code === 'number' ? parsed.code : status;
+  const serverSuffix = serverMessage ? ` (Server: ${serverMessage})` : '';
+
+  const effectiveStatus = serverCode || status;
+
+  if (effectiveStatus === 404) {
+    return new Error(
+      `Report not found. The reportKey may not exist, may have expired, or may belong to a different account. Verify the reportKey is correct.${serverSuffix}`
+    );
+  }
+  if (effectiveStatus === 403) {
+    return new Error(
+      `Access denied. This resource belongs to a different account, or the API key / OAuth token lacks permission. Verify the API key and scope.${serverSuffix}`
+    );
+  }
+  if (effectiveStatus === 400) {
+    const fallbackText =
+      typeof errorBody === 'string' && !parsed ? ` ${errorBody.trim().slice(0, 500)}` : '';
+    return new Error(
+      `Invalid request (400).${serverSuffix || fallbackText || ' No server detail provided.'}`
+    );
+  }
+  if (effectiveStatus === 401) {
+    return new Error(
+      `Authentication failed. Check your API key.${serverSuffix}`
+    );
+  }
+  if (effectiveStatus === 429) {
+    return new Error(
+      `Rate limit exceeded. Wait a moment before retrying.${serverSuffix}`
+    );
+  }
+
+  // Non-JSON plain-text error body (e.g., the reviewsAnalysis endpoint returning
+  // "You do not have permission to access this resource.")
+  if (parsed === null && typeof errorBody === 'string' && errorBody.trim()) {
+    return new Error(
+      `Local Falcon API error (status ${status}): ${errorBody.trim().slice(0, 500)}`
+    );
+  }
+
+  return new Error(`Local Falcon API error: ${status}${serverSuffix}`);
+}
+
+// Unwraps LF.api's standard {code, success, message, parameters, data, field_mask_warnings}
+// wrapper down to its `data` payload, AND preserves field_mask_warnings.exceptions[] as
+// a _warnings string array attached to the returned result. Call sites that used to do
+// `return data.data` (silently discarding the warnings siblings) should use this helper.
+//
+// Handling rules:
+//   - When response.data is missing, falls back to returning `response` itself, matching
+//     the defensive `data?.data ?? data` pattern used in several fetch functions.
+//   - When no warnings are present, returns the inner data unchanged (no _warnings key,
+//     no extra noise).
+//   - When warnings are present and inner is an object, spreads inner and adds
+//     _warnings as a sibling.
+//   - When warnings are present and inner is an array, wraps into { items, _warnings }
+//     (shape-changing, but no current call site returns a bare array to agents, so this
+//     only fires in unusual scenarios).
+//   - When warnings are present and inner is a scalar or undefined, wraps into
+//     { value, _warnings }.
+//   - Each raw path (e.g., "reports.fake.name") is humanized to
+//     "Unknown field in fieldmask: <path>" so agents read it without knowing the
+//     wrapper shape.
+export function unwrapWithWarnings(response: any): any {
+  // Use `'data' in response` (not `?.data ?? response`) so that an explicit
+  // null data value passes through as null instead of falling back to the wrapper.
+  const hasWrapper =
+    response !== null && typeof response === 'object' && 'data' in response;
+  const inner = hasWrapper ? response.data : response;
+  const exceptions: string[] | undefined =
+    response?.field_mask_warnings?.exceptions;
+
+  if (!exceptions?.length) return inner;
+
+  const warnings = exceptions.map((field) => `Unknown field in fieldmask: ${field}`);
+
+  if (Array.isArray(inner)) {
+    return { items: inner, _warnings: warnings };
+  }
+  if (inner !== null && typeof inner === 'object') {
+    return { ...inner, _warnings: warnings };
+  }
+  return { value: inner, _warnings: warnings };
+}
+
+// Rate limiting implementation
+class RateLimiter {
+  maxRequests: number;
+  timeWindowMs: number;
+  requestTimestamps: number[];
+
+  constructor(maxRequests = RATE_LIMIT_MAX_REQUESTS, timeWindowMs = RATE_LIMIT_WINDOW_MS) {
+    this.maxRequests = maxRequests;
+    this.timeWindowMs = timeWindowMs;
+    this.requestTimestamps = [];
+  }
+
+  async waitForAvailableSlot(): Promise<void> {
+    const now = Date.now();
+    // Remove timestamps older than the time window
+    this.requestTimestamps = this.requestTimestamps.filter(
+      timestamp => now - timestamp < this.timeWindowMs
+    );
+
+    if (this.requestTimestamps.length >= this.maxRequests) {
+      // Calculate delay needed to respect rate limit
+      const oldestRequest = this.requestTimestamps[0];
+      const delay = this.timeWindowMs - (now - oldestRequest);
+
+      if (delay > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.waitForAvailableSlot(); // Recursively check again
+      }
+    }
+
+    // Add current request timestamp
+    this.requestTimestamps.push(Date.now());
+  }
+}
+
+// Create a singleton rate limiter
+const rateLimiter = new RateLimiter();
+
+// Helper to determine if an error is retryable
+function isRetryableError(error: Error) {
+  // Network errors, 5xx responses, and timeouts are retryable
+  return error.name === 'AbortError' ||
+    error.message.includes('network') ||
+    error.message.includes('timeout') ||
+    (error.message.includes('API error: 5'));
+}
+
+// Retry mechanism with exponential backoff
+async function withRetry(fn: () => Promise<any>, maxRetries = MAX_RETRIES, initialDelayMs = INITIAL_RETRY_DELAY_MS) {
+  let retries = 0;
+
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      retries++;
+      if (retries > maxRetries || !isRetryableError(error as Error)) {
+        throw error;
+      }
+
+      const delayMs = initialDelayMs * Math.pow(2, retries - 1);
+      console.log(`Retrying after ${delayMs}ms (attempt ${retries}/${maxRetries}): ${error}`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+/**
+ * Helper function to safely parse JSON from API response
+ * @param {Response} response - Fetch Response object
+ * @returns {Promise<any>} Parsed JSON data
+ */
+async function safeParseJson(response: any) {
+  const raw = await (response as Response).text();
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.error('Raw response from Local Falcon API:', raw);
+    throw new Error('Failed to parse JSON from Local Falcon API response');
+  }
+  rejectChatGptApiFailure(parsed, !response.ok);
+  return parsed;
+}
+
+/**
+ * Fetches scan reports from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} limit - Maximum number of results to return
+ * @param {string} nextToken - Optional pagination token for additional results
+ * @param {string} startDate - Optional start date to filter reports (format: YYYY-MM-DD)
+ * @param {string} endDate - Optional end date to filter reports (format: YYYY-MM-DD)
+ * @returns {Promise<LocalFalconReportsResponse>} API response
+ */
+export async function fetchLocalFalconReports(apiKey: string, limit: string, nextToken?: string, startDate?: string, endDate?: string, placeId?: string, keyword?: string, gridSize?: string, campaignKey?: string, platform?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/reports`);
+  url.searchParams.set("limit", limit);
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  if (startDate) url.searchParams.set("start_date", startDate);
+  if (endDate) url.searchParams.set("end_date", endDate);
+  if (placeId) url.searchParams.set("place_id", placeId);
+  if (keyword) url.searchParams.set("keyword", keyword);
+  if (gridSize) url.searchParams.set("grid_size", gridSize);
+  if (campaignKey) url.searchParams.set("campaign_key", campaignKey);
+  if (platform) url.searchParams.set("platform", platform);
+  // Auto-prefix fieldmask with reports.* wildcard syntax for the list endpoint
+  if (fieldmask) url.searchParams.set("fieldmask", prefixFieldmaskForList(fieldmask, 'reports'));
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    // When fieldmask is used, the API returns the standard structure with filtered fields
+    if (fieldmask) {
+      if (unwrapped?.reports) {
+        return {
+          ...unwrapped,
+          reports: unwrapped.reports.slice(0, parseInt(limit) || unwrapped.reports.length)
+        };
+      }
+      // Fallback: return whatever the unwrap gave us (preserves _warnings if present)
+      return unwrapped;
+    }
+
+    // Validate response structure before processing
+    if (!unwrapped || !unwrapped.reports) {
+      throw new Error('Invalid response format from Local Falcon API');
+    }
+
+    return {
+      ...unwrapped,
+      reports: unwrapped.reports.slice(0, parseInt(limit) || unwrapped.reports.length)
+    };
+  });
+}
+
+/**
+ * Fetches trend reports from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} limit - Maximum number of results to return
+ * @param {string} nextToken - Optional pagination token for additional results
+ * @param {string} placeId - Optional place ID to filter by
+ * @param {string} keyword - Optional keyword to filter by
+ * @returns {Promise<LocalFalconTrendReportsResponse>} API response
+ */
+export async function fetchLocalFalconTrendReports(apiKey: string, limit: string, nextToken?: string, placeId?: string, keyword?: string, startDate?: string, endDate?: string, platform?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/trend-reports`);
+  url.searchParams.set("limit", limit);
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  if (placeId) url.searchParams.set("place_id", placeId);
+  if (keyword) url.searchParams.set("keyword", keyword);
+  if (startDate) url.searchParams.set("start_date", startDate);
+  if (endDate) url.searchParams.set("end_date", endDate);
+  if (platform) url.searchParams.set("platform", platform);
+  // Auto-prefix fieldmask with reports.* wildcard syntax for the list endpoint
+  if (fieldmask) url.searchParams.set("fieldmask", prefixFieldmaskForList(fieldmask, 'reports'));
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    // When fieldmask is used, the API returns the standard structure with filtered fields
+    if (fieldmask) {
+      if (unwrapped?.reports) {
+        return {
+          ...unwrapped,
+          reports: unwrapped.reports.slice(0, parseInt(limit) || unwrapped.reports.length)
+        };
+      }
+      return unwrapped;
+    }
+
+    // Validate response structure
+    if (!unwrapped || !unwrapped.reports) {
+      throw new Error('Invalid response format from Local Falcon API');
+    }
+
+    return {
+      ...unwrapped,
+      reports: unwrapped.reports.slice(0, parseInt(limit) || unwrapped.reports.length)
+    };
+  });
+}
+
+/**
+ * Fetches auto scans from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} nextToken - Optional pagination token
+ * @param {string} placeId - Optional place ID filter
+ * @param {string} keyword - Optional keyword filter
+ * @param {string} grid_size - Optional grid size filter
+ * @param {string} frequency - Optional frequency filter
+ * @param {string} status - Optional status filter
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconAutoScans(apiKey: string, nextToken?: string, placeId?: string, keyword?: string, grid_size?: string, frequency?: string, status?: string, platform?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/autoscans`);
+
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  if (placeId) url.searchParams.set("place_id", placeId);
+  if (keyword) url.searchParams.set("keyword", keyword);
+  if (grid_size) url.searchParams.set("grid_size", grid_size);
+  if (frequency) url.searchParams.set("frequency", frequency);
+  if (status) url.searchParams.set("status", status);
+  if (platform) url.searchParams.set("platform", platform);
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Fetches location reports from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} limit - Maximum number of results
+ * @param {string} placeId - Optional place ID filter
+ * @param {string} keyword - Optional keyword filter
+ * @param {string} nextToken - Optional pagination token
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconLocationReports(apiKey: string, limit: string, placeId?: string, keyword?: string, startDate?:string, endDate?: string, nextToken?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/location-reports`);
+  url.searchParams.set("limit", limit);
+
+  if (placeId) url.searchParams.set("place_id", placeId);
+  if (keyword) url.searchParams.set("keyword", keyword);
+  if (startDate) url.searchParams.set("start_date", startDate);
+  if (endDate) url.searchParams.set("end_date", endDate);
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  // Auto-prefix fieldmask with reports.* wildcard syntax for the list endpoint
+  if (fieldmask) url.searchParams.set("fieldmask", prefixFieldmaskForList(fieldmask, 'reports'));
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    // When fieldmask is used, the API returns the standard structure with filtered fields
+    if (fieldmask) {
+      if (unwrapped?.reports) {
+        return {
+          ...unwrapped,
+          reports: unwrapped.reports.slice(0, parseInt(limit) || unwrapped.reports.length)
+        };
+      }
+      return unwrapped;
+    }
+
+    // Validate response
+    if (!unwrapped || !unwrapped.reports) {
+      throw new Error('Invalid response format from Local Falcon API');
+    }
+
+    const limitNum = parseInt(limit) || unwrapped.reports.length;
+
+    const out: any = {
+      next_token: unwrapped.next_token,
+      ai_analysis: unwrapped.ai_analysis,
+      reports: unwrapped.reports.slice(0, limitNum).map((report: any) => {
+        return {
+          report_key: report.report_key,
+          last_date: report.last_date,
+          location: report.location,
+          keywords: report.keywords,
+          pdf: report.pdf,
+          avg_arp: report.avg_arp,
+          avg_atrp: report.avg_atrp,
+          avg_solv: report.avg_solv,
+        };
+      }),
+    };
+    if (unwrapped._warnings) out._warnings = unwrapped._warnings;
+    return out;
+  });
+}
+
+/**
+ * Fetches all locations from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} query - Optional search query
+ * @returns {Promise<any>} API response
+ */
+export async function fetchAllLocalFalconLocations(apiKey: string, query?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/locations`);
+
+  if (query) url.searchParams.set("query", query);
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Fetches all location groups from the Local Falcon API.
+ * Groups may be nested: a child group carries a `parent` object identifying
+ * its container; top-level groups have type `parent`.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} limit - Maximum number of results to return
+ * @param {string} [query] - Optional search query (matches group key or name)
+ * @param {string} [nextToken] - Optional pagination token from a prior response
+ * @param {string} [fieldmask] - Optional comma-separated list of fields to return
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconLocationGroups(apiKey: string, limit: string, query?: string, nextToken?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/location-groups`);
+  url.searchParams.set("limit", limit);
+
+  if (query) url.searchParams.set("query", query);
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  // Auto-prefix fieldmask with groups.* wildcard syntax for the list endpoint
+  if (fieldmask) url.searchParams.set("fieldmask", prefixFieldmaskForList(fieldmask, 'groups'));
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    // When fieldmask is used, the API returns the standard structure with filtered fields
+    if (fieldmask) {
+      if (unwrapped?.groups) {
+        return {
+          ...unwrapped,
+          groups: unwrapped.groups.slice(0, parseInt(limit) || unwrapped.groups.length)
+        };
+      }
+      return unwrapped;
+    }
+
+    // Validate response
+    if (!unwrapped || !unwrapped.groups) {
+      throw new Error('Invalid response format from Local Falcon API');
+    }
+
+    const limitNum = parseInt(limit) || unwrapped.groups.length;
+
+    const out: any = {
+      next_token: unwrapped.next_token,
+      groups: unwrapped.groups.slice(0, limitNum).map((group: any) => {
+        const g: any = {
+          key: group.key,
+          name: group.name,
+          type: group.type,
+          location_count: group.location_count,
+          place_ids: group.place_ids,
+          date_created: group.date_created,
+        };
+        // `parent` is present only for nested (child) groups
+        if (group.parent) g.parent = group.parent;
+        return g;
+      }),
+    };
+    if (unwrapped._warnings) out._warnings = unwrapped._warnings;
+    return out;
+  });
+}
+
+/**
+ * Fetches a location report from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} reportKey - The report key
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconLocationReport(apiKey: string, reportKey: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/location-reports/${reportKey}`);
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Fetches a report from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} reportKey - The report key
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconReport(apiKey: string, reportKey: string, fieldmask?: string, includeWidgetData = false) {
+  // Clean up the report key if it's a URL
+  const cleanReportKey = reportKey.includes('/')
+    ? reportKey.split('/').pop()
+    : reportKey;
+
+  const url = new URL(`${API_BASE}/reports/${cleanReportKey}`);
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    // Report reads must never deliver an application-level denied/error payload
+    // as successful widget data, including on the normal/Claude profile.
+    if (data?.success === false) throw parseApiError(res.status, JSON.stringify(data));
+    const unwrapped = unwrapWithWarnings(data);
+
+    // Handle 202 Accepted — scan report is still processing
+    if (res.status === 202) {
+      return {
+        ...unwrapped,
+        report_key: cleanReportKey,
+        _mcp_status: "processing",
+        _mcp_note: "This scan report is still processing. Check getLocalFalconReport again later with the same report_key. Do NOT run another scan or resubmit this scan; that would consume credits again."
+      };
+    }
+
+    try {
+      // Validate the response
+      if (!unwrapped || (includeWidgetData && (typeof unwrapped !== "object" || Array.isArray(unwrapped)))) {
+        throw new Error('Invalid response format from Local Falcon API');
+      }
+
+      // Strip data_points by default — too large for LLM context windows
+      // (e.g. 81 grid points × 20 results each). Preserve when fieldmask explicitly requests them.
+      // _warnings (if present from unwrapWithWarnings) passes through either branch.
+      const wantsDataPoints = fieldmask && fieldmask.includes('data_points');
+      if (wantsDataPoints || includeWidgetData) {
+        return unwrapped;
+      }
+      const { data_points, ...cleanData } = unwrapped;
+      return cleanData;
+    } catch (err) {
+      throw new Error(`Failed to parse report data: ${err}`);
+    }
+  });
+}
+
+/**
+ * Fetches a trend report from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} reportKey - The report key
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconTrendReport(apiKey: string, reportKey: string, fieldmask?: string) {
+  // Clean up the report key if it's a URL
+  const cleanReportKey = reportKey.includes('/')
+    ? reportKey.split('/').pop()
+    : reportKey;
+
+  const url = new URL(`${API_BASE}/trend-reports/${cleanReportKey}`);
+  // Pass fieldmask directly — this is a single-report endpoint, not a list.
+  // Do NOT use prefixFieldmaskForList here as it wraps all fields with scans.*
+  // which drops top-level fields like report_key, last_date, keyword, location.
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    if (!unwrapped) {
+      throw new Error('Invalid response format from Local Falcon API');
+    }
+
+    const report = unwrapped;
+
+    // Always clean up the response — strip heavy nested data regardless of fieldmask.
+    // The scans array and locations array contain data_points that are too large for LLM context.
+
+    // Clean locations: extract from scans array (get the most populated set) and strip to key metrics
+    let locations = report.locations;
+    if (!locations && report.scans) {
+      locations = report.scans.reduce((most: any[], current: any) => {
+        return current.locations && current.locations.length > most.length ? current.locations : most;
+      }, []);
+    }
+
+    if (locations && Array.isArray(locations)) {
+      locations = locations.map((location: any) => {
+        return {
+          place_id: location.place_id,
+          name: location.name,
+          address: location.address,
+          phone: location.phone,
+          display_url: location.display_url,
+          rating: location.rating,
+          reviews: location.reviews,
+          arp: location.arp,
+          atrp: location.atrp,
+          solv: location.solv,
+        };
+      });
+    }
+
+    // Clean scans: strip to key metrics per scan (no data_points, no nested locations)
+    let scans = report.scans;
+    if (scans && Array.isArray(scans)) {
+      scans = scans.map((scan: any) => {
+        return {
+          report_key: scan.report_key,
+          date: scan.date,
+          arp: scan.arp,
+          atrp: scan.atrp,
+          solv: scan.solv,
+          image: scan.image,
+          heatmap: scan.heatmap
+        };
+      });
+    }
+
+    return {
+      id: report.id,
+      last_date: report.last_date,
+      keyword: report.keyword,
+      location: report.location,
+      ai_analysis: report.ai_analysis,
+      lat: report.lat,
+      lng: report.lng,
+      grid_size: report.grid_size,
+      radius: report.radius,
+      measurement: report.measurement,
+      scan_count: report.scan_count,
+      points: report.points,
+      pdf: report.pdf,
+      locations,
+      scans,
+    };
+  });
+}
+
+/**
+ * Fetches keyword reports from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} limit - Maximum number of results
+ * @param {string} nextToken - Optional pagination token
+ * @param {string} keyword - Optional keyword filter
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconKeywordReports(apiKey: string, limit: string, nextToken?: string, keyword?: string, startDate?: string, endDate?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/keyword-reports`);
+  url.searchParams.set("limit", limit);
+
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  if (startDate) url.searchParams.set("start_date", startDate);
+  if (endDate) url.searchParams.set("end_date", endDate);
+  if (keyword) url.searchParams.set("keyword", keyword);
+  // Auto-prefix fieldmask with reports.* wildcard syntax for the list endpoint
+  if (fieldmask) url.searchParams.set("fieldmask", prefixFieldmaskForList(fieldmask, 'reports'));
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    // When fieldmask is used, the API returns the standard structure with filtered fields
+    if (fieldmask) {
+      if (unwrapped?.reports) {
+        return {
+          ...unwrapped,
+          reports: unwrapped.reports.slice(0, parseInt(limit) || unwrapped.reports.length)
+        };
+      }
+      return unwrapped;
+    }
+
+    // Validate the response
+    if (!unwrapped || !unwrapped.reports) {
+      throw new Error('Invalid response format from Local Falcon API');
+    }
+
+    const limitNum = parseInt(limit) || unwrapped.reports.length;
+
+    return {
+      ...unwrapped,
+      reports: unwrapped.reports.slice(0, limitNum).map((report: any) => {
+        // Remove unnecessary fields to save bandwidth
+        const { last_timestamp, looker_last_date, scan_count, pdf, ...cleanReport } = report;
+        return cleanReport;
+      })
+    };
+  });
+}
+
+/**
+ * Fetches a keyword report from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} reportKey - The report key
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconKeywordReport(apiKey: string, reportKey: string, fieldmask?: string) {
+  // Clean up the report key if it's a URL
+  const cleanReportKey = reportKey.includes('/')
+    ? reportKey.split('/').pop()
+    : reportKey;
+
+  const url = new URL(`${API_BASE}/keyword-reports/${cleanReportKey}`);
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Fetches a grid from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} lat - Latitude
+ * @param {string} lng - Longitude
+ * @param {string} gridSize - Grid size
+ * @param {string} radius - Radius
+ * @param {string} measurement - Measurement unit
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconGrid(apiKey: string, lat?: string, lng?: string, gridSize?: string, radius?: string, measurement?: string) {
+  const url = new URL(`${API_BASE}/grid`);
+
+  if (lat) url.searchParams.set("lat", lat);
+  if (lng) url.searchParams.set("lng", lng);
+  if (gridSize) url.searchParams.set("grid_size", gridSize.toString());
+  if (radius) url.searchParams.set("radius", radius.toString());
+  if (measurement) url.searchParams.set("measurement", measurement);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Fetches Google Business locations from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} nextToken - Optional pagination token
+ * @param {string} query - Search query
+ * @param {string} near - Optional location filter
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconGoogleBusinessLocations(apiKey: string, nextToken?: string, query?: string, near?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/places`);
+
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  if (query) url.searchParams.set("query", query);
+  if (near) url.searchParams.set("near", near);
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Fetches ranking data for a business at a coordinate.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} lat - Latitude
+ * @param {string} lng - Longitude
+ * @param {string} keyword - Search keyword
+ * @param {string} zoom - Map zoom level
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconRankingAtCoordinate(apiKey: string, lat: string, lng: string, keyword: string, zoom = "13") {
+  const url = new URL(`${API_BASE}/result`);
+  url.searchParams.set("lat", lat);
+  url.searchParams.set("lng", lng);
+  url.searchParams.set("keyword", keyword);
+  url.searchParams.set("zoom", zoom);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Fetches search results at a coordinate without rank comparison.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} lat - Latitude
+ * @param {string} lng - Longitude
+ * @param {string} keyword - Search keyword
+ * @param {string} zoom - Map zoom level
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconKeywordAtCoordinate(apiKey: string, lat: string, lng: string, keyword: string, zoom = "13") {
+  const url = new URL(`${API_BASE}/search`);
+  url.searchParams.set("lat", lat);
+  url.searchParams.set("lng", lng);
+  url.searchParams.set("keyword", keyword);
+  url.searchParams.set("zoom", zoom.toString());
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    }, LONG_OPERATION_TIMEOUT_MS); // Longer timeout for search operations
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Runs a full grid search using Local Falcon API v2.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} placeId - The Google Place ID of the business to match against
+ * @param {string} keyword - The desired search term or keyword
+ * @param {string} lat - The data point latitude value
+ * @param {string} lng - The data point longitude value
+ * @param {string} gridSize - Grid size (3, 5, 7, 9, 11, 13, or 15)
+ * @param {string} radius - Radius from center point (.1 to 100)
+ * @param {string} measurement - Measurement unit ("mi" for miles or "km" for kilometers)
+ * @param {string} platform - Platform to run scan against ("google", "apple", "gaio", or "chatgpt")
+ * @param {boolean} aiAnalysis - Whether AI analysis should be generated (optional)
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconFullGridSearch(
+  apiKey: string,
+  placeId: string,
+  keyword: string,
+  lat: string,
+  lng: string,
+  gridSize: string,
+  radius: string,
+  measurement: string,
+  platform: string,
+  aiAnalysis: boolean = false
+) {
+  const url = "https://api.localfalcon.com/v2/run-scan/";
+  
+  const formData = new FormData();
+  formData.append("place_id", placeId);
+  formData.append("keyword", keyword);
+  formData.append("lat", lat);
+  formData.append("lng", lng);
+  formData.append("grid_size", gridSize);
+  formData.append("radius", radius);
+  formData.append("measurement", measurement);
+  formData.append("platform", platform);
+  formData.append("ai_analysis", aiAnalysis.toString());
+  const isEager = platform != "google"
+  formData.append("eager", isEager.toString())
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url, {
+      method: "POST",
+      body: formData,
+      headers: buildHeaders(apiKey, true),
+    }, LONG_OPERATION_TIMEOUT_MS); // Long timeout for grid searches
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const responseData = await safeParseJson(res);
+
+
+    console.info(`Is eager is: ${isEager}`)
+    console.info(`Platform is: ${platform}`)
+    if (isEager && debugPayloadLogging()) console.info(`Raw eager response is ${JSON.stringify(responseData, null, 2)}`)
+    
+    const data = responseData.data;
+    const { data_points, rankings, ...rest } = data;
+    const parameters = responseData.parameters;
+    const result = {
+      parameters,
+      rest,
+      message: responseData.message,
+      url: `https://www.localfalcon.com/reports/view/${rest.report_key}`
+    }
+    if (debugPayloadLogging()) console.info(`response is: ${JSON.stringify(result, null, 2)}`)
+
+    return {
+      success: true,
+      ...result
+    };
+  });
+}
+
+/**
+ * Fetches competitor reports from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} limit - Maximum number of results
+ * @param {string} startDate - Optional start date filter
+ * @param {string} endDate - Optional end date filter
+ * @param {string} placeId - Optional place ID filter
+ * @param {string} keyword - Optional keyword filter
+ * @param {string} gridSize - Optional grid size filter
+ * @param {string} nextToken - Optional pagination token
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconCompetitorReports(apiKey: string, limit: string, startDate?: string, endDate?: string, placeId?: string, keyword?: string, gridSize?: string, nextToken?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/competitor-reports`);
+  url.searchParams.set("limit", limit);
+
+  if (startDate) url.searchParams.set("start_date", startDate);
+  if (endDate) url.searchParams.set("end_date", endDate);
+  if (placeId) url.searchParams.set("place_id", placeId);
+  if (keyword) url.searchParams.set("keyword", keyword);
+  if (gridSize) url.searchParams.set("grid_size", gridSize);
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  // Auto-prefix fieldmask with reports.* wildcard syntax for the list endpoint
+  if (fieldmask) url.searchParams.set("fieldmask", prefixFieldmaskForList(fieldmask, 'reports'));
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    // When fieldmask is used, the API returns the standard structure with filtered fields
+    if (fieldmask) {
+      if (unwrapped?.reports) {
+        return {
+          ...unwrapped,
+          reports: unwrapped.reports.slice(0, parseInt(limit) || unwrapped.reports.length)
+        };
+      }
+      return unwrapped;
+    }
+
+    // Validate the response
+    if (!unwrapped || !unwrapped.reports) {
+      throw new Error('Invalid response format from Local Falcon API');
+    }
+
+    const limitNum = parseInt(limit) || unwrapped.reports.length;
+
+    return {
+      ...unwrapped,
+      reports: unwrapped.reports.slice(0, limitNum).map((report: any) => {
+        // Remove unnecessary fields to save bandwidth
+        const {
+          data_points,
+          checksum,
+          timestamp,
+          looker_date,
+          pdf,
+          ...cleanReport
+        } = report;
+        return cleanReport;
+      })
+    };
+  });
+}
+
+/**
+ * Fetches a competitor report from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} reportKey - Report key
+ * @param {string} [fieldmask] - Optional fieldmask for server-side field filtering
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconCompetitorReport(apiKey: string, reportKey: string, fieldmask?: string) {
+  // Clean up the report key if it's a URL
+  const cleanReportKey = reportKey.includes('/')
+    ? reportKey.split('/').pop()
+    : reportKey;
+
+  const url = new URL(`${API_BASE}/competitor-reports/${cleanReportKey}`);
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    try {
+      if (!unwrapped) {
+        throw new Error('Invalid response format from Local Falcon API');
+      }
+
+      const reportData = unwrapped;
+
+      // Strip data_points from each business by default — too large for LLM context
+      // (e.g. 31 competitors × 9 grid points × 20 results each).
+      // If the fieldmask explicitly requests data_points, preserve them.
+      const wantsDataPoints = fieldmask && fieldmask.includes('data_points');
+      if (!wantsDataPoints && reportData.businesses && Array.isArray(reportData.businesses)) {
+        reportData.businesses = reportData.businesses.map((biz: any) => {
+          const { data_points, ...cleanBiz } = biz;
+          return cleanBiz;
+        });
+      }
+
+      return reportData;
+    } catch (err) {
+      throw new Error(`Failed to parse competitor report data: ${err}`);
+    }
+  });
+}
+
+/**
+ * Fetches campaign reports from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} limit - Maximum number of results
+ * @param {string} startDate - Optional start date filter
+ * @param {string} endDate - Optional end date filter
+ * @param {string} placeId - Optional place ID filter
+ * @param {string} nextToken - Optional pagination token
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconCampaignReports(apiKey: string, limit: string, startDate?: string, endDate?: string, placeId?: string, runDate?: string, nextToken?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/campaigns`);
+  url.searchParams.set("limit", limit);
+
+  if (startDate) url.searchParams.set("start_date", startDate);
+  if (endDate) url.searchParams.set("end_date", endDate);
+  if (placeId) url.searchParams.set("place_id", placeId);
+  if (runDate) url.searchParams.set("run", runDate);
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  // Auto-prefix fieldmask with reports.* wildcard syntax for the list endpoint
+  if (fieldmask) url.searchParams.set("fieldmask", prefixFieldmaskForList(fieldmask, 'reports'));
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    // When fieldmask is used, the API returns the standard structure with filtered fields
+    if (fieldmask) {
+      if (unwrapped?.reports) {
+        return {
+          ...unwrapped,
+          reports: unwrapped.reports.slice(0, parseInt(limit) || unwrapped.reports.length)
+        };
+      }
+      return unwrapped;
+    }
+
+    // Validate the response
+    if (!unwrapped || !unwrapped.reports) {
+      throw new Error('Invalid response format from Local Falcon API');
+    }
+
+    const limitNum = parseInt(limit) || unwrapped.reports.length;
+
+    return {
+      ...unwrapped,
+      reports: unwrapped.reports.slice(0, limitNum).map((report: any) => {
+        // Remove only truly unnecessary fields
+        const {
+          data_points,
+          ...cleanReport
+        } = report;
+        return cleanReport;
+      })
+    };
+  });
+}
+
+/**
+ * Fetches a campaign report from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} reportKey - Report key
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconCampaignReport(apiKey: string, reportKey: string, runDate:string, fieldmask?: string) {
+  // Clean up the report key if it's a URL
+  const cleanReportKey = reportKey.includes('/')
+    ? reportKey.split('/').pop()
+    : reportKey;
+
+  const url = new URL(`${API_BASE}/campaigns/${cleanReportKey}`);
+
+  if (runDate) url.searchParams.set("run", runDate);
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    }, LONG_OPERATION_TIMEOUT_MS); // Campaign reports can be large
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Fetches guard reports from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} limit - Maximum number of results
+ * @param {string} startDate - Optional start date filter
+ * @param {string} endDate - Optional end date filter
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconGuardReports(apiKey: string, limit: string, startDate?: string, endDate?: string, status?: string, nextToken?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/guard`);
+  url.searchParams.set("limit", limit);
+
+  if (startDate) url.searchParams.set("start_date", startDate);
+  if (endDate) url.searchParams.set("end_date", endDate);
+  if (status) url.searchParams.set("status", status);
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+  // Auto-prefix fieldmask with reports.* wildcard syntax for the list endpoint
+  if (fieldmask) url.searchParams.set("fieldmask", prefixFieldmaskForList(fieldmask, 'reports'));
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    const data = await safeParseJson(res);
+    const unwrapped = unwrapWithWarnings(data);
+
+    // When fieldmask is used, the API returns the standard structure with filtered fields
+    if (fieldmask) {
+      if (unwrapped?.reports) {
+        return {
+          ...unwrapped,
+          reports: unwrapped.reports.slice(0, parseInt(limit) || unwrapped.reports.length)
+        };
+      }
+      return unwrapped;
+    }
+
+    // Validate the response
+    if (!unwrapped || !unwrapped.reports) {
+      throw new Error('Invalid response format from Local Falcon API');
+    }
+
+    const limitNum = parseInt(limit) || unwrapped.reports.length;
+
+    return {
+      ...unwrapped,
+      reports: unwrapped.reports.slice(0, limitNum)
+    };
+  });
+}
+
+/**
+ * Fetches a guard report from the Local Falcon API.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} placeId - Place ID
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconGuardReport(apiKey: string, placeId: string, startDate?: string, endDate?: string, fieldmask?: string) {
+  const url = new URL(`${API_BASE}/guard/${placeId}`);
+  if (startDate) url.searchParams.set("start_date", startDate);
+  if (endDate) url.searchParams.set("end_date", endDate);
+  if (fieldmask) url.searchParams.set("fieldmask", fieldmask);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+type ScanSubmissionParams = {
+  placeId: string;
+  keyword: string;
+  gridSize: string;
+  platform: string;
+};
+
+// Shape the MCP return for the HTTP 202 "scan is processing" branch. When the server
+// accepts a scan under eager mode but can't finish within its 20s eager budget, it
+// returns 202 with data.report_key populated so the agent can poll. Mirrors the 202
+// pattern in fetchLocalFalconReport().
+export function buildEagerPendingResponse(
+  data: any,
+  params: ScanSubmissionParams
+): any {
+  const reportKey = data?.data?.report_key;
+  const status = data?.data?.status ?? 'pending';
+  return {
+    success: true,
+    message: reportKey
+      ? `Scan submitted successfully and is processing. Report key: ${reportKey}. Poll getLocalFalconReport with this key to check status — it will return HTTP 202 with a pending note until the scan completes.`
+      : "Scan submitted successfully and is processing. Poll listLocalFalconScanReports with the same placeId to find the report_key.",
+    report_key: reportKey,
+    status,
+    place_id: params.placeId,
+    keyword: params.keyword,
+    grid_size: params.gridSize,
+    platform: params.platform,
+    _mcp_note: "The scan is queued and processing. Call getLocalFalconReport with this report_key to poll status. Do NOT retry runLocalFalconScan — retrying consumes additional credits."
+  };
+}
+
+// Shape the MCP return for the network-timeout fallback. Shouldn't fire under normal
+// conditions (SCAN_SUBMIT_TIMEOUT_MS > server's 20s eager wait), but can happen under
+// network congestion. report_key isn't available here; agent must recover by listing
+// recent scans.
+export function buildScanTimeoutFallback(params: ScanSubmissionParams): any {
+  return {
+    success: true,
+    message: "Scan submitted successfully but the report key could not be captured due to a network timeout. Check your recent scans via listLocalFalconScanReports in a moment to find it.",
+    place_id: params.placeId,
+    keyword: params.keyword,
+    grid_size: params.gridSize,
+    platform: params.platform,
+    _mcp_note: "The scan is running. Use listLocalFalconScanReports with the same placeId to find the submitted report. Do NOT retry runLocalFalconScan — retrying consumes additional credits."
+  };
+}
+
+/**
+ * Runs a scan at the specified coordinate point and gets ranking data for a specified business.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} placeId - The Google Place ID of the business to match against in results
+ * @param {string} keyword - The desired search term or keyword
+ * @param {string} lat - The data point latitude value
+ * @param {string} lng - The data point longitude value
+ * @param {string} gridSize - The size of the grid (3, 5, 7, 9, 11, 13, or 15)
+ * @param {string} radius - The radius of the grid from center point to outer most north/east/south/west point (0.1 to 100)
+ * @param {string} measurement - The measurement unit of the radius ("mi" for miles or "km" for kilometers)
+ * @param {string} platform - The platform to run the scan against ("google", "apple", "gaio", or "chatgpt")
+ * @param {boolean} [aiAnalysis=false] - Whether AI analysis should be generated for this scan (optional)
+ * @returns {Promise<any>} API response with scan results
+ */
+export async function runLocalFalconScan(
+  apiKey: string,
+  placeId: string,
+  keyword: string,
+  lat: string,
+  lng: string,
+  gridSize: string,
+  radius: string,
+  measurement: string,
+  platform: string,
+  aiAnalysis: boolean = false
+): Promise<any> {
+  try {
+    // Wait for rate limiter before making the request
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('place_id', placeId);
+    form.append('keyword', keyword);
+    form.append('lat', lat);
+    form.append('lng', lng);
+    form.append('grid_size', gridSize);
+    form.append('radius', radius);
+    form.append('measurement', measurement);
+    form.append('platform', platform);
+    form.append('ai_analysis', aiAnalysis.toString());
+    // eager=1 tells the server-side run-scan handler to cap its completion-wait at
+    // 20s instead of 360s. If the scan finishes in <20s we get HTTP 200 with the
+    // full report; otherwise HTTP 202 with data.report_key populated so the agent
+    // can poll via getLocalFalconReport. Previously the MCP's 15s timeout consistently
+    // fired before the server responded, so the report_key was never surfaced.
+    form.append('eager', '1');
+
+    // Server's eager budget is 20s (runtime_check in LF.api). 25s keeps a 5s margin so
+    // the MCP's timeout outlasts the server — we capture the 202-with-report_key
+    // response instead of aborting into the network-timeout fallback path.
+    const SCAN_SUBMIT_TIMEOUT_MS = 25_000;
+
+    let response: any;
+    try {
+      response = await fetchWithTimeout(
+        `${API_BASE_V2}/run-scan/`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        SCAN_SUBMIT_TIMEOUT_MS
+      );
+    } catch (error) {
+      // MCP-side timeout before server responded — shouldn't happen with 25s > 20s
+      // eager budget, but possible under network congestion. report_key is unreachable
+      // from here; agent recovers via listings.
+      if (isTimeoutError(error)) {
+        return buildScanTimeoutFallback({ placeId, keyword, gridSize, platform });
+      }
+      throw error;
+    }
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    // HTTP 202 — scan still processing after server's eager wait. report_key is present
+    // in data.data so the agent can poll getLocalFalconReport until completion.
+    if (response.status === 202) {
+      return buildEagerPendingResponse(data, { placeId, keyword, gridSize, platform });
+    }
+
+    // HTTP 200 — scan completed within server's 20s eager budget. Full report is in
+    // the response body with report_key inside data.
+    return data;
+  } catch (error) {
+    console.error('Error running scan:', error);
+    throw error;
+  }
+}
+
+/**
+ * Searches for business locations on the specified platform.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} term - The business location name to search for
+ * @param {string} platform - The platform to search against ("google" or "apple")
+ * @param {string} [proximity] - Optional proximity filter (e.g., city, state, country)
+ * @returns {Promise<any>} API response with matching business locations
+ */
+export async function searchForLocalFalconBusinessLocation(
+  apiKey: string,
+  term: string,
+  platform: string,
+  proximity?: string
+): Promise<any> {
+  try {
+    // Wait for rate limiter before making the request
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('term', term);
+    form.append('platform', platform);
+    if (proximity) form.append('proximity', proximity);
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/locations/search`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    // Parse and return the response
+    const data = await safeParseJson(response);
+    
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error searching business locations:', error);
+    throw error;
+  }
+}
+
+/**
+ * Saves a business location to your Local Falcon account.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} platform - The platform to add the location from ("google" or "apple")
+ * @param {string} placeId - The Business Location ID to add
+ * @param {string} [name] - Business name (required for Apple)
+ * @param {string} [lat] - Latitude (required for Apple)
+ * @param {string} [lng] - Longitude (required for Apple)
+ * @returns {Promise<any>} API response
+ */
+export async function saveLocalFalconBusinessLocationToAccount(
+  apiKey: string,
+  platform: 'google' | 'apple',
+  placeId: string,
+  name?: string,
+  lat?: string,
+  lng?: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('platform', platform);
+    form.append('place_id', placeId);
+    if (name) form.append('name', name);
+    if (lat) form.append('lat', lat);
+    if (lng) form.append('lng', lng);
+    
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/locations/add`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error saving business location:', error);
+    throw error;
+  }
+}
+
+
+/**
+ * Retrieves Local Falcon account information.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} [returnField] - Optional specific return information: "user", "credit package", "subscription", or "credits"
+ * @returns {Promise<any>} API response with account details
+ */
+export async function fetchLocalFalconAccountInfo(
+  apiKey: string,
+  returnField?: 'user' | 'credit package' | 'subscription' | 'credits',
+  fieldmask?: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    if (returnField) form.append('return', returnField);
+    if (fieldmask) form.append('fieldmask', fieldmask);
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/account`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error fetching account information:', error);
+    throw error;
+  }
+}
+
+export async function addLocationsToFalconGuard(
+  apiKey: string,
+  placeIds: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('place_id', placeIds);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/guard/add`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error adding locations to Falcon Guard:', error);
+    throw error;
+  }
+}
+
+/**
+ * Pauses protection for one or multiple locations in Falcon Guard.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} [guardKey] - Falcon Guard report key(s), separated by commas
+ * @param {string} [placeId] - Google Place ID(s), separated by commas (required if guardKey is blank)
+ * @returns {Promise<any>} API response
+ */
+export async function pauseFalconGuardProtection(
+  apiKey: string,
+  guardKey?: string,
+  placeId?: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    if (guardKey) form.append('guard_key', guardKey);
+    if (placeId) form.append('place_id', placeId);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/guard/pause`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error pausing Falcon Guard protection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Resumes protection for one or multiple locations in Falcon Guard.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} [guardKey] - Falcon Guard report key(s), separated by commas
+ * @param {string} [placeId] - Google Place ID(s), separated by commas (required if guardKey is blank)
+ * @returns {Promise<any>} API response
+ */
+export async function resumeFalconGuardProtection(
+  apiKey: string,
+  guardKey?: string,
+  placeId?: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    if (guardKey) form.append('guard_key', guardKey);
+    if (placeId) form.append('place_id', placeId);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/guard/resume`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error resuming Falcon Guard protection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Removes protection for one or multiple locations from Falcon Guard.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} [guardKey] - Falcon Guard report key(s), separated by commas
+ * @param {string} [placeId] - Google Place ID(s), separated by commas (required if guardKey is blank)
+ * @returns {Promise<any>} API response
+ */
+export async function removeFalconGuardProtection(
+  apiKey: string,
+  guardKey?: string,
+  placeId?: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    if (guardKey) form.append('guard_key', guardKey);
+    if (placeId) form.append('place_id', placeId);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/guard/delete`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error removing Falcon Guard protection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Creates a new campaign in Local Falcon.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {object} params - Campaign parameters
+ * @returns {Promise<any>} API response
+ */
+export async function createLocalFalconCampaign(
+  apiKey: string,
+  params: {
+    name: string;
+    measurement: 'mi' | 'km';
+    gridSize: string;
+    radius: string;
+    frequency: 'one-time' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
+    placeId: string;
+    keyword: string;
+    startDate: string;
+    startTime: string;
+    aiAnalysis?: boolean;
+    notify?: boolean;
+    emailRecipients?: string;
+    emailSubject?: string;
+    emailBody?: string;
+  }
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('name', params.name);
+    form.append('measurement', params.measurement);
+    form.append('grid_size', params.gridSize);
+    form.append('radius', params.radius);
+    form.append('frequency', params.frequency);
+    form.append('place_id', params.placeId);
+    form.append('keyword', params.keyword);
+    form.append('start_date', params.startDate);
+    form.append('start_time', params.startTime);
+    if (params.aiAnalysis !== undefined) form.append('ai_analysis', params.aiAnalysis ? '1' : '0');
+    if (params.notify !== undefined) form.append('notify', params.notify ? '1' : '0');
+    if (params.emailRecipients) form.append('email_recipients', params.emailRecipients);
+    if (params.emailSubject) form.append('email_subject', params.emailSubject);
+    if (params.emailBody) form.append('email_body', params.emailBody);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/campaigns/create`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error creating campaign:', error);
+    throw error;
+  }
+}
+
+/**
+ * Updates an existing campaign in Local Falcon.
+ * The fields required depend on the value of the `action` parameter.
+ * A campaign cannot be modified while it is currently running.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {object} params - Update parameters
+ * @returns {Promise<any>} API response
+ */
+export async function updateLocalFalconCampaign(
+  apiKey: string,
+  params: {
+    campaignKey: string;
+    action: 'update-settings' | 'add-location' | 'modify-location' | 'remove-location' | 'add-keyword' | 'update-keyword' | 'remove-keyword';
+    placeId?: string;
+    keyword?: string;
+    name?: string;
+    gridSize?: string;
+    radius?: string;
+    measurement?: 'mi' | 'km';
+    platforms?: string;
+    keywordType?: 'traditional' | 'ai' | 'both';
+    aiAnalysis?: boolean;
+    date?: string;
+    time?: string;
+    frequency?: 'one-time' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
+    notify?: boolean;
+    recipients?: string;
+    emailName?: string;
+    emailReplyTo?: string;
+    emailSubject?: string;
+    emailBody?: string;
+    emailSendAi?: boolean;
+  }
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('campaign_key', params.campaignKey);
+    form.append('action', params.action);
+    if (params.placeId) form.append('place_id', params.placeId);
+    if (params.keyword) form.append('keyword', params.keyword);
+    if (params.name) form.append('name', params.name);
+    if (params.gridSize) form.append('size', params.gridSize);
+    if (params.radius) form.append('radius', params.radius);
+    if (params.measurement) form.append('measurement', params.measurement);
+    if (params.platforms) form.append('platforms', params.platforms);
+    if (params.keywordType) form.append('keyword_type', params.keywordType);
+    if (params.aiAnalysis !== undefined) form.append('ai_analysis', params.aiAnalysis ? '1' : '0');
+    if (params.date) form.append('date', params.date);
+    if (params.time) form.append('time', params.time);
+    if (params.frequency) form.append('frequency', params.frequency);
+    if (params.notify !== undefined) form.append('notify', params.notify ? '1' : '0');
+    if (params.recipients) form.append('recipients', params.recipients);
+    if (params.emailName) form.append('email_name', params.emailName);
+    if (params.emailReplyTo) form.append('email_replyto', params.emailReplyTo);
+    if (params.emailSubject) form.append('email_subject', params.emailSubject);
+    if (params.emailBody) form.append('email_body', params.emailBody);
+    if (params.emailSendAi !== undefined) form.append('email_send_ai', params.emailSendAi ? '1' : '0');
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/campaigns/update`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error updating campaign:', error);
+    throw error;
+  }
+}
+
+/**
+ * Manually triggers a campaign to run immediately.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} campaignKey - The key of the campaign to run
+ * @returns {Promise<any>} API response
+ */
+export async function runLocalFalconCampaign(
+  apiKey: string,
+  campaignKey: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('campaign_key', campaignKey);
+
+    // Campaign run submission strategy:
+    // Same pattern as runLocalFalconScan — treat timeout as successful submission.
+    // Campaigns need more time than individual scans because they can contain thousands
+    // of locations and the API may take up to 60s just to validate and queue everything.
+    const CAMPAIGN_SUBMIT_TIMEOUT_MS = 60000; // 60s — campaigns are data-heavy
+
+    let response: any;
+    try {
+      response = await fetchWithTimeout(
+        `${API_BASE_V2}/campaigns/run`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        CAMPAIGN_SUBMIT_TIMEOUT_MS
+      );
+    } catch (error) {
+      // Timeout = campaign was submitted and scans are processing (expected, not an error)
+      if ((error as Error).name === 'AbortError' || (error as Error).message?.includes('timeout')) {
+        return {
+          success: true,
+          message: "Campaign run submitted successfully and scans are now processing. Campaign runs can take several minutes depending on the number of scans and queue load.",
+          campaign_key: campaignKey,
+          _mcp_note: "The campaign is running. Use listLocalFalconCampaignReports or listLocalFalconScanReports to check for completed results. Do NOT retry runLocalFalconCampaign — the scans are already queued and retrying would consume additional credits. If results do not appear after 4-5 polling attempts, inform the user that the campaign is still processing (large campaigns with many locations can take up to several hours) and suggest they check https://www.localfalcon.com/reports for results, or come back and ask again later."
+        };
+      }
+      throw error;
+    }
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error running campaign:', error);
+    throw error;
+  }
+}
+
+/**
+ * Pauses a campaign.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} campaignKey - The key of the campaign to pause
+ * @returns {Promise<any>} API response
+ */
+export async function pauseLocalFalconCampaign(
+  apiKey: string,
+  campaignKey: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('campaign_key', campaignKey);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/campaigns/pause`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error pausing campaign:', error);
+    throw error;
+  }
+}
+
+/**
+ * Resumes a campaign from a deactivated or paused status.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} campaignKey - The key of the campaign to resume
+ * @param {string} [startDate] - Optional date to resume and run the campaign (MM/DD/YYYY)
+ * @param {string} [startTime] - Optional time of day the campaign should next run (e.g., "9:00 AM")
+ * @returns {Promise<any>} API response
+ */
+export async function resumeLocalFalconCampaign(
+  apiKey: string,
+  campaignKey: string,
+  startDate?: string,
+  startTime?: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('campaign_key', campaignKey);
+    if (startDate) form.append('start_date', startDate);
+    if (startTime) form.append('start_time', startTime);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/campaigns/resume`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error resuming campaign:', error);
+    throw error;
+  }
+}
+
+/**
+ * Reactivates a campaign that was deactivated due to insufficient credits.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} campaignKey - The key of the campaign to reactivate
+ * @returns {Promise<any>} API response
+ */
+export async function reactivateLocalFalconCampaign(
+  apiKey: string,
+  campaignKey: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('campaign_key', campaignKey);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/campaigns/reactivate`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error reactivating campaign:', error);
+    throw error;
+  }
+}
+
+/**
+ * Retrieves the full list of all Reviews Analysis Reports.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} [reviewsKey] - Filter by parent Reviews Analysis record key
+ * @param {string} [placeId] - Filter by platform Place ID(s), comma-separated
+ * @param {string} [frequency] - Filter by analysis frequency
+ * @param {number} [limit] - Number of results (1-100, defaults to 10)
+ * @param {string} [nextToken] - Pagination token for next page
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconReviewsAnalysisReports(
+  apiKey: string,
+  reviewsKey?: string,
+  placeId?: string,
+  frequency?: string,
+  limit?: number,
+  nextToken?: string,
+  fieldmask?: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    if (reviewsKey) form.append('reviews_key', reviewsKey);
+    if (placeId) form.append('place_id', placeId);
+    if (frequency) form.append('frequency', frequency);
+    if (limit !== undefined) form.append('limit', limit.toString());
+    if (nextToken) form.append('next_token', nextToken);
+    if (fieldmask) form.append('fieldmask', fieldmask);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE}/reviews/`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error fetching reviews analysis reports:', error);
+    throw error;
+  }
+}
+
+/**
+ * Retrieves a specific Reviews Analysis Report.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} reportKey - The key of the report to retrieve
+ * @returns {Promise<any>} API response
+ */
+export async function fetchLocalFalconReviewsAnalysisReport(
+  apiKey: string,
+  reportKey: string,
+  fieldmask?: string
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+    const form = new FormData();
+    form.append('report_key', reportKey);
+    if (fieldmask) form.append('fieldmask', fieldmask);
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE}/reviews/${reportKey}`,
+        {
+          method: 'POST',
+          body: form,
+          headers: buildHeaders(apiKey, true),
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error fetching reviews analysis report:', error);
+    throw error;
+  }
+}
+
+/**
+ * Searches the Local Falcon Knowledge Base for help articles, how-to guides, and platform documentation.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} [q] - Optional search query to filter articles
+ * @param {string} [categoryId] - Optional category ID to filter articles
+ * @param {string} [limit] - Optional limit for number of results
+ * @param {string} [nextToken] - Optional pagination token for additional results
+ * @returns {Promise<any>} API response with matching knowledge base articles
+ */
+export async function searchLocalFalconKnowledgeBase(
+  apiKey: string,
+  q?: string,
+  categoryId?: string,
+  limit?: string,
+  nextToken?: string
+): Promise<any> {
+  const url = new URL(`${API_BASE_V2}/knowledge-base/`);
+
+  if (q) url.searchParams.set("q", q);
+  if (categoryId) url.searchParams.set("category_id", categoryId);
+  if (limit) url.searchParams.set("limit", limit);
+  if (nextToken) url.searchParams.set("next_token", nextToken);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "GET",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Retrieves a specific Local Falcon Knowledge Base article by ID.
+ * @param {string} apiKey - Your Local Falcon API key
+ * @param {string} articleId - The numeric ID of the article to retrieve
+ * @returns {Promise<any>} API response with the full article content
+ */
+export async function getLocalFalconKnowledgeBaseArticle(
+  apiKey: string,
+  articleId: string
+): Promise<any> {
+  const url = new URL(`${API_BASE_V2}/knowledge-base/${articleId}`);
+
+  await rateLimiter.waitForAvailableSlot();
+
+  return withRetry(async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: "GET",
+      headers: buildHeaders(apiKey),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseApiError(res.status, errorText);
+    }
+
+    return await safeParseJson(res);
+  });
+}
+
+/**
+ * Fetches an image from a URL and returns it as base64-encoded data.
+ * Used to convert image URLs in API responses to inline MCP image content.
+ * @param {string} imageUrl - The image URL to fetch
+ * @returns {Promise<{ data: string; mimeType: string } | null>} Base64 data and MIME type, or null on failure
+ */
+export async function fetchImageAsBase64(imageUrl: string): Promise<{ data: string; mimeType: string } | null> {
+  try {
+    const res = await fetchWithTimeout(imageUrl, {}, 10000);
+    if (!res.ok) return null;
+
+    const contentType = res.headers.get('content-type') || 'image/png';
+    const arrayBuffer = await res.arrayBuffer();
+
+    // Skip images larger than 5MB
+    if (arrayBuffer.byteLength > 5 * 1024 * 1024) return null;
+
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    return { data: base64, mimeType: contentType };
+  } catch {
+    return null;
+  }
+}
+// ════════════════════════════════════════════════════════════════════════════
+// Manage Google Business Profile (v2 /gbp/*)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// These endpoints read and write the live Google Business Profile behind a
+// connected location, rather than Local Falcon report data. Every one is keyed
+// on place_id and only works for locations linked to a Google account — list
+// eligible ones with fetchAllLocalFalconLocations and gbpLinked = true.
+//
+// Wire format: POST with form fields, matching the other v2 endpoints. Nested
+// values use PHP bracket notation (attributes[0][name], call_to_action[url],
+// names[0]), so appendFormValue flattens objects and arrays into that shape.
+// Callers therefore pass ordinary objects and arrays and never build bracket
+// keys by hand.
+//
+// Note: getGbpLocation and getGbpGoogleUpdated return Google's own resource
+// unchanged, so their response fields are camelCase; every other endpoint here
+// returns snake_case.
+
+/** Recursively flatten a value into PHP-style bracket form fields. */
+function appendFormValue(form: FormData, key: string, value: unknown): void {
+  if (value === undefined || value === null || value === "") return;
+  if (Array.isArray(value)) {
+    value.forEach((entry, i) => appendFormValue(form, `${key}[${i}]`, entry));
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      appendFormValue(form, `${key}[${k}]`, v);
+    }
+    return;
+  }
+  if (typeof value === "boolean") {
+    form.append(key, value ? "true" : "false");
+    return;
+  }
+  form.append(key, String(value));
+}
+
+/**
+ * Shared transport for every /v2/gbp/* endpoint.
+ *
+ * Empty, null and undefined params are dropped rather than sent blank, matching
+ * the `if (value)` convention used by the rest of this module.
+ */
+async function gbpRequest(
+  apiKey: string,
+  endpoint: string,
+  params: Record<string, unknown> = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<any> {
+  try {
+    await rateLimiter.waitForAvailableSlot();
+
+    const form = new FormData();
+    for (const [key, value] of Object.entries(params)) {
+      appendFormValue(form, key, value);
+    }
+
+    const response = await withRetry(async () => {
+      return await fetchWithTimeout(
+        `${API_BASE_V2}/gbp/${endpoint}/`,
+        { method: "POST", body: form, headers: buildHeaders(apiKey, true) },
+        timeoutMs
+      );
+    });
+
+    const data = await safeParseJson(response);
+
+    if (!response.ok) {
+      throw parseApiError(response.status, data);
+    }
+
+    return data;
+  } catch (error) {
+    console.error(`Error calling GBP endpoint "${endpoint}":`, error);
+    throw error;
+  }
+}
+
+// ── Structured parameter types ──────────────────────────────────────────────
+
+/** A service on a profile: identified by free-text name OR Google service type. */
+export interface GbpServiceInput {
+  name?: string;
+  service_type_id?: string;
+  description?: string;
+  price?: Record<string, unknown>;
+}
+
+/** An attribute assignment. Supply exactly one of the value variants. */
+export interface GbpAttributeInput {
+  name: string;
+  values?: unknown[];
+  set_values?: unknown[];
+  unset_values?: unknown[];
+  uris?: string[];
+}
+
+/** A regular weekly opening period. */
+export interface GbpRegularPeriodInput {
+  open_day: string;
+  open_time: string;
+  close_day: string;
+  close_time: string;
+}
+
+/** A media item attached to a post. */
+export interface GbpPostMediaInput {
+  media_format: string;
+  source_url: string;
+}
+
+/** A single review reply, for the batch form of replyToGbpReviews. */
+export interface GbpReviewReplyInput {
+  place_id: string;
+  review_id: string;
+  reply: string;
+}
+
+// ── Reads: profile ──────────────────────────────────────────────────────────
+
+export async function getGbpLocation(apiKey: string, placeId: string): Promise<any> {
+  return gbpRequest(apiKey, "location", { place_id: placeId });
+}
+
+export async function getGbpGoogleUpdated(
+  apiKey: string,
+  placeId: string,
+  fieldsMask?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "google-updated", { place_id: placeId, fields_mask: fieldsMask });
+}
+
+export async function getGbpVerification(apiKey: string, placeId: string): Promise<any> {
+  return gbpRequest(apiKey, "verification", { place_id: placeId });
+}
+
+export async function getGbpAttributes(apiKey: string, placeId: string): Promise<any> {
+  return gbpRequest(apiKey, "attributes", { place_id: placeId });
+}
+
+export async function listGbpServices(apiKey: string, placeId: string): Promise<any> {
+  return gbpRequest(apiKey, "services", { place_id: placeId });
+}
+
+export async function getGbpMetrics(
+  apiKey: string,
+  placeId: string,
+  metrics?: string,
+  startDate?: string,
+  endDate?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "metrics", {
+    place_id: placeId,
+    metrics,
+    start_date: startDate,
+    end_date: endDate,
+  });
+}
+
+// ── Reads: content ──────────────────────────────────────────────────────────
+
+export async function listGbpPosts(
+  apiKey: string,
+  placeId: string,
+  postId?: string,
+  limit?: number | string,
+  nextToken?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "posts", {
+    place_id: placeId,
+    post_id: postId,
+    limit,
+    next_token: nextToken,
+  });
+}
+
+export async function listGbpMedia(
+  apiKey: string,
+  placeId: string,
+  mediaId?: string,
+  category?: string,
+  limit?: number | string,
+  nextToken?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "media", {
+    place_id: placeId,
+    media_id: mediaId,
+    category,
+    limit,
+    next_token: nextToken,
+  });
+}
+
+export async function listGbpCustomerMedia(
+  apiKey: string,
+  placeId: string,
+  mediaId?: string,
+  limit?: number | string,
+  nextToken?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "customer-media", {
+    place_id: placeId,
+    media_id: mediaId,
+    limit,
+    next_token: nextToken,
+  });
+}
+
+export async function listGbpReviews(
+  apiKey: string,
+  placeId: string,
+  reviewId?: string,
+  limit?: number | string,
+  unanswered?: boolean,
+  rating?: string,
+  nextToken?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "reviews", {
+    place_id: placeId,
+    review_id: reviewId,
+    limit,
+    unanswered,
+    rating,
+    next_token: nextToken,
+  });
+}
+
+export async function listGbpLinks(
+  apiKey: string,
+  placeId: string,
+  linkId?: string,
+  limit?: number | string,
+  nextToken?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "links", {
+    place_id: placeId,
+    link_id: linkId,
+    limit,
+    next_token: nextToken,
+  });
+}
+
+// ── Reads: taxonomy / reference data ────────────────────────────────────────
+
+export async function listGbpCategories(
+  apiKey: string,
+  placeId: string,
+  query?: string,
+  regionCode?: string,
+  language?: string,
+  names?: string,
+  limit?: number | string,
+  nextToken?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "categories", {
+    place_id: placeId,
+    query,
+    region_code: regionCode,
+    language,
+    names,
+    limit,
+    next_token: nextToken,
+  });
+}
+
+export async function listGbpChains(
+  apiKey: string,
+  placeId: string,
+  query?: string,
+  chainId?: string,
+  limit?: number | string
+): Promise<any> {
+  return gbpRequest(apiKey, "chains", {
+    place_id: placeId,
+    query,
+    chain_id: chainId,
+    limit,
+  });
+}
+
+export async function listGbpAttributeMetadata(
+  apiKey: string,
+  placeId: string,
+  category?: string,
+  regionCode?: string,
+  language?: string,
+  showAll?: boolean,
+  limit?: number | string,
+  nextToken?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "attribute-metadata", {
+    place_id: placeId,
+    category,
+    region_code: regionCode,
+    language,
+    show_all: showAll,
+    limit,
+    next_token: nextToken,
+  });
+}
+
+export async function listGbpActionTypes(
+  apiKey: string,
+  placeId: string,
+  language?: string,
+  limit?: number | string,
+  nextToken?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "action-types", {
+    place_id: placeId,
+    language,
+    limit,
+    next_token: nextToken,
+  });
+}
+
+// ── Writes: posts ───────────────────────────────────────────────────────────
+
+export async function createGbpPost(
+  apiKey: string,
+  placeId: string,
+  options: {
+    summary?: string;
+    topicType?: string;
+    callToAction?: Record<string, unknown>;
+    media?: GbpPostMediaInput[];
+    event?: Record<string, unknown>;
+    offer?: Record<string, unknown>;
+    language?: string;
+  } = {}
+): Promise<any> {
+  return gbpRequest(apiKey, "create-post", {
+    place_id: placeId,
+    summary: options.summary,
+    topic_type: options.topicType,
+    call_to_action: options.callToAction,
+    media: options.media,
+    event: options.event,
+    offer: options.offer,
+    language: options.language,
+  });
+}
+
+export async function updateGbpPost(
+  apiKey: string,
+  placeId: string,
+  postId: string,
+  options: {
+    summary?: string;
+    callToAction?: Record<string, unknown>;
+    media?: GbpPostMediaInput[];
+    event?: Record<string, unknown>;
+    offer?: Record<string, unknown>;
+    replace?: string;
+  } = {}
+): Promise<any> {
+  return gbpRequest(apiKey, "update-post", {
+    place_id: placeId,
+    post_id: postId,
+    summary: options.summary,
+    call_to_action: options.callToAction,
+    media: options.media,
+    event: options.event,
+    offer: options.offer,
+    replace: options.replace,
+  });
+}
+
+export async function deleteGbpPost(
+  apiKey: string,
+  placeId: string,
+  postId: string
+): Promise<any> {
+  // The API requires this literal confirmation token on destructive calls.
+  return gbpRequest(apiKey, "delete-post", {
+    place_id: placeId,
+    post_id: postId,
+    confirm: "DELETE_POST",
+  });
+}
+
+// ── Writes: media ───────────────────────────────────────────────────────────
+
+export async function createGbpMedia(
+  apiKey: string,
+  placeId: string,
+  mediaFormat: string,
+  sourceUrl: string,
+  category: string,
+  description?: string
+): Promise<any> {
+  return gbpRequest(apiKey, "create-media", {
+    place_id: placeId,
+    media_format: mediaFormat,
+    source_url: sourceUrl,
+    category,
+    description,
+  });
+}
+
+export async function updateGbpMedia(
+  apiKey: string,
+  placeId: string,
+  mediaId: string,
+  category: string
+): Promise<any> {
+  return gbpRequest(apiKey, "update-media", {
+    place_id: placeId,
+    media_id: mediaId,
+    category,
+  });
+}
+
+export async function deleteGbpMedia(
+  apiKey: string,
+  placeId: string,
+  mediaId: string
+): Promise<any> {
+  return gbpRequest(apiKey, "delete-media", {
+    place_id: placeId,
+    media_id: mediaId,
+    confirm: "DELETE_MEDIA",
+  });
+}
+
+// ── Writes: review replies ──────────────────────────────────────────────────
+
+export async function replyToGbpReviews(
+  apiKey: string,
+  options: {
+    placeId?: string;
+    reviewId?: string;
+    reply?: string;
+    replies?: GbpReviewReplyInput[];
+  }
+): Promise<any> {
+  return gbpRequest(apiKey, "reply-review", {
+    place_id: options.placeId,
+    review_id: options.reviewId,
+    reply: options.reply,
+    replies: options.replies,
+  });
+}
+
+export async function deleteGbpReviewReply(
+  apiKey: string,
+  placeId: string,
+  reviewId: string,
+  replies?: Array<{ place_id: string; review_id: string }>
+): Promise<any> {
+  return gbpRequest(apiKey, "delete-review-reply", {
+    place_id: placeId,
+    review_id: reviewId,
+    replies,
+    confirm: "DELETE_REPLY",
+  });
+}
+
+// ── Writes: action links ────────────────────────────────────────────────────
+
+export async function createGbpLink(
+  apiKey: string,
+  placeId: string,
+  actionType: string,
+  uri?: string,
+  isPreferred?: boolean
+): Promise<any> {
+  return gbpRequest(apiKey, "create-link", {
+    place_id: placeId,
+    action_type: actionType,
+    uri,
+    is_preferred: isPreferred,
+  });
+}
+
+export async function updateGbpLink(
+  apiKey: string,
+  placeId: string,
+  linkId: string,
+  uri?: string,
+  isPreferred?: boolean
+): Promise<any> {
+  return gbpRequest(apiKey, "update-link", {
+    place_id: placeId,
+    link_id: linkId,
+    uri,
+    is_preferred: isPreferred,
+  });
+}
+
+export async function deleteGbpLink(
+  apiKey: string,
+  placeId: string,
+  linkId: string
+): Promise<any> {
+  return gbpRequest(apiKey, "delete-link", {
+    place_id: placeId,
+    link_id: linkId,
+    confirm: "DELETE_LINK",
+  });
+}
+
+// ── Writes: services ────────────────────────────────────────────────────────
+
+export async function addGbpServices(
+  apiKey: string,
+  placeId: string,
+  services: GbpServiceInput[]
+): Promise<any> {
+  return gbpRequest(apiKey, "add-services", { place_id: placeId, services });
+}
+
+export async function removeGbpServices(
+  apiKey: string,
+  placeId: string,
+  names: string[]
+): Promise<any> {
+  return gbpRequest(apiKey, "remove-services", { place_id: placeId, names });
+}
+
+export async function replaceGbpServices(
+  apiKey: string,
+  placeId: string,
+  services: GbpServiceInput[]
+): Promise<any> {
+  // Wholesale replacement: anything absent from `services` is removed.
+  return gbpRequest(apiKey, "replace-services", {
+    place_id: placeId,
+    services,
+    confirm: "REPLACE_SERVICES",
+  });
+}
+
+// ── Writes: profile details, hours, status, attributes ──────────────────────
+
+export async function updateGbpLocation(
+  apiKey: string,
+  placeId: string,
+  options: {
+    updates?: Record<string, unknown>;
+    clear?: string;
+    replace?: string;
+  } = {}
+): Promise<any> {
+  return gbpRequest(apiKey, "update-location", {
+    place_id: placeId,
+    updates: options.updates,
+    clear: options.clear,
+    replace: options.replace,
+  });
+}
+
+export async function updateGbpHours(
+  apiKey: string,
+  placeId: string,
+  options: {
+    regular?: GbpRegularPeriodInput[];
+    special?: unknown[];
+    clear?: string;
+    replace?: string;
+  } = {}
+): Promise<any> {
+  return gbpRequest(apiKey, "update-hours", {
+    place_id: placeId,
+    regular: options.regular,
+    special: options.special,
+    clear: options.clear,
+    replace: options.replace,
+  });
+}
+
+export async function updateGbpStatus(
+  apiKey: string,
+  placeId: string,
+  status: string,
+  openingDate?: string
+): Promise<any> {
+  // CLOSED_PERMANENTLY requires echoing the status back as confirmation.
+  return gbpRequest(apiKey, "update-status", {
+    place_id: placeId,
+    status,
+    confirm: status === "CLOSED_PERMANENTLY" ? status : undefined,
+    opening_date: openingDate,
+  });
+}
+
+export async function updateGbpAttributes(
+  apiKey: string,
+  placeId: string,
+  attributes: GbpAttributeInput[]
+): Promise<any> {
+  return gbpRequest(apiKey, "update-attributes", {
+    place_id: placeId,
+    attributes,
+    confirm: "SET_ATTRIBUTES",
+  });
+}

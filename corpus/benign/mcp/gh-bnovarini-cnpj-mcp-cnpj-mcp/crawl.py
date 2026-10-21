@@ -1,0 +1,255 @@
+"""Polite crawler for company websites found through registered corporate email domains.
+
+Reads a TSV of `domain<TAB>cnpj` (extra columns ignored) and writes one JSON line per domain with
+what the company's own site publishes: WhatsApp links, phones, emails, social profiles, and the
+page each item came from. Results are labelled as coming from the company's website, never mixed
+into Receita fields.
+
+Politeness: identifies itself, obeys robots.txt, at most 1 request per second per domain, at most
+3 pages per domain (home, robots.txt, one contact page), small page size cap, no retries on 4xx.
+
+Run: python -m cnpj_mcp.crawl domains.tsv out.jsonl [concurrency]
+"""
+import asyncio, json, re, sys, time
+from html import unescape
+from urllib import robotparser
+from urllib.parse import urljoin, urlparse, parse_qs
+
+import httpx
+
+from .clean import br_number, wa_number, social_ok, landing_problem
+from . import ident as _ident
+
+UA = "cnpj-mcp-crawler/0.1 (+https://github.com/bnovarini/cnpj-mcp)"
+MAX_BYTES = 400_000
+PHONE = re.compile(r"(?<!\d)(?:\+?55\s?)?\(?(\d{2})\)?[\s.-]?(9?\d{4})[\s.-]?(\d{4})(?!\d)")
+JUNK_EMAIL = re.compile(r"@([a-z0-9-]+\.)*(sentry(-next)?\.wixpress\.com|wixpress\.com|sentry\.io)$|^[0-9a-f]{24,}@|@(email|empresa|exemplo|example|domain|dominio|seudominio|seusite|seuemail|yourdomain|yoursite|site|nome|mail|test|teste|mysite|meusite|naoinformado|nomedosite|suaempresa|company|yourcompany)\.(com|com\.br|org|net|br)$|^(email|seuemail|seu-email|seunome|nome|exemplo|example|your|you|name|user|usuario|teste|test|naoinformado)@", re.I)
+JUNK_EMAIL2 = re.compile(r"^(seu|sua|your|my)([-_.]?(contato|email|e-mail|mail|nome|name|usuario|user|site))?@|^(youremail|yourmail|username|seu[-_.]?nome|seu[-_.]?email|example[-_.]?mail)[^@]*@|@(your-?domain|seu-?dominio|e-mail|melhoremail|provedor|hum)\.", re.I)
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+SOCIAL = {
+    "instagram": re.compile(r"https?://(?:www\.)?instagram\.com/([A-Za-z0-9._]{2,30})/?"),
+    "facebook": re.compile(r"https?://(?:www\.|pt-br\.|m\.)?facebook\.com/(profile\.php\?id=\d+|[A-Za-z0-9.\-_/]{2,80})"),
+    "linkedin": re.compile(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/(company|in)/([A-Za-z0-9\-_%]{2,80})"),
+    "youtube": re.compile(r"https?://(?:www\.)?youtube\.com/(@[A-Za-z0-9._\-]{2,50}|channel/[A-Za-z0-9_\-]+|c/[A-Za-z0-9_\-]+)"),
+    "tiktok": re.compile(r"https?://(?:www\.)?tiktok\.com/(@[A-Za-z0-9._]{2,40})"),
+    "x": re.compile(r"https?://(?:www\.)?(?:twitter|x)\.com/([A-Za-z0-9_]{2,30})"),
+}
+SOCIAL_SKIP = {"sharer", "share", "tr", "plugins", "dialog", "intent", "home", "login"}
+WA = re.compile(r"(?:wa\.me/|(?:api|web)\.whatsapp\.com/send/?\?[^\"' <>]*phone=|whatsapp://send\?[^\"' <>]*phone=)\+?(\d{10,13})")
+CONTACT_HINT = re.compile(r"contato|contact|fale[-_ ]?conosco|atendimento|onde[-_ ]?estamos|localiza", re.I)
+HREF = re.compile(r"""<a\s[^>]*?href=["']([^"'#][^"']*)["'][^>]*>(.*?)</a>""", re.I | re.S)
+
+
+class Pacer:
+    """At most one request per second per domain."""
+    def __init__(self):
+        self.last = {}
+
+    async def wait(self, host):
+        now = time.monotonic()
+        nxt = self.last.get(host, 0) + 1.0
+        if nxt > now:
+            self.last[host] = nxt
+            await asyncio.sleep(nxt - now)
+        else:
+            self.last[host] = now
+
+
+def extract(html, url):
+    # long unbroken runs (inline base64 images, minified blobs) make the email regex quadratic and can stall the whole event loop
+    html = re.sub(r"[A-Za-z0-9+/=_.%-]{150,}", " ", html)
+    found = {"whatsapp": {}, "phones": {}, "emails": {}, "social": {}}
+    text = unescape(re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I))
+    for m in WA.finditer(html):
+        n, _ = wa_number(m.group(1))
+        if n:
+            found["whatsapp"].setdefault("55" + n, url)
+    for m in re.finditer(r"""href=["']tel:([^"']+)["']""", html, re.I):
+        n, _ = br_number(m.group(1))
+        if n:
+            found["phones"].setdefault(n, url)
+    plain = re.sub(r"<[^>]+>", " ", text)
+    for m in PHONE.finditer(plain):
+        ddd, a, b = m.groups()
+        if ddd == "00" or ddd[0] == "0":
+            continue
+        n, _ = br_number(ddd + a + b)
+        if n:
+            found["phones"].setdefault(n, url)
+    for m in EMAIL.finditer(html):
+        e = m.group(0).lower().rstrip(".")
+        if JUNK_EMAIL.search(e) or JUNK_EMAIL2.search(e):
+            continue
+        if not e.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".css", ".js")):
+            found["emails"].setdefault(e, url)
+    for name, rx in SOCIAL.items():
+        for m in rx.finditer(html):
+            handle = "/".join(g for g in m.groups() if g).strip("/")
+            if handle.split("/")[0].lower() in SOCIAL_SKIP:
+                continue
+            if social_ok(f"{name}:{handle}"):
+                found["social"].setdefault(f"{name}:{handle}", url)
+            break
+    return found
+
+
+def merge(a, b):
+    for k in a:
+        for item, src in b[k].items():
+            a[k].setdefault(item, src)
+
+
+async def get(client, pacer, url, rp):
+    host = urlparse(url).netloc
+    if rp is not None and not rp.can_fetch(UA, url):
+        return None, "robots_blocked"
+    await pacer.wait(host)
+    try:
+        async with client.stream("GET", url) as r:
+            if r.status_code >= 400:
+                return None, f"http_{r.status_code}"
+            ctype = r.headers.get("content-type", "")
+            if "html" not in ctype and "text" not in ctype:
+                return None, "not_html"
+            buf = b""
+            async for chunk in r.aiter_bytes():
+                buf += chunk
+                if len(buf) > MAX_BYTES:
+                    break
+            enc = r.encoding or "utf-8"
+            return (str(r.url), buf.decode(enc, errors="replace")), "ok"
+    except httpx.ConnectError as e:
+        return None, "dns_or_connect_fail"
+    except httpx.ConnectTimeout:
+        return None, "timeout_connect"
+    except httpx.PoolTimeout:
+        return None, "timeout_pool"
+    except httpx.TimeoutException:
+        return None, "timeout_read"
+    except Exception as e:
+        return None, "error_" + type(e).__name__
+
+
+async def crawl_domain(client, pacer, dom, cnpj, sem, comps=None):
+    async with sem:
+        rec = {"domain": dom, "cnpj": cnpj, "status": None, "pages": [], "crawled_at": int(time.time())}
+        found = {"whatsapp": {}, "phones": {}, "emails": {}, "social": {}}
+        base, rp = None, None
+        for scheme_host in (f"https://{dom}", f"https://www.{dom}", f"http://{dom}"):
+            try:
+                await pacer.wait(urlparse(scheme_host).netloc)
+                r = await client.get(scheme_host + "/robots.txt")
+                rp = robotparser.RobotFileParser()
+                if r.status_code == 200 and "html" not in r.headers.get("content-type", "").lower()[:9]:
+                    rp.parse(r.text.splitlines())
+                elif r.status_code in (401, 403):
+                    rp.disallow_all = True
+                else:
+                    rp.allow_all = True
+                base = scheme_host
+                break
+            except httpx.ConnectError:
+                continue
+            except httpx.PoolTimeout:
+                rec["status"] = "timeout_pool"
+                continue
+            except httpx.TimeoutException:
+                rec["status"] = "timeout_connect"
+                continue
+            except Exception:
+                continue
+        if base is None:
+            rec["status"] = rec["status"] or "dns_or_connect_fail"
+            return rec
+        res, st = await get(client, pacer, base + "/", rp)
+        if res is None:
+            rec["status"] = st
+            return rec
+        final, html = res
+        rec["final_url"] = final
+        prob = landing_problem(dom, final)
+        if prob:
+            rec["status"] = prob
+            return rec
+        rec["pages"].append(final)
+        merge(found, extract(html, final))
+        sigs = [_ident.page_signals(html)] if comps else []
+        contact = None
+        for href, label in HREF.findall(html):
+            if CONTACT_HINT.search(href) or CONTACT_HINT.search(re.sub(r"<[^>]+>", " ", label)):
+                u = urljoin(final, href)
+                p = urlparse(u)
+                if p.netloc.replace("www.", "") == urlparse(final).netloc.replace("www.", "") and u.split("#")[0] != final:
+                    contact = u.split("#")[0]
+                    break
+        if contact:
+            res2, st2 = await get(client, pacer, contact, rp)
+            if res2:
+                rec["pages"].append(res2[0])
+                merge(found, extract(res2[1], res2[0]))
+                if comps:
+                    sigs.append(_ident.page_signals(res2[1]))
+        rec["status"] = "ok"
+        if comps:
+            sg = _ident.combine(sigs)
+            rec["ident"] = {c["cnpj"]: dict(zip(("level", "evidence"), _ident.evaluate(sg, c))) for c in comps}
+        rec.update({k: [{"value": v, "source_url": s} for v, s in d.items()] for k, d in found.items()})
+        return rec
+
+
+async def main(inp, outp, conc=40):
+    """Resumable: domains already present in the output file are skipped. A worker pool keeps memory flat for large inputs."""
+    import os
+    done = set()
+    if os.path.exists(outp):
+        for line in open(outp):
+            try:
+                done.add(json.loads(line)["domain"])
+            except Exception:
+                pass
+    rows = [l.rstrip("\n").split("\t") for l in open(inp) if l.strip()]
+    rows = [r for r in rows if r[0] not in done]
+    deadline = time.time() + float(os.environ.get("CRAWL_MAX_SECONDS") or 1e12)
+    print(f"{len(done)} already done, {len(rows)} to crawl, {conc} workers", flush=True)
+    pacer = Pacer()
+    # DNS lookups run in the default thread pool; its small default size queues lookups and shows up as false connect timeouts
+    from concurrent.futures import ThreadPoolExecutor
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=min(conc, 400)))
+    limits = httpx.Limits(max_connections=conc * 2, max_keepalive_connections=20)
+    q = asyncio.Queue()
+    for r in rows:
+        q.put_nowait(r)
+    count = 0
+    async with httpx.AsyncClient(headers={"User-Agent": UA, "Accept-Language": "pt-BR,pt;q=0.9"}, timeout=httpx.Timeout(10, connect=10),
+                                 follow_redirects=True, limits=limits, max_redirects=4, verify=False) as client:
+        import http.cookiejar
+        client.cookies.jar.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))  # never store cookies: a shared jar grows with every domain and slows each request
+        with open(outp, "a") as out:
+            async def worker():
+                nonlocal count
+                one = asyncio.Semaphore(1)
+                while time.time() < deadline:
+                    try:
+                        r = q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        return
+                    try:
+                        rec = await asyncio.wait_for(crawl_domain(client, pacer, r[0], r[1] if len(r) > 1 else "", one, json.loads(r[2]) if len(r) > 2 and r[2] else None), 45)
+                    except asyncio.TimeoutError:
+                        rec = {"domain": r[0], "cnpj": r[1] if len(r) > 1 else "", "status": "timeout_total", "pages": [], "crawled_at": int(time.time())}
+                    except Exception as e:
+                        rec = {"domain": r[0], "cnpj": r[1] if len(r) > 1 else "", "status": "error_" + type(e).__name__, "pages": [], "crawled_at": int(time.time())}
+                    pacer.last.pop(r[0], None)
+                    pacer.last.pop("www." + r[0], None)
+                    out.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    count += 1
+                    if count % 1000 == 0:
+                        out.flush()
+                        print(count, "done", flush=True)
+            await asyncio.gather(*[worker() for _ in range(conc)])
+            out.flush()
+    print("finished", count, flush=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 40))

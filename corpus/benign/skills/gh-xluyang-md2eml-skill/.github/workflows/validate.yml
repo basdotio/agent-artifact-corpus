@@ -1,0 +1,27 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile
+        run: python -m py_compile scripts/local_markdown_to_email.py
+      - name: CLI smoke test
+        run: python scripts/local_markdown_to_email.py --help
+      - name: Validate skill metadata
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('SKILL.md').read_text(encoding='utf-8')
+          assert text.startswith('---\n') and '\nname: obsidian-to-email\n' in text
+          assert Path('tool_spec.json').is_file()
+          print('Skill metadata is valid')
+          PY

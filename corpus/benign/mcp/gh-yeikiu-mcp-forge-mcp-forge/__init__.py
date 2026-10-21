@@ -8,7 +8,7 @@ Zero dependencies, one import::
 from .runtime import PROTOCOL_VERSIONS, Server, Tool, ToolError, log
 from .validate import SchemaError, check, validate
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "Server",

@@ -1,0 +1,67 @@
+# Gioia: the verbs. The server turns each action into a tool with these parameters.
+name: gioia
+title: Gioia methodology (Gioia, Corley & Hamilton 2013)
+version: 1
+
+code_type: concept
+prefixes: {concept: C, theme: T, dimension: D}
+
+# what each object carries: tool parameter -> attribute in schema.tql
+fields:
+  concept:
+    label: {attr: label, required: true, doc: "short label, close to the informant's terms"}
+    description: {attr: description, required: true, doc: "one or two sentences: what informants say or do"}
+    in_vivo: {attr: in-vivo, doc: "the informant's own word or phrase for it, if there is one"}
+  theme:
+    label: {attr: label, required: true, doc: "researcher-centric label for the 2nd-order theme"}
+    description: {attr: description, required: true, doc: "definition: what the grouped concepts have in common"}
+  dimension:
+    label: {attr: label, required: true, doc: "label for the aggregate dimension"}
+    description: {attr: description, required: true, doc: "definition: what the themes add up to"}
+
+# how groups form (bottom-up); mirrors the cardinalities in schema.tql
+groups:
+  - {type: theme, relation: theme-membership, group_role: theme, member_role: concept, member_type: concept, min: 2, exclusive: true}
+  - {type: dimension, relation: dimension-membership, group_role: dimension, member_role: theme, member_type: theme, min: 1, exclusive: true}
+
+actions:
+  add_concept:
+    kind: create_code
+    type: concept
+    doc: >
+      Add a 1st-order concept with its evidence in one call. quotes: [{"text": the informant's exact
+      words, "reason": why they show this concept}] (add "source" if you have not called begin()).
+      Quotes are checked against the transcript now; if one is not found, nothing is saved.
+  add_theme:
+    kind: create_group
+    type: theme
+    members_param: concepts
+    doc: >
+      Group 1st-order concepts into a 2nd-order theme. concepts: [{"id": "C-3", "reason": why it belongs}],
+      at least two; a concept can be in one theme only.
+  add_dimension:
+    kind: create_group
+    type: dimension
+    members_param: themes
+    answers: required
+    doc: >
+      Group 2nd-order themes into an aggregate dimension. themes: [{"id": "T-2", "reason": ...}];
+      answers: how this dimension answers the research question.
+
+memo:
+  budgets: {note: 2000, interview: 3000, batch: 4000, corpus: 6000}
+
+# soft expectations: what is still open. Each query selects the ids of items that fail.
+checks:
+  - id: interview_memo
+    text: every source read has an interview memo
+    query: 'match $s isa source, has id $i; assignment (source: $s); not { $m isa memo, has memo-level "interview"; about (memo: $m, target: $s); }; select $i;'
+  - id: concept_placed
+    text: every concept is in a theme (or has a memo saying why not)
+    query: 'match $c isa concept, has id $i; not { theme-membership (concept: $c); }; not { $m isa memo; about (memo: $m, target: $c); }; select $i;'
+  - id: theme_placed
+    text: every theme is in an aggregate dimension
+    query: 'match $t isa theme, has id $i; not { dimension-membership (theme: $t); }; select $i;'
+  - id: negative_case
+    text: every dimension has been checked for negative cases (a negative-case memo about it)
+    query: 'match $d isa dimension, has id $i; not { $m isa memo, has memo-kind "negative-case"; about (memo: $m, target: $d); }; select $i;'

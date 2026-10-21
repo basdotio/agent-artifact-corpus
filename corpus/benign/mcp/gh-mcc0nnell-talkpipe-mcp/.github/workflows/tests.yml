@@ -1,0 +1,32 @@
+name: TalkPipe MCP tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install pinned TalkPipe and MCP SDK
+        run: python -m pip install -r requirements.txt
+      - name: Syntax checks
+        run: |
+          python -m compileall -q approved_workflows.py talkpipe_mcp.py blade_local_client.py windanvil_commander_mcp.py tests
+          bash -n scripts/private-tunnel.sh scripts/install-tunnel-runtime-key.sh
+          if scripts/install-tunnel-runtime-key.sh </dev/null >/dev/null 2>&1; then
+            echo "ERROR: credential installer accepted noninteractive input"
+            exit 1
+          fi
+      - name: Unit and MCP stdio tests
+        run: python -m unittest discover -s tests -v

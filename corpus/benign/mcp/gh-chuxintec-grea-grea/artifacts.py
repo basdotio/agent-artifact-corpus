@@ -1,6 +1,6 @@
 """Artifact identity and bounded inventories. Static bytes do not prove runtime behavior."""
 import os,hashlib
-from pathlib import Path
+from grea.host.paths import Path
 from .common import GreaError,hash_file,digest
 
 def format_of(path):

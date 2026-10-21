@@ -1,0 +1,2309 @@
+###
+# Copyright (c) 1999-2025, Juniper Networks Inc.
+#
+#  All rights reserved.
+#
+#  License: Apache 2.0
+#
+#  THIS SOFTWARE IS PROVIDED BY Juniper Networks Inc. ''AS IS'' AND ANY
+#  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+#  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL Juniper Networks Inc. BE LIABLE FOR ANY
+#  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+#  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+#  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+#  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+#  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+#  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+###
+
+from __future__ import annotations as _annotations
+
+import argparse
+import json
+import logging
+import os
+import re
+import secrets
+import signal
+import sys
+import threading
+import time
+from contextlib import contextmanager
+from collections.abc import Iterable
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Generic, Literal
+
+import anyio
+import mcp.types as types
+import yaml
+from jinja2 import Environment, StrictUndefined, TemplateError
+from jnpr.junos import Device
+from jnpr.junos.exception import (
+    ConnectError,
+    ConfigLoadError,
+    CommitError,
+    LockError,
+    RpcTimeoutError,
+)
+from jnpr.junos.utils.config import Config
+from mcp.server.lowlevel import Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
+from mcp.server.session import ServerSessionT
+from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.shared.context import LifespanContextT, RequestContext, RequestT
+from pydantic import BaseModel, Field
+from pydantic.networks import AnyUrl
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount
+from utils.config import (
+    prepare_connection_params,
+    validate_all_devices,
+)
+from utils.token_file import DEFAULT_TOKENS_FILE
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+log = logging.getLogger("jmcp-server")
+
+# Global variable for devices (parsed from JSON file)
+devices = {}
+
+# Junos MCP Server
+JUNOS_MCP = "jmcp-server"
+
+
+class ConnectionPool:
+    """Thread-safe SSH connection pool for Junos devices.
+
+    Reuses SSH sessions across tool calls instead of opening a new connection
+    for every command. Idle connections are closed after a configurable timeout
+    (default 300s, configurable via JMCP_POOL_IDLE_TIMEOUT env var).
+    """
+
+    def __init__(self, idle_timeout: int | None = None):
+        self._connections: dict[str, dict] = {}
+        self._pool_lock = threading.Lock()
+        if idle_timeout is None:
+            self._idle_timeout = 300
+            env_val = os.getenv("JMCP_POOL_IDLE_TIMEOUT")
+            if env_val is not None:
+                try:
+                    self._idle_timeout = int(env_val)
+                except ValueError:
+                    log.warning(
+                        "Invalid JMCP_POOL_IDLE_TIMEOUT environment variable "
+                        "value: %s. Using default idle timeout.",
+                        env_val,
+                    )
+        else:
+            self._idle_timeout = idle_timeout
+        self._running = True
+        self._cleanup_thread = threading.Thread(
+            target=self._cleanup_loop, daemon=True, name="pool-cleanup"
+        )
+        self._cleanup_thread.start()
+        log.info("Connection pool initialized (idle_timeout=%ds)", self._idle_timeout)
+
+    @contextmanager
+    def get_connection(self, router_name: str, timeout: int = 360):
+        """Get a pooled device connection. Creates or reuses as needed.
+
+        Args:
+            router_name: Name of the router (must exist in devices dict)
+            timeout: Command timeout to set on the device
+
+        Yields:
+            An open jnpr.junos.Device instance
+
+        Raises:
+            ValueError: If connection params are invalid
+            ConnectError: If SSH connection fails
+
+        Note:
+            Handlers reach the pool via anyio.to_thread.run_sync, which shares
+            anyio's process-wide default thread limiter (40 tokens). A batch
+            over >40 routers, or 40+ concurrent same-router calls, will queue at
+            that ceiling; the per-router lock below also serializes same-router
+            work.
+        """
+        entry = self._get_or_create_entry(router_name)
+        entry["lock"].acquire()
+        try:
+            device = entry["device"]
+            if device is None or not device.connected:
+                if device is not None:
+                    try:
+                        device.close()
+                    except Exception:
+                        pass
+                    entry["device"] = None
+                device_info = devices[router_name]
+                connect_params = prepare_connection_params(device_info, router_name)
+                device = Device(**connect_params)
+                try:
+                    device.open()
+                except Exception:
+                    # open() may have partially established the transport before
+                    # raising; close the local device so we don't leak it (it was
+                    # never stored in entry["device"], so the except block below
+                    # would not see it).
+                    try:
+                        device.close()
+                    except Exception:
+                        pass
+                    raise
+                entry["device"] = device
+                log.info("Pool: opened new connection to %s", router_name)
+            else:
+                log.debug("Pool: reusing connection to %s", router_name)
+
+            device.timeout = timeout
+            yield device
+        except Exception as exc:
+            # Invalidate the pooled connection if it is no longer usable: either
+            # the transport dropped (not connected), or an RPC timed out.
+            # RpcTimeoutError leaves device.connected True but the session is no
+            # longer reliable; pre-pooling, every call opened a fresh session so
+            # a timeout never poisoned later calls — evict to preserve that.
+            dev = entry["device"]
+            if dev is not None and (
+                not dev.connected or isinstance(exc, RpcTimeoutError)
+            ):
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+                entry["device"] = None
+            raise
+        finally:
+            # Refresh last_used on every borrow — success OR failure. Otherwise a
+            # connection whose operation raised while still connected keeps
+            # last_used at 0.0, and the idle-cleanup loop (which requires
+            # last_used > 0) would never reap it.
+            entry["last_used"] = time.time()
+            entry["lock"].release()
+
+    def _get_or_create_entry(self, router_name: str) -> dict:
+        with self._pool_lock:
+            if router_name not in self._connections:
+                self._connections[router_name] = {
+                    "device": None,
+                    "lock": threading.Lock(),
+                    "last_used": 0.0,
+                }
+            return self._connections[router_name]
+
+    def _cleanup_loop(self):
+        while self._running:
+            time.sleep(60)
+            self._cleanup_idle()
+
+    def _cleanup_idle(self):
+        now = time.time()
+        # Collect idle candidates under the global lock, then close OUTSIDE it.
+        # Holding _pool_lock across a blocking device.close() (a black-holed
+        # device can stall on TCP/SSH timeout) would freeze every router's
+        # borrow, since get_connection() needs the same lock. Mirrors close_all.
+        candidates = []
+        with self._pool_lock:
+            for router_name, entry in self._connections.items():
+                if (
+                    entry["device"] is not None
+                    and entry["last_used"] > 0
+                    and (now - entry["last_used"]) > self._idle_timeout
+                ):
+                    candidates.append((router_name, entry))
+        for router_name, entry in candidates:
+            # Non-blocking: skip entries currently in use this cycle.
+            if not entry["lock"].acquire(blocking=False):
+                continue
+            try:
+                # Re-check under the lock: the entry may have been used or closed
+                # between collection and acquiring the lock.
+                if (
+                    entry["device"] is not None
+                    and entry["last_used"] > 0
+                    and (now - entry["last_used"]) > self._idle_timeout
+                ):
+                    try:
+                        entry["device"].close()
+                    except Exception as e:
+                        log.debug(
+                            "Pool: error closing idle connection to %s: %s",
+                            router_name,
+                            e,
+                        )
+                    entry["device"] = None
+                    log.info(
+                        "Pool: closed idle connection to %s (idle %.0fs)",
+                        router_name,
+                        now - entry["last_used"],
+                    )
+            finally:
+                entry["lock"].release()
+
+    def close_all(self, shutdown: bool = True):
+        """Close all pooled connections.
+
+        Args:
+            shutdown: If True (default), also stop the idle-cleanup thread —
+                use on server shutdown. If False, drop all connections but
+                keep the pool operational (cleanup thread keeps running) —
+                use on device reload, where configs changed but the pool
+                must keep serving.
+        """
+        if shutdown:
+            self._running = False
+        # Snapshot entries under the global lock, then close each under its own
+        # per-router lock (outside the global lock, so a slow close can't block
+        # unrelated routers). Do NOT clear _connections: clearing would detach an
+        # entry that an in-flight get_connection() borrow already holds, leaving
+        # the connection it is about to open untracked and never reaped. Leaving
+        # device=None entries behind is cheap and keeps every connection
+        # reapable.
+        with self._pool_lock:
+            entries = list(self._connections.items())
+        for router_name, entry in entries:
+            if shutdown:
+                # Shutdown: don't wait on an in-flight op (the process is exiting
+                # and the OS reclaims sockets) — skip busy entries so SIGTERM
+                # during a long command doesn't hang teardown.
+                if not entry["lock"].acquire(blocking=False):
+                    continue
+            else:
+                # Reload: wait for in-flight ops so we don't sever a live RPC.
+                entry["lock"].acquire()
+            try:
+                if entry["device"] is not None:
+                    try:
+                        entry["device"].close()
+                    except Exception as e:
+                        log.debug(
+                            "Pool: error closing connection to %s: %s",
+                            router_name,
+                            e,
+                        )
+                    entry["device"] = None
+            finally:
+                entry["lock"].release()
+        log.info("Connection pool: all connections closed")
+
+
+# Global connection pool instance
+connection_pool = ConnectionPool()
+
+
+class Context(BaseModel, Generic[ServerSessionT, LifespanContextT, RequestT]):
+    """Context object providing access to MCP capabilities.
+
+    This provides a cleaner interface to MCP's RequestContext functionality.
+    It gets injected into tool and resource functions that request it via type hints.
+
+    To use context in a tool function, add a parameter with the Context type annotation:
+
+    ```python
+    @server.tool()
+    def my_tool(x: int, ctx: Context) -> str:
+        # Log messages to the client
+        ctx.info(f"Processing {x}")
+        ctx.debug("Debug info")
+        ctx.warning("Warning message")
+        ctx.error("Error message")
+
+        # Report progress
+        ctx.report_progress(50, 100)
+
+        # Access resources
+        data = ctx.read_resource("resource://data")
+
+        # Get request info
+        request_id = ctx.request_id
+        client_id = ctx.client_id
+
+        return str(x)
+    ```
+
+    The context parameter name can be anything as long as it's annotated with Context.
+    The context is optional - tools that don't need it can omit the parameter.
+    """
+
+    _request_context: RequestContext[ServerSessionT, LifespanContextT, RequestT] | None
+    _fastmcp: Server | None
+
+    def __init__(
+        self,
+        *,
+        request_context: (
+            RequestContext[ServerSessionT, LifespanContextT, RequestT] | None
+        ) = None,
+        fastmcp: Server | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(**kwargs)
+        self._request_context = request_context
+        self._fastmcp = fastmcp
+
+    @property
+    def fastmcp(self) -> Server:
+        """Access to the FastMCP server."""
+        if self._fastmcp is None:
+            raise ValueError("Context is not available outside of a request")
+        return self._fastmcp
+
+    @property
+    def request_context(
+        self,
+    ) -> RequestContext[ServerSessionT, LifespanContextT, RequestT]:
+        """Access to the underlying request context."""
+        if self._request_context is None:
+            raise ValueError("Context is not available outside of a request")
+        return self._request_context
+
+    async def report_progress(
+        self, progress: float, total: float | None = None, message: str | None = None
+    ) -> None:
+        """Report progress for the current operation.
+
+        Args:
+            progress: Current progress value e.g. 24
+            total: Optional total value e.g. 100
+            message: Optional message e.g. Starting render...
+        """
+        progress_token = (
+            self.request_context.meta.progressToken
+            if self.request_context.meta
+            else None
+        )
+
+        if progress_token is None:
+            return
+
+        await self.request_context.session.send_progress_notification(
+            progress_token=progress_token,
+            progress=progress,
+            total=total,
+            message=message,
+        )
+
+    async def read_resource(self, uri: str | AnyUrl) -> Iterable[ReadResourceContents]:
+        """Read a resource by URI.
+
+        Args:
+            uri: Resource URI to read
+
+        Returns:
+            The resource content as either text or bytes
+        """
+        assert (
+            self._fastmcp is not None
+        ), "Context is not available outside of a request"
+        return await self._fastmcp.read_resource(uri)
+
+    async def log(
+        self,
+        level: Literal["debug", "info", "warning", "error"],
+        message: str,
+        *,
+        logger_name: str | None = None,
+    ) -> None:
+        """Send a log message to the client.
+
+        Args:
+            level: Log level (debug, info, warning, error)
+            message: Log message
+            logger_name: Optional logger name
+            **extra: Additional structured data to include
+        """
+        await self.request_context.session.send_log_message(
+            level=level,
+            data=message,
+            logger=logger_name,
+            related_request_id=self.request_id,
+        )
+
+    @property
+    def client_id(self) -> str | None:
+        """Get the client ID if available."""
+        return (
+            getattr(self.request_context.meta, "client_id", None)
+            if self.request_context.meta
+            else None
+        )
+
+    @property
+    def request_id(self) -> str:
+        """Get the unique ID for this request."""
+        return str(self.request_context.request_id)
+
+    @property
+    def session(self):
+        """Access to the underlying session for advanced usage."""
+        return self.request_context.session
+
+    # Convenience methods for common log levels
+    async def debug(self, message: str, **extra: Any) -> None:
+        """Send a debug log message."""
+        await self.log("debug", message, **extra)
+
+    async def info(self, message: str, **extra: Any) -> None:
+        """Send an info log message."""
+        await self.log("info", message, **extra)
+
+    async def warning(self, message: str, **extra: Any) -> None:
+        """Send a warning log message."""
+        await self.log("warning", message, **extra)
+
+    async def error(self, message: str, **extra: Any) -> None:
+        """Send an error log message."""
+        await self.log("error", message, **extra)
+
+
+def _run_junos_cli_command(router_name: str, command: str, timeout: int = 360) -> str:
+    """Internal helper to run a Junos CLI command using the connection pool."""
+    log.debug(
+        "Executing command %s on router %s with timeout %ss (internal)",
+        command,
+        router_name,
+        timeout,
+    )
+    try:
+        with connection_pool.get_connection(router_name, timeout) as junos_device:
+            op = junos_device.cli(command, warning=False)
+            return op
+    except ValueError as ve:
+        return f"Error: {ve}"
+    except ConnectError as ce:
+        return f"Connection error to {router_name}: {ce}"
+    except Exception as e:
+        return f"An error occurred: {e}"
+
+
+def _run_junos_pfe_command(
+    router_name: str, target: str, command: str, timeout: int = 360
+):
+    """
+    Internal helper to connect and run a Junos PFE command.
+    Returns:
+        dict: {target: result_text} on success
+        str: error message on failure
+    """
+    log.debug(
+        "Executing command %s on router %s with timeout %ss (internal)",
+        command,
+        router_name,
+        timeout,
+    )
+    try:
+        with connection_pool.get_connection(router_name, timeout) as junos_device:
+            op = junos_device.rpc.request_pfe_execute(target=target, command=command)
+            result_text = op.text if hasattr(op, "text") else str(op)
+            return {target: result_text}
+    except ValueError as ve:
+        return f"Error: {ve}"
+    except ConnectError as ce:
+        return f"Connection error to {router_name}: {ce}"
+    except Exception as e:
+        return f"An error occurred: {e}"
+
+
+def get_timeout_with_fallback(arguments_timeout: int = None) -> int:
+    """Get timeout value with fallback priority: arguments -> ENV -> default (360)"""
+    if arguments_timeout is not None:
+        return arguments_timeout
+
+    env_timeout = os.getenv("JUNOS_TIMEOUT")
+    if env_timeout is not None:
+        try:
+            return int(env_timeout)
+        except ValueError:
+            log.warning(
+                "Invalid JUNOS_TIMEOUT environment variable value: %s. "
+                "Using default timeout.",
+                env_timeout,
+            )
+
+    return 360
+
+
+def _split_blocklist_pattern_tokens(pattern: str) -> list[str]:
+    """Split a pattern without breaking regex character classes containing spaces."""
+    tokens: list[str] = []
+    current: list[str] = []
+    in_char_class = False
+    escaped = False
+
+    for char in pattern:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+
+        if char == "\\":
+            current.append(char)
+            escaped = True
+            continue
+
+        if char == "[":
+            in_char_class = True
+        elif char == "]" and in_char_class:
+            in_char_class = False
+
+        if char.isspace() and not in_char_class:
+            if current:
+                tokens.append("".join(current))
+                current = []
+            continue
+
+        current.append(char)
+
+    if current:
+        tokens.append("".join(current))
+
+    return tokens
+
+
+def _matches_blocklist_tokens(value: str, pattern: str) -> bool:
+    """Match a blocked prefix, including abbreviated literal Junos keywords."""
+    value_tokens = value.split()
+    pattern_tokens = _split_blocklist_pattern_tokens(pattern)
+    if len(value_tokens) < len(pattern_tokens):
+        return False
+
+    regex_metacharacters = frozenset(".^$*+?{}[]\\|()")
+    for value_token, pattern_token in zip(value_tokens, pattern_tokens):
+        if regex_metacharacters.isdisjoint(pattern_token):
+            if not pattern_token.startswith(value_token):
+                return False
+        elif not re.fullmatch(pattern_token, value_token):
+            return False
+
+    return True
+
+
+def check_config_blocklist(
+    config_text: str, block_file: str = "block.cfg"
+) -> tuple[bool, str | None]:
+    """Return whether the submitted config should be blocked based on tokenized regex patterns."""
+    if not config_text:
+        return False, None
+
+    block_file_path = Path(block_file)
+    if not block_file_path.is_absolute() and not block_file_path.exists():
+        block_file_path = Path(__file__).resolve().parent / block_file
+
+    if not block_file_path.exists():
+        return (
+            True,
+            f"Error: blocklist file '{block_file_path}' not found. "
+            "Refusing to apply configuration.",
+        )
+
+    try:
+        with open(block_file_path, "r", encoding="utf-8") as f:
+            blocked_patterns = [
+                line.strip()
+                for line in f
+                if line.strip() and not line.strip().startswith("#")
+            ]
+    except OSError as e:
+        return True, f"Error: unable to read blocklist file '{block_file_path}': {e}"
+
+    config_lines = [
+        " ".join(line.split()) for line in config_text.splitlines() if line.strip()
+    ]
+
+    for pattern in blocked_patterns:
+        for config_line in config_lines:
+            try:
+                matches = _matches_blocklist_tokens(config_line, pattern)
+            except re.error as e:
+                return (
+                    True,
+                    f"Error: invalid regex in '{block_file_path}': '{pattern}' ({e})",
+                )
+
+            if matches:
+                return True, (
+                    f"Blocked configuration rejected: line '{config_line}' "
+                    f"matches blocked pattern '{pattern}'"
+                )
+
+    return False, None
+
+
+def check_command_blocklist(
+    command: str, block_file: str = "block.cmd"
+) -> tuple[bool, str | None]:
+    """Return whether the submitted operational command should be blocked.
+
+    Each non-comment line in block.cmd is treated as a regex prefix pattern. If the
+    normalized command starts with any pattern, command execution is rejected.
+    """
+    if not command:
+        return False, None
+
+    block_file_path = Path(block_file)
+    if not block_file_path.is_absolute() and not block_file_path.exists():
+        block_file_path = Path(__file__).resolve().parent / block_file
+
+    if not block_file_path.exists():
+        return (
+            True,
+            f"Error: blocklist file '{block_file_path}' not found. Refusing to execute command.",
+        )
+
+    try:
+        with open(block_file_path, "r", encoding="utf-8") as f:
+            blocked_patterns = [
+                line.strip()
+                for line in f
+                if line.strip() and not line.strip().startswith("#")
+            ]
+    except OSError as e:
+        return True, f"Error: unable to read blocklist file '{block_file_path}': {e}"
+
+    normalized_command = " ".join(command.split())
+
+    for pattern in blocked_patterns:
+        try:
+            if re.match(pattern, normalized_command) or _matches_blocklist_tokens(
+                normalized_command, pattern
+            ):
+                return True, (
+                    f"Blocked command rejected: command '{normalized_command}' "
+                    f"matches blocked pattern '{pattern}'"
+                )
+        except re.error as e:
+            return (
+                True,
+                f"Error: invalid regex in '{block_file_path}': '{pattern}' ({e})",
+            )
+
+    return False, None
+
+
+def validate_token_from_file(
+    token: str, token_file: str | Path = DEFAULT_TOKENS_FILE
+) -> bool:
+    """Validate a token against the configured token file."""
+    try:
+        if not os.path.exists(token_file):
+            return False
+
+        with open(token_file, "r", encoding="utf-8") as f:
+            tokens = json.load(f)
+
+        presented_token = token.encode("utf-8")
+        token_is_valid = False
+        for token_data in tokens.values():
+            stored_token = token_data.get("token")
+            if isinstance(stored_token, str):
+                token_is_valid |= secrets.compare_digest(
+                    stored_token.encode("utf-8"), presented_token
+                )
+
+        return token_is_valid
+    except (json.JSONDecodeError, OSError, AttributeError):
+        return False
+
+
+class BearerTokenMiddleware(BaseHTTPMiddleware):
+    """Middleware to check Bearer token authentication for streamable-http"""
+
+    def __init__(
+        self,
+        app,
+        auth_enabled: bool = True,
+        token_file: str | Path = DEFAULT_TOKENS_FILE,
+    ):
+        super().__init__(app)
+        self.auth_enabled = auth_enabled
+        self.token_file = Path(token_file).resolve()
+
+    async def dispatch(self, request: Request, call_next):
+        # Log all incoming requests
+        client_host = request.client.host if request.client else "unknown"
+        log.info(
+            "Incoming request: %s %s from %s",
+            request.method,
+            request.url.path,
+            client_host,
+        )
+
+        # Try to read request body for debugging
+        if request.method == "POST":
+            try:
+                body = await request.body()
+                if body:
+                    import json
+
+                    try:
+                        parsed_body = json.loads(body.decode())
+                        log.info("Request body: %s", parsed_body)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        log.info("Raw request body: %s...", body[:200])
+            except Exception as e:
+                log.warning("Could not read request body: %s", e)
+
+        # Skip auth if disabled (for stdio transport)
+        if not self.auth_enabled:
+            return await call_next(request)
+
+        auth_header = request.headers.get("authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            log.warning(
+                "Missing or invalid auth header for %s %s",
+                request.method,
+                request.url.path,
+            )
+            return JSONResponse(
+                {"error": "Missing or invalid Authorization header"}, status_code=401
+            )
+
+        token = auth_header[7:]  # Remove "Bearer " prefix
+
+        if not validate_token_from_file(token, self.token_file):
+            log.warning(
+                "Invalid token attempt from %s",
+                request.client.host if request.client else "unknown",
+            )
+            return JSONResponse({"error": "Invalid token"}, status_code=401)
+
+        log.debug("Token validation successful")
+        return await call_next(request)
+
+
+async def handle_execute_junos_command(
+    arguments: dict, context: Context
+) -> list[types.ContentBlock]:
+    """Handler for execute_junos_command tool"""
+    start_time = time.time()
+    start_timestamp = datetime.now(timezone.utc).isoformat()
+    router_name = arguments.get("router_name", "")
+    command = arguments.get("command", "")
+    timeout = get_timeout_with_fallback(arguments.get("timeout"))
+
+    is_blocked, blocked_message = check_command_blocklist(command)
+    if is_blocked:
+        result = blocked_message
+    elif router_name not in devices:
+        result = f"Router {router_name} not found in the device mapping."
+    else:
+        log.debug(
+            "Executing command %s on router %s with timeout %ss",
+            command,
+            router_name,
+            timeout,
+        )
+        result = await anyio.to_thread.run_sync(
+            _run_junos_cli_command, router_name, command, timeout
+        )
+
+    end_time = time.time()
+    end_timestamp = datetime.now(timezone.utc).isoformat()
+    execution_duration = round(end_time - start_time, 3)
+    content_block = types.TextContent(
+        type="text",
+        text=result,
+        annotations={
+            "router_name": router_name,
+            "command": command,
+            "metadata": {
+                "execution_duration": execution_duration,
+                "start_time": start_timestamp,
+                "end_time": end_timestamp,
+            },
+        },
+    )
+    log.debug("content block: %s", content_block)
+    return [content_block]
+
+
+async def handle_execute_junos_command_batch(
+    arguments: dict, context: Context
+) -> list[types.ContentBlock]:
+    """
+    Handler for execute_junos_command_batch tool.
+
+    Executes the same command on multiple routers in parallel.
+
+    This function demonstrates async/await parallel execution patterns. The "magic" of parallelism
+    comes from three key concepts:
+
+    1. ASYNC/AWAIT: Allows cooperative multitasking - while one router is waiting for network I/O,
+       other routers can be contacted simultaneously
+
+     2. THREAD POOL: PyEZ's Device.cli() is synchronous (blocking), so we use
+         anyio.to_thread.run_sync()
+       to run it in a background thread without blocking the async event loop
+
+     3. ASYNCIO.GATHER: Launches multiple async operations simultaneously and
+         waits for all to complete
+
+    Real-world analogy: Instead of calling 3 restaurants sequentially and waiting on hold for each
+    (serial execution = 3 × 2 minutes = 6 minutes), you have 3 friends call simultaneously
+    (parallel execution = max(2, 2, 2) = 2 minutes total).
+    """
+    import asyncio
+
+    batch_start_time = time.time()
+    # Dedupe while preserving order: with the connection pool, repeated routers
+    # share one per-router lock and would run serially (and waste worker
+    # threads) instead of in parallel.
+    router_names = list(dict.fromkeys(arguments.get("router_names", [])))
+    command = arguments.get("command", "")
+    timeout = get_timeout_with_fallback(arguments.get("timeout"))
+
+    # ============================================================================
+    # STEP 1: Input Validation
+    # ============================================================================
+    # Fail fast if inputs are invalid - no point starting parallel execution
+    # if we know it will fail
+
+    if not router_names:
+        return [
+            types.TextContent(
+                type="text",
+                text="Error: router_names list is required and cannot be empty",
+            )
+        ]
+
+    if not command:
+        return [types.TextContent(type="text", text="Error: command is required")]
+
+    is_blocked, blocked_message = check_command_blocklist(command)
+    if is_blocked:
+        return [types.TextContent(type="text", text=blocked_message)]
+
+    # Validate all routers exist before executing - prevents partial failures
+    invalid_routers = [r for r in router_names if r not in devices]
+    if invalid_routers:
+        return [
+            types.TextContent(
+                type="text",
+                text=(
+                    "Error: The following routers not found in device mapping: "
+                    f"{', '.join(invalid_routers)}"
+                ),
+            )
+        ]
+
+    log.info(
+        "Executing batch command on %s routers in parallel: %s",
+        len(router_names),
+        command,
+    )
+    await context.info(
+        f"Executing command on {len(router_names)} routers in parallel..."
+    )
+
+    # ============================================================================
+    # STEP 2: Define Per-Router Async Function
+    # ============================================================================
+    # This nested async function will be called once per router, and all calls
+    # will run in parallel thanks to asyncio.gather() below
+
+    async def execute_on_router(router_name: str) -> dict:
+        """
+        Execute command on a single router and return structured result.
+
+        This is an ASYNC function, which means it can yield control to the event loop
+        while waiting for I/O operations (like network connections to routers).
+
+        KEY INSIGHT: Each call to this function represents one "parallel task".
+        When we create 3 tasks, they all run concurrently.
+        """
+        start_time = time.time()
+        start_timestamp = datetime.now(timezone.utc).isoformat()
+
+        try:
+            # ----------------------------------------------------------------
+            # THE MAGIC: anyio.to_thread.run_sync()
+            # ----------------------------------------------------------------
+            # Problem: _run_junos_cli_command() is SYNCHRONOUS (blocking)
+            # - It uses PyEZ's Device.cli() which blocks the thread while waiting
+            # - If we called it directly, it would block the async event loop
+            # - This would make everything serial again (defeating parallelism)
+            #
+            # Solution: anyio.to_thread.run_sync()
+            # - Runs the blocking function in a background thread pool
+            # - The async event loop remains free to handle other tasks
+            # - Multiple threads can run simultaneously (one per router)
+            #
+            # Result: True parallel execution!
+            # - While router1's thread waits for SSH response, router2's thread
+            #   can be establishing its connection, and router3's thread can be
+            #   sending its command, etc.
+            #
+            # Think of it like: Each router gets its own phone line (thread),
+            # and all phone calls happen at the same time instead of one after another.
+
+            result = await anyio.to_thread.run_sync(
+                _run_junos_cli_command,  # The synchronous function to run
+                router_name,  # Arguments to pass to it
+                command,
+                timeout,
+            )
+
+            # Determine if this was a success or error based on result content
+            # (the _run_junos_cli_command returns error messages as strings)
+            is_error = (
+                result.startswith("Connection error")
+                or result.startswith("An error occurred")
+                or result.startswith("Error:")
+            )
+            status = "failed" if is_error else "success"
+
+        except Exception as e:
+            # Catch any unexpected exceptions (shouldn't happen normally)
+            result = f"Exception during execution: {str(e)}"
+            status = "failed"
+
+        end_time = time.time()
+        end_timestamp = datetime.now(timezone.utc).isoformat()
+        execution_duration = round(end_time - start_time, 3)
+
+        # Return structured data for this single router
+        return {
+            "router_name": router_name,
+            "status": status,
+            "output": result,
+            "execution_duration": execution_duration,
+            "start_time": start_timestamp,
+            "end_time": end_timestamp,
+        }
+
+    # ============================================================================
+    # STEP 3: Launch All Tasks in Parallel with asyncio.gather()
+    # ============================================================================
+    # This is where the REAL MAGIC happens!
+    #
+    # asyncio.gather() explanation:
+    # -----------------------------
+    # 1. List comprehension creates N async tasks (one per router):
+    #    [execute_on_router("router1"), execute_on_router("router2"), ...]
+    #
+    # 2. The * (splat) operator unpacks them as individual arguments:
+    #    asyncio.gather(task1, task2, task3, ...)
+    #
+    # 3. gather() schedules ALL tasks to run CONCURRENTLY on the event loop:
+    #    - All tasks start approximately at the same time
+    #    - While one task waits for I/O, others continue executing
+    #    - The event loop switches between tasks as they yield control (at await points)
+    #
+    # 4. await gather() waits for ALL tasks to complete and returns results in order:
+    #    results = [result1, result2, result3, ...]
+    #
+    # Timeline visualization (3 routers, each takes ~1.2 seconds):
+    #
+    # SERIAL EXECUTION (without gather):
+    # Router1: [===========]
+    # Router2:              [===========]
+    # Router3:                           [===========]
+    # Total:   |----------------------------------|  (~3.6 seconds)
+    #
+    # PARALLEL EXECUTION (with gather):
+    # Router1: [===========]
+    # Router2: [===========]
+    # Router3: [===========]
+    # Total:   |-----------|                         (~1.2 seconds)
+    #
+    # Key: Each router runs in its own thread, so they all complete in the time
+    # it takes for the slowest one to finish!
+
+    results = await asyncio.gather(
+        *[execute_on_router(router_name) for router_name in router_names],
+        return_exceptions=False,  # If any task raises an exception, propagate it immediately
+    )
+
+    batch_end_time = time.time()
+    batch_duration = round(batch_end_time - batch_start_time, 3)
+
+    # ============================================================================
+    # STEP 4: Process and Format Results
+    # ============================================================================
+    # At this point, ALL routers have completed (or failed), and we have all results
+
+    # Calculate summary statistics
+    successful_count = sum(1 for r in results if r["status"] == "success")
+    failed_count = len(results) - successful_count
+
+    # Build structured response with summary + individual results
+    response_data = {
+        "summary": {
+            "command": command,
+            "total_routers": len(router_names),
+            "successful": successful_count,
+            "failed": failed_count,
+            "total_duration": batch_duration,
+        },
+        "results": results,  # This contains all per-router results in order
+    }
+
+    # Format as pretty JSON for LLM consumption
+    # The LLM can easily parse this and identify which output came from which router
+    formatted_output = json.dumps(response_data, indent=2)
+
+    log.info(
+        "Batch command execution completed: %s successful, %s failed, %ss total",
+        successful_count,
+        failed_count,
+        batch_duration,
+    )
+    await context.info(
+        f"Batch execution complete: {successful_count}/{len(router_names)} successful"
+    )
+
+    # Return as MCP TextContent with annotations for structured metadata
+    content_block = types.TextContent(
+        type="text",
+        text=formatted_output,
+        annotations={
+            "command": command,
+            "router_names": router_names,
+            "batch_metadata": {
+                "total_routers": len(router_names),
+                "successful": successful_count,
+                "failed": failed_count,
+                "total_duration": batch_duration,
+            },
+        },
+    )
+
+    return [content_block]
+
+
+async def handle_get_junos_config(
+    arguments: dict, context: Context
+) -> list[types.ContentBlock]:
+    """Handler for get_junos_config tool"""
+    router_name = arguments.get("router_name", "")
+
+    if router_name not in devices:
+        result = f"Router {router_name} not found in the device mapping."
+    else:
+        log.debug("Getting configuration from router %s", router_name)
+        result = await anyio.to_thread.run_sync(
+            _run_junos_cli_command,
+            router_name,
+            "show configuration | display inheritance no-comments | display set | no-more",
+        )
+
+    content_block = types.TextContent(
+        type="text", text=result, annotations={"router_name": router_name}
+    )
+    log.debug("content block: %s", content_block)
+
+    return [content_block]
+
+
+async def handle_junos_config_diff(
+    arguments: dict, context: Context
+) -> list[types.ContentBlock]:
+    """Handler for junos_config_diff tool"""
+    router_name = arguments.get("router_name", "")
+    version = arguments.get("version", 1)
+
+    if router_name not in devices:
+        result = f"Router {router_name} not found in the device mapping."
+    else:
+        log.debug(
+            "Getting configuration diff from router %s for version %s",
+            router_name,
+            version,
+        )
+        result = await anyio.to_thread.run_sync(
+            _run_junos_cli_command,
+            router_name,
+            f"show configuration | compare rollback {version}",
+        )
+
+    content_block = types.TextContent(
+        type="text",
+        text=result,
+        annotations={"router_name": router_name, "config_diff_version": version},
+    )
+    log.debug("content block: %s", content_block)
+
+    return [content_block]
+
+
+def _detect_config_format(rendered_config: str) -> str:
+    """Classify a rendered configuration as 'set', 'xml', or 'text'.
+
+    XML is detected from a leading '<'. Otherwise the config is 'set' only if
+    every non-blank, non-comment line is a set/delete/deactivate/activate
+    command; anything else means stanza ('text') format.
+    """
+    if rendered_config.lstrip().startswith("<"):
+        return "xml"
+    for line in rendered_config.strip().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not re.match(r"^(set|delete|deactivate|activate)\s", stripped):
+            return "text"
+    return "set"
+
+
+def _dry_run_commit_check(
+    rtr_name: str, cu: Config, diff: str, msgs: list[tuple[str, str]]
+) -> str:
+    """Commit-check then roll back, appending progress messages to msgs.
+
+    Called with the exclusive Config context still open. A rollback failure
+    propagates to the caller's eviction path — the candidate database would
+    otherwise keep the uncommitted changes for the next borrower of the
+    pooled session.
+    """
+    msgs.append(("info", f"Performing commit check on {rtr_name}..."))
+    try:
+        if cu.commit_check():
+            msgs.append(("info", f"{rtr_name}: Dry-run commit check passed"))
+            entry = f"🔍 {rtr_name}: Configuration check successful. Changes:\n\n{diff}"
+        else:
+            result_msg = "Commit check failed - configuration has errors"
+            msgs.append(("error", f"{rtr_name}: {result_msg}"))
+            entry = f"❌ {rtr_name}: {result_msg}"
+    except Exception as check_error:
+        msgs.append(("error", f"{rtr_name}: Commit check error: {check_error}"))
+        entry = f"❌ {rtr_name}: Commit check error: {check_error}"
+
+    msgs.append(("info", f"{rtr_name}: Rolling back changes (dry-run mode)"))
+    cu.rollback()
+    if cu.diff():
+        msgs.append(
+            (
+                "error",
+                f"{rtr_name}: Rollback verification failed - "
+                "unexpected changes remain",
+            )
+        )
+    else:
+        msgs.append(
+            (
+                "info",
+                f"{rtr_name}: Rollback verified successfully - no pending changes",
+            )
+        )
+    return entry
+
+
+def _apply_rendered_config_sync(
+    rtr_name: str,
+    rendered_config: str,
+    config_format: str,
+    dry_run: bool,
+    commit_comment: str,
+    timeout: int,
+) -> tuple[str, list[tuple[str, str]]]:
+    """Blocking per-router device work, run via anyio.to_thread.run_sync.
+
+    Returns (application-result entry, [(context log level, message), ...]);
+    the async caller replays the messages after the thread returns.
+    """
+    msgs: list[tuple[str, str]] = []
+    with connection_pool.get_connection(rtr_name, timeout) as dev:
+        msgs.append(("info", f"Connected to {rtr_name}"))
+        try:
+            with Config(dev, mode="exclusive") as cu:
+                msgs.append(
+                    (
+                        "info",
+                        f"Loading configuration on {rtr_name} "
+                        f"(format={config_format})...",
+                    )
+                )
+                # "statement not found" is Junos warning a delete targeted a
+                # statement that is already absent — escalating it (PyEZ turns
+                # load warnings into ConfigLoadError) would make re-running a
+                # delete template fail instead of reporting "no changes".
+                cu.load(
+                    rendered_config,
+                    format=config_format,
+                    ignore_warning=["statement not found"],
+                )
+
+                diff = cu.diff()
+                if not diff:
+                    msgs.append(
+                        ("info", f"{rtr_name}: No configuration changes detected")
+                    )
+                    return f"ℹ️  {rtr_name}: No configuration changes detected", msgs
+
+                if dry_run:
+                    return _dry_run_commit_check(rtr_name, cu, diff, msgs), msgs
+
+                msgs.append(("info", f"Performing commit check on {rtr_name}..."))
+                if not cu.commit_check():
+                    result_msg = "Commit check failed - configuration has errors"
+                    msgs.append(("error", f"{rtr_name}: {result_msg}"))
+                    cu.rollback()
+                    return f"❌ {rtr_name}: {result_msg}", msgs
+
+                msgs.append(("info", f"Committing configuration on {rtr_name}..."))
+                cu.commit(comment=commit_comment, timeout=timeout)
+                msgs.append(
+                    ("info", f"{rtr_name}: Configuration committed successfully")
+                )
+                return (
+                    f"✅ {rtr_name}: Configuration committed successfully. "
+                    f"Changes:\n\n{diff}",
+                    msgs,
+                )
+
+        except (ConfigLoadError, CommitError, LockError) as e:
+            # Config.__exit__ released the exclusive lock before this
+            # propagated (a failed unlock raises UnlockError, which is none
+            # of these), so the session is clean and stays pooled.
+            msgs.append(("error", f"{rtr_name}: Configuration error: {e}"))
+            return f"❌ {rtr_name}: Configuration error: {e}", msgs
+        except Exception:
+            # Anything else (an RpcTimeoutError mid-commit, UnlockError from
+            # Config.__exit__, a failed dry-run rollback) may leave the
+            # session holding the exclusive config lock or a dirty candidate
+            # database. Drop the transport so the pool evicts it instead of
+            # handing a poisoned session to the next borrower; mirrors
+            # _load_and_commit_sync.
+            try:
+                dev.close()
+            except Exception:
+                pass
+            raise
+
+
+async def handle_render_and_apply_j2_template(
+    arguments: dict, context
+) -> list[types.ContentBlock]:
+    """
+    Handler for render_and_apply_j2_template tool
+
+    Renders a Jinja2 template with YAML variables and optionally applies the
+    result to one or more routers (in parallel when several are targeted).
+
+    Args:
+        arguments: Dictionary containing:
+            - template_content: Jinja2 template content as string
+            - vars_content: YAML variables content as string (must parse to a
+              mapping; variables missing from it fail the render instead of
+              silently rendering empty)
+            - router_name: Single router name to apply config to (optional)
+            - router_names: List of router names (optional; merged and
+              deduplicated with router_name)
+            - apply_config: Boolean to apply or just render (default: False)
+            - dry_run: Boolean to commit-check and roll back instead of
+              committing (default: False)
+            - commit_comment: Optional commit comment
+            - config_format: Override format detection ('set', 'text', 'xml').
+              Auto-detected if omitted.
+            - timeout: Per-device timeout in seconds
+              (argument -> JUNOS_TIMEOUT env -> 360 default)
+        context: MCP Context object
+
+    Returns:
+        List of TextContent blocks with results
+    """
+    import asyncio
+
+    template_content = arguments.get("template_content", "")
+    vars_content = arguments.get("vars_content", "")
+    router_name = arguments.get("router_name", "")
+    router_names = arguments.get("router_names") or []
+    apply_config = arguments.get("apply_config", False)
+    dry_run = arguments.get("dry_run", False)
+    commit_comment = arguments.get(
+        "commit_comment", "Configuration applied via Jinja2 template"
+    )
+    config_format_override = arguments.get("config_format", None)
+    timeout = get_timeout_with_fallback(arguments.get("timeout"))
+
+    def _error(message: str) -> list[types.ContentBlock]:
+        return [types.TextContent(type="text", text=message)]
+
+    if not template_content:
+        return _error("❌ Error: template_content is required")
+
+    if not vars_content:
+        return _error("❌ Error: vars_content is required")
+
+    if config_format_override and config_format_override not in ("set", "text", "xml"):
+        return _error(
+            f"❌ Error: invalid config_format '{config_format_override}'. "
+            "Must be 'set', 'text', or 'xml'."
+        )
+
+    # Merge the single- and multi-router spellings, dropping duplicates while
+    # preserving order: a repeated name would just serialize on its per-router
+    # pool lock and commit the same change twice.
+    targets = [router_name] if router_name else []
+    targets += [r for r in router_names if r not in targets]
+
+    try:
+        await context.info("Parsing variables from YAML content...")
+        variables = yaml.safe_load(vars_content)
+    except yaml.YAMLError as e:
+        return _error(f"❌ Error parsing YAML content: {e}")
+
+    if not variables:
+        return _error("❌ Error: Variables content is empty or invalid")
+
+    if not isinstance(variables, dict):
+        return _error(
+            "❌ Error: vars_content must be a YAML mapping of variable names "
+            f"to values, got {type(variables).__name__}"
+        )
+
+    await context.debug(f"Loaded variables: {variables}")
+
+    try:
+        await context.info("Rendering Jinja2 template...")
+        env = Environment(
+            trim_blocks=True,
+            lstrip_blocks=True,
+            autoescape=False,
+            undefined=StrictUndefined,
+        )
+        rendered_config = env.from_string(template_content).render(variables)
+        await context.debug(f"Rendered configuration:\n{rendered_config}")
+    except TemplateError as e:
+        # StrictUndefined turns a variable missing from vars_content into an
+        # UndefinedError here, instead of silently rendering an empty string
+        # into the device configuration.
+        return _error(f"❌ Error rendering template: {e}")
+
+    if not rendered_config.strip():
+        return _error("❌ Error: rendered configuration is empty")
+
+    if not apply_config:
+        result_text = (
+            "✅ Template rendered successfully!\n\n"
+            "**Rendered Configuration:**\n"
+            "```\n" + rendered_config + "\n```\n\n"
+            "To apply this configuration to devices, set apply_config=true and provide "
+            "router_name or router_names.\n"
+        )
+        return [
+            types.TextContent(
+                type="text",
+                text=result_text,
+                annotations={
+                    "rendered_config": rendered_config,
+                    "variables": str(variables),
+                },
+            )
+        ]
+
+    if not targets:
+        return _error(
+            "❌ Error: router_name or router_names must be provided "
+            "when apply_config=true"
+        )
+
+    # Validate every target before touching any device: applying to a subset
+    # because of one typo would leave the fleet half-configured.
+    unknown_routers = [r for r in targets if r not in devices]
+    if unknown_routers:
+        return _error(
+            "❌ Error: The following routers not found in device mapping: "
+            + ", ".join(unknown_routers)
+            + ". No configuration was applied."
+        )
+
+    is_blocked, blocked_message = check_config_blocklist(rendered_config)
+    if is_blocked:
+        return _error(blocked_message)
+
+    # Format detection depends only on the rendered config — do it once for
+    # all routers.
+    if config_format_override:
+        config_format = config_format_override
+        await context.info(f"Using explicit config format: {config_format}")
+    else:
+        config_format = _detect_config_format(rendered_config)
+        await context.info(f"Auto-detected config format: {config_format}")
+
+    await context.info(
+        f"{'Checking' if dry_run else 'Applying'} configuration on "
+        f"{len(targets)} router(s) in parallel..."
+    )
+
+    async def _apply_on_router(rtr_name: str) -> tuple[str, list[tuple[str, str]]]:
+        """Run one router's blocking work off the event loop, never raising:
+        each router reports its own success/failure entry so one failure
+        cannot cancel the siblings mid-commit."""
+        try:
+            return await anyio.to_thread.run_sync(
+                _apply_rendered_config_sync,
+                rtr_name,
+                rendered_config,
+                config_format,
+                dry_run,
+                commit_comment,
+                timeout,
+            )
+        except ValueError as ve:
+            return f"❌ {rtr_name}: {ve}", [("error", f"{rtr_name}: {ve}")]
+        except ConnectError as e:
+            error_msg = f"Connection failed: {e}"
+            return f"❌ {rtr_name}: {error_msg}", [
+                ("error", f"{rtr_name}: {error_msg}")
+            ]
+        except Exception as e:
+            error_msg = f"Failed to apply configuration: {e}"
+            return f"❌ {rtr_name}: {error_msg}", [
+                ("error", f"{rtr_name}: {error_msg}")
+            ]
+
+    outcomes = await asyncio.gather(*(_apply_on_router(r) for r in targets))
+
+    application_results = []
+    for entry, msgs in outcomes:
+        for level, message in msgs:
+            if level == "error":
+                await context.error(message)
+            else:
+                await context.info(message)
+        application_results.append(entry)
+
+    summary = "\n".join(application_results)
+
+    mode_prefix = "🔍 DRY RUN - " if dry_run else ""
+    mode_name = "preview" if dry_run else "application"
+
+    final_text = (
+        mode_prefix + "Configuration " + mode_name + " complete!\n\n"
+        "**Routers:** " + ", ".join(targets) + "\n\n"
+        "**Rendered Configuration:**\n"
+        "```\n" + rendered_config + "\n```\n\n"
+        "**Results:**\n" + summary + "\n"
+    )
+
+    return [
+        types.TextContent(
+            type="text",
+            text=final_text,
+            annotations={
+                "router_names": targets,
+                "rendered_config": rendered_config,
+                "dry_run": dry_run,
+                "variables": str(variables),
+            },
+        )
+    ]
+
+
+async def handle_gather_device_facts(
+    arguments: dict, context: Context
+) -> list[types.ContentBlock]:
+    """Handler for gather_device_facts tool"""
+    router_name = arguments.get("router_name", "")
+    timeout = get_timeout_with_fallback(arguments.get("timeout"))
+
+    if router_name not in devices:
+        result = f"Router {router_name} not found in the device mapping."
+    else:
+        log.debug("Getting facts from router %s with timeout %ss", router_name, timeout)
+
+        def _gather_facts_sync() -> str:
+            with connection_pool.get_connection(router_name, timeout) as junos_device:
+                junos_device.facts_refresh()
+                facts_dict = dict(junos_device.facts)
+
+                def json_serializer(obj):
+                    if hasattr(obj, "_asdict"):
+                        return obj._asdict()
+                    elif hasattr(obj, "__dict__"):
+                        return obj.__dict__
+                    else:
+                        return str(obj)
+
+                return json.dumps(facts_dict, indent=2, default=json_serializer)
+
+        try:
+            result = await anyio.to_thread.run_sync(_gather_facts_sync)
+        except ValueError as ve:
+            result = f"Error: {ve}"
+        except ConnectError as ce:
+            result = f"Connection error to {router_name}: {ce}"
+        except Exception as e:
+            result = f"An error occurred: {e}"
+
+    content_block = types.TextContent(
+        type="text", text=result, annotations={"router_name": router_name}
+    )
+    log.debug("content block: %s", content_block)
+
+    return [content_block]
+
+
+async def handle_get_router_list(
+    arguments: dict, context: Context
+) -> list[types.ContentBlock]:
+    """Handler for get_router_list tool"""
+    log.debug("Getting list of routers")
+
+    # Build structured device information, excluding sensitive data
+    router_info = {}
+    for router_name, device_config in devices.items():
+        # Create a deep copy of device config to avoid modifying original
+        import copy
+
+        filtered_config = copy.deepcopy(device_config)
+
+        # Exclude ssh_config (jump host/proxy configuration)
+        if "ssh_config" in filtered_config:
+            del filtered_config["ssh_config"]
+
+        # Exclude sensitive auth credentials but keep auth type
+        if "auth" in filtered_config:
+            # Remove password if present
+            if "password" in filtered_config["auth"]:
+                del filtered_config["auth"]["password"]
+            # Remove private key path if present
+            if "private_key_path" in filtered_config["auth"]:
+                del filtered_config["auth"]["private_key_path"]
+
+        router_info[router_name] = filtered_config
+
+    # Format as pretty JSON
+    result = json.dumps(router_info, indent=2)
+
+    content_block = types.TextContent(type="text", text=result)
+
+    log.debug("content block: %s", content_block)
+    return [content_block]
+
+
+async def handle_execute_pfe_command(
+    arguments: dict, context: Context
+) -> list[types.ContentBlock]:
+    """Handler for execute_pfe_command tool"""
+    start_time = time.time()
+    start_timestamp = datetime.now(timezone.utc).isoformat()
+    router_name = arguments.get("router_name", "")
+    target = arguments.get("target", "")
+    command = arguments.get("command", "")
+    timeout = get_timeout_with_fallback(arguments.get("timeout"))
+
+    is_blocked, blocked_message = check_command_blocklist(command)
+    if is_blocked:
+        result_text = blocked_message
+    elif not isinstance(devices, dict):
+        result_text = (
+            "Error: Devices mapping is not a dictionary. "
+            "Check devices.json format and loading logic."
+        )
+    elif router_name not in devices:
+        result_text = f"Router {router_name} not found in the device mapping."
+    else:
+        log.debug(
+            "Executing command %s on router %s with timeout %ss",
+            command,
+            router_name,
+            timeout,
+        )
+        result = await anyio.to_thread.run_sync(
+            _run_junos_pfe_command, router_name, target, command, timeout
+        )
+        if isinstance(result, dict):
+            # Normal case: RPC succeeded, result is a dict keyed by target
+            result_text = result.get(target, str(result))
+        elif isinstance(result, str):
+            # Error case: result is a string error message
+            result_text = result
+        else:
+            # Unexpected type: convert to string and log warning
+            log.warning(
+                "Unexpected result type from _run_junos_pfe_command: %s",
+                type(result),
+            )
+            result_text = str(result)
+
+    end_time = time.time()
+    end_timestamp = datetime.now(timezone.utc).isoformat()
+    execution_duration = round(end_time - start_time, 3)
+    content_block = types.TextContent(
+        type="text",
+        text=result_text,
+        annotations={
+            "router_name": router_name,
+            "target": target,
+            "command": command,
+            "metadata": {
+                "execution_duration": execution_duration,
+                "start_time": start_timestamp,
+                "end_time": end_timestamp,
+            },
+        },
+    )
+    log.debug("content block: %s", content_block)
+    return [content_block]
+
+
+async def handle_load_and_commit_config(
+    arguments: dict, context: Context
+) -> list[types.ContentBlock]:
+    """Handler for load_and_commit_config tool"""
+    router_name = arguments.get("router_name", "")
+    config_text = arguments.get("config_text", arguments.get("config", ""))
+    config_format = arguments.get("config_format", "set")
+    commit_comment = arguments.get("commit_comment", "Configuration loaded via MCP")
+    timeout = get_timeout_with_fallback(arguments.get("timeout"))
+
+    is_blocked, blocked_message = check_config_blocklist(config_text)
+    if is_blocked:
+        result = blocked_message
+    elif router_name not in devices:
+        result = f"Router {router_name} not found in the device mapping."
+    else:
+        log.debug(
+            "Loading and committing config on router %s with format %s",
+            router_name,
+            config_format,
+        )
+
+        def _load_and_commit_sync() -> str:
+            with connection_pool.get_connection(router_name, timeout) as junos_device:
+                config_util = Config(junos_device)
+                try:
+                    config_util.lock()
+                except Exception as e:
+                    return f"Failed to lock configuration: {e}"
+
+                try:
+                    fmt = config_format.lower()
+                    if fmt in ("set", "text", "xml"):
+                        config_util.load(config_text, format=fmt)
+                    else:
+                        config_util.unlock()
+                        return (
+                            f"Error: Unsupported config format "
+                            f"'{config_format}'. Use 'set', 'text', or 'xml'"
+                        )
+
+                    diff = config_util.diff()
+                    if not diff:
+                        config_util.unlock()
+                        return "No configuration changes detected"
+
+                    config_util.commit(comment=commit_comment, timeout=timeout)
+                    config_util.unlock()
+                    return (
+                        "Configuration successfully loaded and "
+                        f"committed on {router_name}. Changes:\n{diff}"
+                    )
+                except Exception as e:
+                    try:
+                        config_util.rollback()
+                        config_util.unlock()
+                    except Exception:
+                        # Cleanup failed for ANY reason (e.g. unlock() raising
+                        # UnlockError, or rollback() a bare RpcError — neither a
+                        # subclass of the previously-allowlisted types): this
+                        # session may still hold the config lock. Drop the
+                        # transport so the pool evicts it (via the
+                        # `not device.connected` check in get_connection) instead
+                        # of returning a locked session that fails every later
+                        # commit with "database is locked". Classifying the
+                        # failure is the outer `except Exception as e`'s job.
+                        try:
+                            junos_device.close()
+                        except Exception:
+                            pass
+                    return f"Failed to load/commit configuration: {e}"
+
+        try:
+            result = await anyio.to_thread.run_sync(_load_and_commit_sync)
+        except ValueError as ve:
+            result = f"Error: {ve}"
+        except ConnectError as ce:
+            result = f"Connection error to {router_name}: {ce}"
+        except Exception as e:
+            result = f"An error occurred: {e}"
+
+    content_block = types.TextContent(
+        type="text",
+        text=result,
+        annotations={
+            "router_name": router_name,
+            "config_text": config_text,
+            "config_format": config_format,
+            "commit_comment": commit_comment,
+        },
+    )
+
+    return [content_block]
+
+
+def _is_error_content(content_blocks: list[types.ContentBlock]) -> bool:
+    """Best-effort detection of tool-level failures from text responses."""
+    error_prefixes = (
+        "error:",
+        "failed",
+        "connection error",
+        "an error occurred",
+        "❌",
+        "blocked configuration rejected",
+        "blocked command rejected",
+        "unknown tool",
+    )
+
+    for content in content_blocks:
+        if isinstance(content, types.TextContent):
+            message = content.text.strip().lower()
+            if message.startswith(error_prefixes):
+                return True
+
+    return False
+
+
+# Tool registry mapping tool names to their handler functions
+# To add a new tool:
+# 1. Create an async handler function:
+#    async def handle_my_new_tool(arguments: dict) -> list[types.ContentBlock]
+# 2. Add it to this registry: "my_new_tool": handle_my_new_tool
+# 3. Add the tool definition to list_tools() method
+TOOL_HANDLERS = {
+    "execute_junos_command": handle_execute_junos_command,
+    "execute_junos_command_batch": handle_execute_junos_command_batch,
+    "get_junos_config": handle_get_junos_config,
+    "junos_config_diff": handle_junos_config_diff,
+    "render_and_apply_j2_template": handle_render_and_apply_j2_template,
+    "gather_device_facts": handle_gather_device_facts,
+    "get_router_list": handle_get_router_list,
+    "load_and_commit_config": handle_load_and_commit_config,
+    "execute_junos_pfe_command": handle_execute_pfe_command,
+}
+
+
+def create_mcp_server() -> Server:
+    """Create and configure the MCP server with all tools"""
+    app = Server(JUNOS_MCP, version="1.1.0")
+
+    @app.call_tool()
+    async def call_tool(name: str, arguments: dict) -> types.CallToolResult:
+        """Handle tool calls using the tool registry."""
+        handler = TOOL_HANDLERS.get(name)
+        if handler:
+            try:
+                request_context = app.request_context
+                log.info(
+                    f"Got request_context: {type(request_context)}, session: {type(request_context.session) if request_context else None}"
+                )
+            except LookupError as e:
+                log.warning(f"LookupError getting request_context: {e}")
+                request_context = None
+
+            context = Context(request_context=request_context, fastmcp=app)
+            log.info(
+                f"Created context with request_context: {request_context is not None}"
+            )
+
+            content_blocks = await handler(arguments, context=context)
+            return content_blocks
+
+        return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
+
+    @app.list_resources()
+    async def list_resources() -> list[types.Resource]:
+        """List available resources - none for this server"""
+        return []
+
+    @app.list_prompts()
+    async def list_prompts() -> list[types.Prompt]:
+        """List available prompts - none for this server"""
+        return []
+
+    @app.list_tools()
+    async def list_tools() -> list[types.Tool]:
+        """List available tools"""
+        return [
+            types.Tool(
+                name="execute_junos_command",
+                description="Execute a Junos command on the router",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "router_name": {
+                            "type": "string",
+                            "description": "The name of the router",
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "The command to execute on the router",
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Command timeout in seconds",
+                            "default": 360,
+                        },
+                    },
+                    "required": ["router_name", "command"],
+                },
+            ),
+            types.Tool(
+                name="execute_junos_pfe_command",
+                description="Execute a Junos PFE (Packet Forwarding Engine) command on the router",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "router_name": {
+                            "type": "string",
+                            "description": "The name of the router",
+                        },
+                        "target": {
+                            "type": "string",
+                            "description": "The PFE target (e.g., fpc0, fpc1, etc.)",
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "The command to execute on the router",
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Command timeout in seconds",
+                            "default": 360,
+                        },
+                    },
+                    "required": ["router_name", "command", "target"],
+                },
+            ),
+            types.Tool(
+                name="execute_junos_command_batch",
+                description=(
+                    "Execute the same Junos command on multiple routers in "
+                    "parallel. Returns structured JSON output with per-router "
+                    "results, timing, and success/failure status."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "router_names": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of router names to execute the command on",
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "The command to execute on all routers",
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Command timeout in seconds per router",
+                            "default": 360,
+                        },
+                    },
+                    "required": ["router_names", "command"],
+                },
+            ),
+            types.Tool(
+                name="get_junos_config",
+                description="Get the configuration of the router",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "router_name": {
+                            "type": "string",
+                            "description": "The name of the router",
+                        }
+                    },
+                    "required": ["router_name"],
+                },
+            ),
+            types.Tool(
+                name="junos_config_diff",
+                description="Get the configuration diff against a rollback version",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "router_name": {
+                            "type": "string",
+                            "description": "The name of the router",
+                        },
+                        "version": {
+                            "type": "integer",
+                            "description": "Rollback version to compare against (1-49)",
+                            "default": 1,
+                        },
+                    },
+                    "required": ["router_name"],
+                },
+            ),
+            types.Tool(
+                name="render_and_apply_j2_template",
+                description=(
+                    "Render a Jinja2 template with YAML variables and optionally apply it "
+                    "to one or more Junos routers. "
+                    "When apply_config=false (default), the template is only rendered locally "
+                    "— no device connection is made. "
+                    "When apply_config=true, the tool connects to the device(s) and loads the "
+                    "rendered configuration. "
+                    "Combine apply_config=true with dry_run=true to perform a commit check "
+                    "on the device and display the diff without committing — changes are "
+                    "automatically rolled back after the check. "
+                    "Use router_name for a single device or router_names (list) for multiple "
+                    "devices; at least one must be provided when apply_config=true, and "
+                    "every name is validated before any device is touched. "
+                    "Multiple routers are configured in parallel. "
+                    "Template variables missing from vars_content fail the render instead "
+                    "of silently rendering as empty strings."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "router_name": {
+                            "type": "string",
+                            "description": (
+                                "Name of a single router to apply the configuration to. "
+                                "Required when apply_config=true and router_names is not provided."
+                            ),
+                        },
+                        "router_names": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "JSON array of router name strings to apply the configuration to "
+                                "in parallel, e.g. ['pe1', 'pe2', 'pe3']. "
+                                "Each element must exactly match a name in the device mapping. "
+                                "Use this instead of router_name when targeting multiple devices. "
+                                "Required when apply_config=true and router_name is not provided."
+                            ),
+                        },
+                        "template_content": {
+                            "type": "string",
+                            "description": "Jinja2 template content as a string.",
+                        },
+                        "vars_content": {
+                            "type": "string",
+                            "description": "YAML-formatted variables to render into the template.",
+                        },
+                        "apply_config": {
+                            "type": "boolean",
+                            "description": (
+                                "If false (default), only render the template locally without "
+                                "connecting to any device. If true, connect to the device(s) "
+                                "and load the rendered configuration."
+                            ),
+                        },
+                        "dry_run": {
+                            "type": "boolean",
+                            "description": (
+                                "Only effective when apply_config=true. If true, perform a "
+                                "commit check on the device and show the diff without committing. "
+                                "Changes are automatically rolled back after the check. "
+                                "If false (default), commit the configuration."
+                            ),
+                        },
+                        "commit_comment": {
+                            "type": "string",
+                            "description": "Commit comment recorded in the device commit log.",
+                            "default": "Configuration applied via Jinja2 template",
+                        },
+                        "config_format": {
+                            "type": "string",
+                            "description": (
+                                "Configuration format: 'set' (flat set commands), "
+                                "'text' (stanza/hierarchical), or 'xml'. "
+                                "If omitted, auto-detected from the rendered template content: "
+                                "a leading '<' → 'xml', lines starting with "
+                                "set/delete/deactivate/activate → 'set', otherwise → 'text'."
+                            ),
+                            "enum": ["set", "text", "xml"],
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": (
+                                "Per-device timeout in seconds applied to the connection "
+                                "and the commit RPC. Falls back to the JUNOS_TIMEOUT "
+                                "environment variable, then 360."
+                            ),
+                            "default": 360,
+                        },
+                    },
+                    "required": ["template_content", "vars_content"],
+                },
+            ),
+            types.Tool(
+                name="gather_device_facts",
+                description="Gather Junos device facts from the router",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "router_name": {
+                            "type": "string",
+                            "description": "The name of the router",
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Connection timeout in seconds",
+                            "default": 360,
+                        },
+                    },
+                    "required": ["router_name"],
+                },
+            ),
+            types.Tool(
+                name="get_router_list",
+                description="Get list of available Junos routers",
+                inputSchema={"type": "object", "properties": {}, "required": []},
+            ),
+            types.Tool(
+                name="load_and_commit_config",
+                description="Load and commit configuration on a Junos router",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "router_name": {
+                            "type": "string",
+                            "description": "The name of the router",
+                        },
+                        "config_text": {
+                            "type": "string",
+                            "description": "The configuration text to load",
+                        },
+                        "config_format": {
+                            "type": "string",
+                            "description": "Format: set, text, or xml",
+                            "default": "set",
+                        },
+                        "commit_comment": {
+                            "type": "string",
+                            "description": "Commit comment",
+                            "default": "Configuration loaded via MCP",
+                        },
+                    },
+                    "required": ["router_name", "config_text"],
+                },
+            ),
+        ]
+
+    return app
+
+
+def main():
+    # Create the parser
+    parser = argparse.ArgumentParser(description="Junos MCP Server")
+
+    # Add the arguments
+    parser.add_argument(
+        "-f",
+        "--device-mapping",
+        default="devices.json",
+        type=str,
+        help="the name of the JSON file containing the device mapping",
+    )
+    parser.add_argument(
+        "-H", "--host", default="127.0.0.1", type=str, help="Junos MCP Server host"
+    )
+    parser.add_argument(
+        "-t",
+        "--transport",
+        default="streamable-http",
+        type=str,
+        help="Junos MCP Server transport",
+    )
+    parser.add_argument(
+        "-p", "--port", default=30030, type=int, help="Junos MCP Server port"
+    )
+    parser.add_argument(
+        "--tokens-file",
+        default=str(DEFAULT_TOKENS_FILE),
+        help="path to the token file (default: alongside jmcp.py)",
+    )
+    parser.add_argument(
+        "--allow-unauthenticated-http",
+        action="store_true",
+        default=False,
+        help=(
+            "Allow streamable-http to start without token authentication. "
+            "Only permitted when the listener is bound to a loopback address "
+            "(127.0.0.1, ::1, or localhost). Intended for local development "
+            "only - DO NOT use in production."
+        ),
+    )
+
+    # Parse the arguments
+    args = parser.parse_args()
+    token_file = Path(args.tokens_file).expanduser().resolve()
+    global devices
+
+    # Determine whether token authentication is enabled for non-stdio
+    # transports. The server fails closed: if streamable-http is requested
+    # without a valid, non-empty token file, startup is refused unless the
+    # operator explicitly opts in with --allow-unauthenticated-http (and even
+    # then only on a loopback bind).
+    auth_enabled = False
+    if args.transport == "stdio":
+        log.info("stdio transport - no authentication required")
+    else:
+        tokens_loaded = False
+        token_error = None
+        if token_file.exists():
+            try:
+                with open(token_file, "r", encoding="utf-8") as f:
+                    tokens = json.load(f)
+                if tokens:
+                    tokens_loaded = True
+                else:
+                    token_error = f"token file '{token_file}' is empty"
+            except json.JSONDecodeError as e:
+                token_error = f"token file '{token_file}' is not valid JSON: {e}"
+            except OSError as e:
+                token_error = f"token file '{token_file}' could not be read: {e}"
+        else:
+            token_error = f"token file '{token_file}' not found"
+
+        if tokens_loaded:
+            auth_enabled = True
+            log.info("Token-based authentication enabled")
+            log.info("Clients must send 'Authorization: Bearer <token>' header")
+            log.info("Use jmcp_token_manager.py to manage tokens")
+        else:
+            loopback_hosts = {"127.0.0.1", "::1", "localhost"}
+            if not args.allow_unauthenticated_http:
+                log.error(
+                    "Refusing to start %s transport without authentication: %s",
+                    args.transport,
+                    token_error,
+                )
+                log.error(
+                    "Generate a token with: "
+                    "python jmcp_token_manager.py generate --id <token-id>"
+                )
+                log.error(
+                    "Or, for local development on loopback only, re-run with "
+                    "--allow-unauthenticated-http"
+                )
+                sys.exit(1)
+            if args.host not in loopback_hosts:
+                log.error(
+                    "--allow-unauthenticated-http is only permitted when "
+                    "binding to a loopback address (127.0.0.1, ::1, "
+                    "localhost); refusing to bind to %s without "
+                    "authentication",
+                    args.host,
+                )
+                sys.exit(1)
+            log.warning(
+                "*** Streamable HTTP authentication is DISABLED "
+                "(--allow-unauthenticated-http). %s. Server is open to any "
+                "client that can reach %s:%s and can commit configuration "
+                "to mapped devices. Use only for local development. ***",
+                token_error,
+                args.host,
+                args.port,
+            )
+
+    try:
+        with open(args.device_mapping, "r") as f:
+            devices = json.load(f)
+            # Validate all device configurations
+            validate_all_devices(devices)
+            log.info("Successfully loaded and validated %s device(s)", len(devices))
+    except FileNotFoundError:
+        print(f"File {args.device_mapping} not found.")
+        devices = {}
+        raise
+    except json.JSONDecodeError:
+        print(f"File {args.device_mapping} is not a valid JSON file.")
+        devices = {}
+        raise
+    except ValueError as e:
+        print(f"Device configuration validation failed: {e}")
+        sys.exit(1)
+
+    # Set up signal handler for clean shutdown
+    def signal_handler(sig, frame):
+        print("\nShutting down MCP server...")
+        connection_pool.close_all()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Create MCP server
+    mcp_server = create_mcp_server()
+
+    # Run with the specified transport
+    try:
+        if args.transport == "stdio":
+
+            async def run_stdio():
+                async with stdio_server() as (read_stream, write_stream):
+                    await mcp_server.run(
+                        read_stream,
+                        write_stream,
+                        mcp_server.create_initialization_options(),
+                    )
+
+            anyio.run(run_stdio)
+        elif args.transport == "streamable-http":
+            # For streamable-http, create Starlette app with session manager
+            async def run_streamable_http():
+                session_manager = StreamableHTTPSessionManager(
+                    app=mcp_server,
+                    event_store=None,  # No persistence
+                )
+
+                # ASGI handler
+                async def handle_streamable_http(scope, receive, send):
+                    await session_manager.handle_request(scope, receive, send)
+
+                # Create middleware stack
+                middleware = []
+                if auth_enabled:
+                    middleware.append(
+                        Middleware(
+                            BearerTokenMiddleware,
+                            auth_enabled=True,
+                            token_file=token_file,
+                        )
+                    )
+
+                # Create Starlette app
+                async def lifespan(app):
+                    async with session_manager.run():
+                        log.info(
+                            "Streamable HTTP server started on http://%s:%s",
+                            args.host,
+                            args.port,
+                        )
+                        yield
+                        log.info("Server shutting down...")
+
+                starlette_app = Starlette(
+                    routes=[Mount("/mcp", app=handle_streamable_http)],
+                    middleware=middleware,
+                    lifespan=lifespan,
+                )
+
+                # Run with uvicorn
+                import uvicorn
+
+                config = uvicorn.Config(
+                    starlette_app, host=args.host, port=args.port, log_level="info"
+                )
+                server = uvicorn.Server(config)
+                await server.serve()
+
+            anyio.run(run_streamable_http)
+        else:
+            log.error("Unsupported transport: %s", args.transport)
+            sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\nServer stopped by user")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

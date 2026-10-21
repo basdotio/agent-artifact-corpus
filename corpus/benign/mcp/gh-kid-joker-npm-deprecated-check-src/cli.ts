@@ -1,0 +1,109 @@
+import type { Command } from 'commander'
+import type { CommonOption, CompatOption, ConfigOption, CurrentOption, GlobalOption, PackageOption } from './types'
+import process from 'node:process'
+import { Option, program } from 'commander'
+import { version } from '../package.json'
+import checkCompat from './io/compat'
+import checkConfig from './io/config'
+import checkCurrent from './io/current'
+import checkGlobal from './io/global'
+import checkNode from './io/node'
+import checkPackage from './io/package'
+
+export { checkCurrent, checkGlobal, checkNode, checkPackage }
+
+const registryOption = new Option('--registry <value>', 'specify registry URL')
+
+program
+  .version(`npm-deprecated-check ${version}`)
+  .usage('<command> [options]')
+
+program
+  .command('node')
+  .description('check if used node version is deprecated (reached End Of Life)')
+  .action(() => {
+    checkNode()
+  })
+
+program
+  .command('current')
+  .description('check the packages of the current project')
+  .addOption(new Option('--ignore <value>', 'ignore specific packages'))
+  .addOption(new Option('--failfast', 'exit the program if it has been deprecated'))
+  .addOption(new Option('--deep', 'deep inspection for monorepo projects'))
+  .addOption(new Option('--verbose', 'show detailed Node version compatibility information'))
+  .addOption(registryOption)
+  .action((option: CurrentOption) => {
+    checkNode()
+    checkCurrent(option)
+  })
+
+program
+  .command('global')
+  .description('check global packages, default: npm')
+  .addOption(new Option('-m, --manager <value>', 'check specified package manager').choices(['npm', 'yarn', 'pnpm']).default('npm'))
+  .addOption(new Option('--ignore <value>', 'ignore specific packages'))
+  .addOption(new Option('--failfast', 'exit the program if it has been deprecated'))
+  .addOption(registryOption)
+  .action((globalOption: GlobalOption) => {
+    checkNode()
+    checkGlobal(globalOption)
+  })
+
+program
+  .command('package <packageName>')
+  .description('check for specified package')
+  .addOption(new Option('-r, --range <value>', 'check specified versions'))
+  .addOption(registryOption)
+  .action((packageName: string, option: { range?: string } & Omit<CommonOption, 'failfast'>) => {
+    const packageOption: PackageOption = {
+      packageName,
+      ...option,
+    }
+    checkPackage(packageOption)
+  })
+
+program
+  .command('compat [packageName]')
+  .description('check Node.js version compatibility for project or package')
+  .addOption(new Option('--node <version>', 'target Node.js version'))
+  .addOption(new Option('--deep', 'deep inspection for monorepo projects'))
+  .addOption(new Option('--ignore <value>', 'ignore specific packages'))
+  .addOption(registryOption)
+  .action((packageName: string | undefined, option: any) => {
+    const compatOption: CompatOption = {
+      ...option,
+      packageName,
+    }
+    checkCompat(compatOption)
+  })
+
+program
+  .command('config')
+  .description('inspect and modify the config')
+  .addOption(new Option('-g, --get <path>', 'get value from option'))
+  .addOption(new Option('-s, --set <path> <value>', 'set option value'))
+  .addOption(new Option('-d, --delete <path>', 'delete option from config'))
+  .addOption(new Option('-l, --list', 'list all options'))
+  .action((option: Record<string, any>, command: Command) => {
+    if (Object.keys(option).length === 0) {
+      command.outputHelp()
+      process.exit(0)
+    }
+
+    const configOption: ConfigOption = {}
+    for (const key in option) {
+      if (key === 'set')
+        configOption.set = [option.set, command.args[0]]
+      else
+        configOption[key as keyof ConfigOption] = option[key]
+    }
+    checkConfig(configOption)
+  })
+
+if (process.argv.includes('--mcp')) {
+  import('./mcp').then(m => m.startServer())
+}
+else {
+  program.parse(process.argv)
+}

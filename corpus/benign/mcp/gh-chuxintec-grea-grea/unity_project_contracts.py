@@ -128,6 +128,7 @@ def capability_matrix():
     return {'schemaVersion': 1, 'standardVersion': STANDARD_VERSION, 'plannerVersion': PLANNER_VERSION,
             'scope': 'Combination observations describe static planning only; executable create-only generation is exposed separately. Named reference game evidence is scoped separately and never applied to arbitrary projects.',
             'combinations': [deepcopy(REFERENCE)],
+            'profileRecipes': [{'id':'modern-ui-v1','version':'0.1.0','status':'candidate','renderPipeline':'builtin','ui':'ugui-tmp','input':'input-system','editor':'6000.6.2f1','definition':'tools/unity/profiles/modern-ui/profile.json','validation':'validation/releases/2026-10-16-audit-remediation.json','scope':'Opt-in sample preparation only; not a supported plan_unity_project generation override.'}],
             'referenceGames': [{
                 'id': 'signal-garden', 'version': '1.0.0',
                 'editor': '6000.6.2f1', 'urp': '17.6.0', 'ugui': '2.6.0',
@@ -135,7 +136,7 @@ def capability_matrix():
                 'template': {'id': 'grea-minimal-2d', 'version': '0.1.0'},
                 'target': 'macOS', 'architecture': 'arm64', 'backend': 'Mono',
                 'managedStripping': 'Medium', 'input': 'legacy',
-                'evidence': 'docs/validation/2026-10-13-unity-m4.json',
+                'evidence': 'validation/releases/2026-10-13-unity-m4.json',
                 'gates': {'A0': 'pass', 'A1': 'pass', 'A2': 'pass', 'A3': 'pass', 'A4': 'pass', 'A5': 'not_run'},
                 'scope': 'Self-authored reference only; human Player input and scoped output evidence. No original-game parity, offline restore or other platform/backend claim.'
             }, {
@@ -145,7 +146,7 @@ def capability_matrix():
                 'template': {'id': 'grea-minimal-2d', 'version': '0.1.0'},
                 'target': 'macOS', 'architecture': 'arm64', 'backend': 'Mono',
                 'managedStripping': 'Medium', 'input': 'legacy',
-                'evidence': 'docs/validation/2026-10-14-reference-player-1.0.1.json',
+                'evidence': 'validation/releases/2026-10-14-reference-player-1.0.1.json',
                 'gates': {'A0': 'pass', 'A1': 'pass', 'A2': 'pass', 'A3': 'pass', 'A4': 'pass', 'A5': 'not_run'},
                 'scope': 'Isolated restored source and independently unpacked Player only; human input, reopen, focus-loss and mixer evidence. No other project/platform, offline or performance claim.'
             }]}

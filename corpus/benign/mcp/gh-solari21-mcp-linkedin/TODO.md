@@ -2,6 +2,9 @@
 
 Lista de tareas, funcionalidades activas y backlog evolutivo para el servidor **MCP LinkedIn**.
 
+> 📌 **Tablero de Seguimiento en Vivo**: Consulta el estado en tiempo real en [MCP LinkedIn Roadmap & Development (GitHub Projects V2)](https://github.com/users/solari21/projects/2).
+> 📦 **Releases Oficiales**: Consulta los paquetes y notas de versión en [GitHub Releases](https://github.com/solari21/mcp-linkedin/releases).
+
 ---
 
 ## 🚀 Versión 1.0.0 (Lanzamiento Inicial - Completado)
@@ -61,7 +64,38 @@ Lista de tareas, funcionalidades activas y backlog evolutivo para el servidor **
 
 ---
 
-## 🔮 Versión 1.1.0 (Próximas Funcionalidades / Backlog)
+---
+
+## 🚀 Versión 1.1.0 (Inteligencia Editorial, Estrategia y Anti-IA - Completado)
+
+- [x] **Suite de Heurística Anti-IA y Limpieza de Huella Sintética**:
+  - [x] Motor de humanización en 3 pasadas (`linkedin_humanize`): purga de 17 caracteres invisibles, normalización tipográfica y sustitución de 113+ términos corporativos trillados con preservación de URLs.
+  - [x] Panel heurístico de 5 verificaciones (`linkedin_detect_ai`): Burstiness, Specificity, Slop Density, Fingerprint y Voice, adaptado para evaluación natural bilingüe (EN/ES) con veredicto PASS/REVIEW/FLAGGED.
+
+- [x] **Estrategia de Copywriting y Conversión de Alto Impacto**:
+  - [x] Calibrador de ganchos contra 21 fórmulas probadas (`linkedin_hook_score`) con control de límites visibles de corte móvil (140 car) y escritorio (210 car).
+  - [x] Rúbrica objetiva de 12 elementos sobre 100 puntos (`linkedin_score_profile`) con diagnóstico priorizado *Fix-First*.
+  - [x] Generador de comentarios profesionales basado en 9 arquetipos de alto valor (`linkedin_generate_comment`), erradicando comentarios clónicos.
+  - [x] Planificador de carruseles PDF verticales en ratio 4:5 (`linkedin_carousel_planner`) con reglas de retención y boilerplate HTML/CSS.
+  - [x] Desglose y reciclaje de activos largos en 4 publicaciones semanales independientes (`linkedin_repurpose_content`).
+  - [x] Secuencia de prospección por mensaje directo en 4 fases (`linkedin_dm_sequence`) con nota de invitación $\le$ 200 caracteres y follow-ups espaciados.
+
+- [x] **Triaje de Interacciones y Detección de Bots**:
+  - [x] Triaje automatizado de la bandeja de entrada (`linkedin_triage_inbox`) en LEAD, RECRUITER, PEER, ASK y SPAM, detectando secuencias frías automatizadas.
+  - [x] Triaje de respuestas a publicaciones propias (`linkedin_triage_replies`) para priorizar debate y leads en la primera hora de publicación.
+
+- [x] **Distribución Oficial y Automatización Continua (CI/CD)**:
+  - [x] Publicación oficial de la Release `v1.1.0` en [GitHub Releases](https://github.com/solari21/mcp-linkedin/releases/tag/v1.1.0) con binarios precompilados (`.whl` y `.tar.gz`).
+  - [x] Inclusión del módulo `linkedin_cdp.py` en `py-modules` de `pyproject.toml` para empaquetado 100% íntegro.
+  - [x] Workflow de Auto-Release en push a `main` (`.github/workflows/publish_package.yml`) con resolución dinámica de versión desacoplada en script dedicado (`.github/scripts/resolve_version.py`), erradicando `python -c` inline, colisiones de entrecomillado en Bash y NameError con booleanos, anti-duplicación de changelogs y `action-gh-release@v3` (Node 24 sin advertencias).
+  - [x] Infografía y Diagrama de Arquitectura de 5 capas y 6 bloques funcionales diseñado bajo el estándar editorial canónico `diagram-design` (HTML + SVG standalone y PNG de alta resolución sin distorsión).
+  - [x] Diagrama de Flujo Operativo End-to-End diseñado y exportado con MCP `diagram-design` (Taste Gate 100%, SVG/PNG), sustituyendo los bloques Mermaid sobredimensionados en `README.md` y `GUIA_USO.md`.
+  - [x] Norma canónica *Release Exit Gate* en `AGENTS.md` (Regla 0.8) y `github-automation` (`SKILL.md`).
+  - [x] Sincronización continua de hitos en el tablero Kanban [MCP LinkedIn Roadmap](https://github.com/users/solari21/projects/2).
+
+---
+
+## 🔮 Versión 1.2.0 (Próximas Funcionalidades / Backlog)
 
 - [ ] **Encuestas Interactivas (Polls)**:
   - [ ] Herramienta para crear encuestas con opciones múltiples y duración configurable.
@@ -70,11 +104,8 @@ Lista de tareas, funcionalidades activas y backlog evolutivo para el servidor **
 - [ ] **Publicación Programada Nativa**:
   - [ ] Aprovechamiento del selector nativo de LinkedIn para programar fecha y hora diferida.
 
-- [ ] **Carruseles y Documentos PDF**:
-  - [ ] Soporte para subir presentaciones diapositiva a diapositiva mediante PDF.
+- [ ] **Subida Automática de Carruseles PDF**:
+  - [ ] Automatización de subida directa de archivos PDF generados al modal de publicación de LinkedIn.
 
 - [ ] **Exportación y Métricas Históricas**:
   - [ ] Exportación periódica de analíticas a bases de datos locales SQLite o archivos CSV/Excel.
-
-- [ ] **Webhooks y Notificaciones Locales**:
-  - [ ] Servicio en segundo plano para notificar mensajes nuevos en bandeja de entrada vía toast/webhook local.

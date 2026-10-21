@@ -4,7 +4,9 @@ These checks reject aliases and accidental overwrites; they are not a sandbox
 against concurrent hostile changes to parent directories.
 """
 import os
-from pathlib import Path, PureWindowsPath
+from pathlib import PureWindowsPath
+from grea.host.paths import Path
+from .host.files import is_link
 import re
 import unicodedata
 
@@ -13,7 +15,7 @@ def canonical_path(value):
     path = Path(value).expanduser().absolute()
     if any(p.is_symlink() and not p.exists() for p in (path, *path.parents)):
         raise ValueError('Dangling path symlink')
-    if path.is_symlink():
+    if is_link(path):
         raise ValueError('Output/root may not itself be a symlink')
     # Resolve caller-selected existing ancestors (including macOS /tmp and /var).
     return path.resolve()
@@ -46,7 +48,7 @@ def relative_name(value):
     if path.drive or path.root or any(
         p in ('', '.', '..') or p.endswith((' ', '.'))
         or re.search(r'[<>:"|?*\x00-\x1f\x7f]', p)
-        or re.fullmatch(r'(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?', p, re.I)
+        or re.fullmatch(r'(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?', p, re.I)
         for p in parts
     ):
         raise ValueError('Unsafe portable path: ' + repr(value))

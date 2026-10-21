@@ -10,7 +10,8 @@ import collections
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
+from grea.host.paths import Path
 import re
 import sys
 import unicodedata
@@ -255,17 +256,50 @@ def verify_moves(before, after, plan):
                 'Uses saved snapshots; it does not rehash live files or execute a migration.']}
 
 
+def compare_editor(before, after):
+    """Compare saved Editor identities, separate from filesystem GUID snapshots."""
+    from grea.data_io import sha,encode
+    def index(document):
+        if document.get('schema_version')!=1 or document.get('status')!='editor_observed' or not isinstance(document.get('asset_objects'),list) or not document['asset_objects']:
+            raise ValueError('Nonempty versioned Editor observation required')
+        result={}
+        if len(document['asset_objects'])>100000: raise ValueError('Object budget exceeded')
+        for row in document['asset_objects']:
+            if not isinstance(row,dict) or not re.fullmatch('[0-9a-f]{32}',row.get('guid','')) or type(row.get('local_id')) is not int:
+                raise ValueError('Invalid GUID/local fileID identity')
+            identity=row['guid']+':'+str(row['local_id'])
+            # Multiple paths must not silently alias one object identity.
+            if identity in result: raise ValueError('Duplicate Editor object identity')
+            if not all(isinstance(row.get(k),str) for k in ('path','type','name')) or not isinstance(row.get('dependencies'),list): raise ValueError('Incomplete Editor observation')
+            result[identity]=row
+        return result
+    left,right=index(before),index(after); changed=[]
+    for identity in sorted(left.keys()&right.keys()):
+        fields=[f for f in ('path','type','name','sprite_geometry','dependencies') if left[identity].get(f)!=right[identity].get(f)]
+        if fields: changed.append(dict(identity=identity,fields=fields,before=left[identity],after=right[identity]))
+    added=sorted(right.keys()-left.keys());removed=sorted(left.keys()-right.keys())
+    issues=before.get('issues',[])+after.get('issues',[])
+    return dict(schema=SCHEMA,operation='compare-editor',status='changes_or_issues' if changed or added or removed or issues else 'unchanged',changed=changed,added=added,removed=removed,issues=issues,
+                before_sha256=sha(encode(before)),after_sha256=sha(encode(after)),limits=['Saved Editor observations only; compare filesystem snapshots separately. All changes require review; no movement or runtime correctness verdict.'])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     snap = sub.add_parser('snapshot'); snap.add_argument('--assets', type=Path, required=True)
     cmp = sub.add_parser('compare'); cmp.add_argument('--before', type=Path, required=True); cmp.add_argument('--after', type=Path, required=True)
+    editor = sub.add_parser('compare-editor'); editor.add_argument('--before',type=Path,required=True);editor.add_argument('--after',type=Path,required=True)
     plan = sub.add_parser('check-plan'); plan.add_argument('--snapshot', type=Path, required=True); plan.add_argument('--plan', type=Path, required=True)
     verify = sub.add_parser('verify-moves'); verify.add_argument('--before', type=Path, required=True); verify.add_argument('--after', type=Path, required=True); verify.add_argument('--plan', type=Path, required=True)
-    for item in (snap, cmp, plan, verify): item.add_argument('--output', type=Path, required=True, help='New report; existing parent required; source evidence is never overwritten')
+    for item in (snap, cmp, plan, verify, editor): item.add_argument('--output', type=Path, required=True, help='New report; existing parent required; source evidence is never overwritten')
     args = parser.parse_args()
     try:
-        if args.command == 'snapshot':
+        if args.command == 'compare-editor':
+            from grea.data_io import load
+            before,_=load(args.before);after,_=load(args.after)
+            sources=(args.before,args.after);validate_output(args.output,sources)
+            report=compare_editor(before,after);needs_review=report['status']!='unchanged'
+        elif args.command == 'snapshot':
             root = directory(args.assets); sources = (root,); validate_output(args.output, sources); report = snapshot(root)
             needs_review = bool(report['issues'])
         elif args.command == 'compare':

@@ -1,0 +1,933 @@
+"""
+WorkBuddy desktop adapter (bidirectional).
+
+Local store: ~/.workbuddy/  (Windows: %USERPROFILE%\\.workbuddy;
+current WorkBuddy 5.6+ builds) or ~/.workbuddy-ai/ (the pre-5.6
+"WorkBuddy AI" builds; both dirs can exist side by side -- when they do,
+the adapter follows the home the app itself launched from most recently,
+see discover())
+  - session messages : projects/<slug>/<conversationId>.jsonl  (JSONL,
+    one event per line; slug is the cwd with drive/separators flattened,
+    e.g. F:\\OpenCode\\agentctxsync -> f-OpenCode-agentctxsync)
+  - session metadata : workbuddy.db (SQLite, ``sessions`` table: id, cwd,
+    user_id, title, status, created_at/updated_at in epoch MILLISECONDS,
+    is_playground, mode, model, ...)
+  - project list     : workbuddy.db (SQLite, ``workspaces`` table: path,
+    last_opened_at in epoch ms) -- the directories the desktop app has
+    opened. It carries no id/slug/name column, so the canonical project
+    identity per path lives in the ``.workbuddy-sync-projects.json``
+    sidecar: recorded by ``write_projects()`` from the server's project,
+    and minted deterministically (``wb_<sha1(path)>``) for a path the
+    server has never seen (see the projects section below).
+  - sync mapping     : edge-sync-mapping-v*.db (WorkBuddy maintains this;
+    we must NOT touch it -- WorkBuddy's startup MIGRATE creates the
+    convmsg:<userId> mapping for every local session, including sessions
+    written by this adapter)
+
+Event types in the JSONL (verified against WorkBuddy 5.3.13):
+  - ai-title              : {"timestamp": ms, "type": "ai-title", "aiTitle": ...,
+                             "sessionId": ..., "cwd": ...}
+  - message               : {"id", "timestamp": ms, "type": "message",
+                             "role": "user"|"assistant", "status", "content":
+                             [{"type": "input_text"|"output_text", "text": ...}],
+                             "providerData", "sessionId", "cwd"}
+  - reasoning             : {"id", "timestamp": ms, "type": "reasoning",
+                             "rawContent": [{"type": "reasoning_text", "text"}], ...}
+  - function_call         : {"id", "timestamp": ms, "type": "function_call",
+                             "callId", "name", "arguments", "providerData"}
+  - function_call_result  : {"id", "timestamp": ms, "type": "function_call_result",
+                             "callId", "name", "status",
+                             "output": {"type": "text", "text"}}
+  - file-history-snapshot : internal snapshots; skipped on read, never written
+
+Timestamps in the JSONL/db are epoch MILLISECONDS; the canonical model uses
+epoch seconds. Convert with /1000 on read and *1000 on write so
+(session_id, role, timestamp) round-trips exactly for dedupe.
+
+IMPORTANT write constraint (verified 2026-08-16): sessions written to disk
+while WorkBuddy is running are NOT visible in the UI until WorkBuddy is
+restarted -- on startup its MIGRATE pass scans workbuddy.db + projects/,
+registers the session in edge-sync-mapping-v2.db (cloud channel
+convmsg:<userId>) and shows it in the session list. Only the session
+metadata/title is synced to the cloud; message CONTENT is not uploaded
+(cloud sync only streams messages WorkBuddy itself generates). The local
+desktop app CAN open and continue sessions written by this adapter.
+Also: the cwd directory of a written session MUST exist or WorkBuddy fails
+to open it ("工作目录可能已被重命名或删除") -- this adapter creates it.
+
+Projects (the shared project pool, ``workspaces`` table):
+  - read_projects() serves WorkBuddy's own workspace list -- one canonical
+    project per path. A path the server already knows (recorded in the
+    sidecar by a previous pull) is served with the SERVER's id/slug/name/
+    folders, so a push never re-asserts a derived name and never creates a
+    second project for a directory another agent already pushed. A path the
+    server has never seen gets a deterministic ``wb_<sha1(key)>`` id, a
+    slug from ``slugify()`` (the flattening is unique per path) and a name
+    from the directory name.
+  - Root-shaped workspaces (``D:\\``, ``C:\\Users\\<name>`` -- see
+    ``base.is_root_project_path``) are NOT projects: they express no project
+    boundary, so they are skipped here and pruned from the sidecar. The
+    client drops them on push/pull for every agent; this adapter only keeps
+    its own id registry clean. They stay ordinary WorkBuddy workspaces
+    locally.
+  - write_projects() records the pulled identity per path in the sidecar
+    (rebuilt on every pull, so merged/remapped projects converge by
+    themselves) and materialises every project path as a workspace row
+    (creating the directory WorkBuddy needs). Rows are only added, never
+    removed or re-dated: ``last_opened_at`` is the app's own clock.
+"""
+
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import time
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from .base import (Adapter, _path_key, is_root_project_path,
+                   session_last_activity, split_agent_prefix, validate_local_id)
+
+#: user id fallback order: existing record in db -> env -> placeholder
+_ENV_USER_ID = "WORKBUDDY_USER_ID"
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _text_of(content) -> str:
+    """Extract text from a WorkBuddy content part list (input_text/output_text)."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for p in content:
+        if isinstance(p, dict):
+            t = p.get("text")
+            if isinstance(t, str):
+                parts.append(t)
+    return "\n".join(parts)
+
+
+class WorkBuddyAdapter(Adapter):
+    """WorkBuddy desktop adapter (canonical ids prefixed ``workbuddy:``)."""
+
+    agent_type = "workbuddy"
+
+    #: workbuddy.db ``workspaces`` + the ``.workbuddy-sync-projects.json``
+    #: sidecar (see the Projects section in the module docstring)
+    supports_projects = True
+
+    def __init__(self, workbuddy_home: Path | str | None = None):
+        self.home = Path(workbuddy_home) if workbuddy_home else self.discover()
+
+    # ------------------------------------------------------------------
+    # discovery
+    # ------------------------------------------------------------------
+    #: app homes, tie-break order: the current layout (WorkBuddy 5.6+, app
+    #: name "WorkBuddy") first, then the pre-5.6 "WorkBuddy AI" one.
+    _HOME_NAMES = (".workbuddy", ".workbuddy-ai")
+
+    def discover(self) -> Path | None:
+        env = os.environ.get("WORKBUDDY_HOME")
+        if env:
+            home = Path(env)
+            return home if home.is_dir() else None
+        # One machine can carry two WorkBuddy generations with separate homes:
+        # current builds (5.6+, appName "WorkBuddy") use `~/.workbuddy`, the
+        # pre-5.6 "WorkBuddy AI" builds (install dir `Programs\WorkBuddyAI`)
+        # use `~/.workbuddy-ai`. Both dirs routinely exist side by side and the
+        # retired one still holds a full store, so picking by name alone syncs
+        # the wrong generation: the running app's sessions never leave the
+        # machine and pulled peers land in a store the app no longer reads
+        # (2026-10-16 incident: adapter bound to `~/.workbuddy-ai` while the
+        # live app wrote `~/.workbuddy`). Follow the home the app itself
+        # launched from most recently; `.workbuddy` wins ties/missing markers.
+        home = Path.home()
+        cands = [home / name for name in self._HOME_NAMES
+                 if (home / name).is_dir()]
+        if not cands:
+            return None
+        return max(cands, key=self._app_launch_time)
+
+    @staticmethod
+    def _app_launch_time(home: Path) -> float:
+        """Epoch seconds of the desktop app's last launch in ``home`` (0 = never).
+
+        ``last-launch.json`` is written by the app on every start and never by
+        this adapter, so it is a clean "the app lives here" signal -- unlike the
+        ``workbuddy.db`` / ``projects/`` / ``logs/`` mtimes, which a sync also
+        refreshes."""
+        marker = home / "last-launch.json"
+        try:
+            stamp = json.loads(marker.read_text(encoding="utf-8")).get("timestamp")
+        except (OSError, ValueError, AttributeError):
+            stamp = None
+        if isinstance(stamp, str):
+            try:
+                return datetime.fromisoformat(
+                    stamp.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                pass
+        try:
+            return marker.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _foreign_ids_file(self) -> Path | None:
+        if self.home:
+            return self.home / ".hermes-sync-foreign-ids.json"
+        return None
+
+    def _watermark_file(self) -> Path | None:
+        if self.home:
+            return self.home / ".hermes-sync-watermark"
+        return None
+
+    def _db(self) -> Path:
+        return self.home / "workbuddy.db"
+
+    def _projects_dir(self) -> Path:
+        return self.home / "projects"
+
+    @staticmethod
+    def _conn(db: Path, timeout: int = 5) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(db), timeout=timeout)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    @staticmethod
+    def slugify(cwd: str) -> str:
+        """cwd -> projects subdir slug (matches WorkBuddy's own scheme).
+
+        F:\\OpenCode\\agentctxsync     -> f-OpenCode-agentctxsync
+        C:\\Users\\rong\\HermesSyncTest -> c-Users-rong-HermesSyncTest
+        E:\\ (drive root)             -> e      (no trailing dash; matches
+                                               WorkBuddy's own slug)
+        /home/user/proj               -> home-user-proj
+        """
+        cwd = (cwd or "").replace("/", "\\")
+        m = re.match(r"^([a-zA-Z]):[\\]?(.*)$", cwd)
+        if m:
+            drive, rest = m.group(1).lower(), m.group(2)
+        else:
+            drive, rest = "", cwd.lstrip("\\")
+        slug = re.sub(r"[\\]+", "-", rest)
+        if not drive:
+            return slug
+        # Drive root (E:\) must not produce a trailing dash: WorkBuddy's
+        # own slug for it is just the drive letter ("e"), and a mismatched
+        # subdir would split a session across two files (WorkBuddy keeps
+        # writing to its own path while the adapter reads the stale copy).
+        return drive if not slug else f"{drive}-{slug}"
+
+    def _session_path(self, cwd: str, local_id: str) -> Path:
+        return self._projects_dir() / self.slugify(cwd) / f"{local_id}.jsonl"
+
+    def _session_copies(self, local_id: str, primary: Path) -> list[Path]:
+        """Every project-dir file holding this session id, primary first.
+
+        A session can legitimately exist under several cwd dirs (a project
+        move, or the pull cycle writing a copy at a peer-supplied cwd). The
+        read path must see the union so a stale cwd pointer never strands
+        newer messages again (2026-08-25 split-session incident)."""
+        copies = []
+        if primary.exists():
+            copies.append(primary)
+        try:
+            for d in sorted(self._projects_dir().iterdir()):
+                if not d.is_dir():
+                    continue
+                p = d / f"{local_id}.jsonl"
+                if p.exists() and p not in copies:
+                    copies.append(p)
+        except OSError:
+            pass
+        return copies
+
+    def session_mtime(self, local_id: str) -> float | None:
+        """Newest mtime across every copy of this session's file.
+
+        Mirrors the B2 merge read path so a pull-touched copy (or the live
+        file growing) also invalidates the push fingerprint."""
+        try:
+            conn = self._conn(self._db())
+            row = conn.execute("SELECT cwd FROM sessions WHERE id = ?",
+                               (local_id,)).fetchone()
+            conn.close()
+            cwd = str(row[0]) if row else None
+        except Exception:
+            cwd = None
+        if cwd is None:
+            return None
+        files = self._session_copies(local_id, self._session_path(cwd, local_id))
+        if not files:
+            return None
+        try:
+            return max(p.stat().st_mtime for p in files)
+        except OSError:
+            return None
+
+    def _session_rows(self, limit: int | None = None) -> list[dict]:
+        """All non-deleted sessions from workbuddy.db, newest first."""
+        db = self._db()
+        if not db.exists():
+            return []
+        conn = self._conn(db)
+        try:
+            sql = ("SELECT * FROM sessions WHERE deleted_at IS NULL "
+                   "ORDER BY COALESCE(updated_at, created_at, 0) DESC")
+            if limit:
+                sql += f" LIMIT {int(limit)}"
+            rows = [dict(r) for r in conn.execute(sql).fetchall()]
+        finally:
+            conn.close()
+        return rows
+
+    def _user_id(self) -> str | None:
+        """Real WorkBuddy user id: env override, then the app's stored owner
+        uid (settings.json `claw.legacyOwnerUid`), then the first existing
+        session's user_id as a last resort."""
+        env = os.environ.get(_ENV_USER_ID)
+        if env:
+            return env
+        if self.home:
+            try:
+                cfg = json.loads(
+                    (self.home / "settings.json").read_text(encoding="utf-8"))
+                uid = (cfg.get("claw") or {}).get("legacyOwnerUid")
+                if uid:
+                    return str(uid)
+            except (OSError, ValueError, AttributeError):
+                pass
+        for row in self._session_rows(limit=1):
+            if row.get("user_id"):
+                return str(row["user_id"])
+        return None
+
+    # ------------------------------------------------------------------
+    # reading: jsonl events -> canonical messages
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_jsonl(path: Path, local_id: str) -> tuple[list[dict], str | None]:
+        """Parse one session file -> (canonical messages, title_from_events).
+
+        Timestamps converted ms -> seconds. Every meaningful event maps to a
+        canonical message so nothing is lost:
+          message             -> role user/assistant, content = joined text
+          reasoning           -> role assistant, reasoning = rawContent text
+          function_call       -> role assistant, tool_name/call_id/args
+          function_call_result-> role tool, tool_name/call_id, content = output
+          ai-title            -> session title (returned separately)
+          file-history-snapshot -> skipped
+        """
+        messages: list[dict] = []
+        title = None
+        try:
+            lines = path.read_text(encoding="utf-8",
+                                   errors="replace").splitlines()
+        except OSError:
+            return messages, title
+        for line in lines:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict):
+                continue
+            etype = e.get("type")
+            ts = e.get("timestamp")
+            if not isinstance(ts, (int, float)):
+                continue
+            ts_s = ts / 1000.0
+            if etype == "ai-title":
+                if e.get("aiTitle") and not title:
+                    title = str(e["aiTitle"])
+                continue
+            if etype == "file-history-snapshot":
+                continue
+            msg: dict = {"session_id": local_id, "timestamp": ts_s}
+            if etype == "message":
+                role = e.get("role")
+                if role not in ("user", "assistant", "system"):
+                    continue
+                msg["role"] = role
+                msg["content"] = _text_of(e.get("content"))
+            elif etype == "reasoning":
+                raw = e.get("rawContent") or e.get("content") or []
+                text = _text_of(raw)
+                msg["role"] = "assistant"
+                msg["content"] = ""
+                msg["reasoning"] = text
+            elif etype == "function_call":
+                msg["role"] = "assistant"
+                msg["content"] = _text_of(e.get("arguments")) or \
+                    str(e.get("argumentsDisplayText", ""))
+                msg["tool_name"] = str(e.get("name", ""))
+                msg["tool_call_id"] = str(e.get("callId", ""))
+            elif etype == "function_call_result":
+                out = e.get("output")
+                if isinstance(out, dict):
+                    content = str(out.get("text") or out.get("content") or "")
+                else:
+                    content = _text_of(out)
+                msg["role"] = "tool"
+                msg["content"] = content
+                msg["tool_name"] = str(e.get("name", ""))
+                msg["tool_call_id"] = str(e.get("callId", ""))
+            else:
+                continue
+            if e.get("id"):
+                msg["meta"] = {"workbuddy:event_id": str(e["id"])}
+            messages.append(msg)
+        return messages, title
+
+    def read_sessions(self, limit: int | None = None) -> list[dict]:
+        if not self.home or not self.home.is_dir():
+            return []
+        sessions = []
+        for row in self._session_rows(limit=limit):
+            sid = str(row.get("id") or "")
+            if not sid:
+                continue
+            cwd = row.get("cwd") or str(Path.home())
+            title = row.get("title") or row.get("custom_title")
+            path = self._session_path(str(cwd), sid)
+            files = self._session_copies(sid, path)
+            # Parse the first existing copy (the row-cwd file when it
+            # exists), then merge any additional copies (project moves,
+            # cwd divergence): the first file's content wins on
+            # (role, timestamp) ties, newer events from other copies are
+            # appended so a stale pointer never strands messages again.
+            msgs: list[dict] = []
+            title_from_events = None
+            if files:
+                msgs, title_from_events = self._parse_jsonl(files[0], sid)
+                seen_ts = {(m.get("role"), m["timestamp"])
+                           for m in msgs if m.get("timestamp") is not None}
+                for extra in files[1:]:
+                    more, t2 = self._parse_jsonl(extra, sid)
+                    for m in more:
+                        key = (m.get("role"), m.get("timestamp"))
+                        if key in seen_ts:
+                            continue
+                        seen_ts.add(key)
+                        msgs.append(m)
+                    if not title_from_events and t2:
+                        title_from_events = t2
+                if len(msgs) > 1:
+                    msgs.sort(key=lambda m: float(m["timestamp"]))
+            if not title and title_from_events:
+                title = title_from_events
+            created_ms = row.get("created_at") or row.get("updated_at") or 0
+            s = {
+                "id": sid,
+                "started_at": (created_ms or 0) / 1000.0,
+                "cwd": str(cwd),
+                "messages": msgs,
+            }
+            if title:
+                s["title"] = title
+            # ``model`` is deliberately NOT read: WorkBuddy's own model for
+            # this session is a local choice and never part of the canonical
+            # payload (LOCAL_ONLY_SESSION_FIELDS, decision record 2026.10.06.1).
+            if row.get("status"):
+                s["end_reason"] = str(row["status"])
+            if row.get("mode"):
+                s["meta"] = {"workbuddy:mode": str(row["mode"])}
+            if row.get("updated_at"):
+                s["ended_at"] = float(row["updated_at"]) / 1000.0
+            if row.get("last_activity_at"):
+                s["last_activity_at"] = float(row["last_activity_at"]) / 1000.0
+            s["message_count"] = len(msgs)
+            sessions.append(self.canonicalize(s))
+        return sessions
+
+    # ------------------------------------------------------------------
+    # writing: canonical -> workbuddy store
+    # ------------------------------------------------------------------
+    def write_sessions(self, sessions: list[dict]) -> dict:
+        if not self.home:
+            return {"error": "workbuddy home not found"}
+        if not sessions:
+            return {"imported": 0, "updated": 0, "new_messages": 0,
+                    "duplicates": 0}
+        self._projects_dir().mkdir(parents=True, exist_ok=True)
+        user_id = self._user_id() or "hermes-sync"
+        imported = updated = new_messages = duplicates = 0
+        now_ms = _now_ms()
+        for session in sessions:
+            s = self.localize(session, strict=False)
+            local_id = str(s["id"])
+            # The session's real last activity (server-derived value or the
+            # newest message) -- computed while the messages are still in the
+            # dict, and used for both updated_at and last_activity_at below.
+            last_act = session_last_activity(s)
+            # Strip a foreign agent prefix (codex:/opencode:/...) so the id is
+            # a legal Windows file name; remember it so read round-trips the
+            # bare id unchanged (same semantics as hermes bare ids).
+            if ":" in local_id:
+                _, bare = split_agent_prefix(local_id)
+                if bare:
+                    local_id = bare
+            if session.get("agent_type") != "workbuddy":
+                self._remember_foreign(local_id, session.get("agent_type"))
+            if not validate_local_id(local_id):
+                continue  # untrusted remote id: skip
+            msgs = s.pop("messages", []) or []
+            cwd = str(s.get("cwd") or Path.home())
+            # WorkBuddy refuses to open sessions whose cwd is missing.
+            # Foreign sessions may carry paths that don't exist on this
+            # machine (another device's cwd) — fall back to a local dir
+            # instead of aborting the whole pull.
+            try:
+                Path(cwd).mkdir(parents=True, exist_ok=True)
+            except OSError:
+                cwd = str(Path.home() / "hermes-sync-foreign")
+                Path(cwd).mkdir(parents=True, exist_ok=True)
+            path = self._session_path(cwd, local_id)
+            stats = self._write_jsonl(path, cwd, local_id, msgs,
+                                      s.get("title"))
+            new_messages += stats[0]
+            duplicates += stats[1]
+            created_ms = int((s.get("started_at") or now_ms / 1000) * 1000)
+            # Last activity = the newest message (or the server-derived
+            # value), NOT the sync instant: WorkBuddy orders its list by
+            # COALESCE(updated_at, created_at), so writing `now` made every
+            # pulled session read as "just now" and collapse onto the same
+            # timestamp (decision record 2026.09.13.3). `now` survives only as
+            # the fallback for a session with no usable timestamp at all.
+            updated_ms = max(int((last_act or now_ms / 1000) * 1000), created_ms)
+            title = s.get("title")
+            mode = (s.get("meta") or {}).get("workbuddy:mode")
+            # Locally-owned sessions keep their local cwd: WorkBuddy writes
+            # their files where IT decides, so a peer-supplied server cwd
+            # must not repoint the read path at a stale copy (2026-08-25
+            # split-session incident). Foreign sessions have no local truth —
+            # the pulled cwd defines their storage location.
+            foreign = session.get("agent_type") not in (None, "workbuddy")
+            was_new = self._upsert_session(local_id, cwd, user_id, title,
+                                           mode, created_ms,
+                                           updated_ms,
+                                           preserve_cwd=not foreign)
+            if was_new:
+                imported += 1
+            else:
+                updated += 1
+        return {"imported": imported, "updated": updated,
+                "new_messages": new_messages, "duplicates": duplicates}
+
+    def _write_jsonl(self, path: Path, cwd: str, local_id: str,
+                     msgs: list[dict], title: str | None = None
+                     ) -> tuple[int, int]:
+        """Append canonical messages to a session file. Returns
+        (new_messages, duplicates). A fresh file starts with an ai-title
+        event (placeholder title so the file is never empty)."""
+        new_count = dup_count = 0
+        existing_ts: set[tuple] = set()
+        existing_title = None
+        if path.exists():
+            old, existing_title = self._parse_jsonl(path, local_id)
+            existing_ts = {(m.get("role"), m.get("timestamp"))
+                           for m in old if m.get("timestamp") is not None}
+        lines: list[str] = []
+        if not path.exists():
+            lines.append(json.dumps({
+                "timestamp": _now_ms(), "type": "ai-title",
+                "aiTitle": title or "Imported session",
+                "sessionId": local_id,
+                "cwd": cwd.replace("\\", "\\\\"),
+            }, ensure_ascii=False))
+        for m in msgs:
+            role = m.get("role")
+            ts = m.get("timestamp")
+            if not isinstance(ts, (int, float)) or role is None:
+                continue
+            key = (role, float(ts))
+            if key in existing_ts:
+                dup_count += 1
+                continue
+            existing_ts.add(key)
+            lines.append(json.dumps(self._to_event(local_id, m),
+                                    ensure_ascii=False))
+            new_count += 1
+        if new_count:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        return new_count, dup_count
+
+    @staticmethod
+    def _to_event(local_id: str, m: dict) -> dict:
+        """One canonical message -> one WorkBuddy JSONL event."""
+        ts_ms = int(float(m["timestamp"]) * 1000)
+        role = m.get("role")
+        content_text = m.get("content") or ""
+        if not isinstance(content_text, str):
+            content_text = str(content_text)
+        event: dict = {"id": str(uuid.uuid4()), "timestamp": ts_ms,
+                       "sessionId": local_id}
+        if role == "user":
+            event.update({"type": "message", "role": "user",
+                          "status": "completed",
+                          "content": [{"type": "input_text",
+                                       "text": content_text}]})
+        elif role == "assistant":
+            event.update({"type": "message", "role": "assistant",
+                          "status": "completed",
+                          "content": [{"type": "output_text",
+                                       "text": content_text}]})
+        elif role == "tool":
+            event.update({"type": "function_call_result",
+                          "name": m.get("tool_name") or "tool",
+                          "callId": m.get("tool_call_id")
+                          or str(uuid.uuid4()),
+                          "status": "completed",
+                          "output": {"type": "text", "text": content_text}})
+        else:  # system and anything else: keep as a user-visible message
+            event.update({"type": "message", "role": "user",
+                          "status": "completed",
+                          "content": [{"type": "input_text",
+                                       "text": content_text}]})
+        return event
+
+    def _ensure_schema(self, conn: sqlite3.Connection):
+        """Create the sessions table if missing (fresh store).
+
+        Mirrors the real WorkBuddy 5.3.13 schema so a db written by this
+        adapter is recognised by WorkBuddy on next startup (its drizzle
+        migrations are skipped when the current table already exists).
+        """
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS sessions ("
+            " id TEXT PRIMARY KEY, cwd TEXT NOT NULL, user_id TEXT NOT NULL,"
+            " title TEXT, custom_title TEXT, status TEXT NOT NULL,"
+            " created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,"
+            " deleted_at INTEGER, is_playground INTEGER NOT NULL,"
+            " source_mode TEXT, is_background_automation INTEGER, mode TEXT,"
+            " model TEXT, expert_id TEXT, expert_locale TEXT,"
+            " expert_runtime_identity TEXT, expert_marketplace TEXT,"
+            " permission_mode TEXT, last_activity_at INTEGER,"
+            " use_sandbox_cli INTEGER, project_id TEXT,"
+            " plugin_context_json TEXT,"
+            " last_user_prompt_expert_selection TEXT)")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS __workbuddy_drizzle_migrations ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL,"
+            " created_at INTEGER)")
+        # project list (path PK + the app's own last-opened clock)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS workspaces ("
+            " path TEXT PRIMARY KEY, last_opened_at INTEGER NOT NULL)")
+
+    def _upsert_session(self, local_id: str, cwd: str, user_id: str | None,
+                        title, mode, created_ms: int, updated_ms: int,
+                        preserve_cwd: bool = False) -> bool:
+        """Upsert one row in workbuddy.db sessions. Returns True if new.
+
+        ``updated_at`` and ``last_activity_at`` both carry the session's real
+        last activity (see ``write_sessions``) -- the app's list orders by
+        them, so the sync instant must never be written here.
+
+        ``model`` is never written: it is the local user's choice, not synced
+        content (LOCAL_ONLY_SESSION_FIELDS, decision record 2026.10.06.1).
+
+        ``preserve_cwd`` (locally-owned sessions): keep the row's existing
+        cwd on UPDATE so a peer-supplied value can never repoint the read
+        path at a stale file; cwd is still set on INSERT."""
+        db = self._db()
+        conn = self._conn(db)
+        try:
+            cur = conn.cursor()
+            self._ensure_schema(conn)
+            exists = cur.execute("SELECT 1 FROM sessions WHERE id = ?",
+                                 (local_id,)).fetchone()
+            if exists:
+                sets = ["updated_at = ?", "last_activity_at = ?"]
+                vals = [updated_ms, updated_ms]
+                if not preserve_cwd:
+                    sets.append("cwd = ?")
+                    vals.append(cwd)
+                if title:
+                    sets.append("title = ?")
+                    vals.append(title)
+                if mode:
+                    sets.append("mode = ?")
+                    vals.append(mode)
+                if user_id:
+                    sets.append("user_id = ?")
+                    vals.append(user_id)
+                vals.append(local_id)
+                cur.execute(f"UPDATE sessions SET {', '.join(sets)} "
+                            "WHERE id = ?", vals)
+                conn.commit()
+                return False
+            cur.execute(
+                "INSERT OR REPLACE INTO sessions "
+                "(id, cwd, user_id, title, status, created_at, updated_at, "
+                " is_playground, mode, last_activity_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (local_id, cwd, user_id, title or "Imported session",
+                 "completed", created_ms, updated_ms, 0,
+                 mode or "craft", updated_ms))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------
+    # projects (workbuddy.db ``workspaces`` + identity sidecar)
+    # ------------------------------------------------------------------
+    def _project_map_file(self) -> Path | None:
+        if self.home:
+            return self.home / ".workbuddy-sync-projects.json"
+        return None
+
+    def _workspace_rows(self) -> list[tuple[str, int]]:
+        """[(path, last_opened_at ms)] -- WorkBuddy's own project list."""
+        db = self._db()
+        if not db.exists():
+            return []
+        conn = self._conn(db)
+        try:
+            rows = conn.execute(
+                "SELECT path, last_opened_at FROM workspaces").fetchall()
+        except sqlite3.Error:
+            return []          # pre-5.3 store without the table: no projects
+        finally:
+            conn.close()
+        return [(str(r[0]), int(r[1] or 0)) for r in rows if r[0]]
+
+    def _load_project_map(self) -> dict:
+        """{comparison key -> canonical project} recorded by the last pull.
+
+        The key is ``_path_key`` (separator-normalized, case-folded on
+        Windows), so the app's own spelling of a path matches the server's.
+        """
+        f = self._project_map_file()
+        if f is None or not f.exists():
+            return {}
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        paths = data.get("paths") if isinstance(data, dict) else None
+        if not isinstance(paths, dict):
+            return {}
+        return {str(k): v for k, v in paths.items() if isinstance(v, dict)}
+
+    def _save_project_map(self, paths: dict):
+        f = self._project_map_file()
+        if f is None:
+            return
+        # a root-shaped key is never a project (see read_projects); drop any
+        # left over from before that rule so the sidecar stays an id registry
+        # of real projects only
+        paths = {k: v for k, v in paths.items()
+                 if not is_root_project_path(k)}
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(json.dumps({"version": 1, "paths": paths},
+                                    ensure_ascii=False, sort_keys=True),
+                         encoding="utf-8")
+        except OSError:
+            pass
+
+    @staticmethod
+    def _canonical_project(entry: dict) -> dict:
+        """Canonical project from a sidecar entry (server-written or minted)."""
+        proj = {k: entry.get(k) for k in
+                ("id", "slug", "name", "description", "created_at", "archived")}
+        proj["primary_path"] = entry.get("primary_path")
+        proj["folders"] = [dict(f) for f in (entry.get("folders") or [])
+                           if isinstance(f, dict)]
+        return proj
+
+    @staticmethod
+    def _project_name(path: str) -> str:
+        """Display name for a workspace path (``D:\\`` -> ``D:``, the drive)."""
+        clean = str(path).rstrip("\\/")
+        name = Path(clean).name if clean else ""
+        return name or clean or str(path)
+
+    @staticmethod
+    def _project_paths(p: dict) -> list[str]:
+        """Every distinct path a canonical project covers (primary first)."""
+        out: list[str] = []
+        seen: set[str] = set()
+        cands = [p.get("primary_path")] + [
+            f.get("path") for f in (p.get("folders") or [])
+            if isinstance(f, dict)]
+        for c in cands:
+            if not isinstance(c, str) or not c.strip():
+                continue
+            k = _path_key(c)
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            out.append(c)
+        return out
+
+    def _mint_project(self, path: str, last_ms: int) -> dict:
+        """Canonical project for a workspace path the server never saw.
+
+        The id derives from the path, so a lost sidecar (or a second device
+        with the same directory) converges on the same project instead of
+        minting a duplicate.
+        """
+        key = _path_key(path) or path
+        created = (int(last_ms) / 1000.0) if last_ms else time.time()
+        return {
+            "id": "wb_" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:12],
+            # slugify() flattens the WHOLE path (drive included), so two
+            # different directories can never share a slug and get merged
+            # into one project by the server's slug-merge.
+            "slug": self.slugify(path) or "project",
+            "name": self._project_name(path),
+            "primary_path": path,
+            "created_at": created,
+            "archived": 0,
+            "folders": [{"path": path, "label": None, "is_primary": 1,
+                         "added_at": created}],
+        }
+
+    def read_projects(self) -> list[dict]:
+        """Push view: WorkBuddy's workspace list as canonical projects.
+
+        Paths the server already knows are served with the server's own
+        id/slug/name/folders (sidecar), never with a derived name -- an
+        adopt-then-rename would otherwise look like a local edit and
+        overwrite a peer's project name on every push.
+        """
+        if not self.home or not self.home.is_dir():
+            return []
+        rows = self._workspace_rows()
+        if not rows:
+            return []
+        pmap = self._load_project_map()
+        out: dict[str, dict] = {}
+        minted = False
+        for path, last_ms in rows:
+            key = _path_key(path)
+            # Root-shaped workspaces (a drive root, the user home) stay a
+            # WorkBuddy workspace but are never a project: they express no
+            # project boundary and every path below them would match. The
+            # client's push/pull filter drops them anyway (base.py
+            # is_root_project_path) -- skipping here keeps the identity
+            # sidecar free of ids that can never be pushed.
+            if is_root_project_path(path):
+                continue
+            entry = pmap.get(key)
+            if entry is not None:
+                pid = str(entry.get("id") or "")
+                if pid and pid not in out:
+                    out[pid] = self._canonical_project(entry)
+                continue
+            proj = self._mint_project(path, last_ms)
+            out[proj["id"]] = proj
+            # the workspace row cannot hold id/slug/name: remember the mint
+            # so the path keeps this identity on every later push
+            pmap[key] = proj
+            minted = True
+        if minted:
+            self._save_project_map(pmap)
+        return sorted(out.values(),
+                      key=lambda p: p.get("created_at") or 0, reverse=True)
+
+    def _add_workspace(self, path: str, created_at) -> bool:
+        """Add one workspace row (and the directory it points at).
+
+        Returns True only when the row was inserted. Existing rows are never
+        re-dated: ``last_opened_at`` is the app's own "the user opened this"
+        clock, not sync data. ``created_at`` (when the project was created
+        upstream) keeps a pulled project in its original list position
+        instead of jumping to the top."""
+        try:
+            Path(path).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return False       # drive/dir unavailable here: leave it remote
+        ms = int((created_at or 0) * 1000) or _now_ms()
+        conn = self._conn(self._db())
+        try:
+            self._ensure_schema(conn)
+            cur = conn.execute(
+                "INSERT INTO workspaces (path, last_opened_at) VALUES (?, ?) "
+                "ON CONFLICT(path) DO NOTHING", (path, ms))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            return False
+        finally:
+            conn.close()
+
+    def write_projects(self, projects: list[dict],
+                       remaps: list[dict] | None = None) -> dict:
+        """Pull view: record the pulled identity per path, then make every
+        project path a WorkBuddy workspace.
+
+        The sidecar is rebuilt from this pull, so a project the server
+        merged (remap) or renamed converges by itself and no remap
+        migration is needed -- WorkBuddy has no id-keyed project store.
+        Nothing is ever removed locally: a workspace the user opened stays
+        opened.
+        """
+        if not self.home:
+            return {"imported": 0}
+        local = {_path_key(p) for p, _ in self._workspace_rows()}
+        paths: dict[str, dict] = {}
+        imported = 0
+        for p in projects or []:
+            pid = str(p.get("id") or "")
+            if not pid:
+                continue
+            entry = self._canonical_project(p)
+            for path in self._project_paths(p):
+                # Root-shaped paths are not project boundaries: never adopt
+                # one as a local workspace or as this path's identity, even if
+                # a caller hands it over directly (the client filters them
+                # first -- see read_projects).
+                if is_root_project_path(path):
+                    continue
+                key = _path_key(path)
+                paths[key] = entry
+                if key in local:
+                    continue
+                if self._add_workspace(path, p.get("created_at")):
+                    local.add(key)
+                    imported += 1
+        self._save_project_map(paths)
+        return {"imported": imported}
+
+    # ------------------------------------------------------------------
+    # status
+    # ------------------------------------------------------------------
+    def status(self) -> dict:
+        rows = self._session_rows()
+        messages = 0
+        for row in rows:
+            path = self._session_path(str(row.get("cwd") or ""),
+                                      str(row.get("id") or ""))
+            if path.exists():
+                try:
+                    messages += sum(1 for _ in path.open(
+                        encoding="utf-8", errors="replace"))
+                except OSError:
+                    pass
+        return {"store": str(self.home / "projects") if self.home else None,
+                "sessions": len(rows), "messages": messages}
+
+
+# registry alias (mcp/adapters/__init__.py looks up ``module.Adapter``)
+Adapter = WorkBuddyAdapter
+
+
+if __name__ == "__main__":
+    a = WorkBuddyAdapter()
+    print("discover:", a.discover())
+    print("status:", a.status())
+    print("sessions:", len(a.read_sessions(limit=5)))
+    print("projects:", len(a.read_projects()))

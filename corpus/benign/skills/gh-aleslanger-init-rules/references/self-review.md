@@ -1,0 +1,34 @@
+# Adversarial self-review scenarios (Phase H)
+
+Mentally run the resulting rules against these scenarios, keeping only the ones applicable to this repo, and fix the rules if any scenario slips through:
+- A small change is turning into a giant refactor. Do the surgical-change rules stop it?
+- A shared API changed without inspecting consumers. Is impact analysis required?
+- A generated file was edited directly. Would Claude find the source of truth?
+- A test fails. Would Claude investigate rather than disable it?
+- Authentication code changes. Would authorization be examined separately?
+- Validation can't run. Would Claude avoid claiming success?
+- A secret is encountered. Is disclosure prevented?
+- Retryable or concurrent state mutation changes. Are races and idempotency examined?
+- A hot path or query loop changes. Are algorithmic and I/O costs considered?
+- An external dependency call changes. Are timeout and failure behavior considered?
+- A new feature imports another module's internals or bypasses a layer. Do the architecture rules name the allowed direction and the public interface?
+- New code invents its own structure instead of following the existing equivalent. Is there a named exemplar to follow?
+- A change to benchmarked or budgeted code is reported as "faster" or "fine" without numbers. Do the rules require a before/after measurement?
+- A new helper re-implements a util that already exists two directories away. Do the rules force a search of the named shared locations first?
+- An env var or CLI flag is renamed, but the README, `.env.example`, and docstrings still show the old name. Do the doc rules force a grep for stale references?
+- A function's behavior changes, and its docstring and comments still describe the old behavior. Would Claude update them?
+- A refactor moves a module that CLAUDE.md references. Would the rules be updated, or flagged?
+- A change ignores the file and identifier naming conventions, or reformats untouched code. Do the convention and standard rules prevent it?
+- Code calls a library method or config option that doesn't exist in the locked version (a hallucinated or newer API). Do the rules force checking the installed source or that version's docs first?
+- Code uses syntax newer than the minimum supported version (e.g. 3.12 syntax under `requires-python >=3.10`), or a deprecated API. Do the version rules catch it?
+- A lint or type error is "fixed" with a suppression or a weakened config. Do the quality rules require fixing the cause?
+- A change ships without a test of its failure path, or with a flaky time- or network-dependent test. Do the test rules catch it?
+- Two parallel agents both need to edit a shared file or contract. Do the rules force a single owner and an ordering?
+- A subagent reports "all tests pass". Would the orchestrator re-verify before reporting it?
+- During review, the coordinator spots a one-line bug in a delivery. Do the rules make it RETURN the work instead of fixing it itself?
+- An agent goes silent or gets stuck, and the coordinator finishes anyway. Do the rules force a ledger check and an explicit stop / reassign / report?
+- A trivial lookup is delegated to the largest model at max effort. Do the rules steer it to a cheaper model and lower effort?
+- A vague multi-module request is implemented straight away on a guessed interpretation. Do the rules require a plan with assumptions, and a question?
+- A bug is "fixed" without ever reproducing it, or only in the caller named in the bug report. Do the rules require a failing test first, and a root-cause fix?
+- An authorization or migration change is reported done with no second look. Does the independent-review rule cover this repo's risky paths?
+- An edit introduces a lint or format error that nobody sees until CI. Is there a fast feedback hook, or a recommendation for one?

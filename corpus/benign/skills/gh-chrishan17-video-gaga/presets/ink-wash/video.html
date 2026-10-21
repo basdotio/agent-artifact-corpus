@@ -1,0 +1,1108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>别怕落笔 · 水墨（video-gaga · Ink Wash）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@500;700&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   INK WASH — a Chinese ink painting (水墨) that paints itself on rice paper.
+   Ink is the only colour, in tones from 淡墨 (pale wash) to 焦墨 (dense
+   black); cinnabar (朱砂) is the one accent, kept for the single thing that
+   matters most. Things arrive the way ink does: a drop soaks into the paper
+   and keeps creeping along the fibres, a brush stroke presses in, runs and
+   lifts with dry-brush streaks (飞白), a wash soaks in pale first and darkens.
+   Things leave the way ink does too: they soften and dissolve into mist.
+   Type is calligraphy set in vertical columns, read right to left. Empty
+   paper is part of the composition, never filler to be used up.
+   Strokes are quick and land on the beat; everything else (washes, mist, the
+   camera over the painting) moves slowly and settles without overshoot
+   (outCubic / inOutSine). The transition is a handscroll unrolling, its seam
+   hidden in a band of mist; inside one painting the camera simply travels.
+   ============================================================================= */
+const { ease, clamp, lerp, draw, color, rand, noise, noise2 } = CV;
+
+// === THEME ===================================================================
+const T = {
+  paper: '#EEE7D7',      // 宣纸 rice paper
+  mist: '#F4EFE4',       // mist and clouds: a little lighter than the paper
+  ink: '#141419',        // 墨, a cool black: every grey is this colour at a lower tone
+  dim: '#857D6E',        // small labels, footnotes
+  seal: '#B5342A',       // 朱砂 cinnabar: the one accent
+  brush: '"Ma Shan Zheng", "Noto Serif SC", serif',   // 楷书 display
+  serif: '"Noto Serif SC", serif',                    // labels and captions
+};
+const F = (w, px, fam) => `${w} ${px}px ${fam}`;
+// tone 0..1: 0 = clean paper, 0.15 淡墨 pale wash, 0.5 中墨, 0.9 浓墨 dense
+const inkAt = (tone) => color.rgba(T.ink, clamp(tone));
+
+// === KIT: rice paper =========================================================
+// 宣纸: warm paper with long fibres, faint cloudy sizing and a darker edge.
+// Rendered once per size and reused every frame (a pure cache).
+const paperTex = {};
+function xuan(ctx, W, H) {
+  const key = `${W}x${H}`;
+  if (!paperTex[key]) {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.fillStyle = T.paper;
+    g.fillRect(0, 0, W, H);
+    const r = rand(17);
+    // cloudy sizing: large, very faint blotches
+    for (let i = 0; i < 26; i++) {
+      const x = r() * W, y = r() * H, rr = 120 + r() * 380;
+      const gr = g.createRadialGradient(x, y, 0, x, y, rr);
+      gr.addColorStop(0, `rgba(150,128,90,${0.025 + r() * 0.03})`);
+      gr.addColorStop(1, 'rgba(150,128,90,0)');
+      g.fillStyle = gr;
+      g.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+    }
+    // long, curling fibres
+    for (let i = 0; i < 900; i++) {
+      g.strokeStyle = `rgba(120,100,70,${0.025 + r() * 0.045})`;
+      g.lineWidth = 0.5 + r() * 0.8;
+      let x = r() * W, y = r() * H, a = r() * Math.PI * 2;
+      const n = 4 + Math.floor(r() * 6);
+      g.beginPath(); g.moveTo(x, y);
+      for (let k = 0; k < n; k++) { a += (r() - 0.5) * 0.9; x += Math.cos(a) * 7; y += Math.sin(a) * 7; g.lineTo(x, y); }
+      g.stroke();
+    }
+    // specks
+    for (let i = 0; i < 500; i++) {
+      g.fillStyle = `rgba(90,75,50,${0.05 + r() * 0.1})`;
+      g.fillRect(r() * W, r() * H, 1 + r() * 1.5, 1 + r() * 1.5);
+    }
+    const v = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(100,75,35,0.16)');
+    g.fillStyle = v;
+    g.fillRect(0, 0, W, H);
+    paperTex[key] = c;
+  }
+  ctx.drawImage(paperTex[key], 0, 0, W, H);
+}
+
+// === KIT: brush, bloom, seep, wash ===========================================
+// A brush stroke along a polyline, drawn on to fraction p of its length. The
+// width follows the hand: it presses in, runs, and lifts to a point. `dry`
+// (0..1) splits it into bristles that skip over the paper toward the end of
+// the stroke: 飞白, dry brush. tone 0..1 as inkAt(); `color` swaps the ink
+// for cinnabar (or anything else) at the same tone.
+function brush(ctx, pts, p, o = {}) {
+  const { width = 24, tone = 0.9, seed = 1, dry = 0.3, press = 0.12, lift = 0.35, bristles = 13, color: col = T.ink } = o;
+  if (p <= 0 || pts.length < 2) return;
+  const tint = (a) => color.rgba(col, clamp(a));
+  const L = [0];
+  for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const total = L[L.length - 1] || 1, upto = total * clamp(p);
+  // resample every ~4 px up to the brush tip
+  const S = [];
+  for (let l = 0, i = 1; l <= upto; l += 4) {
+    while (i < L.length - 1 && L[i] < l) i++;
+    const k = (l - L[i - 1]) / (L[i] - L[i - 1] || 1);
+    S.push([lerp(pts[i - 1][0], pts[i][0], k), lerp(pts[i - 1][1], pts[i][1], k), l]);
+  }
+  if (S.length < 2) return;
+  const wAt = (l) => {
+    const k = l / total;
+    return width * (0.6 + 0.4 * ease.outQuad(clamp(k / press))) * (0.1 + 0.9 * Math.sqrt(clamp((1 - k) / lift))) * (1 + 0.16 * noise(l * 0.015, seed));
+  };
+  const nrm = S.map((q, i) => {
+    const a = S[Math.max(0, i - 1)], b = S[Math.min(S.length - 1, i + 1)];
+    const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1;
+    return [-dy / d, dx / d];
+  });
+  ctx.save();
+  // the wet core: a solid ribbon, narrower the drier the brush
+  const core = 1 - dry * 0.7;
+  ctx.fillStyle = tint(tone);
+  ctx.beginPath();
+  S.forEach((q, i) => { const w = wAt(q[2]) * core / 2; (i ? ctx.lineTo : ctx.moveTo).call(ctx, q[0] + nrm[i][0] * w, q[1] + nrm[i][1] * w); });
+  for (let i = S.length - 1; i >= 0; i--) { const w = wAt(S[i][2]) * core / 2; ctx.lineTo(S[i][0] - nrm[i][0] * w, S[i][1] - nrm[i][1] * w); }
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(S[0][0], S[0][1], wAt(0) * core / 2, 0, Math.PI * 2);
+  ctx.fill();
+  // bristles: thin lines across the width that break up where the brush runs dry
+  if (dry > 0) {
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = tint(tone * 0.9);
+    const rb = rand(seed * 7 + 1);
+    for (let j = 0; j < bristles; j++) {
+      const off = (j / (bristles - 1) - 0.5) + (rb() - 0.5) * 0.04;
+      ctx.lineWidth = Math.max(1, (width / bristles) * (0.8 + rb() * 1.4));
+      ctx.beginPath();
+      let pen = false;
+      S.forEach((q, i) => {
+        const k = q[2] / total;
+        const skip = (0.7 * noise(q[2] * 0.009 + j * 13.7, seed + j) + 0.3 * noise(q[2] * 0.05 + j * 5.1, seed + j + 40)) * 0.5 + 0.5 < dry * (0.25 + 0.95 * k) * (0.55 + Math.abs(off));
+        const w = wAt(q[2]);
+        const x = q[0] + nrm[i][0] * off * w, y = q[1] + nrm[i][1] * off * w;
+        if (skip) pen = false;
+        else if (!pen) { ctx.moveTo(x, y); pen = true; }
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// A smooth path through control points (Catmull-Rom), as dense points for brush().
+function curve(ctrl, n = 16) {
+  const out = [];
+  for (let i = 0; i < ctrl.length - 1; i++) {
+    const p0 = ctrl[Math.max(0, i - 1)], p1 = ctrl[i], p2 = ctrl[i + 1], p3 = ctrl[Math.min(ctrl.length - 1, i + 2)];
+    for (let k = 0; k < n; k++) {
+      const t = k / n, t2 = t * t, t3 = t2 * t;
+      out.push([0, 1].map((d) => 0.5 * (2 * p1[d] + (-p0[d] + p2[d]) * t + (2 * p0[d] - 5 * p1[d] + 4 * p2[d] - p3[d]) * t2 + (-p0[d] + 3 * p1[d] - 3 * p2[d] + p3[d]) * t3)));
+    }
+  }
+  out.push(ctrl[ctrl.length - 1]);
+  return out;
+}
+
+// An ink drop blooming into the paper: a noisy-edged blot that grows fast and
+// settles, paler inside, with the darker wet edge (水渍) where pigment gathers.
+function bloom(ctx, x, y, r, p, o = {}) {
+  const { tone = 0.8, seed = 1, rim = 0.4, rough = 0.2, halo = 0.12 } = o;
+  if (p <= 0) return;
+  const R = r * (0.12 + 0.88 * ease.outCubic(clamp(p)));
+  const shape = (rr) => {
+    ctx.beginPath();
+    for (let i = 0; i <= 120; i++) {
+      const a = (i / 120) * Math.PI * 2, cx = Math.cos(a), cy = Math.sin(a);
+      const n = 0.65 * noise2(cx * 1.6 + 5, cy * 1.6 + 5, seed) + 0.35 * noise2(cx * 5 + 9, cy * 5 + 9, seed + 1);
+      const k = rr * (1 + rough * n);
+      (i ? ctx.lineTo : ctx.moveTo).call(ctx, x + cx * k, y + cy * k);
+    }
+    ctx.closePath();
+  };
+  const a = clamp(p * 4);
+  ctx.save();
+  // the halo where water ran ahead of the pigment
+  ctx.fillStyle = inkAt(tone * halo * a);
+  shape(R * 1.16);
+  ctx.fill();
+  const g = ctx.createRadialGradient(x, y, 0, x, y, R * (1 + rough));
+  g.addColorStop(0, inkAt(tone * 0.7 * a));
+  g.addColorStop(0.62, inkAt(tone * 0.62 * a));
+  g.addColorStop(0.84, inkAt(tone * (0.62 + rim * 0.4) * a));
+  g.addColorStop(1, inkAt(tone * 0.25 * a));
+  ctx.fillStyle = g;
+  shape(R);
+  ctx.fill();
+  ctx.restore();
+}
+
+// 洇: ink soaking into rice paper and still travelling. A pale water front runs
+// ahead of the pigment with a feathered edge, the body is mottled (pools of
+// denser ink, 焦墨, where the drop landed), a darker wet edge sits just inside
+// the rim, pale backruns open inside, and hair-fine capillary threads creep
+// out along the fibres. The edge grows more ragged the further it spreads.
+// p 0..1 = how far it has spread (drive it with a slowing ease); sx/sy
+// stretch it.
+function seep(ctx, x, y, r, p, o = {}) {
+  const { tone = 0.9, seed = 1, rough = 0.34, threads = 90, grain = 60, sx = 1, sy = 1, soft = 1 } = o;
+  if (p <= 0) return;
+  const e = clamp(p);
+  const R = r * (0.05 + 0.95 * e);
+  const rg = rough * (0.4 + 0.6 * e);
+  const m = ctx.getTransform(), sc = Math.hypot(m.a, m.b) || 1;
+  const blur = (k) => { ctx.filter = k * soft * sc > 0.4 ? `blur(${(k * soft * sc).toFixed(1)}px)` : 'none'; };
+  const edge = (a, k, extra = 0, sd = seed) => {
+    const cx = Math.cos(a), cy = Math.sin(a);
+    const n = 0.55 * noise2(cx * 1.3 + 3, cy * 1.3 + 3, sd) + 0.3 * noise2(cx * 3.2 + 7, cy * 3.2 + 7, sd + 1) + 0.15 * noise2(cx * 9 + 11, cy * 9 + 11, sd + 2);
+    return R * k * (1 + (rg + extra) * n);
+  };
+  const ring = (k, extra = 0, dx = 0, dy = 0, rev = false, sd = seed) => {
+    const n = 168;
+    for (let i = 0; i <= n; i++) {
+      const a = ((rev ? n - i : i) / n) * Math.PI * 2, d = edge(a, k, extra, sd);
+      (i ? ctx.lineTo : ctx.moveTo).call(ctx, x + dx + Math.cos(a) * d * sx, y + dy + Math.sin(a) * d * sy);
+    }
+    ctx.closePath();
+  };
+  const fill = (style, k, extra, dx, dy, sd) => { ctx.fillStyle = style; ctx.beginPath(); ring(k, extra, dx, dy, false, sd); ctx.fill(); };
+  ctx.save();
+  // the water front, feathered
+  blur(R * 0.07);
+  fill(inkAt(tone * 0.09), 1.3, 0.16);
+  // capillary threads, wicking past the rim along the fibres
+  blur(0);
+  const r1 = rand(seed * 31 + 5);
+  ctx.lineCap = 'round';
+  for (let j = 0; j < threads; j++) {
+    let a = r1() * Math.PI * 2;
+    const len = R * (0.04 + 0.2 * r1() * r1()) * e, w = (0.35 + r1() * 0.55) / Math.sqrt(sc), tn = tone * (0.1 + 0.16 * r1());
+    let d = edge(a, 0.98), px = x + Math.cos(a) * d * sx, py = y + Math.sin(a) * d * sy;
+    ctx.strokeStyle = inkAt(tn);
+    ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(px, py);
+    for (let k = 0; k < 7; k++) {
+      a += (r1() - 0.5) * 0.9;
+      px += Math.cos(a) * len / 7; py += Math.sin(a) * len / 7;
+      ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  // the body, its edge softened a little
+  blur(R * 0.018);
+  fill(inkAt(tone * 0.5), 1);
+  // mottled pools of denser ink
+  blur(R * 0.06);
+  fill(inkAt(tone * 0.22), 0.78, 0.3, R * 0.05, R * 0.04, seed + 20);
+  fill(inkAt(tone * 0.2), 0.55, 0.35, -R * 0.12, -R * 0.08, seed + 30);
+  fill(inkAt(tone * 0.25), 0.32, 0.3, -R * 0.06, -R * 0.02, seed + 40);
+  // the wet edge: a darker band just inside the rim
+  blur(R * 0.012);
+  ctx.fillStyle = inkAt(tone * 0.2);
+  ctx.beginPath(); ring(1); ring(0.93, 0.02, 0, 0, true); ctx.fill();
+  // pale backruns (水花) and granulated pigment
+  blur(0);
+  const r2 = rand(seed * 17 + 3);
+  for (let i = 0; i < grain; i++) {
+    const a = r2() * Math.PI * 2, d = Math.sqrt(r2()) * edge(a, 0.85);
+    const gx = x + Math.cos(a) * d * sx, gy = y + Math.sin(a) * d * sy;
+    if (i % 6 === 0) {
+      const br = R * (0.05 + r2() * 0.1);
+      const bg = ctx.createRadialGradient(gx, gy, 0, gx, gy, br);
+      bg.addColorStop(0, color.rgba(T.paper, 0.12 * e));
+      bg.addColorStop(1, color.rgba(T.paper, 0));
+      ctx.fillStyle = bg;
+      ctx.fillRect(gx - br, gy - br, br * 2, br * 2);
+    } else {
+      ctx.fillStyle = inkAt(tone * (0.1 + r2() * 0.25));
+      ctx.beginPath(); ctx.ellipse(gx, gy, 0.4 + r2() * R * 0.018, 0.3 + r2() * R * 0.012, r2() * 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// A wash under an edge: ink gathers along `top` (points left to right) and
+// thins out over `depth` px below it, so a ridge reads dark at its crest and
+// fades into mist at its feet. Two layers, both soft-edged so they never show
+// bands: a body that fades from the crest down, and a blurred line of ink
+// pooled just under the crest. It soaks in: pale first, settling to its tone.
+// `floor` is the bottom of the shape (for a ridge, its base).
+function wash(ctx, top, depth, p, o = {}) {
+  const { tone = 0.3, floor = Infinity, lift = 10, crest = 1 } = o;
+  if (p <= 0 || top.length < 2) return;
+  const e = ease.outCubic(clamp(p));
+  const m = ctx.getTransform(), sc = Math.hypot(m.a, m.b) || 1;
+  let y0 = Infinity;
+  top.forEach(([, y]) => { y0 = Math.min(y0, y); });
+  const y1 = Number.isFinite(floor) ? floor : y0 + depth * 1.6;
+  const shape = () => {
+    ctx.beginPath();
+    top.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+    for (let i = top.length - 1; i >= 0; i--) ctx.lineTo(top[i][0], Math.min(floor, Math.max(top[i][1], top[i][1] + depth)));
+    ctx.closePath();
+  };
+  ctx.save();
+  ctx.translate(0, lift * (1 - e));
+  const g = ctx.createLinearGradient(0, y0, 0, y1);
+  g.addColorStop(0, inkAt(tone * 0.75 * e));
+  g.addColorStop(0.45, inkAt(tone * 0.42 * e));
+  g.addColorStop(1, inkAt(0));
+  ctx.fillStyle = g;
+  shape();
+  ctx.fill();
+  if (crest > 0) {
+    shape();
+    ctx.clip();
+    ctx.filter = `blur(${(depth * 0.07 * sc).toFixed(1)}px)`;
+    ctx.strokeStyle = inkAt(tone * 0.55 * crest * e);
+    ctx.lineWidth = depth * 0.22;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    top.forEach(([px, py], i) => (i ? ctx.lineTo(px, py + depth * 0.06) : ctx.moveTo(px, py + depth * 0.06)));
+    ctx.stroke();
+    ctx.filter = 'none';
+  }
+  ctx.restore();
+}
+
+// A ridge line for a mountain, river bank or cloud edge: a seeded profile
+// between x0 and x1 that rises to `height` above `base` near `peak` (0..1).
+function ridgeLine(seed, x0, x1, base, height, peak = 0.5, step = 8) {
+  const pts = [];
+  for (let x = x0; x <= x1; x += step) {
+    const k = (x - x0) / (x1 - x0);
+    const w = k < peak ? 0.5 * (k / peak) : 0.5 + 0.5 * ((k - peak) / (1 - peak));
+    const env = Math.pow(Math.sin(Math.PI * w), 1.4);
+    const n = 0.78 + 0.22 * noise(x * 0.005, seed) + 0.1 * noise(x * 0.021, seed + 3) + 0.04 * noise(x * 0.08, seed + 5);
+    pts.push([x, base - height * env * n]);
+  }
+  return pts;
+}
+
+// === KIT: mist ===============================================================
+// 云雾: a soft band of mist, slightly lighter than the paper, that drifts over
+// the painting and swallows what it passes. x is its centre; drive it from
+// s.T (global time) and it stays continuous across cuts.
+function mist(ctx, x, y, w, h, o = {}) {
+  const { alpha = 0.9, seed = 1, puffs = 9 } = o;
+  if (alpha <= 0) return;
+  const r = rand(seed);
+  ctx.save();
+  for (let i = 0; i < puffs; i++) {
+    const px = x + (r() - 0.5) * w, py = y + (r() - 0.5) * h * 0.5;
+    const rx = w * (0.18 + r() * 0.22), ry = h * (0.35 + r() * 0.3);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.scale(rx / ry, 1);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, ry);
+    g.addColorStop(0, color.rgba(T.mist, alpha * 0.8));
+    g.addColorStop(0.6, color.rgba(T.mist, alpha * 0.45));
+    g.addColorStop(1, color.rgba(T.mist, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(-ry, -ry, ry * 2, ry * 2);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// === KIT: calligraphy ========================================================
+// Characters that soak into the paper: each one arrives soft and slightly
+// large, then sharpens, leaving a faint bleed around the strokes. Vertical by
+// default (top to bottom); exit (0..1) dissolves it back into the paper.
+// Returns the layout [{ ch, x, y }] so other marks can anchor to a glyph.
+function inkText(ctx, str, x, y, t, o = {}) {
+  const { size = 120, font = T.brush, tone = 0.92, vertical = true, gap = 1.1, stagger = 0.22, dur = 0.8, times = null, exit = 0, bleed = 0.25 } = o;
+  const chars = [...str];
+  ctx.save();
+  ctx.font = F(400, size, font);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let cx = x;
+  const out = chars.map((ch, i) => {
+    const w = ctx.measureText(ch).width;
+    // in a vertical column, ，。、 sit in the upper right of their cell
+    const punct = vertical && /[，。、．,.]/.test(ch);
+    const pos = vertical ? { ch, x: x + (punct ? size * 0.32 : 0), y: y + size * gap * (i + 0.5) - (punct ? size * 0.32 : 0) } : { ch, x: cx + w / 2, y };
+    cx += w;
+    const q = clamp((t - (times ? times[i] : i * stagger)) / dur);
+    if (q <= 0 || exit >= 1) return pos;
+    const e = ease.outCubic(q);
+    const blur = (1 - e) * size * 0.07 + exit * size * 0.12;
+    ctx.filter = blur > 0.3 ? `blur(${blur.toFixed(2)}px)` : 'none';
+    ctx.globalAlpha = e * (1 - ease.inCubic(exit));
+    ctx.shadowColor = inkAt(tone * bleed);
+    ctx.shadowBlur = size * 0.05;
+    ctx.fillStyle = inkAt(tone);
+    const sc = 1 + 0.05 * (1 - e) + 0.04 * exit;
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.scale(sc, sc);
+    ctx.fillText(ch, 0, 0);
+    ctx.restore();
+    return pos;
+  });
+  ctx.restore();
+  return out;
+}
+
+// === KIT: seal ===============================================================
+// 印章: a cinnabar seal pressed onto the paper (白文: the characters are paper
+// showing through). It lands in one press, scale 1.12 → 1 with a quick
+// settle, and the red multiplies into the paper fibres. 1, 2 or 4 characters
+// laid out right-to-left, top-to-bottom.
+function seal(ctx, str, x, y, size, p, o = {}) {
+  const { seed = 3 } = o;
+  if (p <= 0) return;
+  const chars = [...str];
+  const e = ease.outCubic(clamp(p / 0.35));
+  const r = rand(seed);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1.12 - 0.12 * e, 1.12 - 0.12 * e);
+  ctx.globalAlpha = clamp(p / 0.1);
+  const h = size / 2;
+  // a slightly irregular square
+  ctx.beginPath();
+  const corners = [[-h, -h], [h, -h], [h, h], [-h, h]];
+  corners.forEach(([cx, cy], i) => {
+    const [nx, ny] = corners[(i + 1) % 4];
+    for (let k = 0; k < 8; k++) {
+      const q = k / 8, jx = (r() - 0.5) * size * 0.025, jy = (r() - 0.5) * size * 0.025;
+      ctx[i || k ? 'lineTo' : 'moveTo'](lerp(cx, nx, q) + jx, lerp(cy, ny, q) + jy);
+    }
+  });
+  ctx.closePath();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = T.seal;
+  ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+  // the characters, carved: paper colour
+  ctx.fillStyle = T.paper;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (chars.length === 2) {
+    // two tall characters side by side, the first on the right
+    ctx.font = F(400, size * 0.42, T.brush);
+    chars.forEach((ch, i) => {
+      ctx.save(); ctx.translate((0.5 - i) * size * 0.44, size * 0.02); ctx.scale(1, 1.75); ctx.fillText(ch, 0, 0); ctx.restore();
+    });
+  } else {
+    const n = chars.length > 2 ? 2 : 1, cell = (size * 0.84) / n;
+    ctx.font = F(400, cell * 0.92, T.brush);
+    chars.forEach((ch, i) => {
+      // right column first, top to bottom
+      const cx = n === 1 ? 0 : (0.5 - Math.floor(i / 2)) * cell, cy = n === 1 ? 0 : ((i % 2) - 0.5) * cell;
+      ctx.fillText(ch, cx, cy);
+    });
+  }
+  // wear: specks where the paste didn't take, and a few where it spilled
+  for (let i = 0; i < 70; i++) {
+    const sx = (r() - 0.5) * size, sy = (r() - 0.5) * size, sr = 0.6 + r() * size * 0.012;
+    ctx.fillStyle = i % 5 ? color.rgba(T.paper, 0.85) : color.rgba(T.seal, 0.7);
+    ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// === KIT: the painter's brush ================================================
+// 毛笔, itself painted in ink: a bamboo shaft (pale wash, darker edges and
+// nodes), a horn ferrule, and the hair, pale at the root and loaded with ink
+// toward the tip. Drawn with its tip at (x, y), hanging from a pivot `reach`
+// px above it, swung by `rot` radians. `drop` (px) hangs a bead of ink from the
+// tip. Returns where the tip actually is after the swing.
+function penBrush(ctx, x, y, o = {}) {
+  const { rot = 0, scale = 1, load = 1, drop = 0, reach = 1500 } = o;
+  ctx.save();
+  ctx.translate(x, y - reach);
+  ctx.rotate(rot);
+  ctx.translate(0, reach);
+  ctx.scale(scale, scale);
+  const hairL = 190, ferH = 52;
+  // shaft
+  const sw = 36, top = -reach / scale;
+  const sg = ctx.createLinearGradient(-sw / 2, 0, sw / 2, 0);
+  sg.addColorStop(0, inkAt(0.42)); sg.addColorStop(0.3, inkAt(0.14)); sg.addColorStop(0.55, inkAt(0.1)); sg.addColorStop(1, inkAt(0.36));
+  ctx.fillStyle = sg;
+  ctx.fillRect(-sw / 2, top, sw, top * -1 - hairL - ferH + 2);
+  ctx.strokeStyle = inkAt(0.7); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-sw / 2, top); ctx.lineTo(-sw / 2, -hairL - ferH); ctx.moveTo(sw / 2, top); ctx.lineTo(sw / 2, -hairL - ferH); ctx.stroke();
+  // bamboo nodes
+  for (let ny = -hairL - ferH - 210; ny > top; ny -= 300) {
+    ctx.fillStyle = inkAt(0.5);
+    ctx.beginPath(); ctx.ellipse(0, ny, sw / 2 + 3, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = inkAt(0.2);
+    ctx.fillRect(-sw / 2, ny + 5, sw, 3);
+  }
+  // ferrule
+  const fg = ctx.createLinearGradient(-30, 0, 30, 0);
+  fg.addColorStop(0, inkAt(0.95)); fg.addColorStop(0.35, inkAt(0.6)); fg.addColorStop(0.5, inkAt(0.75)); fg.addColorStop(1, inkAt(0.95));
+  ctx.fillStyle = fg;
+  ctx.beginPath(); ctx.roundRect(-27, -hairL - ferH, 54, ferH, 6); ctx.fill();
+  // hair: a bulb that tapers to a point, pale at the root, loaded at the tip
+  const half = (v) => 28 * (v < 0.3 ? 0.86 + 0.14 * Math.sin((v / 0.3) * Math.PI / 2) : Math.pow(1 - (v - 0.3) / 0.7, 1.25));
+  const hg = ctx.createLinearGradient(0, -hairL, 0, 0);
+  hg.addColorStop(0, inkAt(0.16)); hg.addColorStop(0.35, inkAt(0.22 + 0.2 * load)); hg.addColorStop(0.7, inkAt(0.4 + 0.5 * load)); hg.addColorStop(1, inkAt(0.5 + 0.45 * load));
+  ctx.fillStyle = hg;
+  ctx.beginPath();
+  for (let i = 0; i <= 40; i++) { const v = i / 40; ctx.lineTo(half(v), -hairL + v * hairL); }
+  for (let i = 40; i >= 0; i--) { const v = i / 40; ctx.lineTo(-half(v), -hairL + v * hairL); }
+  ctx.closePath(); ctx.fill();
+  // a few hair strands
+  ctx.strokeStyle = inkAt(0.35 + 0.3 * load); ctx.lineWidth = 1.2;
+  [-0.6, -0.25, 0.15, 0.5].forEach((k) => {
+    ctx.beginPath();
+    for (let i = 4; i <= 36; i++) { const v = i / 40; ctx.lineTo(half(v) * k * (1 - v * 0.2), -hairL + v * hairL); }
+    ctx.stroke();
+  });
+  // the bead of ink
+  if (drop > 0.5) {
+    ctx.fillStyle = inkAt(0.93);
+    ctx.beginPath();
+    ctx.moveTo(-drop * 0.35, -2);
+    ctx.quadraticCurveTo(-drop * 1.05, drop * 0.9, 0, drop * 1.9);
+    ctx.quadraticCurveTo(drop * 1.05, drop * 0.9, drop * 0.35, -2);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = color.rgba(T.mist, 0.5);
+    ctx.beginPath(); ctx.ellipse(-drop * 0.3, drop * 0.9, drop * 0.16, drop * 0.3, 0.3, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+  return { x: x - Math.sin(rot) * reach, y: y - reach + Math.cos(rot) * reach };
+}
+
+// === KIT: handscroll transition ==============================================
+// 手卷: the next scene is the next stretch of the same scroll. The painting
+// pans left as the scroll unrolls, and a band of mist hides the join.
+function scrollPan(ctx, A, B, p) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const x = Math.round(p * W);
+  ctx.drawImage(A, -x, 0);
+  ctx.drawImage(B, W - x, 0);
+  mist(ctx, W - x, H / 2, W * 0.22, H * 1.3, { seed: 5, puffs: 11, alpha: 0.9 * Math.sin(Math.PI * p) });
+}
+
+// === KIT: one painting across many scenes ====================================
+// A painting that keeps growing over several cuts is timed in global seconds:
+// each stroke starts when a word is spoken in some scene, or on a beat. These
+// read the resolved timeline (spoken times and scene starts), so cuts between
+// scenes of the same painting are invisible.
+const timeline = () => (typeof window !== 'undefined' && window.__CV && window.__CV.scenes) || [];
+const sceneNamed = (id) => timeline().find((x) => x.id === id);
+// global start of scene `id`, plus `beats` beats of the score
+function startOf(id, beats = 0) {
+  const sc = sceneNamed(id);
+  return sc ? sc.start + beats * (window.__CV.bpm ? 60 / window.__CV.bpm : 0.5) : 1e9;
+}
+// global time at which `phrase` is spoken in scene `id`
+function spokenAt(id, phrase, fallback = 0) {
+  const sc = sceneNamed(id);
+  if (!sc) return 1e9;
+  const at = sc.voice && sc.voice.words ? CV.speech.find(sc.voice.words, phrase) : null;
+  return sc.start + (sc.voiceDelay || 0) + (at ?? fallback);
+}
+// eased 0..1 progress of a global window
+const span = (T, t0, dur, e = ease.inOutSine) => e(clamp((T - t0) / dur));
+
+// === EXAMPLE: the child's drawing ============================================
+// Eight years old: thick, wobbly strokes, fast, the way a kid draws. Each
+// stroke: control points, its start (in beats from the scene start), width.
+const wob = (pts, seed, amt = 5) => curve(pts.map(([x, y], i) => [x + noise(i * 0.9, seed) * amt, y + noise(i * 0.9 + 7, seed) * amt]), 10);
+const circle = (cx, cy, r, n = 14, k = 1.08) => Array.from({ length: n + 1 }, (_, i) => { const a = -Math.PI / 2 + (i / n) * Math.PI * 2 * k; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
+const KID = [
+  { pts: wob([[440, 792], [700, 776], [960, 794], [1220, 774], [1480, 788]], 1), b: 0, w: 11 },          // ground
+  { pts: wob([[470, 786], [560, 620], [640, 486], [700, 580], [760, 650], [830, 520], [900, 420], [980, 600], [1060, 786]], 2, 4), b: 0.5, w: 12 }, // two mountains
+  { pts: circle(1370, 300, 62), b: 1.25, w: 10 },                                                         // sun
+  ...Array.from({ length: 8 }, (_, i) => { const a = (i / 8) * Math.PI * 2 + 0.2; return { pts: [[1370 + Math.cos(a) * 84, 300 + Math.sin(a) * 84], [1370 + Math.cos(a) * 124, 300 + Math.sin(a) * 124]], b: 1.75 + i * 0.09, w: 8 }; }), // rays
+  { pts: Array.from({ length: 9 }, (_, i) => [1330 + (i % 2) * 80 - (i > 4 ? 10 : 0), 262 + i * 9.5]), b: 2.6, w: 9, tone: 0.32, dry: 0.5 }, // colouring the sun in
+  { pts: wob([[1150, 786], [1150, 628], [1330, 628], [1330, 786]], 3, 3), b: 3, w: 10 },                // house
+  { pts: wob([[1128, 632], [1240, 528], [1352, 632]], 4, 3), b: 3.5, w: 11 },                           // roof
+  { pts: wob([[1216, 786], [1216, 700], [1262, 700], [1262, 786]], 5, 2), b: 3.9, w: 8 },               // door
+  { pts: circle(1080, 640, 22, 10), b: 4.3, w: 8 },                                                     // head
+  { pts: [[1080, 664], [1078, 736]], b: 4.6, w: 8 },                                                    // body
+  { pts: wob([[1040, 690], [1080, 684], [1122, 692]], 6, 2), b: 4.8, w: 7 },                            // arms
+  { pts: wob([[1058, 784], [1078, 736], [1102, 786]], 7, 2), b: 5, w: 7 },                              // legs
+  { pts: wob([[560, 330], [585, 348], [610, 326], [636, 346], [660, 324]], 8, 2), b: 5.3, w: 6 },       // birds
+];
+const KID_X = [
+  curve([[470, 250], [800, 470], [1150, 650], [1470, 850]], 8),
+  curve([[1460, 230], [1130, 470], [790, 650], [450, 860]], 8),
+];
+// the drawing at local time t: `gone(x)` 0..1 dissolves strokes by position
+function kidDrawing(ctx, s, t, gone = () => 0) {
+  KID.forEach((k, i) => {
+    const t0 = s.onBeat(k.b);
+    const cx = k.pts.reduce((a, q) => a + q[0], 0) / k.pts.length;
+    const g = gone(cx);
+    if (g >= 1) return;
+    ctx.save();
+    ctx.globalAlpha = 1 - g;
+    ctx.translate(0, -30 * ease.inCubic(g));
+    brush(ctx, k.pts, ease.inOutSine(clamp((t - t0) / 0.32)), { width: k.w, tone: k.tone ?? 0.84, seed: 60 + i, dry: k.dry ?? 0.18, press: 0.25, lift: 0.25 });
+    ctx.restore();
+  });
+}
+// the red cross, two quick slashes; fade 0..1 takes it away
+function redCross(ctx, t1, t2, t, fade = 0) {
+  if (fade >= 1) return;
+  ctx.save();
+  ctx.globalAlpha = 1 - fade;
+  KID_X.forEach((pts, i) => brush(ctx, pts, ease.outQuad(clamp((t - [t1, t2][i]) / 0.2)), { width: 46, tone: 0.9, color: T.seal, seed: 90 + i, dry: 0.55, press: 0.06, lift: 0.3, bristles: 16 }));
+  ctx.restore();
+}
+
+// === EXAMPLE: the copybook ===================================================
+// 田字格: an endless copybook, every cell filled with the same neat 正 (the
+// tally mark, and the word for "correct").
+const CELL = 112, GRID_I = 23, GRID_J = 13;
+const GRID = [];
+for (let j = -GRID_J; j <= GRID_J; j++) for (let i = -GRID_I; i <= GRID_I; i++) GRID.push({ i, j, d: Math.hypot(i + 0.5, (j + 0.5) * 1.2) });
+const GRID_DMAX = Math.max(...GRID.map((c) => c.d));
+
+// === EXAMPLE: the painting ===================================================
+// One painting in world coordinates (1920×1080 at zoom 1). The blot that fell
+// by accident becomes the summit of the main peak; everything else is painted
+// around it. Every stroke is timed in global seconds (see the timeline KIT).
+const BLOT = { x: 700, y: 356, r: 96 };
+const jag = (pts, seed, amt = 6) => curve(pts, 12).map(([x, y], i) => [x, y + noise(i * 0.35, seed) * amt]);
+// the main peak's two slopes, from its feet up to the blot, with a shoulder each
+const SLOPE_L = jag([[230, 800], [300, 742], [372, 690], [418, 616], [462, 566], [506, 588], [548, 532], [598, 452], [636, 410]], 21);
+const SLOPE_R = jag([[768, 402], [808, 446], [858, 492], [912, 512], [958, 494], [1000, 540], [1048, 620], [1100, 710], [1170, 800]], 22);
+const MAIN = [...SLOPE_L, [664, 336], [700, 306], [738, 338], ...SLOPE_R];
+const LEFT = ridgeLine(24, -60, 560, 840, 330, 0.42);
+const FAR = ridgeLine(26, 860, 1500, 760, 330, 0.5);
+// the folds of the main peak (its inner contours), painted top down
+const FOLDS = [
+  [[652, 452], [628, 540], [592, 628], [576, 720]], [[748, 452], [772, 540], [800, 620], [812, 716]],
+  [[466, 582], [452, 650], [446, 730]], [[956, 508], [972, 590], [986, 690]], [[702, 470], [708, 560], [694, 650]],
+];
+// 披麻皴: a flurry of thin dry strokes down the slopes, leaning outward
+const ridgeY = (x) => { let best = MAIN[0]; for (const q of MAIN) if (Math.abs(q[0] - x) < Math.abs(best[0] - x)) best = q; return best[1]; };
+const CUN = (() => {
+  const r = rand(500), out = [];
+  for (let i = 0; i < 30; i++) {
+    const x = 380 + r() * 680, top = ridgeY(x) + 30 + r() * 30, y = top + r() * Math.max(10, 720 - top) * 0.7;
+    const len = 50 + r() * 70, lean = (x - 700) * 0.0028 + (r() - 0.5) * 0.2;
+    out.push({ pts: curve([[x, y], [x + Math.sin(lean) * len * 0.5 + 4, y + len * 0.5], [x + Math.sin(lean) * len, y + len]], 6), w: 3 + r() * 3, tone: 0.28 + r() * 0.2 });
+  }
+  return out.sort((a, b) => a.pts[0][1] - b.pts[0][1]);
+})();
+// The anchors every stroke hangs on: computed from the timeline each frame.
+function anchors() {
+  const A = {};
+  A.land = spokenAt('brush', '毛笔');
+  A.shake = spokenAt('drop', '抖');
+  A.release = spokenAt('drop', '一滴墨') + 0.15;
+  A.impact = spokenAt('drop', '下去') + 0.32;
+  A.spread = spokenAt('drop', '晕开');
+  A.dropEnd = startOf('stain');
+  A.ghost = spokenAt('stain', '擦');
+  A.guide = spokenAt('ridge', '它有点像', 2);
+  A.ridge = spokenAt('ridge', '一座山', 3);
+  A.left = spokenAt('paint', '顺着', 0.5);
+  A.cun = spokenAt('paint', '它', 0.9);
+  A.pine = spokenAt('paint', '接着', 1.4);
+  A.needles = spokenAt('paint', '画', 1.8);
+  A.m = (i) => startOf('montage', i);
+  A.truth = startOf('truth');
+  A.peak = spokenAt('truth', '一座山', 2.4);
+  A.end = startOf('end');
+  return A;
+}
+// The camera over the painting: [zoom, world x, world y at the centre].
+function cameraAt(T, A) {
+  const fyDrop = BLOT.y - 70 / 3.2;
+  return CV.tween(T, [
+    [A.impact - 0.4, [3.2, BLOT.x, fyDrop]],
+    [A.dropEnd + 3.5, [3.55, BLOT.x, BLOT.y - 6], ease.inOutSine],
+    [A.guide - 0.2, [1.75, 690, 520], ease.inOutSine],
+    [A.left - 0.1, [1.75, 690, 520]],
+    [A.m(0), [1.3, 640, 560], ease.inOutSine],
+    [A.m(7), [1, 960, 540], ease.inOutCubic],
+    [A.peak, [1, 960, 540]],
+    [A.peak + 2.5, [1.035, 900, 520], ease.inOutSine],
+    [A.end + 8, [1.05, 880, 520], ease.inOutSine],
+  ]);
+}
+// the splash when the drop lands: satellites thrown out around the blot
+const SPLASH = Array.from({ length: 7 }, (_, i) => { const r = rand(300 + i); const a = r() * Math.PI * 2; return { a, d: 1.3 + r() * 1.1, s: 2.5 + r() * 4.5 }; });
+function pine(ctx, T, A) {
+  const q = (t0, d) => ease.inOutSine(clamp((T - t0) / d));
+  // the rock it grows from
+  wash(ctx, curve([[60, 940], [120, 890], [210, 872], [300, 900], [360, 950]], 8), 90, q(A.pine - 0.3, 1.2), { tone: 0.55, floor: 960 });
+  brush(ctx, curve([[60, 942], [120, 890], [210, 870], [300, 900], [362, 952]], 8), q(A.pine - 0.3, 0.5), { width: 13, tone: 0.9, seed: 71, dry: 0.5 });
+  // the trunk, leaning out over the valley
+  brush(ctx, curve([[210, 880], [230, 780], [205, 700], [250, 620], [320, 560], [350, 520]], 10), q(A.pine, 0.6), { width: 26, tone: 0.86, seed: 72, dry: 0.55, press: 0.04, lift: 0.5 });
+  const branches = [
+    [[[232, 760], [170, 720], [110, 712]], 0.35], [[[226, 690], [300, 668], [380, 664]], 0.5],
+    [[[262, 610], [200, 570], [150, 560]], 0.62], [[[322, 556], [400, 540], [450, 548]], 0.72],
+  ];
+  branches.forEach(([pts, d], i) => brush(ctx, curve(pts, 8), q(A.pine + d, 0.35), { width: 10, tone: 0.85, seed: 73 + i, dry: 0.4 }));
+  // needle clusters: a pale wash, then a flat fan of needles over it
+  const clusters = [[110, 708], [172, 726], [384, 660], [318, 678], [150, 556], [214, 574], [452, 542], [394, 536], [352, 506], [298, 600], [430, 572], [70, 716]];
+  clusters.forEach(([cx, cy], c) => {
+    const p = q(A.needles + c * 0.06, 0.35);
+    if (p <= 0) return;
+    bloom(ctx, cx, cy - 8, 32, p, { tone: 0.1, seed: 180 + c, rough: 0.3, halo: 0.15 });
+    for (let k = 0; k < 15; k++) {
+      const a = -Math.PI * (0.04 + 0.92 * (k / 14)), len = 40 + 10 * noise(k + c * 3, 9);
+      brush(ctx, [[cx, cy], [cx + Math.cos(a) * len * p, cy + Math.sin(a) * len * 0.5 * p]], 1, { width: 3, tone: 0.84, seed: 80 + k, dry: 0, press: 0.3, lift: 0.7 });
+    }
+  });
+}
+function waterfall(ctx, T, A) {
+  const t0 = A.m(1);
+  const q = (d, len) => ease.inOutSine(clamp((T - t0 - d) / len));
+  brush(ctx, curve([[452, 600], [440, 680], [450, 760], [436, 830]], 8), q(0, 0.4), { width: 9, tone: 0.75, seed: 101, dry: 0.75 });
+  brush(ctx, curve([[540, 590], [552, 670], [540, 750], [556, 830]], 8), q(0.12, 0.4), { width: 9, tone: 0.75, seed: 102, dry: 0.75 });
+  // the falling water: pale dashed lines that keep flowing
+  const reveal = q(0.2, 0.8);
+  if (reveal <= 0) return;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(430, 590, 140, 250 * reveal); ctx.clip();
+  ctx.strokeStyle = inkAt(0.2); ctx.lineCap = 'round';
+  [462, 478, 494, 510, 526].forEach((x, i) => {
+    ctx.lineWidth = 2 + (i % 2);
+    ctx.setLineDash([46 + i * 6, 20 + i * 3]);
+    ctx.lineDashOffset = -T * 150 - i * 23;
+    ctx.beginPath(); ctx.moveTo(x, 596); ctx.bezierCurveTo(x + 3, 680, x - 3, 760, x + 2, 840); ctx.stroke();
+  });
+  ctx.restore();
+}
+function river(ctx, T, A) {
+  const t0 = A.m(3);
+  [[380, 872, 520], [700, 892, 640], [430, 916, 380], [980, 924, 420], [1200, 868, 200]].forEach(([x, y, w], i) => {
+    brush(ctx, curve([[x, y], [x + w * 0.5, y - 4], [x + w, y + 2]], 8), ease.inOutSine(clamp((T - t0 - i * 0.07) / 0.5)), { width: 5, tone: 0.42, seed: 110 + i, dry: 0.65 });
+  });
+}
+function boat(ctx, T, A) {
+  const t0 = A.m(4);
+  const x = 1010 + Math.max(0, T - t0) * 7, y = 896;
+  const q = (d, len) => ease.inOutSine(clamp((T - t0 - d) / len));
+  brush(ctx, curve([[x - 70, y - 6], [x - 20, y + 8], [x + 40, y + 6], [x + 78, y - 10]], 10), q(0, 0.35), { width: 11, tone: 0.86, seed: 41, dry: 0.2, press: 0.2, lift: 0.4 });
+  brush(ctx, curve([[x + 6, y - 2], [x + 4, y - 26], [x + 8, y - 44]], 8), q(0.2, 0.25), { width: 10, tone: 0.86, seed: 42, dry: 0.1 });
+  bloom(ctx, x + 9, y - 52, 9, q(0.35, 0.3), { tone: 0.85, seed: 43, rough: 0.1, halo: 0.05 });
+  brush(ctx, curve([[x + 34, y - 64], [x - 20, y + 30]], 8), q(0.45, 0.3), { width: 4, tone: 0.75, seed: 44, dry: 0.3 });
+  [[0, 22, 130], [50, 40, 80]].forEach(([dx, dy, w], i) => {
+    brush(ctx, curve([[x + dx - w / 2, y + dy], [x + dx, y + dy - 3], [x + dx + w / 2, y + dy + 1]], 8), q(0.5 + i * 0.15, 0.4), { width: 4, tone: 0.38, seed: 50 + i, dry: 0.5 });
+  });
+}
+function birds(ctx, T, A) {
+  const t0 = A.m(2);
+  for (let i = 0; i < 5; i++) {
+    const k = T - t0 - i * 0.16;
+    if (k <= 0) continue;
+    const r = rand(400 + i);
+    const vx = 210 + r() * 50, vy = -(120 + r() * 40);
+    const x = 340 + r() * 60 + vx * k + 14 * Math.sin(k * 2 + i), y = 540 + r() * 40 + vy * k + 10 * Math.sin(k * 3 + i * 2);
+    if (y < -60) continue;
+    const sz = 13 + r() * 5, flap = Math.sin((T * 3.4 + i * 0.37) * Math.PI * 2);
+    const a = ease.outCubic(clamp(k / 0.3));
+    ctx.save();
+    ctx.globalAlpha = a;
+    brush(ctx, curve([[x - sz, y - 5 * flap], [x - sz * 0.45, y - 4 - 3 * flap], [x, y]], 6), 1, { width: 3.6, tone: 0.85, seed: 120 + i, dry: 0, press: 0.2, lift: 0.3 });
+    brush(ctx, curve([[x, y], [x + sz * 0.5, y - 4 - 3 * flap], [x + sz * 1.1, y - 6 * flap]], 6), 1, { width: 3.6, tone: 0.85, seed: 125 + i, dry: 0, press: 0.4, lift: 0.4 });
+    ctx.restore();
+  }
+}
+function reeds(ctx, T, A) {
+  const t0 = A.m(7);
+  const r = rand(130);
+  for (let i = 0; i < 11; i++) {
+    const bx = 1250 + r() * 190, h = 50 + r() * 80, lean = -30 + r() * 80;
+    const sway = 5 * Math.sin(T * 1.3 + i * 0.7);
+    brush(ctx, curve([[bx, 948], [bx + lean * 0.25, 948 - h * 0.55], [bx + lean + sway, 948 - h]], 8), ease.inOutSine(clamp((T - t0 - i * 0.03) / 0.35)), { width: 3 + r() * 2, tone: 0.55 + r() * 0.3, seed: 130 + i, dry: 0.2, press: 0.08, lift: 0.7 });
+  }
+}
+// The whole painting at global time T, in world coordinates.
+function painting(ctx, T, A) {
+  const q = (t0, d, e = ease.inOutSine) => e(clamp((T - t0) / d));
+  // the moon, a pale disc behind everything
+  bloom(ctx, 1230, 250, 150, q(A.m(5), 1.6, ease.outCubic), { tone: 0.085, seed: 140, rough: 0.04, rim: 0.25, halo: 0.25 });
+  // far peaks, pale
+  wash(ctx, FAR, 300, q(A.m(0), 1.8), { tone: 0.14, floor: 760 });
+  brush(ctx, FAR, q(A.m(0) - 0.1, 0.7), { width: 4, tone: 0.3, seed: 26, dry: 0.6, press: 0.05, lift: 0.2 });
+  // the main peak around the blot
+  const guide = q(A.guide, 1.1) * (1 - q(A.ridge + 0.6, 0.8));
+  if (guide > 0) {
+    ctx.save(); ctx.globalAlpha = guide; ctx.setLineDash([6, 12]); ctx.lineWidth = 2.4; ctx.strokeStyle = inkAt(0.35);
+    ctx.beginPath(); MAIN.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
+    ctx.restore();
+  }
+  wash(ctx, MAIN, 480, q(A.ridge + 0.25, 2.2), { tone: 0.42, floor: 805 });
+  // the blot: lands, spreads, keeps creeping a little
+  const blotP = T < A.dropEnd ? 0.86 * ease.outCubic(clamp((T - A.impact) / (A.dropEnd - A.impact))) : 0.86 + 0.14 * ease.outQuad(clamp((T - A.dropEnd) / 6));
+  if (T >= A.impact) {
+    SPLASH.forEach((d, i) => {
+      const out = ease.outCubic(clamp((T - A.impact) / 0.22));
+      seep(ctx, BLOT.x + Math.cos(d.a) * BLOT.r * d.d * 0.8 * out, BLOT.y + Math.sin(d.a) * BLOT.r * d.d * 0.8 * out, d.s, clamp((T - A.impact) / 1.2), { tone: 0.75, seed: 150 + i, threads: 6, grain: 0, rough: 0.3 });
+    });
+    // once it is a mountain, the blot's ink runs down into the slopes (破墨)
+    seep(ctx, BLOT.x - 6, BLOT.y + 120, 150, q(A.ridge + 0.4, 2.4, ease.outCubic), { tone: 0.3, seed: 165, sx: 0.9, sy: 1.25, threads: 0, grain: 0, soft: 3, rough: 0.45 });
+    seep(ctx, BLOT.x, BLOT.y, BLOT.r, blotP, { tone: 0.94, seed: 160, sy: 0.92 });
+    // the ring that runs out the moment it lands
+    const k = clamp((T - A.impact) / 0.32);
+    if (k > 0 && k < 1) {
+      ctx.save(); ctx.strokeStyle = inkAt(0.25 * (1 - k)); ctx.lineWidth = 3 * (1 - k);
+      ctx.beginPath(); ctx.ellipse(BLOT.x, BLOT.y, BLOT.r * (0.15 + 0.6 * ease.outCubic(k)), BLOT.r * (0.15 + 0.6 * ease.outCubic(k)) * 0.95, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    }
+  }
+  // the contour, from the blot down each side, in two strokes per slope
+  const down = [...SLOPE_L].reverse(), cutL = Math.round(down.length * 0.55), cutR = Math.round(SLOPE_R.length * 0.5);
+  brush(ctx, down.slice(0, cutL), q(A.ridge - 0.05, 0.6), { width: 11, tone: 0.88, seed: 21, dry: 0.45, press: 0.05, lift: 0.3 });
+  brush(ctx, down.slice(cutL + 3), q(A.ridge + 0.5, 0.55), { width: 9, tone: 0.8, seed: 22, dry: 0.6, press: 0.1, lift: 0.4 });
+  brush(ctx, SLOPE_R.slice(0, cutR), q(A.ridge + 0.1, 0.6), { width: 11, tone: 0.88, seed: 23, dry: 0.45, press: 0.05, lift: 0.3 });
+  brush(ctx, SLOPE_R.slice(cutR + 3), q(A.ridge + 0.65, 0.55), { width: 9, tone: 0.8, seed: 25, dry: 0.6, press: 0.1, lift: 0.4 });
+  FOLDS.forEach((pts, i) => brush(ctx, curve(pts, 8), q(A.ridge + 0.9 + i * 0.12, 0.45), { width: 6, tone: 0.45, seed: 190 + i, dry: 0.75, press: 0.1, lift: 0.5 }));
+  CUN.forEach((c, i) => brush(ctx, c.pts, q(A.cun + i * 0.035, 0.25), { width: c.w, tone: c.tone, seed: 170 + i, dry: 0.75, press: 0.15, lift: 0.5, bristles: 7 }));
+  // the waterfall in the gorge between the peaks
+  waterfall(ctx, T, A);
+  // the near ridge on the left, darker
+  wash(ctx, LEFT, 300, q(A.left + 0.2, 1.8), { tone: 0.55, floor: 860 });
+  brush(ctx, LEFT, q(A.left, 0.9), { width: 13, tone: 0.9, seed: 24, dry: 0.45, press: 0.05, lift: 0.2 });
+  // mist along the feet of the mountains
+  const fog = q(A.m(6), 2.2);
+  mist(ctx, 400 + T * 14 % 2400 - 400, 800, 1100, 170, { seed: 7, alpha: 0.85 * fog });
+  mist(ctx, 1500 - ((T * 9) % 2400) + 600, 640, 900, 140, { seed: 8, alpha: 0.7 * fog });
+  river(ctx, T, A);
+  boat(ctx, T, A);
+  reeds(ctx, T, A);
+  pine(ctx, T, A);
+  birds(ctx, T, A);
+}
+// The painting through its camera, for any scene from the brush onwards.
+function paintingShot(ctx, s) {
+  const A = anchors();
+  const [zoom, fx, fy] = cameraAt(s.T, A);
+  xuan(ctx, s.W, s.H);
+  draw.camera(ctx, s.W, s.H, { zoom, focusX: fx, focusY: fy }, () => painting(ctx, s.T, A));
+  return { A, zoom, fx, fy };
+}
+// world → screen under the painting's camera
+const toScreen = (cam, x, y, W = 1920, H = 1080) => [W / 2 + (x - cam.fx) * cam.zoom, H / 2 + (y - cam.fy) * cam.zoom];
+// The brush over the paper (screen space): it comes down, swings to rest, a
+// bead gathers on the tip, the hand trembles, the bead falls, the brush lifts.
+function brushShot(ctx, s, cam) {
+  const { A } = cam, T = s.T;
+  const [bx, by] = toScreen(cam, BLOT.x, BLOT.y);
+  const tipY = 410;
+  const down = ease.outCubic(clamp((T - (A.land - 1.6)) / 1.7));
+  const up = ease.inCubic(clamp((T - (A.impact - 0.1)) / 0.7));
+  const y = lerp(-140, tipY, down) - 1100 * up;
+  const settle = T - A.land;
+  let rot = settle > 0 ? 0.05 * Math.sin(settle * 3.6) * Math.exp(-settle * 1.1) : -0.05 * (1 - down);
+  rot += CV.fx.shake(T, A.shake, 0.012, { decay: 0.35, freq: 18, seed: 4 }).x;
+  const bead = 20 * ease.outCubic(clamp((T - A.land - 0.3) / 2.2));
+  const falling = T >= A.release;
+  const tip = penBrush(ctx, bx, y, { rot, drop: falling ? 0 : bead, load: 1, reach: 1500, scale: 1.5 });
+  if (falling && T < A.impact) {
+    // the bead in free fall, stretching as it speeds up
+    const k = clamp((T - A.release) / (A.impact - A.release));
+    const dy = lerp(tip.y + bead * 0.9, by, k * k);
+    const st = 1 + 0.9 * k;
+    ctx.save();
+    ctx.translate(lerp(tip.x, bx, k), dy);
+    ctx.scale(1 / Math.sqrt(st), st);
+    ctx.fillStyle = inkAt(0.94);
+    ctx.beginPath(); ctx.arc(0, 0, bead * 0.95, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = color.rgba(T.mist, 0.45);
+    ctx.beginPath(); ctx.ellipse(-bead * 0.3, -bead * 0.25, bead * 0.18, bead * 0.3, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+// === VIDEO ===================================================================
+const unroll = { type: scrollPan, duration: 1.6, ease: ease.inOutSine, sfx: 'paper' };
+const SEAL_AT = [1548, 772];
+
+CV.create({
+  width: 1920, height: 1080, fps: 30,
+  background: T.paper,
+  lang: 'zh-CN',
+  // the score designed for this video (tender, then hopeful, then free): a felt
+  // piano figure and a music box for the childhood memory, held chords while
+  // the drop hangs, then a koto line, strings and a brushed kit that open up
+  // as the painting grows, a bamboo-flute melody in the gaps, and home
+  music: {
+    bpm: 80, seed: 7, key: 'E', mode: 'major', progression: [0, 4, 5, 3], kit: 'brush',
+    layers: [
+      { name: 'felt piano', inst: 'felt', notes: [0, 2, 1, 2], pattern: 'X.x.X.x.', gate: 1.6, vel: [0.1, 0.14] },
+      { name: 'music box', inst: 'bell', kind: 'musicbox', notes: [2, 1, 3, 1], pattern: 'X...x...', vel: 0.07, verb: 0.35, to: 0.42 },
+      { name: 'strings', inst: 'strings', notes: 'chord', pattern: 'X---', vel: [0.025, 0.05], from: 0.42 },
+      { name: 'upright bass', inst: 'bass', kind: 'upright', octave: -1, notes: ['root', 'root', 'fifth'], pattern: 'X..x..X.', vel: 0.18, from: 0.45 },
+      { name: 'koto', inst: 'koto', notes: [0, 1, 2, 3, 2, 1, 2, 3], pattern: 'X.x.X.x.X.x.X.x.', vel: [0.08, 0.12], verb: 0.3, from: 0.6 },
+      { name: 'kick', inst: 'kick', pattern: 'X.......X.x.....', vel: 0.32, from: 0.48 },
+      { name: 'brush snare', inst: 'snare', pattern: '....X.......X...', vel: 0.18, from: 0.55 },
+      { name: 'shaker', inst: 'shaker', pattern: 'xXxXxXxXxXxXxXxX', vel: 0.05, from: 0.8 },
+    ],
+    lead: { inst: 'flute', range: [72, 88], rhythm: 'melodic', vel: 0.075, verb: 0.35 },
+    parts: {
+      memory: { progression: [5, 3, 0, 4], seed: 3, lead: { inst: 'bell', kind: 'musicbox', rhythm: 'sparse' } },
+      held: { progression: [3, 4], chordBars: 2, seed: 5, lead: { rhythm: 'sparse' } },
+      flow: { progression: [0, 4, 5, 3], seed: 11 },
+      home: { progression: [3, 4, 0, 0], seed: 12 },
+    },
+  },
+  transition: 'cut',
+  subtitles: {
+    style: { font: F(500, 44, T.serif), color: inkAt(0.9), box: null, stroke: color.rgba(T.paper, 0.92), strokeWidth: 10, y: 0.935 },
+  },
+  scenes: [
+    // --- 1. Eight years old: the drawing, then two red slashes ------------------
+    {
+      id: 'cross', part: 'memory', voiceDelay: 4 * 0.75, tail: 1.0, energy: 0.38,
+      sfx: [{ at: '打', type: 'swish', gain: 1.2 }, { at: '红叉', type: 'swish', gain: 1.4 }],
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        xuan(ctx, W, H);
+        const x1 = s.when('打', 6), x2 = s.when('红叉', 6.5);
+        const punch = 0.03 * (Math.exp(-Math.max(0, t - x1) / 0.12) * (t >= x1) + Math.exp(-Math.max(0, t - x2) / 0.12) * (t >= x2));
+        draw.camera(ctx, W, H, { zoom: 1 + 0.04 * (s.T / 14) + punch }, () => {
+          kidDrawing(ctx, s, t);
+          redCross(ctx, x1, x2, t);
+        });
+      },
+    },
+    // --- 2. The mist takes the drawing; the red cross is the last thing to go ---
+    {
+      id: 'stop', tail: 1.6, energy: 0.3,
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        xuan(ctx, W, H);
+        const mx = lerp(-500, 2500, ease.inOutSine(clamp((t - 0.1) / 2.8)));
+        const fade = s.at(s.when('画过画', 2.2), 1.4, ease.inOutSine);
+        draw.camera(ctx, W, H, { zoom: 1 + 0.04 * (s.T / 14) }, () => {
+          kidDrawing(ctx, { onBeat: () => -99 }, 99, (x) => clamp((mx - x - 120) / 260));
+          redCross(ctx, -99, -99, 99, fade);
+          mist(ctx, mx, 560, 900, 1300, { seed: 12, puffs: 12, alpha: 0.95 * Math.sin(Math.PI * clamp((t - 0.1) / 2.8)) });
+        });
+      },
+    },
+    // --- 3. Twenty years of copybooks: 正 after 正, then the camera pulls out ----
+    {
+      id: 'grid', voiceDelay: 2 * 0.75, tail: 1.2, energy: 0.5,
+      captionStyle: { box: color.rgba(T.paper, 0.95), stroke: null, radius: 4, padX: 22, padY: 10 },
+      sfx: [{ at: '别', type: 'whoosh', gain: 0.8 }],
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        xuan(ctx, W, H);
+        const t0 = s.when('二十', 1.5), tFull = s.when('别', 4.5);
+        const pull = ease.inOutCubic(clamp((t - tFull + 0.1) / 1.6));
+        const zoom = lerp(1, 0.42, pull);
+        draw.camera(ctx, W, H, { zoom, focusX: W / 2, focusY: H / 2 }, () => {
+          const x0 = W / 2 - GRID_I * CELL - CELL / 2, y0 = H / 2 - GRID_J * CELL - CELL / 2;
+          const nx = GRID_I * 2 + 1, ny = GRID_J * 2 + 1;
+          ctx.save();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = inkAt(0.32);
+          // solid lines sweep in: rows left to right, then columns top to bottom
+          for (let j = 0; j <= ny; j++) {
+            const p = ease.inOutQuad(clamp((t - j * 0.035) / 0.7));
+            if (p <= 0) continue;
+            const y = y0 + j * CELL;
+            ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + nx * CELL * p, y); ctx.stroke();
+          }
+          for (let i = 0; i <= nx; i++) {
+            const p = ease.inOutQuad(clamp((t - 0.3 - i * 0.02) / 0.7));
+            if (p <= 0) continue;
+            const x = x0 + i * CELL;
+            ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + ny * CELL * p); ctx.stroke();
+          }
+          // the dashed cross inside every cell
+          const dash = s.at(0.9, 0.6);
+          if (dash > 0) {
+            ctx.setLineDash([7, 7]); ctx.lineWidth = 1.3; ctx.strokeStyle = inkAt(0.2 * dash);
+            for (let j = 0; j < ny; j++) { const y = y0 + (j + 0.5) * CELL; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + nx * CELL, y); ctx.stroke(); }
+            for (let i = 0; i < nx; i++) { const x = x0 + (i + 0.5) * CELL; ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + ny * CELL); ctx.stroke(); }
+          }
+          ctx.restore();
+          // 正, cell after cell, faster and faster, spreading out from the middle
+          ctx.save();
+          ctx.font = F(500, CELL * 0.66, T.serif);
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = inkAt(0.72);
+          for (const c of GRID) {
+            const at = t0 + (tFull + 0.9 - t0) * Math.pow(c.d / GRID_DMAX, 0.62);
+            const k = clamp((t - at) / 0.2);
+            if (k <= 0) continue;
+            const sc = 1 + 0.3 * (1 - ease.outCubic(k));
+            ctx.globalAlpha = ease.outCubic(k);
+            ctx.save();
+            ctx.translate(W / 2 + (c.i) * CELL, H / 2 + (c.j) * CELL + CELL * 0.03);
+            ctx.scale(sc, sc);
+            ctx.fillText('正', 0, 0);
+            ctx.restore();
+          }
+          ctx.restore();
+        });
+      },
+    },
+    // --- 4. A new scroll: a brush comes down and a bead of ink gathers -----------
+    {
+      id: 'brush', voiceDelay: 3 * 0.75, tail: 0.9, energy: 0.32, part: 'held', transition: unroll,
+      draw(ctx, s) {
+        const cam = paintingShot(ctx, s);
+        brushShot(ctx, s, cam);
+      },
+    },
+    // --- 5. The hand shakes; the drop falls and soaks into the paper -------------
+    {
+      id: 'drop', voiceDelay: 0.25, tail: 1.3, energy: 0.46,
+      sfx: [{ at: (s) => s.when('下去') + 0.32, type: 'pop', gain: 1.2 }, { at: '晕开', type: 'swell', gain: 0.9 }],
+      draw(ctx, s) {
+        const cam = paintingShot(ctx, s);
+        brushShot(ctx, s, cam);
+      },
+    },
+    // --- 6. It won't come off: the old red cross flashes over the stain ----------
+    {
+      id: 'stain', voiceDelay: 0.6, tail: 1.4, energy: 0.24,
+      draw(ctx, s) {
+        const { t } = s;
+        const cam = paintingShot(ctx, s);
+        const g = s.when('擦', 1.5);
+        const flash = Math.exp(-Math.max(0, t - g) / 0.5) * clamp((t - g + 0.1) / 0.1) * 0.5;
+        if (flash > 0.01) {
+          const [bx, by] = toScreen(cam, BLOT.x, BLOT.y);
+          ctx.save();
+          ctx.translate(bx - 960, by - 540);
+          ctx.translate(960, 540); ctx.scale(0.62, 0.62); ctx.translate(-960, -540);
+          ctx.globalAlpha = flash;
+          KID_X.forEach((pts, i) => brush(ctx, pts, 1, { width: 46, tone: 0.9, color: T.seal, seed: 90 + i, dry: 0.55, press: 0.06, lift: 0.3, bristles: 16 }));
+          ctx.restore();
+        }
+      },
+    },
+    // --- 7. Looking at it for a long time: it is a mountain ----------------------
+    {
+      id: 'ridge', part: 'flow', voiceDelay: 0.5, tail: 1.2, energy: 0.56,
+      sfx: [{ at: '一座山', type: 'swell', gain: 0.8 }],
+      draw(ctx, s) { paintingShot(ctx, s); },
+    },
+    // --- 8. Painting on from it: the near ridge, texture, a pine ----------------
+    {
+      id: 'paint', voiceDelay: 0.25, tail: 0.8, energy: 0.7,
+      draw(ctx, s) { paintingShot(ctx, s); },
+    },
+    // --- 9. Music only: a stroke on every beat while the camera pulls out --------
+    {
+      id: 'montage', narration: false, beats: 8, energy: 0.9,
+      draw(ctx, s) { paintingShot(ctx, s); },
+    },
+    // --- 10. The inscription, in the empty paper on the right --------------------
+    {
+      id: 'truth', captions: 'file', voiceDelay: 0.75, tail: 1.4, energy: 0.66,
+      draw(ctx, s) {
+        paintingShot(ctx, s);
+        const a = [...'原来画错的那一笔'], b = [...'也可以是一座山'];
+        inkText(ctx, a.join(''), 1748, 168, s.t, { size: 70, gap: 1.12, times: s.syncTimes(a), dur: 0.7 });
+        inkText(ctx, b.join(''), 1650, 168, s.t, { size: 70, gap: 1.12, times: s.syncTimes(b), dur: 0.7 });
+      },
+    },
+    // --- 11. The red comes back, and condenses into a seal -----------------------
+    {
+      id: 'seal', part: 'home', voiceDelay: 0.5, tail: 1.3, energy: 0.75,
+      sfx: [{ at: '红色', type: 'swish', gain: 0.9 }, { at: '印', type: 'hit', gain: 1 }],
+      draw(ctx, s) {
+        const { t } = s;
+        paintingShot(ctx, s);
+        inkText(ctx, '原来画错的那一笔', 1748, 168, 99, { size: 70, gap: 1.12 });
+        inkText(ctx, '也可以是一座山', 1650, 168, 99, { size: 70, gap: 1.12 });
+        const red = s.when('红色', 1.4), yin = s.when('印', 3.2);
+        // the cross, small, beside the inscription
+        const fold = ease.inOutCubic(clamp((t - (yin - 0.55)) / 0.5));
+        if (t < yin + 0.1) {
+          ctx.save();
+          ctx.translate(SEAL_AT[0], SEAL_AT[1]);
+          ctx.rotate(fold * Math.PI / 4);
+          ctx.scale(0.26 * (1 - 0.6 * fold), 0.26 * (1 - 0.6 * fold));
+          ctx.translate(-960, -555);
+          redCross(ctx, red, red + 0.22, t, ease.inQuad(clamp((t - yin + 0.05) / 0.15)));
+          ctx.restore();
+        }
+        seal(ctx, '我手我心', SEAL_AT[0], SEAL_AT[1], 104, (t - yin) / 0.6, { seed: 8 });
+      },
+    },
+    // --- 12. 别怕落笔 -------------------------------------------------------------
+    {
+      id: 'end', captions: 'file', voiceDelay: 1.5, tail: 3.8, energy: 0.5,
+      draw(ctx, s) {
+        const { t } = s;
+        paintingShot(ctx, s);
+        const out = ease.inOutSine(clamp(t / 1.1));
+        inkText(ctx, '原来画错的那一笔', 1748, 168, 99, { size: 70, gap: 1.12, exit: out });
+        inkText(ctx, '也可以是一座山', 1650, 168, 99, { size: 70, gap: 1.12, exit: out });
+        const units = [...'别怕落笔'];
+        inkText(ctx, '别怕落笔', 1712, 150, t, { size: 142, gap: 1.06, times: s.syncTimes(units), dur: 1.0 });
+        seal(ctx, '我手我心', SEAL_AT[0], SEAL_AT[1], 104, 1, { seed: 8 });
+      },
+    },
+  ],
+});
+</script>
+</body>
+</html>

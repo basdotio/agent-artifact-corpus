@@ -3,7 +3,7 @@
 import argparse
 import json
 import sys
-from pathlib import Path
+from grea.host.paths import Path
 
 def rows(path):
     with path.open(encoding='utf-8') as stream:

@@ -15,12 +15,18 @@ import httpx
 from . import __version__
 from .amounts import usd_spending_cap
 from .client import LeanWarpCloud, LeanWarpCloudError, OperationTimeout
-from .config import credentials_path, load_client, save_credentials
+from .config import credentials_path, load_client, save_credentials, signed_in
 from .endpoints import ConfigurationError
 from .outcome import OperationOutcome, reported
 from .project import ProjectError, plan_upload
 from .resources import published_worker_resources
-from .session import MAX_INLINE_WAIT_SECONDS, ProjectSession, SessionError, UsageError
+from .session import (
+    MAX_INLINE_WAIT_SECONDS,
+    ProjectSession,
+    SessionError,
+    UsageError,
+    check_project,
+)
 
 DEFAULT_WAIT_SECONDS = 30.0
 
@@ -47,8 +53,10 @@ a typical session:
 
 results:
   Operations wait up to {DEFAULT_WAIT_SECONDS:g} seconds for their result. "success" is true
-  when the check passed or the proof was verified, false when it did not,
-  and null while the work is still running.
+  when the operation did its job (a check passed, a proof was verified, a
+  suggestion closed its hole, a trial or listing ran), false when it did not,
+  and null while the work is still running. A trial or listing that ran is not
+  a proof: run a strict check before calling a file done.
 
 exit codes:
   0  success
@@ -128,6 +136,11 @@ def parser() -> argparse.ArgumentParser:
     selection = connect.add_mutually_exclusive_group()
     selection.add_argument("--environment", metavar="NAME", help=environment_help)
     selection.add_argument("--bundle", help=argparse.SUPPRESS)
+    connect.add_argument(
+        "--workspace",
+        metavar="ID",
+        help="connect to an existing workspace from `leanwarp workspaces` instead of creating one",
+    )
     # Deprecated wire compatibility for existing automation and saved requests.
     connect.add_argument("--profile", metavar="SIZE", help=argparse.SUPPRESS)
     connect.add_argument(
@@ -197,7 +210,82 @@ def parser() -> argparse.ArgumentParser:
         "--fresh", action="store_true", help="verify on a separate worker that stops afterwards"
     )
 
-    for operation in (check, inspect, tactics, verify):
+    suggest = commands.add_parser(
+        "suggest",
+        help="find a tactic that closes the hole at a position; `leanwarp apply` writes it",
+    )
+    suggest.add_argument("file", metavar="FILE", help="a .lean file in the project")
+    suggest.add_argument("--line", type=int, required=True, help="line number, from 1")
+    suggest.add_argument("--column", type=int, required=True, help="column number, from 1")
+    suggest.add_argument(
+        "--tactic",
+        action="append",
+        metavar="TACTIC",
+        help="a tactic to try instead of LeanWarp's ranked portfolio; repeat for several",
+    )
+    suggest.add_argument(
+        "--tactic-timeout",
+        type=int,
+        metavar="MS",
+        help="milliseconds per tactic; LeanWarp's learned budgets by default",
+    )
+
+    holes = commands.add_parser(
+        "holes", help="list every sorry and ?_ in a file, with goals for the first 16"
+    )
+    holes.add_argument("file", metavar="FILE", help="a .lean file in the project")
+    holes.add_argument("--no-goals", action="store_true", help="list positions only (faster)")
+
+    declarations = commands.add_parser(
+        "declarations", help="list the declarations a file adds, with types and dependencies"
+    )
+    declarations.add_argument("file", metavar="FILE", help="a .lean file in the project")
+
+    obligations = commands.add_parser(
+        "sorry2lemma",
+        help="move each unfinished theorem's proof into a named lemma; "
+        "`leanwarp apply` writes the new file",
+    )
+    obligations.add_argument("file", metavar="FILE", help="a .lean file in the project")
+    obligations.add_argument(
+        "--max", type=int, default=64, metavar="N", help="at most this many, 1 to 256"
+    )
+    obligations.add_argument("--prefix", metavar="NAME", help="prefix for the generated lemmas")
+    obligations.add_argument(
+        "--strict-final-check",
+        action="store_true",
+        help="also report whether the result passes a strict check (it keeps the sorrys)",
+    )
+
+    batch = commands.add_parser(
+        "check-files", help="check several files in one operation (up to 64)"
+    )
+    batch.add_argument("files", nargs="+", metavar="FILE", help=".lean files in the project")
+    batch.add_argument(
+        "--draft",
+        action="store_true",
+        help="accept files that compile, even with sorry; strict by default",
+    )
+    batch.add_argument(
+        "--file-timeout", type=int, metavar="SECONDS", help="Lean time per file, 1 to 300"
+    )
+
+    commands.add_parser(
+        "apply",
+        help="write the latest suggest or sorry2lemma result into its file and upload it",
+    )
+
+    for operation in (
+        check,
+        inspect,
+        tactics,
+        verify,
+        suggest,
+        holes,
+        declarations,
+        obligations,
+        batch,
+    ):
         operation.add_argument(
             "--wait",
             type=_wait_seconds,
@@ -234,8 +322,36 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("stop", help="stop the worker; saved files are kept")
     commands.add_parser("recover", help="resend a request whose response was lost")
     commands.add_parser(
+        "reconcile",
+        help="after another client changed the workspace, adopt its revision as the "
+        "base; the next sync then uploads this project's files over it",
+    )
+    commands.add_parser(
         "disconnect",
-        help="forget this project's workspace so it can connect to another environment",
+        help="forget this project's stopped workspace so it can connect to another "
+        "environment (run stop first)",
+    )
+    commands.add_parser(
+        "workspaces", help="list your account's workspaces and which one this project uses"
+    )
+    export = commands.add_parser(
+        "export", help="save a workspace's stored operations and results as JSON Lines"
+    )
+    export.add_argument(
+        "--output", required=True, type=Path, metavar="FILE", help="a new file to write"
+    )
+    export.add_argument(
+        "--workspace", metavar="ID", help="another workspace (default: this project's)"
+    )
+    delete = commands.add_parser(
+        "delete",
+        help="delete a workspace with its files and results; credit is kept (cannot be undone)",
+    )
+    delete.add_argument(
+        "--confirm",
+        required=True,
+        metavar="ID",
+        help="the ID of the workspace to delete, from `leanwarp status` or `leanwarp workspaces`",
     )
     commands.add_parser("account", help="show your credit balance")
     commands.add_parser(
@@ -270,10 +386,44 @@ def _doctor(cloud: LeanWarpCloud, root: str, environment: str | None) -> int:
     return 0 if report["compatible"] else 1
 
 
+def _check_before_sign_in(root: str, environment: str | None) -> int:
+    """Check a project against the public catalog, so it is known to run before signing up."""
+    with LeanWarpCloud(None, interface="cli") as cloud:
+        catalog = cloud.versions()["versions"]
+    report = check_project(root, catalog, environment)
+    _emit(
+        {
+            **report,
+            "signed_in": False,
+            "next": "create an API key at https://isagoge.in/dashboard, then run "
+            "`leanwarp auth login` and `leanwarp connect`",
+        }
+    )
+    return 0 if report["compatible"] else 1
+
+
 def _operation(project: ProjectSession, args: argparse.Namespace) -> dict[str, Any]:
-    payload: dict[str, Any] = {"file": args.file}
-    kind = args.command.replace("-", "_")
-    if kind == "check":
+    kind = {"declarations": "extract_decls"}.get(args.command, args.command.replace("-", "_"))
+    payload: dict[str, Any] = {} if kind == "check_files" else {"file": args.file}
+    if kind == "suggest":
+        payload.update(line=args.line, column=args.column)
+        if args.tactic:
+            payload["tactics"] = args.tactic
+        if args.tactic_timeout is not None:
+            payload["timeout_ms"] = args.tactic_timeout
+    elif kind == "holes":
+        payload["goals"] = not args.no_goals
+    elif kind == "extract_decls":
+        pass
+    elif kind == "sorry2lemma":
+        payload.update(max_extractions=args.max, strict_final_check=args.strict_final_check)
+        if args.prefix is not None:
+            payload["name_prefix"] = args.prefix
+    elif kind == "check_files":
+        payload.update(files=args.files, strict=not args.draft)
+        if args.file_timeout is not None:
+            payload["timeout"] = args.file_timeout
+    elif kind == "check":
         payload["strict"] = not args.draft
     elif kind in {"inspect", "try_tactics"}:
         payload.update(line=args.line, column=args.column)
@@ -301,6 +451,22 @@ def _operation(project: ProjectSession, args: argparse.Namespace) -> dict[str, A
         resource_profile=args.profile,
         timeout_seconds=args.execution_timeout,
     )
+
+
+def _export(project: ProjectSession, output: Path, workspace_id: str | None) -> dict[str, Any]:
+    """Write one operation per line, newest first; never replaces an existing file."""
+    count = 0
+    with output.open("x", encoding="utf-8") as stream:
+        try:
+            for operation in project.history(workspace_id):
+                stream.write(json.dumps(operation, ensure_ascii=False, allow_nan=False) + "\n")
+                count += 1
+        except BaseException:
+            # A partial export must not pass for a complete one.
+            stream.close()
+            output.unlink(missing_ok=True)
+            raise
+    return {"status": "exported", "operations": count, "output": str(output)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -336,7 +502,9 @@ def main(argv: list[str] | None = None) -> int:
                 save_credentials(getpass.getpass("LeanWarp API key (hidden): "))
                 _emit({"status": "authenticated"})
             return 0
-        with load_client() as cloud:
+        if args.command == "doctor" and not signed_in():
+            return _check_before_sign_in(args.project, args.environment)
+        with load_client(interface="cli") as cloud:
             if args.command == "doctor":
                 return _doctor(cloud, args.project, args.environment)
             if args.command in {"environments", "versions"}:
@@ -361,10 +529,29 @@ def main(argv: list[str] | None = None) -> int:
                         max_spend_microusd=args.max_spend,
                         environment=args.environment,
                         bundle_id=args.bundle,
+                        workspace_id=args.workspace,
                     )
                 )
                 return 0
-            if args.command in {"status", "recover", "stop", "cancel", "disconnect", "sync"}:
+            if args.command == "workspaces":
+                _emit(project.workspaces())
+                return 0
+            if args.command == "delete":
+                _emit(project.delete(args.confirm))
+                return 0
+            if args.command == "export":
+                _emit(_export(project, args.output, args.workspace))
+                return 0
+            if args.command in {
+                "status",
+                "recover",
+                "reconcile",
+                "stop",
+                "cancel",
+                "disconnect",
+                "sync",
+                "apply",
+            }:
                 result = getattr(project, args.command)()
                 if args.command in {"recover", "cancel"} and "operation_id" in result:
                     _emit(reported(result))

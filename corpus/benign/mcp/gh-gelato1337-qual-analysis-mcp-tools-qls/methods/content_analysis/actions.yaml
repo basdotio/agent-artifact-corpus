@@ -1,0 +1,58 @@
+# Qualitative content analysis: the verbs. The server turns each action into a tool with these parameters.
+name: content_analysis
+title: Qualitative content analysis (directed, inductive and theory-driven passes, with case narratives)
+version: 1
+
+code_type: segment
+prefixes: {segment: S, content-category: K}
+
+fields:
+  segment:
+    label: {attr: label, required: true, doc: "what the passage says, in one short English phrase"}
+    description: {attr: description, doc: "optional: one or two sentences of context"}
+    in_vivo: {attr: in-vivo, doc: "the informant's own word or phrase for it, if there is one"}
+    period: {attr: period, doc: "when it happened, as the informant places it: a year or a span, e.g. 1999 or 2001-2003"}
+    direction: {attr: direction, doc: "for events and factors: accelerating, decelerating, turning point or neutral"}
+  content-category:
+    label: {attr: label, required: true, doc: "the category's name"}
+    description: {attr: description, required: true, doc: "definition: what belongs here and what does not"}
+    origin: {attr: origin, required: true, doc: "guide (from the brief's coding frame), emergent (from the data) or theory (from the brief's theory frame)"}
+    parent: {attr: parent, doc: "id of the broader category this one refines (emergent subcategories)"}
+
+groups:
+  - {type: content-category, relation: categorisation, group_role: category, member_role: segment, member_type: segment, min: 0, exclusive: false}
+
+actions:
+  add_category:
+    kind: create_group
+    type: content-category
+    members_param: segments
+    doc: >
+      Define a category of the coding frame. It may start empty; segments are coded into it later.
+      segments (optional): [{"id": "S-3", "reason": why it belongs}].
+  code_segment:
+    kind: create_code
+    type: segment
+    into: content-category
+    into_param: categories
+    doc: >
+      Code a passage in one call: quotes [{"text": the informant's exact words, "reason": why they say
+      this}] and categories [{"id": "K-2", "reason": why the passage belongs there}], at least one.
+      Quotes are checked against the transcript now; if one is not found, nothing is saved.
+
+memo:
+  budgets: {note: 2000, interview: 6000, batch: 6000, corpus: 8000}
+
+checks:
+  - id: segment_categorised
+    text: every coded segment is in at least one category
+    query: 'match $s isa segment, has id $i; not { categorisation (segment: $s); }; select $i;'
+  - id: emergent_parent
+    text: every emergent category names the broader category it refines
+    query: 'match $k isa content-category, has id $i, has origin "emergent"; not { $k has parent $p; }; select $i;'
+  - id: case_description
+    text: every interview has a case description (an interview-level summary memo)
+    query: 'match $s isa source, has id $i; not { $m isa memo, has memo-level "interview", has memo-kind "summary"; about (memo: $m, target: $s); }; select $i;'
+  - id: category_used
+    text: every guide and theory category has segments, or a memo saying why not
+    query: 'match $k isa content-category, has id $i, has origin $o; not { $o == "emergent"; }; not { categorisation (category: $k); }; not { $m isa memo; about (memo: $m, target: $k); }; select $i;'

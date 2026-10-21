@@ -1,0 +1,1249 @@
+"""Tests for the MCP client's batching logic (mcp/server.py).
+
+Sessions are pushed in small batches bounded by session count AND total
+message count, so a giant request cannot exceed the HTTP timeout during a
+full sync (a full resync pulls/pushes every session on the server).
+"""
+
+import asyncio
+import importlib.util
+import json
+import os
+import sys
+import tempfile
+import time
+import unittest
+import unittest.mock as mock
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import server  # noqa: E402
+
+# Keep the suite off the developer's real per-agent state files: log() now
+# appends to LOG_FILE and the background loops touch LEASE_FILE, so a test that
+# forgets to patch them would pollute ~/AppData/Local/hermes.
+_STATE_DIR = tempfile.TemporaryDirectory()
+server.LOG_FILE = Path(_STATE_DIR.name) / "test-sync.log"
+server.LEASE_FILE = Path(_STATE_DIR.name) / "test-sync.primary.json"
+
+
+async def _noop_notify(message: str, level: str = "info"):
+    """_notify_host stub: the real one waits up to 30s for a host session."""
+    return None
+
+
+def mk(n_msgs: int) -> dict:
+    return {"id": f"s{n_msgs}",
+            "messages": [{"role": "user"} for _ in range(n_msgs)]}
+
+
+class ChunkSessionsTest(unittest.TestCase):
+    def test_empty(self):
+        self.assertEqual(server._chunk_sessions([]), [])
+
+    def test_under_limits_single_batch(self):
+        chunks = server._chunk_sessions([mk(10), mk(20)],
+                                        max_sessions=20, max_messages=3000)
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(len(chunks[0]), 2)
+
+    def test_session_count_bound(self):
+        chunks = server._chunk_sessions([mk(1)] * 45,
+                                        max_sessions=20, max_messages=3000)
+        self.assertEqual([len(c) for c in chunks], [20, 20, 5])
+
+    def test_message_count_bound(self):
+        chunks = server._chunk_sessions([mk(2000)] * 4,
+                                        max_sessions=20, max_messages=3000)
+        self.assertEqual([len(c) for c in chunks], [1, 1, 1, 1])
+        for c in chunks:
+            self.assertLessEqual(sum(len(s["messages"]) for s in c), 3000)
+
+    def test_huge_session_gets_own_batch(self):
+        chunks = server._chunk_sessions([mk(100), mk(5000), mk(100)],
+                                        max_sessions=20, max_messages=3000)
+        self.assertEqual([len(c) for c in chunks], [1, 1, 1])
+
+    def test_mixed_merge_and_split(self):
+        # 3 x 1500 msgs: a pair fits (3000), a third would exceed
+        chunks = server._chunk_sessions([mk(1500)] * 3,
+                                        max_sessions=20, max_messages=3000)
+        self.assertEqual([len(c) for c in chunks], [2, 1])
+
+
+    def test_bytes_bound_splits_big_session_out(self):
+        """B4: a session whose payload exceeds max_bytes must not ride along
+        with others (regression: a ~148MB chunk tripped the proxy 413 and
+        aborted the whole push cycle)."""
+        big = {**mk(1), "blob": "x" * (6 * 1024 * 1024)}
+        chunks = server._chunk_sessions([mk(10), big, mk(10)],
+                                        max_sessions=20, max_messages=3000,
+                                        max_bytes=4 * 1024 * 1024)
+        self.assertEqual([len(c) for c in chunks], [1, 1, 1])
+
+    def test_single_huge_session_rides_alone(self):
+        """B4: a session larger than max_bytes gets its own batch (it cannot
+        be split); neighbours stay in their own batches."""
+        huge = {**mk(1), "blob": "x" * (20 * 1024 * 1024)}
+        chunks = server._chunk_sessions([mk(10), huge, mk(10)],
+                                        max_sessions=20, max_messages=3000,
+                                        max_bytes=8 * 1024 * 1024)
+        self.assertEqual([len(c) for c in chunks], [1, 1, 1])
+        self.assertEqual(chunks[1][0]["id"], huge["id"])
+
+
+class ToolRegistrationTest(unittest.TestCase):
+    """The tool surface registers on both mcp SDK eras. Regression: SDK v2
+    (mcp>=2.0.0) removed Server.list_tools()/call_tool() decorators, which
+    crashed the client at import with AttributeError."""
+
+    EXPECTED = [name for spec in server.TOOL_SPECS
+                for name in (spec[0], "hermes_" + spec[0])]
+
+    def test_build_tools_surface(self):
+        tools = server._build_tools()
+        self.assertEqual([t.name for t in tools], self.EXPECTED)
+        self.assertEqual(len(tools), len(self.EXPECTED))
+        for t in tools:
+            self.assertIsNotNone(t.description)
+            # field name differs across SDK eras (inputSchema vs input_schema);
+            # the wire alias is stable
+            schema = t.model_dump(by_alias=True, mode="json")["inputSchema"]
+            self.assertEqual(schema["type"], "object")
+
+    def test_handlers_registered(self):
+        # The module import itself already exercises the era branch; assert
+        # the handlers actually landed on the server instance.
+        if server.SDK_V2:
+            handlers = server.server._request_handlers
+            self.assertIn("tools/list", handlers)
+            self.assertIn("tools/call", handlers)
+        else:
+            from mcp.types import CallToolRequest, ListToolsRequest
+            handlers = server.server.request_handlers
+            self.assertIn(ListToolsRequest, handlers)
+            self.assertIn(CallToolRequest, handlers)
+
+    def test_dispatch_unknown_tool_raises(self):
+        with self.assertRaises(ValueError):
+            asyncio.run(server._dispatch_tool("nope", {}))
+
+
+class PushFingerprintTest(unittest.TestCase):
+    """B5: unchanged sessions are skipped by the push loop (no per-cycle
+    full-store re-upload); fingerprints update only on success."""
+
+    def test_fingerprint_counts_and_max_ts(self):
+        s = {"id": "s1", "messages": [{"timestamp": 1.0}, {"timestamp": 3.5}]}
+        self.assertEqual(server._session_fingerprint(s), (2, 3.5))
+
+    def test_fingerprint_includes_mtime_when_adapter_supports(self):
+        s = {"id": "s1", "messages": [{"timestamp": 1.0}]}
+        with mock.patch.object(server.adapter, "session_mtime",
+                               return_value=123.45678):
+            self.assertEqual(server._session_fingerprint(s), (1, 1.0, 123.457))
+
+    def test_push_skips_unchanged_sessions(self):
+        class FakeAdapter:
+            agent_type = "workbuddy"
+
+            def discover(self):
+                return "store"
+
+            def read_sessions(self):
+                return [{"id": "s1", "cwd": "c:/x", "title": "t",
+                         "messages": [{"session_id": "s1", "role": "user",
+                                       "content": "hi", "timestamp": 1.0}]}]
+
+            def _is_foreign(self, sid):
+                return False
+
+            def _foreign_agent(self, sid):
+                return None
+
+        calls = []
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            with mock.patch.object(server, "adapter", FakeAdapter()), \
+                    mock.patch.object(server, "FIELD_META_PATH",
+                                      td / "meta.json"), \
+                    mock.patch.object(server, "PUSH_FINGERPRINT_PATH",
+                                      td / "fp.json"), \
+                    mock.patch.object(
+                        server, "api_call",
+                        side_effect=lambda *a, **k: calls.append(a) or {
+                            "imported": 0, "updated": 1, "new_messages": 0,
+                            "sync_at": 1.0, "session_revs": {}}):
+                r1 = server.push_sessions()
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0][2]["sessions"][0]["id"], "s1")
+                calls.clear()
+                r2 = server.push_sessions()
+                self.assertEqual(calls, [])  # unchanged -> skipped entirely
+                self.assertEqual(r2["imported"], 0)
+                self.assertEqual(r2["updated"], 0)
+
+    def test_push_retries_after_failure(self):
+        """A failed chunk must NOT advance the fingerprint (retried next
+        cycle), while successful sessions still anchor."""
+        class FakeAdapter:
+            agent_type = "workbuddy"
+
+            def discover(self):
+                return "store"
+
+            def read_sessions(self):
+                return [{"id": "s1", "cwd": "c:/x", "title": "t",
+                         "messages": [{"session_id": "s1", "role": "user",
+                                       "content": "hi", "timestamp": 1.0}]}]
+
+            def _is_foreign(self, sid):
+                return False
+
+            def _foreign_agent(self, sid):
+                return None
+
+        results = [{"error": 413}, {"imported": 0, "updated": 1,
+                                    "new_messages": 0, "sync_at": 1.0,
+                                    "session_revs": {}}]
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            with mock.patch.object(server, "adapter", FakeAdapter()), \
+                    mock.patch.object(server, "FIELD_META_PATH",
+                                      td / "meta.json"), \
+                    mock.patch.object(server, "PUSH_FINGERPRINT_PATH",
+                                      td / "fp.json"), \
+                    mock.patch.object(server, "api_call",
+                                      side_effect=lambda *a, **k:
+                                      results.pop(0)):
+                r1 = server.push_sessions()
+                self.assertIn("failed", r1.get("error", ""))
+                # fingerprint not anchored for the failed session
+                self.assertEqual(server._load_push_fingerprint(), {})
+    def test_legacy_flat_fingerprint_is_stale_when_identity_known(self):
+        """A fingerprint file from before identity recording must not keep
+        suppressing a re-push: once an identity is known, an old flat dict
+        is treated empty so the store is re-pushed (mirrors the pull
+        watermark's legacy handling)."""
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(server, "PUSH_FINGERPRINT_PATH",
+                                   Path(td) / "fp.json"), \
+                    mock.patch.object(server, "SYNC_SERVER",
+                                      "https://www.agentctxsync.com"):
+                Path(td, "fp.json").write_text(
+                    '{"s1": [2, 3.5]}', encoding="utf-8")
+                self.assertEqual(server._load_push_fingerprint(), {})
+
+    def test_fingerprint_invalidated_on_server_switch(self):
+        """A fingerprint recorded against a DIFFERENT server must be ignored
+        in full (full re-push), exactly like the pull watermark — otherwise
+        sessions pushed to an old server/workspace never reach the new one."""
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(server, "PUSH_FINGERPRINT_PATH",
+                                   Path(td) / "fp.json"), \
+                    mock.patch.object(server, "SYNC_SERVER",
+                                      "https://www.agentctxsync.com"):
+                Path(td, "fp.json").write_text(
+                    '{"server": "https://old.invalid", '
+                    '"sessions": {"s1": [2, 3.5]}}', encoding="utf-8")
+                self.assertEqual(server._load_push_fingerprint(), {})
+
+    def test_fingerprint_roundtrip_new_format(self):
+        """Same-server save/load round-trips through the new server-bound
+        wrapper (the push loop still sees the flat {sid: fp} dict)."""
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(server, "PUSH_FINGERPRINT_PATH",
+                                   Path(td) / "fp.json"), \
+                    mock.patch.object(server, "SYNC_SERVER",
+                                      "https://www.agentctxsync.com"):
+                server._save_push_fingerprint({"s1": [2, 3.5]})
+                self.assertEqual(server._load_push_fingerprint(),
+                                 {"s1": [2, 3.5]})
+
+
+class FieldMergeTest(unittest.TestCase):
+    """Field-level optimistic concurrency on the client (see ARCHITECTURE.md):
+    push only dirty / first-contact user-edit fields, and anchor the accepted
+    base so they stop reading dirty. Mirrors the server-side merge rules."""
+
+    def test_push_omits_non_dirty_fields_keeps_derived(self):
+        meta = {"s1": {"cwd": {"base": 4, "val": "D:/old"},
+                       "title": {"base": 1, "val": "t"}}}
+        s = {"id": "s1", "title": "t", "cwd": "D:/old", "source": "cli",
+             "messages": []}
+        out = server._annotate_push_session(s, meta)
+        self.assertEqual(out["source"], "cli")     # derived kept
+        self.assertNotIn("cwd", out)               # not dirty -> omitted
+        self.assertNotIn("title", out)
+        self.assertEqual(out["field_meta"], {})
+
+    def test_push_dirty_field_sends_with_known_base(self):
+        meta = {"s1": {"cwd": {"base": 4, "val": "D:/old"}}}
+        s = {"id": "s1", "cwd": "D:/NEW", "messages": []}
+        out = server._annotate_push_session(s, meta)
+        self.assertEqual(out["cwd"], "D:/NEW")
+        self.assertEqual(out["field_meta"], {"cwd": 4})
+
+    def test_push_first_contact_uses_none_base(self):
+        # No sidecar entry -> base unknown -> field asserted with base None
+        # so the server stays authoritative for an existing session.
+        s = {"id": "s1", "cwd": "D:/x", "messages": []}
+        out = server._annotate_push_session(s, {})
+        self.assertEqual(out["cwd"], "D:/x")
+        self.assertEqual(out["field_meta"], {"cwd": None})
+
+    def test_anchor_records_only_accepted_fields(self):
+        meta = {}
+        chunk = [{"id": "s1", "cwd": "D:/NEW",
+                  "field_meta": {"cwd": 4, "title": None}}]
+        revs = {"s1": {"rev": 7, "field_rev": {"cwd": 7, "title": 2}}}
+        server._anchor_push_meta(meta, chunk, revs)
+        # cwd (known base, accepted) anchored; title (base None, refused) not
+        self.assertEqual(meta,
+                         {"s1": {"cwd": {"base": 7, "val": "D:/NEW"}}})
+
+    def test_missing_local_value_is_not_dirty(self):
+        """A store that never wrote the field is not a local edit.
+
+        A dsh log without a ``session/title`` event (or a column never
+        populated) used to read "dirty" against the sidecar anchor, so the
+        pull dropped the server's authoritative value and the session stayed
+        permanently untitled (desktop list fell back to the workspace name).
+        Missing/empty local means "adopt the server", never "user deleted".
+        """
+        self.assertFalse(server._field_dirty("title", None, "Server title"))
+        self.assertFalse(server._field_dirty("title", "", "Server title"))
+        self.assertFalse(server._field_dirty("cwd", None, "D:/x"))
+        # real local values still compare exactly (paths case-insensitively)
+        self.assertTrue(server._field_dirty("title", "Local", "Server"))
+        self.assertFalse(server._field_dirty("title", "Same", "Same"))
+        self.assertFalse(
+            server._field_dirty("cwd", r"D:\Work\X", "D:/work/x"))
+
+    def test_push_missing_local_field_is_omitted_not_asserted(self):
+        """Mirror rule on push: a None local value must not be asserted
+        against a known base (would clobber the server value)."""
+        meta = {"s1": {"title": {"base": 1, "val": "Server title"}}}
+        s = {"id": "s1", "title": None, "messages": []}
+        out = server._annotate_push_session(s, meta)
+        self.assertNotIn("title", out)
+        self.assertEqual(out.get("field_meta"), {})
+
+
+class LocalOnlyModelTest(unittest.TestCase):
+    """``model`` is a device-local field: the model a user picked for a
+    session is never pushed, never applied from a pull, and a model switch is
+    not a content change (LOCAL_ONLY_SESSION_FIELDS, decision record
+    2026.10.06.1)."""
+
+    def test_strip_local_only_drops_model_from_session_and_messages(self):
+        s = {"id": "s1", "model": "gpt-5.2-codex",
+             "messages": [{"role": "assistant", "content": "hi",
+                           "model": "gpt-5.2-codex"}]}
+        self.assertIs(server._strip_local_only(s), s)   # in-place
+        self.assertNotIn("model", s)
+        self.assertNotIn("model", s["messages"][0])
+
+    def test_push_never_sends_a_model_and_ignores_a_model_switch(self):
+        class FakeAdapter:
+            agent_type = "opencode"
+
+            def __init__(self):
+                self.model = "gpt-5.2-codex"
+
+            def discover(self):
+                return "store"
+
+            def read_sessions(self):
+                return [{"id": "s1", "cwd": "c:/x", "title": "t",
+                         "model": self.model,
+                         "messages": [{"session_id": "s1",
+                                       "role": "assistant",
+                                       "content": "hi", "timestamp": 1.0,
+                                       "model": self.model}]}]
+
+            def _is_foreign(self, sid):
+                return False
+
+            def _foreign_agent(self, sid):
+                return None
+
+        a = FakeAdapter()
+        calls = []
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            with mock.patch.object(server, "adapter", a), \
+                    mock.patch.object(server, "FIELD_META_PATH",
+                                      td / "meta.json"), \
+                    mock.patch.object(server, "PUSH_FINGERPRINT_PATH",
+                                      td / "fp.json"), \
+                    mock.patch.object(
+                        server, "api_call",
+                        side_effect=lambda *args, **kw: calls.append(args) or {
+                            "imported": 1, "updated": 0, "new_messages": 1,
+                            "sync_at": 1.0, "session_revs": {}}):
+                server.push_sessions()
+                self.assertEqual(len(calls), 1)
+                sent = calls[0][2]["sessions"][0]
+                self.assertNotIn("model", sent)
+                self.assertNotIn("model", sent["messages"][0])
+                calls.clear()
+                # A model switch alone is not a content change: the stripped
+                # payload keeps the same fingerprint, so nothing is re-sent.
+                a.model = "deepseek-v4-flash"
+                server.push_sessions()
+                self.assertEqual(calls, [])
+
+    def test_pull_never_writes_a_pulled_model(self):
+        received = []
+
+        class FakeAdapter:
+            agent_type = "omp"
+
+            def discover(self):
+                return "store"
+
+            def last_synced_at(self):
+                return 0.0
+
+            def save_sync_watermark(self, ts):
+                pass
+
+            def read_sessions(self):
+                return []
+
+            def write_sessions(self, sessions):
+                received.extend(sessions)
+                return {"imported": len(sessions), "updated": 0,
+                        "new_messages": 0}
+
+        page = {"sessions": [{
+            "id": "s1", "cwd": "D:/x", "title": "t",
+            "model": "peer-model", "field_rev": {},
+            "messages": [{"role": "assistant", "content": "hi",
+                          "timestamp": 1.0, "model": "peer-model"}]}],
+            "sync_at": 5.0, "total_sessions": 1}
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            with mock.patch.object(server, "adapter", FakeAdapter()), \
+                    mock.patch.object(server, "FIELD_META_PATH",
+                                      td / "meta.json"), \
+                    mock.patch.object(server, "PUSH_FINGERPRINT_PATH",
+                                      td / "fp.json"), \
+                    mock.patch.object(server, "api_call", return_value=page):
+                server.pull_sessions()
+        self.assertTrue(received, "adapter must have been written")
+        self.assertNotIn("model", received[0])
+        self.assertNotIn("model", received[0]["messages"][0])
+
+
+class PullTitleAdoptTest(unittest.TestCase):
+    """Pull must adopt the server title for a session whose local log never
+    got one (title-loss loop), and reconcile idle sessions from the sidecar
+    anchor when the server no longer re-serves them (see CHANGELOG
+    2026.09.08.1)."""
+
+    def _fake_adapter(self, received):
+        class FakeAdapter:
+            agent_type = "dsh"
+
+            def discover(self):
+                return "store"
+
+            def last_synced_at(self):
+                return 0.0
+
+            def save_sync_watermark(self, ts):
+                pass
+
+            def read_sessions(self):
+                # local store: session exists but has NO title yet
+                return [{"id": "s1", "cwd": "D:/x",
+                         "messages": [{"role": "user", "content": "hi",
+                                       "timestamp": 1.0}]}]
+
+            def write_sessions(self, sessions):
+                received.extend(sessions)
+                return {"imported": 0, "updated": len(sessions),
+                        "new_messages": 0}
+        return FakeAdapter()
+
+    def test_pull_keeps_server_title_when_local_untitled(self):
+        """Sidecar anchored + local missing title: the incoming title must
+        survive the merge (previously popped as 'dirty') and reach the
+        adapter write."""
+        received = []
+        meta = {"s1": {"title": {"base": 1, "val": "Server title"}}}
+        page = {"sessions": [{
+            "id": "s1", "cwd": "D:/x", "title": "Server title",
+            "field_rev": {"title": 1},
+            "messages": [{"role": "user", "content": "hi",
+                          "timestamp": 1.0}]}],
+            "sync_at": 5.0, "total_sessions": 1}
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            mp = td / "meta.json"
+            mp.write_text(json.dumps(meta), encoding="utf-8")
+            with mock.patch.object(server, "adapter",
+                                   self._fake_adapter(received)), \
+                    mock.patch.object(server, "FIELD_META_PATH", mp), \
+                    mock.patch.object(server, "PUSH_FINGERPRINT_PATH",
+                                      td / "fp.json"), \
+                    mock.patch.object(server, "api_call",
+                                      return_value=page):
+                r = server.pull_sessions()
+        self.assertTrue(received, "adapter must have been written")
+        for s in received:
+            self.assertEqual(s["title"], "Server title",
+                             "pull must not drop the server title")
+        self.assertGreaterEqual(r.get("titles_healed", 0), 0)
+
+    def test_reconcile_heals_idle_session_from_sidecar(self):
+        """A session the server no longer re-serves recovers its title from
+        the sidecar anchor (last server-accepted value); titled sessions and
+        unknowns are untouched; second run is a no-op."""
+        received = []
+        meta = {"s1": {"title": {"base": 3, "val": "Server title"}},
+                "s2": {"title": {"base": 4, "val": "Other title"}}}
+        local_by_id = {
+            "s1": {"id": "s1", "cwd": "D:/x",
+                   "messages": [{"role": "user", "content": "hi",
+                                 "timestamp": 1.0}]},
+            "s2": {"id": "s2", "cwd": "D:/y", "title": "Has one",
+                   "messages": []},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            mp = td / "meta.json"
+            mp.write_text(json.dumps(meta), encoding="utf-8")
+            with mock.patch.object(server, "adapter",
+                                   self._fake_adapter(received)), \
+                    mock.patch.object(server, "FIELD_META_PATH", mp):
+                self.assertEqual(
+                    server._reconcile_sidecar_titles(local_by_id), 1)
+                # the adapter write landed the title: a fresh local read
+                # would now see it, so the next run is a no-op
+                local_by_id["s1"]["title"] = "Server title"
+                self.assertEqual(
+                    server._reconcile_sidecar_titles(local_by_id), 0)
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0]["id"], "s1")
+        self.assertEqual(received[0]["title"], "Server title")
+
+
+class PullCompletenessRepairTest(unittest.TestCase):
+    """A session deleted locally comes back on the next pull while the server
+    still holds it visible (docs/ARCHITECTURE.md "本地删除不是删除信号"): the
+    first page carries this device's inventory, the server answers with the
+    visible ids we lack, and those are fetched by id and written like any
+    other pulled page."""
+
+    def _fake_adapter(self, received, local, stores_pulled=True,
+                      watermark=1700000000.0):
+        class FakeAdapter:
+            agent_type = "dsh"
+            stores_pulled_sessions = stores_pulled
+
+            def discover(self):
+                return "store"
+
+            def last_synced_at(self):
+                return watermark
+
+            def save_sync_watermark(self, ts):
+                pass
+
+            def read_sessions(self):
+                return [dict(s) for s in local]
+
+            def write_sessions(self, sessions):
+                received.extend(sessions)
+                return {"imported": len(sessions), "updated": 0,
+                        "new_messages": 0}
+        return FakeAdapter()
+
+    def _run_pull(self, adapter, responses, limit=None):
+        calls = []
+
+        def fake_api(method, path, data=None):
+            calls.append(data)
+            return responses.pop(0)
+
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(server, "adapter", adapter), \
+                    mock.patch.object(server, "FIELD_META_PATH",
+                                      Path(td) / "meta.json"), \
+                    mock.patch.object(server, "api_call", side_effect=fake_api):
+                return server.pull_sessions(limit=limit), calls
+
+    def test_deleted_session_is_restored_on_next_pull(self):
+        received = []
+        adapter = self._fake_adapter(received, [{"id": "kept", "messages": []}])
+        page = {"sessions": [], "sync_at": 9.0, "total_sessions": 2,
+                "missing_ids": ["gone"]}
+        restore = {"sessions": [{"id": "gone", "title": "G",
+                                 "messages": [{"role": "user",
+                                               "content": "old",
+                                               "timestamp": 1.0}]}],
+                   "sync_at": 9.0, "total_sessions": 1}
+        result, calls = self._run_pull(adapter, [page, restore])
+        self.assertEqual(calls[0]["known_ids"], ["kept"])
+        self.assertNotIn("known_ids", calls[1])
+        self.assertEqual(calls[1]["ids"], ["gone"])
+        self.assertEqual([s["id"] for s in received], ["gone"])
+        self.assertEqual(result["restored"], 1)
+        self.assertEqual(result["imported"], 1)
+
+    def test_session_delivered_by_the_page_is_not_fetched_twice(self):
+        received = []
+        adapter = self._fake_adapter(received, [{"id": "kept", "messages": []}])
+        page = {"sessions": [{"id": "gone", "messages": []}], "sync_at": 9.0,
+                "total_sessions": 2, "missing_ids": ["gone"]}
+        result, calls = self._run_pull(adapter, [page])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["restored"], 0)
+        self.assertEqual([s["id"] for s in received], ["gone"])
+
+    def test_unfiled_session_is_reported_not_counted_as_restored(self):
+        # an adapter that cannot file the row (unknown profile, read-only
+        # store) returns all-zero stats while the session stays absent:
+        # the request must not be reported as a restoration
+        received = []
+        adapter = self._fake_adapter(received, [{"id": "kept", "messages": []}])
+        adapter.write_sessions = lambda sessions: {"imported": 0, "updated": 0,
+                                                  "new_messages": 0}
+        page = {"sessions": [], "sync_at": 9.0, "total_sessions": 2,
+                "missing_ids": ["gone"]}
+        restore = {"sessions": [{"id": "gone", "title": "G", "messages": []}],
+                   "sync_at": 9.0, "total_sessions": 1}
+        result, _ = self._run_pull(adapter, [page, restore])
+        self.assertEqual(result["restored"], 0)
+        self.assertEqual(result["unfiled"], 1)
+        self.assertEqual(result["imported"], 0)
+
+    def test_read_only_adapter_never_asks_for_missing_sessions(self):
+        # a read-only uploader has no local target for pulled sessions
+        received = []
+        adapter = self._fake_adapter(received, [{"id": "kept", "messages": []}],
+                                     stores_pulled=False)
+        page = {"sessions": [], "sync_at": 9.0, "total_sessions": 2,
+                "missing_ids": ["gone"]}
+        result, calls = self._run_pull(adapter, [page])
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("known_ids", calls[0])
+        self.assertEqual(result["restored"], 0)
+
+    def test_full_pull_does_not_report_its_inventory(self):
+        # a full pull already delivers every visible session; reporting the
+        # pre-pull inventory as missing would download the store twice
+        received = []
+        adapter = self._fake_adapter(received, [{"id": "kept", "messages": []}],
+                                     watermark=0.0)
+        page = {"sessions": [], "sync_at": 9.0, "total_sessions": 2,
+                "missing_ids": ["gone"]}
+        result, calls = self._run_pull(adapter, [page])
+        self.assertNotIn("known_ids", calls[0])
+        self.assertEqual(calls[0]["last_sync_at"], 0)
+        self.assertEqual(result["restored"], 0)
+
+    def test_capped_pull_spends_its_limit_before_restoring(self):
+        # `limit` stays authoritative: a capped pull never pulls more
+        # sessions than the caller asked for
+        received = []
+        adapter = self._fake_adapter(received, [{"id": "kept", "messages": []}])
+        page = {"sessions": [{"id": "new", "messages": []}], "sync_at": 9.0,
+                "total_sessions": 2, "missing_ids": ["gone"]}
+        result, calls = self._run_pull(adapter, [page], limit=1)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["restored"], 0)
+
+
+class ProjectFieldMergeTest(unittest.TestCase):
+    """Field-level optimistic merge for project scalar fields (Phase 2)."""
+
+    def test_push_omits_non_dirty_keeps_id_and_folders(self):
+        meta = {"p1": {"name": {"base": 3, "val": "P1"},
+                       "primary_path": {"base": 1, "val": "D:/x"}}}
+        p = {"id": "p1", "name": "P1", "primary_path": "D:/x", "slug": "s1",
+             "folders": [{"path": "D:/a"}]}
+        out = server._annotate_push_project(p, meta)
+        self.assertEqual(out["slug"], "s1")            # non-edit kept
+        self.assertEqual(out["folders"], [{"path": "D:/a"}])
+        self.assertNotIn("name", out)                  # not dirty -> omitted
+        self.assertNotIn("primary_path", out)
+        self.assertEqual(out["field_meta"], {})
+
+    def test_push_dirty_project_field_sends_with_base(self):
+        meta = {"p1": {"name": {"base": 3, "val": "P1"},
+                       "primary_path": {"base": 1, "val": "D:/x"}}}
+        p = {"id": "p1", "name": "新名", "primary_path": "D:/x", "folders": []}
+        out = server._annotate_push_project(p, meta)
+        self.assertEqual(out["name"], "新名")           # dirty -> asserted
+        self.assertNotIn("primary_path", out)          # not dirty -> omitted
+        self.assertEqual(out["field_meta"], {"name": 3})
+
+    def test_push_first_contact_project_uses_none_base(self):
+        p = {"id": "p1", "name": "New", "folders": []}
+        out = server._annotate_push_project(p, {})
+        self.assertEqual(out["name"], "New")
+        self.assertEqual(out["field_meta"], {"name": None})
+
+    def test_anchor_project_records_only_accepted_fields(self):
+        meta = {}
+        chunk = [{"id": "p1", "name": "新名",
+                  "field_meta": {"name": 3, "primary_path": None}}]
+        revs = {"p1": {"rev": 7, "field_rev": {"name": 7, "primary_path": 2}}}
+        server._anchor_push_project_meta(meta, chunk, revs)
+        self.assertEqual(meta,
+                         {"p1": {"name": {"base": 7, "val": "新名"}}})
+
+
+class ProjectCapabilityTest(unittest.TestCase):
+    """Project sync runs on every cycle for every agent, so an agent without a
+    local project store must be answered, not crashed into (Adapter
+    ``supports_projects``)."""
+
+    class _FakeAdapter:
+        agent_type = "dsh"
+        supports_projects = False
+
+        def discover(self):
+            return "store"
+
+    def test_tools_report_missing_project_store(self):
+        with mock.patch.object(server, "adapter", self._FakeAdapter()):
+            self.assertIn("no local project store",
+                          server.push_projects()["error"])
+            self.assertIn("no local project store",
+                          server.pull_projects()["error"])
+
+    def test_declared_support_pushes_local_projects(self):
+        read = []
+
+        class WithProjects(self._FakeAdapter):
+            supports_projects = True
+
+            def read_projects(self):
+                read.append(1)
+                return [{"id": "p1", "slug": "s1", "name": "P1"}]
+
+        pushed = {}
+
+        def fake_api(method, path, data=None):
+            pushed.update(data or {})
+            return {"imported": 1, "updated": 0, "merged": 0,
+                    "project_revs": {"p1": {"rev": 1, "field_rev": {}}}}
+
+        with mock.patch.object(server, "adapter", WithProjects()), \
+                mock.patch.object(server, "PROJECT_FIELD_META_PATH", None), \
+                mock.patch.object(server, "api_call", side_effect=fake_api):
+            result = server.push_projects()
+        self.assertEqual(result["imported"], 1)
+        self.assertEqual(read, [1])
+        self.assertEqual([p["id"] for p in pushed["projects"]], ["p1"])
+
+
+class RootProjectFilterTest(unittest.TestCase):
+    """Root-shaped paths never reach the shared pool: a folder the Web
+    prefix-matches sessions against must express a project boundary, and a
+    root is every session's ancestor (docs/ARCHITECTURE.md 根目录不入共享项目池)."""
+
+    class _FakeAdapter:
+        agent_type = "hermes"
+        supports_projects = True
+        written = None
+
+        def __init__(self, projects):
+            self._projects = projects
+
+        def discover(self):
+            return "store"
+
+        def read_projects(self):
+            return [dict(p) for p in self._projects]
+
+        def write_projects(self, projects, remaps=None):
+            self.__class__.written = projects
+            return {"imported": len(projects)}
+
+    def _push(self, projects):
+        pushed = {}
+
+        def fake_api(method, path, data=None):
+            pushed.update(data or {})
+            return {"imported": 1, "updated": 1, "merged": 0,
+                    "project_revs": {}}
+
+        a = self._FakeAdapter(projects)
+        with mock.patch.object(server, "adapter", a), \
+                mock.patch.object(server, "PROJECT_FIELD_META_PATH", None), \
+                mock.patch.object(server, "api_call", side_effect=fake_api):
+            result = server.push_projects()
+        return result, pushed
+
+    def test_push_drops_root_paths_and_root_only_projects(self):
+        _, pushed = self._push([
+            {"id": "p1", "slug": "s1", "name": "P1",
+             "primary_path": "C:/Users/rong",
+             "folders": [{"path": "C:/Users/rong"}, {"path": "E:/proj"}]},
+            {"id": "p2", "slug": "s2", "name": "P2", "primary_path": "D:/",
+             "folders": [{"path": "D:/"}]},
+        ])
+        sent = pushed["projects"]
+        self.assertEqual([p["id"] for p in sent], ["p1"])
+        # the root primary is dropped, never rewritten to the surviving folder
+        # (primary_path is a per-field LWW value: inventing one would look like
+        # a local edit and overwrite the peer's value every cycle)
+        self.assertIsNone(sent[0]["primary_path"])
+        self.assertEqual([f["path"] for f in sent[0]["folders"]], ["E:/proj"])
+
+    def test_push_with_only_root_projects_pushes_nothing(self):
+        result, pushed = self._push([{"id": "p", "slug": "s", "name": "N",
+                                      "primary_path": "D:/", "folders": []}])
+        self.assertEqual(result, {"message": "No local projects to push"})
+        self.assertEqual(pushed, {})
+
+    def test_pull_skips_root_paths_and_root_only_projects(self):
+        payload = {"projects": [
+            {"id": "p1", "slug": "s1", "name": "P1",
+             "primary_path": "C:/Users/rong",
+             "folders": [{"path": "C:/Users/rong"}, {"path": "E:/proj"}],
+             "field_rev": {}},
+            {"id": "p2", "slug": "s2", "name": "P2", "primary_path": "D:/",
+             "folders": [{"path": "D:/"}], "field_rev": {}},
+        ], "remaps": []}
+        a = self._FakeAdapter([])
+        with mock.patch.object(server, "adapter", a), \
+                mock.patch.object(server, "PROJECT_FIELD_META_PATH", None), \
+                mock.patch.object(server, "api_call", return_value=payload):
+            result = server.pull_projects()
+        self.assertEqual(result["projects"], 1)     # p2 never reaches the store
+        written = self._FakeAdapter.written
+        self.assertEqual([p["id"] for p in written], ["p1"])
+        self.assertIsNone(written[0]["primary_path"])
+        self.assertEqual([f["path"] for f in written[0]["folders"]],
+                         ["E:/proj"])
+
+
+class SyncLockAndRoleTest(unittest.TestCase):
+    """Cross-process sync lock extended to mutating tool calls, and the
+    startup-loser standby role (see the helpers above _SyncServer)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        lock = Path(self.tmp.name) / "hermes-sync.lock"
+        self._orig = (server.LOCK_FILE, server.LEASE_FILE, server.LOG_FILE,
+                      server.LOG_MAX_BYTES, server.SYNC_INTERVAL,
+                      server.STARTUP_DELAY_S, server.LEASE_STALE_S,
+                      server.TOOL_LOCK_WAIT_S, server.TOOL_LOCK_POLL_S,
+                      server._role, server.AUTO_SYNC)
+        server.LOCK_FILE = lock
+        server.LEASE_FILE = Path(self.tmp.name) / "hermes-sync.primary.json"
+        server.LOG_FILE = Path(self.tmp.name) / "hermes-sync.log"
+        server.SYNC_INTERVAL = 300
+        server.STARTUP_DELAY_S = 0
+        server.LEASE_STALE_S = 420
+        server.TOOL_LOCK_WAIT_S = 0.3
+        server.TOOL_LOCK_POLL_S = 0.02
+        server._role = "starting"
+        server.AUTO_SYNC = True
+
+    def tearDown(self):
+        (server.LOCK_FILE, server.LEASE_FILE, server.LOG_FILE,
+         server.LOG_MAX_BYTES, server.SYNC_INTERVAL, server.STARTUP_DELAY_S,
+         server.LEASE_STALE_S, server.TOOL_LOCK_WAIT_S, server.TOOL_LOCK_POLL_S,
+         server._role, server.AUTO_SYNC) = self._orig
+
+    @staticmethod
+    def _run(coro):
+        return asyncio.run(coro)
+
+    def test_acquire_release_roundtrip(self):
+        self.assertTrue(self._run(server._acquire_tool_lock()))
+        self.assertEqual(server._lock_holder_pid(), os.getpid())
+        server._release_lock()
+        self.assertIsNone(server._lock_holder_pid())
+
+    def test_stale_lock_stolen(self):
+        # os.kill(pid, 0) liveness checks are platform-dependent; patch the
+        # probe so the test asserts the steal logic, not Windows semantics.
+        server.LOCK_FILE.write_text("424242")
+        with mock.patch.object(server, "_pid_alive", return_value=False):
+            self.assertTrue(self._run(server._acquire_tool_lock()))
+        self.assertEqual(server._lock_holder_pid(), os.getpid())
+        server._release_lock()
+
+    def test_foreign_live_holder_busy_after_wait(self):
+        async def go():
+            loop = asyncio.get_event_loop()
+            server.LOCK_FILE.write_text(str(os.getppid()))
+            out = await server._locked_tool(loop, lambda: "ran")
+            return out
+
+        out = self._run(go())
+        self.assertEqual(out.get("error"), "sync_busy")
+        self.assertNotEqual(out.get("detail"), "ran")
+        # foreign holder untouched; nothing leaked into the file
+        self.assertEqual(server._lock_holder_pid(), os.getppid())
+
+    def test_locked_tool_runs_and_releases(self):
+        async def go():
+            loop = asyncio.get_event_loop()
+            out = await server._locked_tool(loop, lambda: {"done": 1})
+            return out, server._lock_holder_pid()
+
+        out, holder_after = self._run(go())
+        self.assertEqual(out, {"done": 1})
+        self.assertIsNone(holder_after)
+
+    def test_own_cycle_waits_then_runs(self):
+        # Lock file holds OUR pid (background cycle in progress): the tool
+        # must wait for the cycle to release, then acquire and run.
+        async def go():
+            loop = asyncio.get_event_loop()
+            server.LOCK_FILE.write_text(str(os.getpid()))
+
+            async def release_later():
+                await asyncio.sleep(0.05)
+                server._release_lock()
+
+            asyncio.get_event_loop().create_task(release_later())
+            out = await server._locked_tool(loop, lambda: {"done": 2})
+            return out
+
+        self.assertEqual(self._run(go()), {"done": 2})
+
+    def _run_loop_briefly(self, coro, predicate=None, timeout=0.15):
+        """Drive a background loop until ``predicate`` holds (or ``timeout``
+        elapses), then cancel it and wait for the cancellation to land — so no
+        cycle is still touching a patched module global after the test."""
+        async def go():
+            task = asyncio.ensure_future(coro)
+            deadline = asyncio.get_event_loop().time() + timeout
+            while asyncio.get_event_loop().time() < deadline:
+                if predicate is not None and predicate():
+                    break
+                await asyncio.sleep(0.005)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        self._run(go())
+
+    # --- background-sync lease: durable role + failover --------------------
+
+    def test_lease_claim_records_this_process(self):
+        server._claim_lease("test")
+        lease = server._read_lease()
+        self.assertEqual(lease["pid"], os.getpid())
+        self.assertEqual(lease["role_reason"], "test")
+        alive, _ = server._lease_owner_alive()
+        self.assertTrue(alive)
+        # We ARE the owner; there is no other copy to yield to.
+        self.assertIsNone(server._owner_pid_or_none())
+
+    def test_dead_lease_owner_leaves_the_role_free(self):
+        # Heartbeat past one interval, so the pid probe is the deciding signal.
+        server._lease_write({"pid": 424242,
+                             "heartbeat": time.time() - server.SYNC_INTERVAL - 1})
+        with mock.patch.object(server, "_pid_alive", return_value=False):
+            alive, lease = server._lease_owner_alive()
+            self.assertFalse(alive)
+            self.assertEqual(lease["pid"], 424242)
+            self.assertIsNone(server._owner_pid_or_none())
+        with mock.patch.object(server, "_pid_alive", return_value=True):
+            self.assertEqual(server._owner_pid_or_none(), 424242)
+
+    def test_fresh_heartbeat_outvotes_a_negative_probe(self):
+        # Windows answers OpenProcess negatively for some LIVE pids, which
+        # reads exactly like a dead owner; a heartbeat written within half an
+        # interval must win, or two copies would both call themselves primary.
+        server._lease_write({"pid": 424242, "heartbeat": time.time()})
+        with mock.patch.object(server, "_pid_alive", return_value=False):
+            alive, _ = server._lease_owner_alive()
+            self.assertTrue(alive)
+            self.assertEqual(server._owner_pid_or_none(), 424242)
+
+    def test_stale_lease_heartbeat_leaves_the_role_free(self):
+        # A live pid is not enough: Windows keeps a dead process answering
+        # liveness probes while another process holds its handle, and pids are
+        # reused — the heartbeat is the fallback that cannot lie.
+        server._lease_write({"pid": 424242,
+                             "heartbeat": time.time() - server.LEASE_STALE_S - 1})
+        with mock.patch.object(server, "_pid_alive", return_value=True):
+            alive, _ = server._lease_owner_alive()
+            self.assertFalse(alive)
+            self.assertIsNone(server._owner_pid_or_none())
+
+    def test_standby_defers_while_owner_alive(self):
+        server.SYNC_INTERVAL = 0.01
+        server._lease_write({"pid": 424242, "heartbeat": time.time()})
+        server._role = "standby"
+        synced = []
+        with mock.patch.object(server, "log", lambda *a, **k: None), \
+                mock.patch.object(server, "_pid_alive", return_value=True), \
+                mock.patch.object(server, "full_sync",
+                                  side_effect=lambda: synced.append(1) or {}), \
+                mock.patch.object(server, "_notify_host", new=_noop_notify):
+            self._run_loop_briefly(server.periodic_sync(), timeout=0.1)
+        self.assertEqual(synced, [])
+        self.assertEqual(server._role, "standby")
+        # A standby must not claim the live owner's lease.
+        self.assertEqual(server._read_lease()["pid"], 424242)
+
+    def test_standby_promotes_when_owner_is_gone(self):
+        """The whole point of the lease: the surviving window keeps syncing."""
+        server.SYNC_INTERVAL = 0.05
+        server._lease_write({"pid": 424242, "heartbeat": time.time() - 1})
+        server._role = "standby"
+        roles = []
+        with mock.patch.object(server, "log", lambda *a, **k: None), \
+                mock.patch.object(server, "_pid_alive", return_value=False), \
+                mock.patch.object(server, "full_sync",
+                                  side_effect=lambda: roles.append(server._role) or
+                                  {"pull": {}, "push": {}}), \
+                mock.patch.object(server, "adapter",
+                                  mock.Mock(supports_projects=False)), \
+                mock.patch.object(server, "_notify_host", new=_noop_notify):
+            self._run_loop_briefly(
+                server.periodic_sync(),
+                predicate=lambda: (server._read_lease() or {}).get(
+                    "last_sync_ok") is not None)
+        self.assertTrue(roles, "the standby never ran a cycle")
+        self.assertEqual(set(roles), {"primary"})
+        lease = server._read_lease()
+        self.assertEqual(lease["pid"], os.getpid())
+        self.assertIn("promoted", lease["role_reason"])
+        self.assertIsNone(server._lock_holder_pid())      # cycle released it
+
+    def test_standby_startup_yields_to_live_owner(self):
+        server._lease_write({"pid": 424242, "heartbeat": time.time()})
+        with mock.patch.object(server, "_pid_alive", return_value=True), \
+                mock.patch.object(server, "pull_sessions",
+                                  side_effect=AssertionError("must not sync")):
+            self._run(server.background_startup_sync())
+        self.assertEqual(server._role, "standby")
+        self.assertIsNone(server._lock_holder_pid())
+        self.assertEqual(server._read_lease()["pid"], 424242)
+
+    def test_standby_startup_elects_when_owner_is_gone(self):
+        with mock.patch.object(server, "_pid_alive", return_value=False), \
+                mock.patch.object(server, "pull_sessions",
+                                  side_effect=lambda *a, **k: {"imported": 0}), \
+                mock.patch.object(server, "push_sessions",
+                                  side_effect=lambda *a, **k: {"imported": 0,
+                                                               "updated": 0}), \
+                mock.patch.object(server, "_notify_host", new=_noop_notify):
+            self._run(server.background_startup_sync())
+        self.assertEqual(server._role, "primary")
+        lease = server._read_lease()
+        self.assertEqual(lease["pid"], os.getpid())
+        self.assertIsInstance(lease["last_sync_ok"], float)
+        self.assertIsNone(server._lock_holder_pid())
+
+    # --- startup sync freshness (duplicate-work guard) ---------------------
+
+    def test_startup_sync_skipped_within_freshness_window(self):
+        # The owner died right after a successful sync: its heartbeat is past
+        # one interval (so the role is free) but last_sync_ok is fresh.
+        server._lease_write({"pid": 424242,
+                             "heartbeat": time.time() - server.SYNC_INTERVAL - 1,
+                             "last_sync_ok": time.time()})
+        calls = []
+        with mock.patch.object(server, "_pid_alive", return_value=False), \
+                mock.patch.object(server, "pull_sessions",
+                                  side_effect=lambda *a, **k: calls.append("pull")), \
+                mock.patch.object(server, "push_sessions",
+                                  side_effect=lambda *a, **k: calls.append("push")), \
+                mock.patch.object(server, "_notify_host", new=_noop_notify):
+            self._run(server.background_startup_sync())
+        self.assertEqual(calls, [])
+        self.assertEqual(server._role, "primary")   # still takes the loops over
+
+    def test_startup_sync_runs_when_last_success_is_stale(self):
+        stale = time.time() - server.SYNC_INTERVAL
+        server._lease_write({"pid": 424242, "heartbeat": stale,
+                             "last_sync_ok": stale})
+        calls = []
+        with mock.patch.object(server, "_pid_alive", return_value=False), \
+                mock.patch.object(server, "pull_sessions",
+                                  side_effect=lambda *a, **k: calls.append("pull") or
+                                  {"imported": 0}), \
+                mock.patch.object(server, "push_sessions",
+                                  side_effect=lambda *a, **k: calls.append("push") or
+                                  {"imported": 0, "updated": 0}), \
+                mock.patch.object(server, "_notify_host", new=_noop_notify):
+            self._run(server.background_startup_sync())
+        self.assertEqual(calls, ["pull", "push"])
+        self.assertGreater(server._read_lease()["last_sync_ok"], stale)
+
+    def test_manual_sync_stamps_the_shared_freshness(self):
+        with mock.patch.object(server, "adapter", mock.Mock(agent_type="omp")), \
+                mock.patch.object(server, "push_sessions",
+                                  return_value={"imported": 1}), \
+                mock.patch.object(server, "_notify_host", new=_noop_notify):
+            out = json.loads(self._run(server._dispatch_tool("sync_push", {})))
+        self.assertEqual(out, {"imported": 1})
+        self.assertIsInstance(server._read_lease()["last_sync_ok"], float)
+
+    def test_sync_status_reports_instance_and_lease(self):
+        server._lease_write({"pid": 424242, "heartbeat": time.time()})
+        server._role = "standby"
+        fake_adapter = mock.Mock(agent_type="omp",
+                                 status=lambda: {"sessions": 3})
+        with mock.patch.object(server, "adapter", fake_adapter), \
+                mock.patch.object(server, "_pid_alive", return_value=True), \
+                mock.patch.object(server, "api_call", return_value={"ok": True}):
+            out = json.loads(self._run(server._dispatch_tool("sync_status", {})))
+        inst = out["instance"]
+        self.assertEqual(inst["pid"], os.getpid())
+        self.assertEqual(inst["role"], "standby")
+        self.assertEqual(inst["lease_owner_pid"], 424242)
+        self.assertTrue(inst["lease_owner_alive"])
+        self.assertEqual(inst["lock_file"], str(server.LOCK_FILE))
+        self.assertEqual(out["local"], {"sessions": 3})
+
+    # --- on-disk log -------------------------------------------------------
+
+    def test_log_appends_with_timestamp_and_rotates(self):
+        server.LOG_MAX_BYTES = 10
+        server.log("first line")
+        server.log("second line")
+        rotated = server.LOG_FILE.with_name(server.LOG_FILE.name + ".1")
+        self.assertTrue(rotated.exists())
+        self.assertIn("first line", rotated.read_text(encoding="utf-8"))
+        body = server.LOG_FILE.read_text(encoding="utf-8")
+        self.assertIn("second line", body)
+        self.assertRegex(
+            body, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2} \[hermes-sync\]")
+
+    def test_periodic_sync_disabled_flag_returns_immediately(self):
+        server.AUTO_SYNC = False
+        self._run(server.periodic_sync())
+
+
+class PushIsolationTest(unittest.TestCase):
+    """A session whose payload cannot be JSON-encoded (raw bytes leaked from
+    a SQLite BLOB column, ...) must not abort the whole push cycle. Both the
+    chunker and the request encoder serialize every session, so one bad value
+    used to kill the cycle before anything was sent -- an entire device
+    stopped syncing (CHANGELOG 2026.09.12.4). The offender is skipped and
+    named; every other session still syncs."""
+
+    @staticmethod
+    def _session(sid: str, blob: bool = False) -> dict:
+        msg = {"session_id": sid, "role": "user", "content": "hi",
+               "timestamp": 1.0}
+        if blob:
+            msg["display_identity"] = bytes(range(32))
+        return {"id": sid, "cwd": "c:/x", "title": "t", "messages": [msg]}
+
+    @staticmethod
+    def _adapter(sessions: list[dict]):
+        class FakeAdapter:
+            agent_type = "workbuddy"
+
+            def discover(self):
+                return "store"
+
+            def read_sessions(self):
+                return sessions
+
+            def _is_foreign(self, sid):
+                return False
+
+            def _foreign_agent(self, sid):
+                return None
+        return FakeAdapter()
+
+    def test_unsendable_session_is_skipped_while_the_rest_syncs(self):
+        sessions = [self._session("bad", blob=True), self._session("good")]
+        calls = []
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            with mock.patch.object(server, "adapter", self._adapter(sessions)), \
+                    mock.patch.object(server, "FIELD_META_PATH",
+                                      td / "meta.json"), \
+                    mock.patch.object(server, "PUSH_FINGERPRINT_PATH",
+                                      td / "fp.json"), \
+                    mock.patch.object(
+                        server, "api_call",
+                        side_effect=lambda *a, **k: calls.append(a) or {
+                            "imported": 0, "updated": 1, "new_messages": 0,
+                            "sync_at": 1.0, "session_revs": {}}):
+                result = server.push_sessions()
+                # the encodable session after the bad one still went out
+                sent = [s["id"] for call in calls
+                        for s in call[2]["sessions"]]
+                self.assertEqual(sent, ["good"])
+                # a skipped session is not a failed cycle
+                self.assertNotIn("error", result)
+                self.assertEqual(result["unsendable"], ["bad"])
+                # and the good one anchored (not re-sent next cycle)
+                self.assertEqual(list(server._load_push_fingerprint()),
+                                 ["good"])
+
+    def test_reason_names_the_offending_field(self):
+        sendable, reasons = server._partition_encodable(
+            [self._session("bad", blob=True), self._session("good")])
+        self.assertEqual([s["id"] for s in sendable], ["good"])
+        self.assertEqual(reasons,
+                         ["bad (messages[0].display_identity (bytes))"])
+
+    def test_api_call_reports_an_unencodable_payload_instead_of_raising(self):
+        result = server.api_call("POST", "/push",
+                                 {"sessions": [{"b": bytes(4)}]})
+        self.assertIn("error", result)
+        self.assertIn("bytes", str(result["error"]))
+
+
+class OpenClawAutoSyncLockTest(unittest.TestCase):
+    """mcp/auto-sync.py is a second writer of the same local store (OpenClaw's
+    dedicated daemon): its cycle must take the cross-process lock the MCP
+    server's background cycle and manual tool calls share, or the two can
+    write the store concurrently."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        spec = importlib.util.spec_from_file_location(
+            "auto_sync_under_test",
+            Path(__file__).resolve().parents[1] / "auto-sync.py")
+        cls.mod = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(os.environ, {"HERMES_SYNC_API_KEY": "ws_test"}):
+            spec.loader.exec_module(cls.mod)
+
+    def setUp(self):
+        self._orig_lock = server.LOCK_FILE
+        server.LOCK_FILE = Path(self.tmp.name) / "auto-sync.lock"
+        server.LOCK_FILE.unlink(missing_ok=True)
+        self.addCleanup(self._restore_lock)
+
+    def _restore_lock(self):
+        server.LOCK_FILE = self._orig_lock
+
+    def test_cycle_runs_under_the_shared_lock(self):
+        with mock.patch.object(server, "full_sync",
+                               return_value={"pull": {}, "push": {}}) as full:
+            out = self.mod.run_once()
+        self.assertEqual(out, {"pull": {}, "push": {}})
+        full.assert_called_once()
+        self.assertIsNone(server._lock_holder_pid())     # released again
+
+    def test_busy_cycle_is_skipped_instead_of_writing(self):
+        server.LOCK_FILE.write_text(str(os.getppid()))
+        with mock.patch.object(server, "full_sync",
+                               side_effect=AssertionError("must not write")) as full:
+            out = self.mod.run_once()
+        self.assertIn("skipped", out)
+        full.assert_not_called()
+        self.assertEqual(server._lock_holder_pid(), os.getppid())
+
+
+if __name__ == "__main__":
+    unittest.main()

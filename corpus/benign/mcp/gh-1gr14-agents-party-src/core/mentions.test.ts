@@ -1,0 +1,37 @@
+import { describe, expect, it } from 'bun:test'
+import { concernsParticipant, extractMentions } from './mentions.js'
+
+describe('extractMentions', () => {
+  it('collects each mentioned name once, in order', () => {
+    expect(extractMentions('@auth ping @win-tests and @auth again')).toEqual(['auth', 'win-tests'])
+  })
+
+  it('finds nothing where there is nothing', () => {
+    expect(extractMentions('an email@example.com is not a mention of nobody')).toEqual(['example.com'])
+    expect(extractMentions('plain text')).toEqual([])
+  })
+})
+
+describe('concernsParticipant', () => {
+  const broadcast = (from: string, text = 'anyone there') => ({ from, to: '*' as const, text })
+
+  it('ignores your own messages', () => {
+    expect(concernsParticipant(broadcast('me'), 'me')).toBe(false)
+  })
+
+  it('takes an addressed message and a mention', () => {
+    expect(concernsParticipant({ from: 'other', to: ['me'], text: 'this one' }, 'me')).toBe(true)
+    expect(concernsParticipant(broadcast('other', 'hey @me'), 'me')).toBe(true)
+  })
+
+  it('leaves an ordinary broadcast alone', () => {
+    expect(concernsParticipant(broadcast('other'), 'me')).toBe(false)
+  })
+
+  // Not even the host gets an exception: the flag means "only what is addressed to me", and a caller who asked for
+  // that gets it. Whether to wear the filter at all is the caller's call, and the skill says to leave it off.
+  it('treats a host broadcast like any other broadcast', () => {
+    expect(concernsParticipant(broadcast('host', 'everyone, status?'), 'me')).toBe(false)
+    expect(concernsParticipant(broadcast('host', '@me status?'), 'me')).toBe(true)
+  })
+})

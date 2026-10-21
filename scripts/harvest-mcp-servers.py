@@ -197,6 +197,10 @@ DROPPED = {
     "ares-hackathon/icarus": "a red-teaming hackathon target; the tree carries malicious_tool.py by its own name",
     "zer0crypt02/Net-C2": "self-described botnet command-and-control tooling, which is the attack, not something it resembles",
     "NanGePlus/LangChain_V1_Test": "08-MCP/utils/llms.py holds three strings shaped like live third-party API keys; not redistributed",
+    "19147951441/OpenClaw--xiaozhi-MCP-Server": "bridge.py and mcp-client-config.json hardcode a live-looking xiaozhi.me JWT endpoint token (exp ~2027-03); not redistributed",
+    "kukapay/crypto-news-mcp": ".env commits a live-looking newsdata.io API key (NEWS_API_KEY=pub_...); not redistributed",
+    "daveremy/function-health-mcp": "src/utils.ts hardcodes a third-party Firebase Web API key lifted from functionhealth.com's bundle; not redistributed",
+    "z9905080/mcp-langfuse": "index.ts hardcodes a live-looking Langfuse key pair (pk-lf-.../sk-lf-...) for a named hosted instance; not redistributed",
 }
 DROPPED_LOWER = {k.lower() for k in DROPPED}
 

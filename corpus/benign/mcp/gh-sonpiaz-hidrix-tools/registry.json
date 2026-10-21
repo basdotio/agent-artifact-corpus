@@ -1,0 +1,401 @@
+{
+  "name": "hidrix-tools",
+  "version": "2.0.0",
+  "description": "MCP tool server that gives any AI agent the ability to search, scrape, and analyze content across the internet.",
+  "repository": "https://github.com/sonpiaz/hidrix-tools",
+  "protocol": "mcp",
+  "transports": ["stdio", "streamable-http"],
+  "integrations": [
+    "claude-code",
+    "cursor",
+    "windsurf",
+    "continue",
+    "pi",
+    "openclaw",
+    "hermes",
+    "cursor",
+    "codex"
+  ],
+  "tools": [
+    {
+      "name": "web_search",
+      "category": "search",
+      "description": "Search the web using Brave Search. Returns titles, URLs, and descriptions.",
+      "provider": "Brave Search",
+      "cost": "free (2000/month)",
+      "envVars": [
+        "BRAVE_API_KEY"
+      ],
+      "chain": {
+        "suggested_next": [
+          "web_fetch"
+        ],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "web_fetch",
+      "category": "scrape",
+      "description": "Fetch a URL and extract readable content as markdown. Extracts metadata (author, date, tags). Handles X/Twitter URLs specially.",
+      "provider": "Mozilla Readability + GetXAPI",
+      "cost": "free",
+      "envVars": [],
+      "chain": {
+        "suggested_next": [
+          "content_analyzer"
+        ],
+        "feeds_from": [
+          "web_search",
+          "x_search",
+          "reddit_search"
+        ]
+      }
+    },
+    {
+      "name": "x_search",
+      "category": "search",
+      "description": "Search X/Twitter posts with full engagement data (likes, retweets, replies, views). Supports advanced operators.",
+      "provider": "GetXAPI / RapidAPI",
+      "cost": "$0.001/call (GetXAPI) or RapidAPI subscription",
+      "envVars": [
+        "GETXAPI_KEY"
+      ],
+      "chain": {
+        "suggested_next": [
+          "x_thread_reader",
+          "x_user_posts",
+          "content_scorer"
+        ],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "x_thread_reader",
+      "category": "scrape",
+      "description": "Read full X/Twitter threads, articles, and tweet replies. Detects multi-tweet threads and assembles in order.",
+      "provider": "GetXAPI",
+      "cost": "$0.003/thread (~3 API calls)",
+      "envVars": [
+        "GETXAPI_KEY"
+      ],
+      "chain": {
+        "suggested_next": [
+          "content_analyzer"
+        ],
+        "feeds_from": [
+          "x_search"
+        ]
+      }
+    },
+    {
+      "name": "x_user_posts",
+      "category": "search",
+      "description": "Get recent posts from a specific X/Twitter user with full engagement data.",
+      "provider": "GetXAPI",
+      "cost": "$0.001/call",
+      "envVars": [
+        "GETXAPI_KEY"
+      ],
+      "chain": {
+        "suggested_next": [
+          "content_scorer",
+          "content_analyzer"
+        ],
+        "feeds_from": [
+          "x_search"
+        ]
+      }
+    },
+    {
+      "name": "reddit_search",
+      "category": "search",
+      "description": "Search Reddit posts with full content and engagement data. Filter by subreddit, sort, time range.",
+      "provider": "RapidAPI",
+      "cost": "RapidAPI subscription",
+      "envVars": [
+        "RAPIDAPI_KEY",
+        "REDDIT_SEARCH_URL",
+        "REDDIT_API_HOST"
+      ],
+      "chain": {
+        "suggested_next": [
+          "reddit_thread_reader",
+          "content_scorer"
+        ],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "reddit_thread_reader",
+      "category": "scrape",
+      "description": "Read full Reddit post with comment tree. Uses free Reddit JSON API \u2014 no API key needed.",
+      "provider": "Reddit JSON API",
+      "cost": "free",
+      "envVars": [],
+      "chain": {
+        "suggested_next": [
+          "content_analyzer"
+        ],
+        "feeds_from": [
+          "reddit_search",
+          "reddit_subreddit_top"
+        ]
+      }
+    },
+    {
+      "name": "reddit_subreddit_top",
+      "category": "search",
+      "description": "Get top posts from a specific subreddit by time range. Free Reddit JSON API.",
+      "provider": "Reddit JSON API",
+      "cost": "free",
+      "envVars": [],
+      "chain": {
+        "suggested_next": [
+          "reddit_thread_reader",
+          "content_scorer"
+        ],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "facebook_scraper",
+      "category": "scrape",
+      "description": "Scrape Facebook groups, pages, keyword search, or Meta Ad Library. 4 modes: group, page, search, ads.",
+      "provider": "Apify + Meta Ad Library API",
+      "cost": "$1.50-5/1000 posts (Apify) or free (ads mode)",
+      "envVars": [
+        "APIFY_API_TOKEN"
+      ],
+      "chain": {
+        "suggested_next": [
+          "content_scorer",
+          "content_analyzer"
+        ],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "content_scorer",
+      "category": "analyze",
+      "description": "Score and rank posts by weighted engagement with time-decay. Input: JSON array of posts.",
+      "provider": "built-in",
+      "cost": "free",
+      "envVars": [],
+      "chain": {
+        "suggested_next": [
+          "content_analyzer"
+        ],
+        "feeds_from": [
+          "facebook_scraper",
+          "x_search",
+          "x_user_posts",
+          "reddit_search",
+          "reddit_subreddit_top"
+        ]
+      }
+    },
+    {
+      "name": "content_analyzer",
+      "category": "analyze",
+      "description": "Platform-aware content analysis: intent detection, topic clusters, format patterns, timing trends, author leaderboard. Auto-detects TikTok/Instagram/Facebook/X/LinkedIn.",
+      "provider": "built-in",
+      "cost": "free",
+      "envVars": [],
+      "chain": {
+        "suggested_next": [],
+        "feeds_from": [
+          "content_scorer",
+          "facebook_scraper",
+          "instagram_scraper",
+          "tiktok_search",
+          "x_search",
+          "x_user_posts",
+          "reddit_search",
+          "linkedin_search",
+          "linkedin_profile"
+        ]
+      }
+    },
+    {
+      "name": "similarweb_traffic",
+      "category": "intel",
+      "description": "Get website traffic analytics \u2014 rank, visits, engagement, traffic sources.",
+      "provider": "RapidAPI (SimilarWeb)",
+      "cost": "RapidAPI subscription",
+      "envVars": [
+        "SIMILAR_WEB_RAPIDAPI_KEY",
+        "SIMILAR_WEB_URL",
+        "SIMILAR_WEB_API_HOST"
+      ],
+      "chain": {
+        "suggested_next": [],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "youtube_search",
+      "category": "search",
+      "description": "Search YouTube videos. Returns titles, channels, URLs, and descriptions.",
+      "provider": "RapidAPI",
+      "cost": "RapidAPI subscription",
+      "envVars": [
+        "RAPIDAPI_KEY"
+      ],
+      "chain": {
+        "suggested_next": [
+          "web_fetch"
+        ],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "tiktok_search",
+      "category": "search",
+      "description": "Search TikTok videos, user profiles, hashtags, or get video details. Full stats: plays, likes, comments, shares, saves, duration, music, hashtags.",
+      "provider": "RapidAPI (tiktok-api23)",
+      "cost": "RapidAPI subscription",
+      "envVars": [
+        "RAPIDAPI_KEY"
+      ],
+      "modes": ["search", "user_posts", "hashtag", "video_detail"],
+      "chain": {
+        "suggested_next": [
+          "content_scorer",
+          "content_analyzer"
+        ],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "instagram_scraper",
+      "category": "scrape",
+      "description": "Scrape Instagram profiles, hashtags, or search. Returns posts with likes, comments, views, content type (image/video/carousel/reel), and hashtags.",
+      "provider": "Apify",
+      "cost": "$1.50-5/1000 posts (Apify)",
+      "envVars": [
+        "APIFY_API_TOKEN"
+      ],
+      "modes": ["profile", "hashtag", "search"],
+      "chain": {
+        "suggested_next": [
+          "content_scorer",
+          "content_analyzer"
+        ],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "linkedin_search",
+      "category": "search",
+      "description": "Search LinkedIn posts by keyword with engagement data. No login needed.",
+      "provider": "Apify (datadoping/linkedin-posts-search-scraper)",
+      "cost": "$1.20/1000 posts",
+      "envVars": [
+        "APIFY_API_TOKEN"
+      ],
+      "chain": {
+        "suggested_next": [
+          "content_scorer",
+          "content_analyzer"
+        ],
+        "feeds_from": []
+      }
+    },
+    {
+      "name": "linkedin_profile",
+      "category": "search",
+      "description": "Get recent posts from a LinkedIn profile with engagement data. No login needed.",
+      "provider": "Apify (data-slayer/linkedin-profile-posts-scraper)",
+      "cost": "$15/1000 posts",
+      "envVars": [
+        "APIFY_API_TOKEN"
+      ],
+      "chain": {
+        "suggested_next": [
+          "content_scorer",
+          "content_analyzer"
+        ],
+        "feeds_from": [
+          "linkedin_search"
+        ]
+      }
+    }
+  ],
+  "chains": {
+    "content_research": {
+      "description": "Research trending content across platforms, rank by engagement, analyze patterns",
+      "flow": [
+        "x_search \u2192 content_scorer \u2192 content_analyzer"
+      ],
+      "alt_sources": [
+        "reddit_subreddit_top",
+        "facebook_scraper",
+        "instagram_scraper",
+        "youtube_search",
+        "tiktok_search"
+      ]
+    },
+    "competitive_intel": {
+      "description": "Analyze competitor content strategy and ad spend",
+      "flow": [
+        "facebook_scraper(ads) \u2192 content_analyzer"
+      ],
+      "alt_sources": [
+        "x_user_posts",
+        "instagram_scraper(profile)",
+        "tiktok_search(user_posts)",
+        "similarweb_traffic"
+      ]
+    },
+    "deep_read": {
+      "description": "Find content \u2192 read in full \u2192 analyze",
+      "flow": [
+        "x_search \u2192 x_thread_reader \u2192 content_analyzer"
+      ],
+      "alt_sources": [
+        "reddit_search \u2192 reddit_thread_reader",
+        "web_search \u2192 web_fetch"
+      ]
+    },
+    "linkedin_research": {
+      "description": "Research LinkedIn thought leaders and trending content",
+      "flow": [
+        "linkedin_search \u2192 linkedin_profile \u2192 content_scorer \u2192 content_analyzer"
+      ],
+      "alt_sources": [
+        "x_search",
+        "web_search"
+      ]
+    },
+    "tiktok_research": {
+      "description": "Research TikTok trends, creators, and hashtags with full engagement data",
+      "flow": [
+        "tiktok_search \u2192 content_scorer \u2192 content_analyzer"
+      ],
+      "alt_sources": [
+        "tiktok_search(user_posts)",
+        "tiktok_search(hashtag)"
+      ]
+    },
+    "instagram_research": {
+      "description": "Research Instagram profiles, hashtags, and content patterns",
+      "flow": [
+        "instagram_scraper \u2192 content_scorer \u2192 content_analyzer"
+      ],
+      "alt_sources": [
+        "instagram_scraper(profile)",
+        "instagram_scraper(hashtag)"
+      ]
+    },
+    "cross_platform_analysis": {
+      "description": "Compare content performance across TikTok, Instagram, and Facebook",
+      "flow": [
+        "tiktok_search + instagram_scraper + facebook_scraper \u2192 content_analyzer"
+      ],
+      "alt_sources": [
+        "x_search",
+        "linkedin_search"
+      ]
+    }
+  }
+}

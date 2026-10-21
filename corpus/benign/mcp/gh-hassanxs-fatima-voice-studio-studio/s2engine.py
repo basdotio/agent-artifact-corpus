@@ -146,22 +146,26 @@ class S2Server:
             raise S2Error("S2 Pro's engine part for this graphics card is missing. Open Models and click Get it.")
         gguf = Path(self.cfg["models_dir"]).resolve() / config.MODELS[model]["files"][0]
         self.port = _free_port()
-        # A card with less memory than the model needs runs it on the CPU: s2.cpp's own "auto" still puts all 36
-        # layers on the card and runs out of memory, and on a 2 GB card (Quadro M1000M) 12 layers on the card were
-        # slower than none.
-        gpu = hardware.main_gpu(hardware.detect())
-        on_cpu = bool(gpu) and 0 < gpu["vram_gb"] < config.MODELS[model].get("vram_gb", 0)
+        # A card with less memory than the model needs (vram_gb counts the audio codec on the card too): the codec
+        # (about 1.9 GB plus its work buffer) goes to the CPU and as many of the 36 layers as fit to the card. s2.cpp's
+        # own "auto" still puts all 36 on the card and runs out of memory. Fewer than half on the card is slower than
+        # none (12 layers: Quadro M1000M on Vulkan, Quadro T2000 on CUDA), so then it all runs on the CPU. Measured on
+        # the T2000 (4 GB, Q6): CPU 9.9x slower than real time, 20 layers 4.4x, all 36 + codec on the CPU 3.8x.
+        layers, split = split_layers(hardware.main_gpu(hardware.detect()), config.MODELS[model].get("vram_gb", 0), gguf)
+        on_cpu = layers == 0
         args = [str(exe), "--server", "-H", "127.0.0.1", "-P", str(self.port), "--model", str(gguf),
-                "--tokenizer", str(folder / "tokenizer.json"), "--gpu-layers", "0" if on_cpu else "36",
-                "--log-level", "info"]
+                "--tokenizer", str(folder / "tokenizer.json"), "--gpu-layers", str(layers), "--log-level", "info"]
         # s2.cpp's Metal backend (this build) has no PAD op, which the audio codec's decode path needs: the
         # codec stays on the CPU with --codec-cpu while the transformer still runs on Metal.
         if on_cpu:
             args += ["--metal", "--codec-cpu"] if engine == "metal" else ["--cuda" if engine == "cuda" else "--vulkan", "-1"]
-            log.info("S2 Pro runs on the CPU: the graphics card has %s GB", gpu["vram_gb"])
+            log.info("S2 Pro runs on the CPU: the graphics card is too small for half of it")
         else:
             args += (["--metal", "--codec-cpu"] if engine == "metal"
                      else ["--cuda", "0"] if engine == "cuda" else ["--vulkan", str(device)])
+            if split and engine != "metal":
+                args.append("--codec-cpu")
+                log.info("S2 Pro: %d of 36 layers on the graphics card, the audio codec on the CPU", layers)
         env = os.environ.copy()
         if engine == "cuda":  # cuBLAS and cudart come from the voice engine's folder
             env["PATH"] = str(config.engine_dir(self.cfg, "cuda")) + os.pathsep + env.get("PATH", "")
@@ -334,6 +338,19 @@ class S2Server:
             raise S2Error(f"S2 Pro couldn't speak this part: {e}") from e
 
 
+def split_layers(gpu: dict | None, need_gb: float, gguf: Path) -> tuple[int, bool]:
+    """How many of S2 Pro's 36 layers go to the graphics card, and whether the audio codec stays on the CPU."""
+    if not gpu or not gpu.get("vram_gb") or gpu["vram_gb"] >= need_gb:
+        return 36, False
+    try:
+        size_gb = gguf.stat().st_size / 1024**3
+    except OSError:
+        return 0, True
+    per_layer = size_gb * 0.79 / 36  # the layers are about 79% of the file (Q6: 3.57 GB of 4.53)
+    layers = min(36, int((gpu["vram_gb"] - 0.5) / per_layer))  # 0.5 GB for the KV cache and work buffers
+    return (layers if layers >= 18 else 0), True
+
+
 def _pieces(text: str) -> list[str]:
     """A part cut at sentences into pieces of about VULKAN_PIECE; a few words left over join their neighbour."""
     out: list[str] = []
@@ -358,15 +375,15 @@ def _join(clips: list[np.ndarray], sr: int) -> np.ndarray:
     return np.concatenate([c * float(np.clip(target / x, 0.5, 2.0)) if x > 0 else c for c, x in zip(clips, levels)])
 
 
-def transcript(cfg: dict, clip: Path) -> str:
-    """What the voice's clip says (s2.cpp needs it to clone the voice): from voice.json, else heard by Whisper once
-    and kept there."""
+def transcript(cfg: dict, clip: Path, model: str = "S2 Pro") -> str:
+    """What the voice's clip says (s2.cpp and omnivoice.cpp need it to clone the voice): from voice.json, else heard
+    by Whisper once and kept there. `model` names the voice model in the messages."""
     meta_path = Path(clip).parent / "voice.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
     if meta.get("transcript"):
         return meta["transcript"]
     if not subtitles.whisper_available(cfg):
-        raise S2Error("S2 Pro needs to know what the voice's clip says: download a Whisper model on Models, or type "
+        raise S2Error(f"{model} needs to know what the voice's clip says: download a Whisper model on Models, or type "
                       "it in the voice's Edit dialog.")
     words = subtitles.transcript(subtitles.run_whisper(cfg, Path(clip), meta.get("language"))).strip()
     if not words:
@@ -376,5 +393,5 @@ def transcript(cfg: dict, clip: Path) -> str:
         tmp = meta_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(meta_path)
-    log.info("Transcribed the clip of %s for S2 Pro", meta.get("name") or clip)
+    log.info("Transcribed the clip of %s for %s", meta.get("name") or clip, model)
     return words

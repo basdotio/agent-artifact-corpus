@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>早起不痛苦的 3 个小方法 · 竖屏（video-gaga · Pop Collage）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Noto+Sans+SC:wght@700;900&family=Unbounded:wght@700;900&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   POP COLLAGE — vertical social short, cut paper on flat colour.
+   Three primaries + cream + ink. Every shape is a sticker: ink outline, hard
+   offset shadow, and it *lands* on a beat with a snappy spring. Type never
+   bounces: words land as they are said. Each tip owns one field colour; the
+   signature transition is a sweep of the palette (stripes). One hit, on the
+   recap — the music breathes right before it.
+   ============================================================================= */
+const { ease, clamp, lerp, fx, draw, color } = CV;
+
+// === THEME ===================================================================
+const T = {
+  yellow: '#FFC93C',
+  red: '#FF5A36',
+  blue: '#2D5BFF',
+  cream: '#FFF6E9',
+  ink: '#1A1A1A',
+  zh: '"ZCOOL KuaiLe", "Noto Sans SC", sans-serif',     // rounded display
+  heavy: '"Noto Sans SC", "PingFang SC", sans-serif',    // strong body
+  num: '"Unbounded", "Noto Sans SC", sans-serif',        // numerals, Latin
+};
+const F = (w, px, fam) => `${w} ${px}px ${fam}`;
+const L = 110; // left margin; content stays left of x = 950 (platform UI on the right)
+
+// springs: shapes land with a small overshoot; stickers with a little more
+const snap = CV.spring(CV.spring.presets.snappy);
+const boing = CV.spring({ stiffness: 260, damping: 15 });
+const land = (sp, dt) => (dt <= 0 ? 0 : sp(dt));
+
+// === KIT: cut paper ==========================================================
+// A sticker: hard ink shadow, flat fill, ink outline. k = scale (spring), rot = tilt.
+function sticker(ctx, x, y, k, rot, shape, fill, o = {}) {
+  if (k <= 0.001) return;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.scale(k, k);
+  const sh = o.shadow ?? 12;
+  ctx.save();
+  ctx.translate(sh, sh);
+  shape(ctx);
+  ctx.fillStyle = T.ink;
+  ctx.fill();
+  ctx.restore();
+  shape(ctx);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.lineWidth = o.line ?? 7;
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = T.ink;
+  ctx.stroke();
+  if (o.inner) o.inner(ctx);
+  ctx.restore();
+}
+const circle = (r) => (c) => { c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); };
+const box = (w, h, r) => (c) => draw.roundRect(c, -w / 2, -h / 2, w, h, r);
+const star = (r, n = 5, k = 0.5) => (c) => {
+  c.beginPath();
+  for (let i = 0; i < n * 2; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / n, rr = i % 2 ? r * k : r;
+    c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  c.closePath();
+};
+// crescent moon, horns to the right (circle minus an offset circle)
+const crescent = (r, d = r * 0.9) => (c) => {
+  const th = Math.atan2(Math.sqrt(r * r - (d * d) / 4), d / 2);
+  c.beginPath();
+  c.arc(0, 0, r, th, -th);
+  c.arc(d, 0, r, th - Math.PI, Math.PI - th, true);
+  c.closePath();
+};
+const bookmark = (w, h) => (c) => {
+  c.beginPath();
+  c.moveTo(-w / 2, -h / 2); c.lineTo(w / 2, -h / 2); c.lineTo(w / 2, h / 2);
+  c.lineTo(0, h / 2 - w * 0.4); c.lineTo(-w / 2, h / 2); c.closePath();
+};
+
+// === EXAMPLE: flip clock =====================================================
+// A clock ticking over (6:59 → 7:00): each changed digit rolls up one step in
+// its own mask, rightmost first — like a flip clock, centred on x.
+function tickOver(ctx, from, to, x, y, lt) {
+  const a = Array.from(from), b = Array.from(to);
+  const ws = b.map((ch) => ctx.measureText(ch).width), total = ws.reduce((p, w) => p + w, 0);
+  const size = parseFloat(ctx.font.match(/(\d+)px/)[1]);
+  let cx = x - total / 2;
+  ctx.save();
+  ctx.textAlign = 'left';
+  b.forEach((ch, i) => {
+    const q = a[i] === ch ? 1 : ease.standard(clamp((lt - (b.length - 1 - i) * 0.05) / 0.28));
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cx - 4, y - size * 0.86, ws[i] + 8, size * 1.04);
+    ctx.clip();
+    if (q < 1) ctx.fillText(a[i], cx, y - q * size);
+    if (q > 0) ctx.fillText(ch, cx, y + (1 - q) * size);
+    ctx.restore();
+    cx += ws[i];
+  });
+  ctx.restore();
+}
+
+// === KIT: ribbons and halftone ===============================================
+// A drawn-on wavy line (cut-paper ribbon).
+function squiggle(ctx, x, y, w, amp, waves, p, col, lw = 18) {
+  const pts = [];
+  for (let i = 0; i <= 64; i++) { const k = i / 64; pts.push([x + k * w, y + Math.sin(k * waves * Math.PI * 2) * amp]); }
+  ctx.strokeStyle = col;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  draw.drawOn(ctx, pts, p);
+}
+
+// Halftone corner: printed dots shrinking away from the corner.
+function halftone(ctx, x0, y0, cols, rows, gap, col, p, flip = 1) {
+  ctx.fillStyle = col;
+  for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+    const k = 1 - (i + j) / (cols + rows - 1);
+    const q = ease.outCubic(clamp(p * 1.6 - (1 - k) * 0.6));
+    const r = gap * 0.46 * k * q;
+    if (r < 0.5) continue;
+    ctx.beginPath();
+    ctx.arc(x0 + flip * i * gap, y0 + j * gap, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// === EXAMPLE: numbered tip cards =============================================
+// Number badge for a tip: a sticker circle that lands on the scene's first beat.
+function badge(ctx, s, n, fill, ink) {
+  const k = land(boing, s.t - s.onBeat(0) + 0.05) * (1 - s.out(0.25, ease.exit, 0.3));
+  sticker(ctx, L + 80, 330, k, -0.12, circle(88), fill, {
+    inner(c) {
+      c.font = F(900, 104, T.num);
+      c.textAlign = 'center';
+      c.fillStyle = ink;
+      c.fillText(String(n), 0, 38);
+    },
+  });
+}
+
+// Title + subline for a tip, each word landing as it is spoken.
+function tipText(ctx, s, title, sub, inkCol, markCol, markWord) {
+  const out = s.out(0.35, ease.exit, 0.3);
+  ctx.textAlign = 'left';
+  ctx.font = F(400, 118, T.zh);
+  ctx.fillStyle = inkCol;
+  fx.wordReveal(ctx, title, L, 590, s.t, { sync: s, dur: 0.35, rise: 0.3, exit: out });
+  ctx.font = F(900, 66, T.heavy);
+  // marker swipe behind the key word of the subline, right after it is said
+  if (markWord) {
+    const pre = sub.slice(0, sub.indexOf(markWord));
+    const x = L + ctx.measureText(pre).width, w = ctx.measureText(markWord).width;
+    fx.highlight(ctx, x - 10, 640, w + 20, 82, ease.inOutCubic(clamp((s.t - s.when(markWord, 2) - 0.2) / 0.35)) * (1 - out), { color: markCol, radius: 12, skew: -0.08 });
+  }
+  ctx.fillStyle = inkCol;
+  fx.wordReveal(ctx, sub, L, 705, s.t, { sync: s, dur: 0.35, rise: 0.3, exit: out });
+}
+
+// === VIDEO ===================================================================
+CV.create({
+  width: 1080, height: 1920, fps: 30,
+  background: T.yellow,
+  lang: 'zh-CN',
+  tail: 0.25, // ≈0.5 s of air after each line's last syllable: social pace
+  // the score designed for this video: upbeat and colourful: a vi-IV-I-V loop, syncopated pluck chords, claps, a bouncing bass
+  music: {
+    bpm: 116, seed: 7, key: 'C', mode: 'major', progression: [5, 3, 0, 4],
+    layers: [
+      { name: 'pad', inst: 'pad', notes: 'chord', pattern: 'X---', vel: 0.04, cutoff: 1300, attack: 0.3 },
+      { name: 'chops', inst: 'pluck', notes: 'chord', pattern: 'X..x..x...x..x..', gate: 2, vel: 0.075, bright: 0.75, decay: 0.99, from: 0.2 },
+      { name: 'bass', inst: 'bass', octave: -1, pattern: 'XXXXXXXX', gate: 0.8, vel: 0.24, from: 0.35, to: 0.65 },
+      { name: 'bounce bass', inst: 'bass', octave: -1, notes: ['root', 'root^'], pattern: 'XXXXXXXX', gate: 0.8, vel: 0.24, from: 0.65 },
+      { name: 'kick (half)', inst: 'kick', pattern: 'X.X.', vel: 0.55, from: 0.5, to: 0.7 },
+      { name: 'kick', inst: 'kick', pattern: 'XXXX', vel: 0.55, from: 0.7 },
+      { name: 'clap', inst: 'clap', pattern: '.X.X', vel: 0.22, from: 0.5 },
+      { name: 'open hat', inst: 'openhat', pattern: '.X.X.X.X', vel: 0.05, from: 0.6 },
+    ],
+    lead: { inst: 'pluck', range: [72, 86], rhythm: 'rhythmic', vel: 0.15, bright: 0.9, decay: 0.993, echo: 0.3 },
+  },
+  transition: { type: 'stripes', colors: [T.red, T.cream, T.blue], count: 3, direction: 'right', stagger: 0.3, duration: 0.5, ease: ease.inOutCubic },
+  subtitles: {
+    maxChars: 11,
+    style: { font: F(900, 62, T.heavy), color: T.cream, highlight: T.yellow, box: null, stroke: T.ink, strokeWidth: 12, y: 0.8 },
+  },
+  scenes: [
+    // --- 1. Hook: the alarm rings in the first second ----------------------------
+    {
+      id: 'hook', voiceDelay: 0.4, energy: 0.6, background: T.yellow,
+      captionStyle: { highlight: T.red }, // yellow on yellow would vanish
+      sfx: [{ at: 0.95, type: 'chime' }, { at: (s) => s.when('三招', 1.8), type: 'pop', gain: 0.8 }],
+      draw(ctx, s) {
+        const { W, t } = s;
+        const out = s.out(0.35, ease.exit, 0.3);
+        halftone(ctx, W - 40, 60, 9, 7, 46, color.rgba(T.red, 0.9), s.at(0, 0.8), -1);
+        squiggle(ctx, 70, 200, 300, 22, 2.5, ease.inOutCubic(clamp((t - s.onBeat(1)) / 0.6)), T.blue, 20);
+        // the alarm clock: lands on 6:59, ticks over to 7:00, then rings (a literal impact)
+        const ck = land(snap, t - 0.05) * (1 - out);
+        const sh = fx.shake(t, 0.95, 10, { decay: 0.22 });
+        const cx = 480 + sh.x, cy = 640 + sh.y;
+        for (const side of [-1, 1]) {
+          const bk = land(boing, t - 0.2);
+          sticker(ctx, cx + side * 190, cy - 175, bk * ck, side * 0.35, circle(52), T.red, { shadow: 9, line: 6 });
+        }
+        sticker(ctx, cx, cy, ck, -0.04 + sh.r * 10, box(640, 320, 70), T.cream, {
+          inner(c) {
+            c.font = F(900, 168, T.num);
+            c.fillStyle = T.ink;
+            tickOver(c, '6:59', '7:00', 0, 62, t - 0.6);
+          },
+        });
+        // ringing: three arcs either side, fanning out and fading
+        const rg = clamp((t - 0.95) / 1.0);
+        if (rg > 0 && rg < 1) {
+          ctx.strokeStyle = color.rgba(T.ink, (1 - rg) * (1 - out));
+          ctx.lineWidth = 9;
+          ctx.lineCap = 'round';
+          for (let i = 0; i < 3; i++) for (const side of [-1, 1]) {
+            const r = 360 + i * 46 + rg * 40;
+            const a0 = side > 0 ? -0.35 : Math.PI - 0.35;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, a0, a0 + 0.7);
+            ctx.stroke();
+          }
+        }
+        // headline: "早起总痛苦？" then "试试这 3 招" — the 3 gets its own red disc
+        ctx.font = F(400, 132, T.zh);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = T.ink;
+        fx.wordReveal(ctx, '早起太难？', L, 1080, t, { sync: s, dur: 0.35, rise: 0.3, exit: out });
+        const line2 = '试试这 3 招';
+        const units = CV.text.words(ctx, line2, L, 1250);
+        const three = units.find((u) => u.text === '3');
+        const t3 = s.when('三招', 1.8);
+        if (three) sticker(ctx, three.x + three.w / 2, 1250 - 46, land(boing, t - t3 + 0.05) * (1 - out), 0.08, circle(84), T.red, { shadow: 10 });
+        fx.wordReveal(ctx, line2, L, 1250, t, { sync: s, dur: 0.35, rise: 0.3, exit: out, colorFor: (w) => (w.text === '3' ? T.cream : null) });
+      },
+    },
+    // --- 2. Tip 1: the same wake-up time all week ------------------------------------
+    {
+      id: 'tip1', energy: 0.65, background: T.blue,
+      sfx: [{ at: '周末', type: 'pop' }],
+      draw(ctx, s) {
+        const { t } = s;
+        const out = s.out(0.3, ease.exit, 0.3);
+        halftone(ctx, 1040, 1840, 8, 6, 46, color.rgba(T.cream, 0.25), s.at(0.2, 0.8), -1);
+        badge(ctx, s, 1, T.yellow, T.ink);
+        tipText(ctx, s, '固定时间起床', '周末也一样', T.cream, color.rgba(T.red, 0.95), '周末');
+        // a week of cards, every one at 7:00; the weekend pair lights up on "周末"
+        const days = ['一', '二', '三', '四', '五', '六', '日'];
+        const tFix = s.when('固定', 0.8), tWk = s.when('周末', 2.2);
+        const cw = 104, gap = 12, y0 = 1150;
+        days.forEach((d, i) => {
+          const x = L + i * (cw + gap) + cw / 2;
+          const k = land(snap, t - tFix - 0.25 - i * 0.07) * (1 - out);
+          const wk = i >= 5 ? ease.standard(clamp((t - tWk) / 0.3)) : 0;
+          sticker(ctx, x, y0 + (i % 2) * 10, k, (i % 3 - 1) * 0.03, box(cw, 320, 22), color.mix(T.cream, T.yellow, wk), {
+            shadow: 8, line: 5,
+            inner(c) {
+              c.textAlign = 'center';
+              c.fillStyle = T.ink;
+              c.font = F(900, 46, T.heavy);
+              c.fillText(d, 0, -80);
+              c.font = F(700, 27, T.num);
+              c.fillText('7:00', 0, 30);
+              c.fillStyle = T.red;
+              c.beginPath(); c.arc(0, 110, 10, 0, Math.PI * 2); c.fill();
+            },
+          });
+        });
+        // sticker label over the weekend: "也 7:00"
+        const lk = land(boing, t - tWk - 0.3) * (1 - out);
+        const lx = L + 5 * (cw + gap) + cw + gap / 2;
+        sticker(ctx, lx, y0 - 240, lk, -0.1, box(240, 92, 46), T.red, {
+          shadow: 8,
+          inner(c) { c.font = F(900, 44, T.heavy); c.textAlign = 'center'; c.fillStyle = T.cream; c.fillText('也 7:00', 0, 16); },
+        });
+      },
+    },
+    // --- 3. Tip 2: open the curtains, let the light in --------------------------------
+    {
+      id: 'tip2', energy: 0.65, background: T.red,
+      sfx: [{ at: '拉开', type: 'swish' }, { at: '晒晒', type: 'shimmer', gain: 0.8 }],
+      draw(ctx, s) {
+        const { t } = s;
+        const out = s.out(0.3, ease.exit, 0.3);
+        halftone(ctx, 40, 1840, 8, 6, 46, color.rgba(T.yellow, 0.4), s.at(0.2, 0.8), 1);
+        badge(ctx, s, 2, T.cream, T.red);
+        tipText(ctx, s, '拉开窗帘', '晒晒太阳', T.cream, color.rgba(T.blue, 0.95), '太阳');
+        // the window: frame lands, curtains slide apart on "拉开", the sun rises on "晒晒"
+        const wx = 470, wy = 1160, ww = 680, wh = 560;
+        const fk = land(snap, t - s.onBeat(1)) * (1 - out);
+        const open = ease.standard(clamp((t - s.when('拉开', 1.4)) / 0.6));
+        const sun = ease.enter(clamp((t - s.when('晒晒', 2.4) + 0.1) / 0.7));
+        sticker(ctx, wx, wy, fk, 0, box(ww, wh, 28), T.cream, {
+          inner(c) {
+            c.save();
+            draw.roundRect(c, -ww / 2 + 22, -wh / 2 + 22, ww - 44, wh - 44, 14);
+            c.clip();
+            c.fillStyle = color.mix(T.cream, '#9FD3FF', open);
+            c.fillRect(-ww / 2, -wh / 2, ww, wh);
+            // sun + slowly turning rays
+            const sy = lerp(wh * 0.5, -wh * 0.06, sun);
+            if (sun > 0) {
+              c.strokeStyle = T.ink;
+              c.lineWidth = 9;
+              c.lineCap = 'round';
+              for (let i = 0; i < 10; i++) {
+                const a = (i / 10) * Math.PI * 2 + t * 0.35;
+                c.beginPath();
+                c.moveTo(Math.cos(a) * 128, sy + Math.sin(a) * 128);
+                c.lineTo(Math.cos(a) * (128 + 46 * sun), sy + Math.sin(a) * (128 + 46 * sun));
+                c.stroke();
+              }
+              c.fillStyle = T.yellow;
+              c.lineWidth = 7;
+              c.beginPath(); c.arc(0, sy, 96, 0, Math.PI * 2); c.fill(); c.stroke();
+            }
+            // curtains
+            for (const side of [-1, 1]) {
+              const cwid = (ww / 2 - 22) * lerp(1, 0.22, open);
+              const x = side < 0 ? -ww / 2 + 22 : ww / 2 - 22 - cwid;
+              c.fillStyle = T.blue;
+              c.fillRect(x, -wh / 2 + 22, cwid, wh - 44);
+              c.strokeStyle = color.rgba(T.ink, 0.35);
+              c.lineWidth = 4;
+              for (let k = 1; k < 4; k++) { const fxp = x + (cwid * k) / 4; c.beginPath(); c.moveTo(fxp, -wh / 2 + 22); c.lineTo(fxp, wh / 2 - 22); c.stroke(); }
+            }
+            c.restore();
+            // window cross bars
+            c.fillStyle = T.ink;
+            c.fillRect(-4, -wh / 2 + 22, 8, wh - 44);
+          },
+        });
+      },
+    },
+    // --- 4. Tip 3: phone down an hour before bed (the music dips here) -----------------
+    {
+      id: 'tip3', energy: 0.4, background: T.cream,
+      captionStyle: { color: T.ink, highlight: T.red, strokeWidth: 0 }, // cream field: ink captions
+      sfx: [{ at: '一小时', type: 'tick' }, { at: '不碰', type: 'pop' }],
+      draw(ctx, s) {
+        const { t } = s;
+        const out = s.out(0.3, ease.exit, 0.3);
+        halftone(ctx, 1040, 60, 8, 6, 46, color.rgba(T.blue, 0.22), s.at(0.2, 0.8), -1);
+        badge(ctx, s, 3, T.blue, T.cream);
+        tipText(ctx, s, '睡前一小时', '不碰手机', T.ink, color.rgba(T.yellow, 0.95), '手机');
+        // the phone lies down face-first on "放下"; a moon and "-1h" sticker arrive
+        const pk = land(snap, t - s.onBeat(1)) * (1 - out);
+        const down = ease.standard(clamp((t - s.when('不碰', 2.0)) / 0.55));
+        const px = 450, py = lerp(1160, 1330, down);
+        sticker(ctx, px, py, pk, lerp(-0.08, -Math.PI / 2 + 0.06, down), box(300, 540, 46), T.ink, {
+          shadow: 10,
+          inner(c) {
+            c.fillStyle = color.mix(T.blue, '#0E1A44', down);
+            draw.roundRect(c, -128, -240, 256, 480, 30);
+            c.fill();
+            // notifications fade with the screen
+            c.globalAlpha = 1 - down;
+            [[-150, T.cream], [-60, T.yellow], [30, T.cream]].forEach(([y, col], i) => {
+              c.fillStyle = col;
+              draw.roundRect(c, -104, y, 208 - i * 30, 62, 18);
+              c.fill();
+            });
+            c.globalAlpha = 1;
+          },
+        });
+        const hk = land(boing, t - s.when('一小时', 1.0) - 0.15) * (1 - out);
+        sticker(ctx, 780, 960, hk, 0.12, box(220, 96, 48), T.red, {
+          shadow: 8,
+          inner(c) { c.font = F(900, 48, T.num); c.textAlign = 'center'; c.fillStyle = T.cream; c.fillText('-1h', 0, 18); },
+        });
+        const mk = land(boing, t - s.when('手机', 2.4) - 0.1) * (1 - out);
+        sticker(ctx, 760, 1180, mk, -0.25, crescent(90), T.yellow, { shadow: 9 });
+        ctx.font = F(900, 52, T.num);
+        ctx.fillStyle = T.ink;
+        ctx.globalAlpha = clamp((t - s.when('手机', 2.4) - 0.4) / 0.4) * (1 - out);
+        ctx.fillText('z', 840, 1080);
+        ctx.font = F(900, 38, T.num);
+        ctx.fillText('z', 884, 1036);
+        ctx.globalAlpha = 1;
+      },
+    },
+    // --- 5. Recap: no voice, three stickers land one per beat (the one hit) ------------
+    {
+      id: 'recap', narration: false, beats: 5, energy: 0.85, background: T.yellow,
+      transition: { type: 'whip', direction: 'up', duration: 0.45, ease: ease.swift },
+      sfx: [{ at: (s) => s.onBeat(1), type: 'hit', gain: 0.8 }, { at: (s) => s.onBeat(2), type: 'pop' }, { at: (s) => s.onBeat(3), type: 'pop' }],
+      draw(ctx, s) {
+        const { t, W } = s;
+        const out = s.out(0.3, ease.exit, 0.3);
+        halftone(ctx, 40, 60, 9, 7, 46, color.rgba(T.blue, 0.85), s.at(0, 0.6), 1);
+        ctx.font = F(400, 96, T.zh);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = T.ink;
+        fx.lineReveal(ctx, ['早起 3 招'], L, 470, t - 0.1, { dur: 0.45, exit: out });
+        const items = [
+          ['1', '固定时间起床', T.blue, T.cream],
+          ['2', '拉开窗帘晒太阳', T.red, T.cream],
+          ['3', '睡前不碰手机', T.cream, T.ink],
+        ];
+        items.forEach(([n, label, fill, ink], i) => {
+          const k = land(boing, t - s.onBeat(i + 1) + 0.04) * (1 - out);
+          const y = 680 + i * 230;
+          sticker(ctx, 470, y, k, (i % 2 ? 1 : -1) * 0.035, box(760, 176, 88), fill, {
+            inner(c) {
+              c.fillStyle = ink;
+              c.beginPath(); c.arc(-290, 0, 56, 0, Math.PI * 2); c.fill();
+              c.font = F(900, 60, T.num);
+              c.textAlign = 'center';
+              c.fillStyle = fill;
+              c.fillText(n, -290, 22);
+              c.font = F(900, 66, T.heavy);
+              c.textAlign = 'left';
+              c.fillStyle = ink;
+              c.fillText(label, -200, 24);
+            },
+          });
+        });
+        // a star lands with the last item
+        sticker(ctx, 860, 1400, land(boing, t - s.onBeat(3) - 0.1) * (1 - out), 0.2, star(70), T.red, { shadow: 9 });
+        void W;
+      },
+    },
+    // --- 6. CTA: save it, try it tomorrow ------------------------------------------------
+    {
+      id: 'cta', tail: 0.9, energy: 0.7, background: T.blue,
+      sfx: [{ at: '收藏', type: 'shimmer' }],
+      draw(ctx, s) {
+        const { t } = s;
+        halftone(ctx, 1040, 1840, 8, 6, 46, color.rgba(T.yellow, 0.35), s.at(0.2, 0.8), -1);
+        squiggle(ctx, L, 470, 360, 20, 2.5, ease.inOutCubic(clamp((t - s.onBeat(0)) / 0.6)), T.yellow, 18);
+        const tSave = s.when('收藏', 0.5);
+        sticker(ctx, 300, 820, land(boing, t - tSave + 0.05), -0.12, bookmark(220, 290), T.yellow, {
+          inner(c) { sticker(c, 0, -20, 1, 0, star(52), T.red, { shadow: 0, line: 6 }); },
+        });
+        ctx.textAlign = 'left';
+        ctx.font = F(400, 150, T.zh);
+        ctx.fillStyle = T.cream;
+        fx.wordReveal(ctx, '收藏起来', L, 1170, t, { sync: s, dur: 0.35, rise: 0.3 });
+        ctx.font = F(900, 84, T.heavy);
+        ctx.fillStyle = T.yellow;
+        fx.wordReveal(ctx, '明天试试！', L, 1310, t, { sync: s, dur: 0.35, rise: 0.3 });
+        // a hand-cut arrow toward where the save button lives (bottom right)
+        ctx.strokeStyle = T.cream;
+        draw.arrow(ctx, 640, 900, 900, 1120, ease.inOutCubic(clamp((t - s.nextBeat(s.voiceEnd)) / 0.6)), { bend: -70, head: 30, width: 12 });
+      },
+    },
+  ],
+  // Print feel: a whisper of grain on the flat colour.
+  overlay(ctx, g) {
+    draw.grain(ctx, g.frame, 0.045);
+  },
+});
+</script>
+</body>
+</html>

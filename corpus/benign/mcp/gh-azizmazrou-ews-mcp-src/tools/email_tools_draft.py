@@ -1,0 +1,585 @@
+"""Draft email tools for EWS MCP Server."""
+import os
+import re
+from typing import Any, Dict
+from datetime import datetime
+from exchangelib import Message, Mailbox, FileAttachment, HTMLBody, Body
+
+from .base import BaseTool
+from .email_tools import (
+    extract_body_html,
+    clean_original_body_for_signature,
+    format_forward_header,
+    copy_attachments_to_message,
+)
+from ..models import SendEmailRequest
+from ..exceptions import ToolExecutionError
+from ..utils import (
+    format_success_response,
+    safe_get,
+    find_message_for_account,
+    ews_id_to_str,
+    attach_inline_files,
+    INLINE_ATTACHMENTS_SCHEMA,
+    escape_html,
+    format_body_for_html,
+    sanitize_html,
+)
+from ..body_format import compose_body, WRITE_FORMAT_SCHEMA as BODY_FORMAT_SCHEMA
+from .email_tools import add_reply_prefix, add_forward_prefix
+
+
+class CreateDraftTool(BaseTool):
+    """Tool for creating draft emails in the Drafts folder."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "create_draft",
+            "description": "Create a draft email in the Drafts folder for review before sending. The draft appears in OWA/Outlook and can be edited and sent manually.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "to": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Recipient email addresses"
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Email subject"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Email body (HTML supported)"
+                    },
+                    "cc": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "CC recipients (optional)"
+                    },
+                    "bcc": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "BCC recipients (optional)"
+                    },
+                    "importance": {
+                        "type": "string",
+                        "enum": ["Low", "Normal", "High"],
+                        "description": "Email importance level (optional)"
+                    },
+                    "attachments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Attachment file paths (optional)"
+                    },
+                    **INLINE_ATTACHMENTS_SCHEMA,
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Outlook categories to attach to the draft (Issue #114)."
+                    },
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to create draft on behalf of (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["to", "subject", "body"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Create draft email via EWS and save to Drafts folder."""
+        target_mailbox = kwargs.pop("target_mailbox", None)
+        categories = kwargs.pop("categories", None)
+        request = self.validate_input(SendEmailRequest, **kwargs)
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            email_body = request.body.strip()
+
+            # Strip CDATA wrapper if present
+            if email_body.startswith('<![CDATA[') and email_body.endswith(']]>'):
+                email_body = email_body[9:-3].strip()
+
+            if not email_body:
+                raise ToolExecutionError("Email body is empty after processing")
+
+            is_html = bool(re.search(r'<[^>]+>', email_body))
+
+            # Create message with appropriate body type
+            if is_html:
+                message = Message(
+                    account=account,
+                    subject=request.subject,
+                    body=HTMLBody(email_body),
+                    to_recipients=[Mailbox(email_address=email) for email in request.to],
+                    folder=account.drafts,
+                )
+            else:
+                message = Message(
+                    account=account,
+                    subject=request.subject,
+                    body=Body(email_body),
+                    to_recipients=[Mailbox(email_address=email) for email in request.to],
+                    folder=account.drafts,
+                )
+
+            # Add CC/BCC
+            if request.cc:
+                message.cc_recipients = [Mailbox(email_address=email) for email in request.cc]
+            if request.bcc:
+                message.bcc_recipients = [Mailbox(email_address=email) for email in request.bcc]
+
+            # Issue #114 — Outlook categories on the draft.
+            if categories:
+                message.categories = list(categories)
+
+            # Set importance
+            message.importance = request.importance.value
+
+            # Add file attachments
+            attachment_count = 0
+            if request.attachments:
+                for file_path in request.attachments:
+                    try:
+                        file_name = os.path.basename(file_path)
+                        with open(file_path, 'rb') as f:
+                            content = f.read()
+                            attachment = FileAttachment(name=file_name, content=content)
+                            message.attach(attachment)
+                            attachment_count += 1
+                    except FileNotFoundError:
+                        raise ToolExecutionError(f"Attachment file not found: {file_path}")
+                    except Exception as e:
+                        raise ToolExecutionError(f"Failed to attach file {file_path}: {e}")
+
+            # Add inline attachments
+            inline_count = attach_inline_files(message, kwargs.get("inline_attachments", []))
+            attachment_count += inline_count
+
+            # Save as draft instead of sending
+            message.save()
+
+            self.logger.info(f"Draft saved for {', '.join(request.to)} with {attachment_count} attachment(s)")
+
+            return format_success_response(
+                "Draft created successfully — check your Drafts folder in OWA/Outlook",
+                message_id=ews_id_to_str(message.id) if hasattr(message, 'id') else None,
+                created_time=datetime.now().isoformat(),
+                recipients=request.to,
+                subject=request.subject,
+                mailbox=mailbox
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to create draft: {e}")
+            raise ToolExecutionError(f"Failed to create draft: {e}")
+
+
+class CreateReplyDraftTool(BaseTool):
+    """Tool for creating reply drafts in the Drafts folder."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "create_reply_draft",
+            "description": "Create a reply draft in the Drafts folder for review before sending.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "The Exchange message ID of the email to reply to"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optional reply body to include in the draft"
+                    },
+                    "reply_all": {
+                        "type": "boolean",
+                        "description": "If true, create a reply-all draft; otherwise create a reply draft",
+                        "default": False
+                    },
+                    "attachments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "File paths to attach to the draft reply (optional)"
+                    },
+                    **INLINE_ATTACHMENTS_SCHEMA,
+                    "cc": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Additional CC recipients to add to the reply draft. "
+                            "These are saved on the draft as cc_recipients alongside "
+                            "the auto-derived to_recipients (sender, plus original "
+                            "to/cc when reply_all=true). Issue #119."
+                        )
+                    },
+                    "bcc": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Additional BCC recipients to add to the reply draft. "
+                            "Mirrors create_forward_draft for parity."
+                        )
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Outlook categories to attach to the reply draft (Issue #114)."
+                    },
+                    **BODY_FORMAT_SCHEMA,
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to create the draft on behalf of (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["message_id"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Create a reply draft via EWS and save it to Drafts."""
+        message_id = kwargs.get("message_id")
+        reply_all = kwargs.get("reply_all", False)
+        attachments = kwargs.get("attachments", [])
+        target_mailbox = kwargs.get("target_mailbox")
+        body = (kwargs.get("body") or "").strip()
+        body_format = kwargs.get("body_format", "html")
+        # Issue #119: caller-supplied cc/bcc were silently dropped on the
+        # saved draft. Now propagated alongside the auto-derived recipients.
+        extra_cc = kwargs.get("cc") or []
+        extra_bcc = kwargs.get("bcc") or []
+        categories = kwargs.get("categories")  # Issue #114
+
+        # Convert markdown/text bodies to HTML BEFORE the heuristic in
+        # format_body_for_html runs. Mirrors ReplyEmailTool/ForwardEmailTool.
+        if body and body_format != "html":
+            body, _ = compose_body(body, body_format)
+
+        if not message_id:
+            raise ToolExecutionError("message_id is required")
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            original_message = find_message_for_account(account, message_id)
+            original_subject = safe_get(original_message, "subject", "") or ""
+            # Use shared prefix helpers so we don't produce "RE: RE: ..." stacks.
+            reply_subject = add_reply_prefix(original_subject) if original_subject else "RE:"
+            original_sender = safe_get(original_message, "sender", None)
+            original_from_email = ""
+            if original_sender and hasattr(original_sender, "email_address"):
+                original_from_email = original_sender.email_address or ""
+
+            original_to = [
+                r.email_address
+                for r in (safe_get(original_message, "to_recipients", []) or [])
+                if r and hasattr(r, "email_address") and r.email_address
+            ]
+            original_cc = [
+                r.email_address
+                for r in (safe_get(original_message, "cc_recipients", []) or [])
+                if r and hasattr(r, "email_address") and r.email_address
+            ]
+
+            if reply_all:
+                seen = set()
+                reply_to_recipients = []
+                for email in [original_from_email] + original_to + original_cc:
+                    if not email or email == account.primary_smtp_address or email in seen:
+                        continue
+                    seen.add(email)
+                    reply_to_recipients.append(Mailbox(email_address=email))
+            else:
+                reply_to_recipients = [Mailbox(email_address=original_from_email)]
+
+            header = format_forward_header(original_message)
+            safe_from = escape_html(header.get("from", ""))
+            safe_to = escape_html(header.get("to", ""))
+            safe_cc = escape_html(header.get("cc", ""))
+            safe_sent = escape_html(header.get("sent", ""))
+            safe_subject = escape_html(header.get("subject", ""))
+
+            original_body_html = sanitize_html(extract_body_html(original_message))
+            original_body_html = clean_original_body_for_signature(original_body_html)
+
+            # Render user body safely: plain text gets HTML-escaped and newlines
+            # converted to <br/>; HTML goes through the lightweight sanitiser.
+            user_body_html = format_body_for_html(body)
+
+            headers_html = f'''<p style="font-size:11pt;font-family:Calibri,sans-serif;">
+<b>From:</b> {safe_from}<br/>
+<b>Sent:</b> {safe_sent}<br/>'''
+            if safe_to:
+                headers_html += f'''<b>To:</b> {safe_to}<br/>'''
+            if safe_cc:
+                headers_html += f'''<b>Cc:</b> {safe_cc}<br/>'''
+            headers_html += f'''<b>Subject:</b> {safe_subject}
+</p>'''
+
+            complete_body = f'''<div class="WordSection1">
+<p class="MsoNormal" style="font-size:11pt;font-family:Calibri,sans-serif;">{user_body_html}</p>
+</div>
+<div style="border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0in 0in 0in">
+{headers_html}
+</div>
+{original_body_html}'''
+
+            message = Message(
+                account=account,
+                subject=reply_subject,
+                body=HTMLBody(complete_body),
+                to_recipients=reply_to_recipients,
+                folder=account.drafts,
+            )
+
+            # Issue #119: persist caller-supplied cc/bcc on the draft.
+            # De-duplicate against to_recipients (already in seen) so a CC'd
+            # address does not also appear in TO when reply_all=True.
+            to_set = {r.email_address for r in reply_to_recipients}
+            cc_to_save = [Mailbox(email_address=e) for e in extra_cc if e and e not in to_set]
+            bcc_to_save = [Mailbox(email_address=e) for e in extra_bcc if e and e not in to_set]
+            if cc_to_save:
+                message.cc_recipients = cc_to_save
+            if bcc_to_save:
+                message.bcc_recipients = bcc_to_save
+
+            # Issue #114 — Outlook categories on the reply draft.
+            if categories:
+                message.categories = list(categories)
+
+            inline_count, _ = copy_attachments_to_message(original_message, message)
+            attachment_count = 0
+
+            for file_path in attachments:
+                try:
+                    file_name = os.path.basename(file_path)
+                    with open(file_path, "rb") as f:
+                        content = f.read()
+                    message.attach(FileAttachment(name=file_name, content=content))
+                    attachment_count += 1
+                except FileNotFoundError:
+                    raise ToolExecutionError(f"Attachment file not found: {file_path}")
+                except PermissionError:
+                    raise ToolExecutionError(f"Permission denied reading attachment: {file_path}")
+                except Exception as e:
+                    raise ToolExecutionError(f"Failed to attach file {file_path}: {e}")
+
+            inline_b64_count = attach_inline_files(message, kwargs.get("inline_attachments", []))
+            attachment_count += inline_b64_count
+            attachment_count += inline_count
+
+            message.save()
+            draft_message_id = ews_id_to_str(message.id)
+            reply_to = header.get("from", "")
+
+            self.logger.info(f"Reply draft saved for message {message_id} in mailbox: {mailbox}")
+
+            return format_success_response(
+                "Reply draft created successfully - check your Drafts folder in OWA/Outlook",
+                message_id=draft_message_id,
+                original_message_id=message_id,
+                original_subject=original_subject,
+                reply_subject=reply_subject,
+                reply_to=reply_to,
+                reply_all=reply_all,
+                # Issue #119: surface the additional recipients on the
+                # response so callers can sanity-check what landed.
+                cc=[mb.email_address for mb in (cc_to_save or [])],
+                bcc=[mb.email_address for mb in (bcc_to_save or [])],
+                attachments_count=attachment_count,
+                inline_attachments_preserved=inline_count,
+                created_time=datetime.now().isoformat(),
+                mailbox=mailbox
+            )
+
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to create reply draft: {e}")
+            raise ToolExecutionError(f"Failed to create reply draft: {e}")
+
+
+class CreateForwardDraftTool(BaseTool):
+    """Tool for creating forward drafts in the Drafts folder."""
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": "create_forward_draft",
+            "description": "Create a forward draft in the Drafts folder for review before sending.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "The Exchange message ID of the email to forward"
+                    },
+                    "to": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of recipient email addresses"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optional message to add before the forwarded content"
+                    },
+                    "cc": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "CC recipients (optional)"
+                    },
+                    "bcc": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "BCC recipients (optional)"
+                    },
+                    "attachments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional file paths to attach to the draft (optional)"
+                    },
+                    **INLINE_ATTACHMENTS_SCHEMA,
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Outlook categories to attach to the forward draft (Issue #114)."
+                    },
+                    **BODY_FORMAT_SCHEMA,
+                    "target_mailbox": {
+                        "type": "string",
+                        "description": "Email address to create the draft on behalf of (requires impersonation/delegate access)"
+                    }
+                },
+                "required": ["message_id", "to"]
+            }
+        }
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """Create a forward draft via EWS and save it to Drafts."""
+        message_id = kwargs.get("message_id")
+        to_recipients = kwargs.get("to", [])
+        body = (kwargs.get("body") or "").strip()
+        body_format = kwargs.get("body_format", "html")
+        cc_recipients = kwargs.get("cc", [])
+        bcc_recipients = kwargs.get("bcc", [])
+        attachments = kwargs.get("attachments", [])
+        target_mailbox = kwargs.get("target_mailbox")
+        categories = kwargs.get("categories")  # Issue #114
+
+        # Convert markdown/text bodies to HTML BEFORE the heuristic in
+        # format_body_for_html runs. Mirrors CreateReplyDraftTool.
+        if body and body_format != "html":
+            body, _ = compose_body(body, body_format)
+
+        if not message_id:
+            raise ToolExecutionError("message_id is required")
+        if not to_recipients:
+            raise ToolExecutionError("to recipients are required")
+
+        try:
+            account = self.get_account(target_mailbox)
+            mailbox = self.get_mailbox_info(target_mailbox)
+
+            original_message = find_message_for_account(account, message_id)
+            original_subject = safe_get(original_message, "subject", "") or ""
+            # Shared prefix helper avoids "FW: FW: ..." stacks.
+            forward_subject = add_forward_prefix(original_subject) if original_subject else "FW:"
+
+            header = format_forward_header(original_message)
+            safe_from = escape_html(header.get("from", ""))
+            safe_to = escape_html(header.get("to", ""))
+            safe_cc = escape_html(header.get("cc", ""))
+            safe_sent = escape_html(header.get("sent", ""))
+            safe_subject = escape_html(header.get("subject", ""))
+
+            original_body_html = sanitize_html(extract_body_html(original_message))
+            original_body_html = clean_original_body_for_signature(original_body_html)
+
+            user_body_html = format_body_for_html(body)
+
+            headers_html = f'''<p style="font-size:11pt;font-family:Calibri,sans-serif;">
+<b>From:</b> {safe_from}<br/>
+<b>Date:</b> {safe_sent}<br/>
+<b>Subject:</b> {safe_subject}<br/>'''
+            if safe_to:
+                headers_html += f'''<b>To:</b> {safe_to}<br/>'''
+            if safe_cc:
+                headers_html += f'''<b>Cc:</b> {safe_cc}<br/>'''
+            headers_html += "</p>"
+
+            complete_body = f'''<div class="WordSection1">
+<p class="MsoNormal" style="font-size:11pt;font-family:Calibri,sans-serif;">{user_body_html}</p>
+</div>
+<div style="border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0in 0in 0in">
+{headers_html}
+</div>
+{original_body_html}'''
+
+            message = Message(
+                account=account,
+                subject=forward_subject,
+                body=HTMLBody(complete_body),
+                to_recipients=[Mailbox(email_address=email) for email in to_recipients],
+                folder=account.drafts,
+            )
+
+            if cc_recipients:
+                message.cc_recipients = [Mailbox(email_address=email) for email in cc_recipients]
+            if bcc_recipients:
+                message.bcc_recipients = [Mailbox(email_address=email) for email in bcc_recipients]
+
+            # Issue #114 — Outlook categories on the forward draft.
+            if categories:
+                message.categories = list(categories)
+
+            inline_count, regular_count = copy_attachments_to_message(original_message, message)
+            original_attachment_count = inline_count + regular_count
+            additional_attachment_count = 0
+
+            for file_path in attachments:
+                try:
+                    file_name = os.path.basename(file_path)
+                    with open(file_path, "rb") as f:
+                        content = f.read()
+                    message.attach(FileAttachment(name=file_name, content=content))
+                    additional_attachment_count += 1
+                except FileNotFoundError:
+                    raise ToolExecutionError(f"Attachment file not found: {file_path}")
+                except PermissionError:
+                    raise ToolExecutionError(f"Permission denied reading attachment: {file_path}")
+                except Exception as e:
+                    raise ToolExecutionError(f"Failed to attach file {file_path}: {e}")
+
+            inline_b64_count = attach_inline_files(message, kwargs.get("inline_attachments", []))
+            additional_attachment_count += inline_b64_count
+
+            message.save()
+            draft_message_id = ews_id_to_str(message.id)
+
+            self.logger.info(f"Forward draft saved for message {message_id} in mailbox: {mailbox}")
+
+            return format_success_response(
+                "Forward draft created successfully - check your Drafts folder in OWA/Outlook",
+                message_id=draft_message_id,
+                original_message_id=message_id,
+                original_subject=original_subject,
+                forward_subject=forward_subject,
+                forwarded_to=to_recipients,
+                cc=cc_recipients if cc_recipients else None,
+                bcc=bcc_recipients if bcc_recipients else None,
+                attachments_included=original_attachment_count,
+                inline_attachments_preserved=inline_count,
+                additional_attachments=additional_attachment_count,
+                created_time=datetime.now().isoformat(),
+                mailbox=mailbox
+            )
+
+        except ToolExecutionError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to create forward draft: {e}")
+            raise ToolExecutionError(f"Failed to create forward draft: {e}")

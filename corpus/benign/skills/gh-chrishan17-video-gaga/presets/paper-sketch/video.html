@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>番茄工作法 · 手绘讲解（video-gaga · Paper Sketch）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Long+Cang&family=Caveat:wght@500;700&family=Noto+Sans+SC:wght@500&display=block" rel="stylesheet">
+</head>
+<body>
+<script src="build/narration.js"></script>
+<script src="../../runtime/video-gaga.js"></script>
+<script>
+/* =============================================================================
+   PAPER SKETCH — hand-drawn explainer on warm paper.
+   Lines draw on in the direction a hand would draw them, and "boil" (re-jitter)
+   on threes, like cel animation. Colour is pencil + one marker. Pages slide in
+   like sheets on a desk. Warm, slow, friendly; never slick.
+   Rhythm: fingerpicked 96 BPM acoustic bed. The hand starts drawing on the
+   first beat, the voice enters on the beat, and one music-only bar lets the
+   drawing close its loop before the last line.
+   ============================================================================= */
+const { ease, clamp, lerp, fx, draw, color, rand } = CV;
+
+// === THEME ===================================================================
+const T = {
+  paper: '#F1E9D8',
+  ink: '#2B2A28',
+  pencil: '#6E675C',
+  red: '#D1495B',
+  green: '#4F8A4B',
+  blue: '#3D6FB6',
+  marker: 'rgba(255, 216, 77, 0.75)',
+  title: '"ZCOOL KuaiLe", "Noto Sans SC", sans-serif',
+  hand: '"Long Cang", "ZCOOL KuaiLe", cursive',
+  latin: '"Caveat", cursive',
+};
+const F = (w, px, fam) => `${w} ${px}px ${fam}`;
+
+// === KIT: pencil, boil, wash =================================================
+// Boil: the jitter seed changes every 3 frames (12 fps at 30 fps output).
+const boil = (s, base) => base * 131 + Math.floor(s.frame / 3);
+
+// A pencil stroke drawn on progressively; double pass for a graphite feel.
+function pencil(ctx, pts, p, col = T.ink, width = 5) {
+  if (p <= 0) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = col;
+  ctx.lineWidth = width;
+  draw.drawOn(ctx, pts, p);
+  ctx.globalAlpha *= 0.35;
+  ctx.lineWidth = width * 0.5;
+  ctx.translate(1.5, 1);
+  draw.drawOn(ctx, pts, p);
+  ctx.restore();
+}
+const line = (s, seed, x1, y1, x2, y2, rough = 2) => draw.sketchLine(x1, y1, x2, y2, { seed: boil(s, seed), roughness: rough });
+const circle = (s, seed, x, y, r, rough = 3) => draw.sketchCircle(x, y, r, { seed: boil(s, seed), roughness: rough, steps: Math.max(36, Math.round(r / 3)) });
+
+// Watercolour-ish fill: offset translucent blobs, clipped to a wobbly circle.
+function wash(ctx, pts, col, p) {
+  if (p <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = 0.8 * p;
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => (i ? ctx.lineTo(x + 3, y + 2) : ctx.moveTo(x + 3, y + 2)));
+  ctx.fill();
+  ctx.restore();
+}
+
+// === EXAMPLE: the tomato =====================================================
+function tomato(ctx, s, cx, cy, r, t0, seed = 1) {
+  const lt = s.t - t0;
+  const body = circle(s, seed, cx, cy, r, Math.min(3.5, r * 0.018));
+  wash(ctx, body, T.red, clamp((lt - 0.5) / 0.5));
+  pencil(ctx, body, ease.inOutCubic(clamp(lt / 0.7)), T.ink, Math.max(3, r * 0.04));
+  // leaves + stem
+  const lp = clamp((lt - 0.6) / 0.5);
+  const lw = Math.max(3, r * 0.035);
+  pencil(ctx, line(s, seed + 2, cx, cy - r * 0.95, cx - r * 0.45, cy - r * 1.1, 1.5), lp, T.green, lw);
+  pencil(ctx, line(s, seed + 3, cx, cy - r * 0.95, cx + r * 0.45, cy - r * 1.12, 1.5), lp, T.green, lw);
+  pencil(ctx, line(s, seed + 4, cx, cy - r * 0.95, cx + r * 0.05, cy - r * 1.35, 1.5), lp, T.green, lw);
+}
+
+// === KIT: marker, arrows, paper, hand lettering ==============================
+function highlight(ctx, x, y, w, h, p) {
+  if (p <= 0) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = T.marker;
+  ctx.beginPath();
+  ctx.moveTo(x, y + 4);
+  ctx.lineTo(x + w * p, y);
+  ctx.lineTo(x + w * p - 6, y + h);
+  ctx.lineTo(x + 4, y + h - 3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function arrow(ctx, s, seed, x1, y1, x2, y2, p, col = T.pencil) {
+  const mid = [(x1 + x2) / 2 + (y2 - y1) * 0.15, (y1 + y2) / 2 - (x2 - x1) * 0.15];
+  const pts = [...line(s, seed, x1, y1, mid[0], mid[1], 2), ...line(s, seed + 1, mid[0], mid[1], x2, y2, 2)];
+  pencil(ctx, pts, p, col, 4);
+  if (p > 0.95) {
+    const a = Math.atan2(y2 - mid[1], x2 - mid[0]);
+    const hp = clamp((p - 0.95) / 0.05);
+    for (const d of [-0.5, 0.5]) pencil(ctx, line(s, seed + 5 + d, x2, y2, x2 - Math.cos(a + d) * 30, y2 - Math.sin(a + d) * 30, 1), hp, col, 4);
+  }
+}
+
+// Paper texture, rendered once and reused every frame.
+let paperTex = null;
+function paper(ctx, W, H) {
+  if (!paperTex) {
+    paperTex = document.createElement('canvas');
+    paperTex.width = W; paperTex.height = H;
+    const g = paperTex.getContext('2d');
+    g.fillStyle = T.paper;
+    g.fillRect(0, 0, W, H);
+    const r = rand(5);
+    for (let i = 0; i < 1400; i++) {
+      g.strokeStyle = `rgba(120,100,70,${0.03 + r() * 0.05})`;
+      g.lineWidth = 0.6 + r();
+      const x = r() * W, y = r() * H, a = r() * Math.PI, l = 6 + r() * 26;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+    }
+    const v = g.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(90,60,20,0.18)');
+    g.fillStyle = v;
+    g.fillRect(0, 0, W, H);
+  }
+  ctx.drawImage(paperTex, 0, 0, W, H);
+}
+
+// Per-character start times for hand-lettered text: each character lands
+// with the word that says it, and characters inside one word follow each
+// other like a pen (step s apart) instead of popping together.
+function handTimes(ctx, s, str, step = 0.08) {
+  const units = CV.text.words(ctx, str, 0, 0).map((w) => w.text);
+  const ts = s.syncTimes(units).slice();
+  for (let i = 1; i < ts.length; i++) if (ts[i] <= ts[i - 1] + step * 0.5) ts[i] = ts[i - 1] + step;
+  return ts;
+}
+
+// Smooth curve as sketchy points (quadratic bezier, jittered on threes).
+function sketchCurve(s, seed, x1, y1, cx, cy, x2, y2, n = 40, rough = 2) {
+  const r = rand(boil(s, seed)), pts = [];
+  for (let i = 0; i <= n; i++) {
+    const k = i / n, j = (r() - 0.5) * rough * Math.sin(Math.PI * k);
+    pts.push([(1 - k) ** 2 * x1 + 2 * (1 - k) * k * cx + k * k * x2 + j, (1 - k) ** 2 * y1 + 2 * (1 - k) * k * cy + k * k * y2 + j]);
+  }
+  return pts;
+}
+
+// === EXAMPLE: the cycle board ================================================
+// The cycle board (four tomatoes → long break). `tm` holds the local times at
+// which each part is drawn, so the music-only scene can redraw it complete.
+function cycleBoard(ctx, s, tm) {
+  const { t } = s;
+  for (let i = 0; i < 4; i++) {
+    const x = 330 + i * 250, y = 470, st = tm.t4 + i * 0.28;
+    tomato(ctx, s, x, y, 90, st, 200 + i * 9);
+    const cp = ease.inOutCubic(clamp((t - st - 0.8) / 0.25));
+    pencil(ctx, [...line(s, 300 + i, x - 40, y + 150, x - 10, y + 180, 1), ...line(s, 310 + i, x - 10, y + 180, x + 45, y + 115, 1)], cp, T.green, 7);
+  }
+  arrow(ctx, s, 400, 1260, 470, 1440, 470, ease.inOutCubic(clamp((t - tm.tr) / 0.5)));
+  const bp = ease.inOutCubic(clamp((t - tm.tr - 0.4) / 0.7));
+  const bubble = circle(s, 410, 1640, 470, 170, 5);
+  wash(ctx, bubble, color.rgba(T.blue, 0.22), tm.wash ?? 0);
+  pencil(ctx, bubble, bp, T.blue, 6);
+  ctx.textAlign = 'center';
+  ctx.font = F(400, 72, T.title);
+  ctx.fillStyle = T.blue;
+  ctx.globalAlpha = clamp((t - tm.tr - 0.8) / 0.4);
+  ctx.fillText('长休息', 1640, 470);
+  ctx.font = F(400, 56, T.hand);
+  ctx.fillText('15–30 分钟', 1640, 550);
+  ctx.globalAlpha = 1;
+  ctx.font = F(400, 90, T.hand);
+  const lw = ctx.measureText('4 个番茄 = 1 轮').width;
+  highlight(ctx, 780 - lw / 2 - 14, 780, lw + 28, 36, tm.marker ?? 0);
+  ctx.fillStyle = T.ink;
+  fx.charReveal(ctx, '4 个番茄 = 1 轮', 780, 800, t - tm.eq, { stagger: 0.06, dur: 0.3, align: 'center' });
+}
+
+// === KIT: page-slide transition ==============================================
+// Page-slide transition: the new sheet slides over with a soft shadow.
+function pageSlide(ctx, A, B, p) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  ctx.drawImage(A, 0, 0);
+  ctx.fillStyle = `rgba(40,30,10,${0.15 * p})`;
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  const x = (1 - p) * W * 1.02;
+  ctx.translate(x, 0);
+  ctx.rotate((1 - p) * 0.03);
+  ctx.shadowColor = 'rgba(40,30,10,0.35)';
+  ctx.shadowBlur = 40;
+  ctx.shadowOffsetX = -12;
+  ctx.drawImage(B, 0, 0);
+  ctx.restore();
+}
+
+// === VIDEO ===================================================================
+const slide = { type: pageSlide, duration: 0.75, ease: ease.inOutCubic, sfx: 'paper' };
+// local window that finishes just before the next page slides in
+const clearDesk = (s, d = 0.4) => s.out(d, ease.exit, 0.75);
+
+CV.create({
+  width: 1920, height: 1080, fps: 30,
+  background: T.paper,
+  lang: 'zh-CN',
+  // the score designed for this video: handmade and warm: fingerpicked major chords, snaps and a shaker, a glockenspiel in the gaps
+  music: {
+    bpm: 96, seed: 7, key: 'G', mode: 'major', progression: [0, 4, 5, 3],
+    layers: [
+      { name: 'pad', inst: 'pad', notes: 'chord', pattern: 'X---', vel: 0.035, cutoff: 700, attack: 0.8 },
+      { name: 'picking (bass notes)', inst: 'pluck', notes: ['root_', 'fifth_'], pattern: 'X.X.X.X.', gate: 3.2, vel: 0.16, bright: 0.35, decay: 0.997, from: 0.15, to: 0.45 },
+      { name: 'picking', inst: 'pluck', notes: ['root_', 2, 'fifth_', 1, 'root_', 2, 'fifth_', '0^'], pattern: 'XxXxXxXx', gate: 3.2, vel: 0.16, bright: 0.35, decay: 0.997, from: 0.45 },
+      { name: 'snaps', inst: 'snap', pattern: '.X.X', vel: 0.16, from: 0.5 },
+      { name: 'shaker', inst: 'shaker', pattern: 'xXxXxXxX', vel: 0.045, from: 0.5 },
+      { name: 'kick', inst: 'kick', pattern: 'X... .... ..x. ....', vel: 0.35, from: 0.7 },
+      { name: 'bass', inst: 'bass', octave: -1, notes: ['root', 'fifth_'], pattern: 'X--.X--.', vel: 0.2, from: 0.7 },
+    ],
+    lead: { inst: 'bell', kind: 'glock', range: [74, 88], rhythm: 'melodic', vel: 0.1, echo: 0.1 },
+  },
+  transition: slide,
+  voiceDelay: 0.3, tail: 0.4, // the voice starts as the page settles
+  subtitles: {
+    style: { font: '500 42px "Noto Sans SC", sans-serif', color: T.ink, box: 'rgba(255,250,238,0.82)', y: 0.92, radius: 6 },
+  },
+  scenes: [
+    // --- 1. Title: the hand draws a tomato over the first bar, then the voice ---
+    {
+      id: 'title', voiceDelay: 1.25, energy: 0.3,
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        paper(ctx, W, H);
+        tomato(ctx, s, 620, 560, 190, s.onBeat(0), 1);
+        ctx.font = F(400, 150, T.title);
+        ctx.fillStyle = T.ink;
+        ctx.textAlign = 'left';
+        const ts = handTimes(ctx, s, '番茄工作法', 0.09);
+        // a sticky-note question first: "想拖延？" scribbled while it's said
+        const q = clearDesk(s, 0.35);
+        ctx.font = F(400, 76, T.hand);
+        ctx.fillStyle = T.pencil;
+        const tq = s.when('拖延', 1.8) - 0.15;
+        fx.charReveal(ctx, '想拖延？', 905, 380, t - tq, { stagger: 0.08, dur: 0.3, rise: 0.1, exit: q });
+        ctx.font = F(400, 150, T.title);
+        ctx.fillStyle = T.ink;
+        fx.wordReveal(ctx, '番茄工作法', 900, 560, t, { times: ts, dur: 0.3, rise: 0.15 });
+        const tt = ts[ts.length - 1];
+        const w = ctx.measureText('番茄工作法').width;
+        highlight(ctx, 890, 585, w + 30, 36, ease.inOutCubic(clamp((t - tt - 0.3) / 0.5)));
+        ctx.font = F(700, 54, T.latin);
+        ctx.fillStyle = T.blue;
+        ctx.globalAlpha = clamp((t - tt - 0.4) / 0.4) * (1 - q);
+        ctx.fillText('the Pomodoro Technique', 910, 680);
+        ctx.globalAlpha = 1 - q;
+        arrow(ctx, s, 30, 1010, 740, 845, 660, ease.inOutCubic(clamp((t - tt - 0.6) / 0.5)), T.blue);
+        ctx.globalAlpha = 1;
+      },
+    },
+    // --- 2. 25 minutes of focus -----------------------------------------------------
+    {
+      id: 'focus', energy: 0.45,
+      sfx: [{ at: '定', type: 'click', gain: 0.8 }],
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        paper(ctx, W, H);
+        const cx = 560, cy = 540, R = 250;
+        // dial: the circle on the first beat, then a tick every 5 minutes
+        const b0 = s.onBeat(0);
+        pencil(ctx, circle(s, 7, cx, cy, R, 3), ease.inOutCubic(clamp((t - b0) / 0.7)), T.ink, 6);
+        for (let m = 0; m < 12; m++) {
+          const a = (m / 12) * Math.PI * 2 - Math.PI / 2;
+          pencil(ctx, line(s, 40 + m, cx + Math.cos(a) * R * 0.82, cy + Math.sin(a) * R * 0.82, cx + Math.cos(a) * R * 0.93, cy + Math.sin(a) * R * 0.93, 1), clamp((t - b0 - 0.5 - m * 0.03) / 0.2), T.pencil, 4);
+        }
+        // red sector sweeps to 25 minutes (5/12 of the dial) on "二十五分钟"
+        const t25 = s.when('二十五', 0.8);
+        const sweep = ease.inOutCubic(clamp((t - t25) / 1.4)) * (25 / 60);
+        if (sweep > 0) {
+          ctx.save();
+          ctx.globalAlpha = 0.7;
+          ctx.fillStyle = T.red;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, R * 0.78, -Math.PI / 2, -Math.PI / 2 + sweep * Math.PI * 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+        const ha = -Math.PI / 2 + sweep * Math.PI * 2;
+        pencil(ctx, line(s, 60, cx, cy, cx + Math.cos(ha) * R * 0.7, cy + Math.sin(ha) * R * 0.7, 1), clamp((t - b0) / 0.4), T.ink, 7);
+        ctx.fillStyle = T.ink;
+        ctx.beginPath(); ctx.arc(cx, cy, 10, 0, 7); ctx.fill();
+        // text column
+        const q = clearDesk(s);
+        ctx.textAlign = 'left';
+        ctx.font = F(400, 190, T.title);
+        ctx.fillStyle = T.red;
+        fx.charReveal(ctx, '25 分钟', 960, 500, t - t25, { stagger: 0.07, dur: 0.3, rise: 0.12 });
+        ctx.font = F(400, 84, T.hand);
+        ctx.fillStyle = T.ink;
+        const t1 = s.when('一件事', 3.0);
+        fx.charReveal(ctx, '只做一件事', 970, 680, t - t1 + 0.4, { stagger: 0.08, dur: 0.3, rise: 0.1, exit: q });
+        const w = ctx.measureText('一件事').width, x0 = 970 + ctx.measureText('只做').width;
+        ctx.globalAlpha = 1 - q;
+        pencil(ctx, line(s, 70, x0, 700, x0 + w, 704, 3), ease.inOutCubic(clamp((t - t1 - 0.3) / 0.4)), T.red, 6);
+        ctx.globalAlpha = 1;
+      },
+    },
+    // --- 3. 5-minute break: the bell rings on its word ------------------------------
+    {
+      id: 'rest', energy: 0.5, tail: 1.2, // hold the note long enough to read
+      sfx: [{ at: '铃', type: 'chime', gain: 0.8 }],
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        paper(ctx, W, H);
+        const tb = s.when('铃', 0.4);
+        const ring = Math.sin((t - tb) * 40) * Math.exp(-Math.max(0, t - tb) * 3) * (t > tb ? 1 : 0);
+        ctx.save();
+        ctx.translate(1450, 330);
+        ctx.rotate(ring * 0.25);
+        const bell = [...line(s, 90, -60, 40, -45, -30), ...line(s, 91, -45, -30, 0, -70), ...line(s, 92, 0, -70, 45, -30), ...line(s, 93, 45, -30, 60, 40), ...line(s, 94, 60, 40, -60, 40)];
+        pencil(ctx, bell, ease.inOutCubic(clamp((t - tb + 0.4) / 0.5)), T.ink, 5);
+        ctx.restore();
+        for (let k = 0; k < 3; k++) {
+          const a = -0.9 + k * 0.5;
+          pencil(ctx, line(s, 95 + k, 1450 + Math.cos(a) * 110, 310 + Math.sin(a) * 110, 1450 + Math.cos(a) * 150, 310 + Math.sin(a) * 150, 1), clamp((t - tb - 0.1) / 0.2) * (1 - clamp((t - tb - 1.2) / 0.3)), T.red, 5);
+        }
+        // cup draws on "休息", then the watercolour settles, then steam
+        const tc = s.when('休息', 1.0) - 0.3;
+        const cp = ease.inOutCubic(clamp((t - tc) / 0.9));
+        const cup = [...line(s, 100, 420, 460, 450, 760), ...line(s, 101, 450, 760, 690, 760), ...line(s, 102, 690, 760, 720, 460), ...line(s, 103, 720, 460, 420, 460)];
+        wash(ctx, cup, color.rgba(T.blue, 0.35), clamp((t - tc - 0.6) / 0.4));
+        pencil(ctx, cup, cp, T.ink, 6);
+        pencil(ctx, circle(s, 104, 760, 580, 70, 3).slice(10, 40), clamp((t - tc - 0.7) / 0.4), T.ink, 6);
+        for (let k = 0; k < 3; k++) {
+          const pts = [];
+          for (let i = 0; i <= 20; i++) pts.push([500 + k * 70 + Math.sin(i * 0.5 + t * 2 + k) * 12, 430 - i * 9]);
+          ctx.globalAlpha = 0.6 * clamp((t - tc - 1) / 0.5);
+          pencil(ctx, pts, 1, T.pencil, 4);
+          ctx.globalAlpha = 1;
+        }
+        const q = clearDesk(s);
+        ctx.textAlign = 'left';
+        ctx.font = F(400, 190, T.title);
+        ctx.fillStyle = T.blue;
+        const t5 = s.when('五分钟', 1.4);
+        fx.charReveal(ctx, '5 分钟', 900, 620, t - t5, { stagger: 0.07, dur: 0.3, rise: 0.12 });
+        ctx.font = F(400, 84, T.hand);
+        ctx.fillStyle = T.ink;
+        fx.charReveal(ctx, '起来走走，喝口水', 910, 780, t - t5 - 0.6, { stagger: 0.06, dur: 0.3, exit: q });
+      },
+    },
+    // --- 4. The cycle ----------------------------------------------------------------
+    {
+      id: 'cycle', tail: 0.5, energy: 0.55,
+      sfx: [0, 1, 2, 3].map((i) => ({ at: (s) => s.when('四个', 0.6) - 0.2 + i * 0.28 + 0.85, type: 'tick', gain: 0.45 })),
+      draw(ctx, s) {
+        const { W, H } = s;
+        paper(ctx, W, H);
+        const t4 = s.when('四个', 0.6) - 0.2;
+        cycleBoard(ctx, s, { t4, tr: s.when('好好', 2.2) - 0.2, eq: t4 + 1.6 });
+      },
+    },
+    // --- 4b. Music only: the loop closes, the page gets its colour -------------------
+    {
+      id: 'loop', narration: false, beats: 4, energy: 0.7, transition: 'cut',
+      sfx: [{ at: (s) => s.onBeat(1.5), type: 'shimmer', gain: 0.9 }],
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        paper(ctx, W, H);
+        const b = (i) => s.onBeat(i);
+        cycleBoard(ctx, s, { t4: -9, tr: -9, eq: -9, wash: ease.inOutSine(clamp((t - b(1.5)) / 0.7)), marker: ease.inOutCubic(clamp((t - b(2)) / 0.45)) });
+        // the return arrow arcs over the tomatoes: after the long break, again
+        const lp = ease.inOutCubic(clamp((t - b(0)) / (b(1.5) - b(0))));
+        const pts = sketchCurve(s, 500, 1600, 290, 960, 20, 330, 330, 48, 3);
+        pencil(ctx, pts, lp, T.red, 6);
+        if (lp > 0.97) {
+          const hp = clamp((lp - 0.97) / 0.03);
+          const [ex, ey] = pts[pts.length - 1], [px_, py_] = pts[pts.length - 4];
+          const a = Math.atan2(ey - py_, ex - px_);
+          for (const d of [-0.5, 0.5]) pencil(ctx, line(s, 520 + d, ex, ey, ex - Math.cos(a + d) * 34, ey - Math.sin(a + d) * 34, 1), hp, T.red, 6);
+        }
+        ctx.font = F(400, 72, T.hand);
+        ctx.fillStyle = T.red;
+        ctx.textAlign = 'center';
+        fx.charReveal(ctx, '再来一轮', 960, 140, t - b(1.75), { stagger: 0.08, dur: 0.3, rise: 0.1, align: 'center' });
+      },
+    },
+    // --- 5. Ending: a watercolour bloom opens onto one tomato ------------------------
+    {
+      id: 'end', tail: 1.5, energy: 0.4,
+      transition: { type: 'ink', x: 0.5, y: 0.44, duration: 0.9, ease: ease.inOutSine, edgeColor: 'rgba(209,73,91,0.2)', softness: 0.05, sfx: 'swell' },
+      draw(ctx, s) {
+        const { W, H, t } = s;
+        paper(ctx, W, H);
+        tomato(ctx, s, 960, 450, 160, s.onBeat(0), 3);
+        ctx.font = F(400, 120, T.title);
+        ctx.fillStyle = T.ink;
+        const str = '一次一个番茄';
+        fx.wordReveal(ctx, str, 960, 800, t, { times: handTimes(ctx, s, str, 0.08), dur: 0.3, rise: 0.12, align: 'center' });
+        ctx.font = F(400, 80, T.hand);
+        ctx.fillStyle = T.red;
+        ctx.textAlign = 'left';
+        const tl = s.when('慢慢', 1.6) - 0.1;
+        ctx.font = F(400, 120, T.title);
+        const right = 960 + ctx.measureText(str).width / 2;
+        ctx.font = F(400, 80, T.hand);
+        fx.charReveal(ctx, '慢慢来', right + 30, 790, t - tl, { stagger: 0.12, dur: 0.35, rise: 0.1 });
+      },
+    },
+  ],
+});
+</script>
+</body>
+</html>

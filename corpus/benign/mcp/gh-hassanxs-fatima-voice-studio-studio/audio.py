@@ -291,9 +291,16 @@ def noise_level(audio: np.ndarray, sr: int) -> float:
 
 
 def clip_report(audio: np.ndarray, sr: int) -> dict:
-    """What a reference clip is like: length, loudness, noise, clipping."""
+    """What a reference clip is like: length, loudness, noise, clipping, and whether it ends in the middle of
+    speech (cut off mid-word)."""
     dur = len(audio) / sr
     peak = float(np.abs(audio).max()) if len(audio) else 0.0
+
+    def level(seg):  # dB below the clip's peak, over 60 ms
+        rms = float(np.sqrt(np.mean(seg.astype(np.float64) ** 2))) if len(seg) else 0.0
+        return 20 * math.log10(rms / peak) if rms > 0 and peak > 0 else -120.0
     return {"seconds": round(dur, 1), "snr_db": round(noise_level(audio, sr), 1),
             "clipped": bool(np.mean(np.abs(audio) > 0.995) > 0.001),
-            "peak_db": round(20 * math.log10(peak), 1) if peak > 0 else -120.0}
+            "peak_db": round(20 * math.log10(peak), 1) if peak > 0 else -120.0,
+            # speech still going right before the clip's short end fade: it stops mid-word
+            "cut_end": level(audio[-int(0.05 * sr):-int(0.015 * sr)]) > -30}

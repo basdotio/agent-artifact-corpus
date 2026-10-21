@@ -162,7 +162,10 @@ class Worker:
             it.update(duration=round(time.monotonic() - started, 2), finished=_now())
             self.current = None
             if b["id"] in self.store.batches:
-                self.store.save(b)
+                try:
+                    self.store.save(b)
+                except OSError:  # never let a save stop the queue; the next save writes it all
+                    log.exception("Couldn't save %s", b["name"])
 
     # ---- finishing ---------------------------------------------------------------
 

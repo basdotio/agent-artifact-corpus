@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>__TITLE__</title>
+<style>
+/* Layout: a research notebook. A run header, then tabbed views; the three Gioia levels keep one colour each
+   everywhere (1st order = blue, 2nd order = ochre, aggregate = plum), so a reader always knows the level. */
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --sunk: #eceef2; --ink: #1a2130; --muted: #5a6474; --line: #d9dde4;
+  --accent: #2c4fb8;
+  --l1: #3a6c9c; --l1-soft: #e3ecf5; --l2: #a5701c; --l2-soft: #f6ecda; --l3: #7b3a6c; --l3-soft: #f3e4ef;
+  --good: #2f7d4f; --warn: #a5701c; --bad: #b23b3b;
+  --display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161d; --surface: #1a1f28; --sunk: #222834; --ink: #e6e9ef; --muted: #9aa3b2; --line: #2f3644;
+  --accent: #8ea8ff;
+  --l1: #7fb0de; --l1-soft: #1d2b3a; --l2: #e0aa55; --l2-soft: #33291a; --l3: #d48cc2; --l3-soft: #33202f;
+  --good: #6cc192; --warn: #e0aa55; --bad: #ef8080; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161d; --surface: #1a1f28; --sunk: #222834; --ink: #e6e9ef; --muted: #9aa3b2; --line: #2f3644;
+  --accent: #8ea8ff;
+  --l1: #7fb0de; --l1-soft: #1d2b3a; --l2: #e0aa55; --l2-soft: #33291a; --l3: #d48cc2; --l3-soft: #33202f;
+  --good: #6cc192; --warn: #e0aa55; --bad: #ef8080; color-scheme: dark }
+
+* { box-sizing: border-box }
+[hidden] { display: none !important }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); padding-inline: 16px; padding-block: 0 48px }
+.wrap { max-width: 1240px; margin: 0 auto }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.2 }
+h1 { font-size: 1.9rem } h2 { font-size: 1.4rem } h3 { font-size: 1.12rem }
+a { color: var(--accent) }
+code, .mono { font-family: var(--mono); font-size: .86em }
+.muted { color: var(--muted) }
+.eyebrow { font: 500 .72rem/1.2 var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+button { font: inherit; color: inherit; cursor: pointer }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+
+header.run { padding-block: 28px 18px; display: grid; gap: 14px; border-bottom: 1px solid var(--line) }
+.rq { max-width: 75ch; font-family: var(--display); font-size: 1.1rem; line-height: 1.45 }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 22px; font-variant-numeric: tabular-nums }
+.stat b { font: 600 1.15rem var(--mono); display: block }
+.stat span { font-size: .78rem; color: var(--muted) }
+
+nav.tabs { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); display: flex; gap: 4px;
+  overflow-x: auto; border-bottom: 1px solid var(--line); padding-block: 8px }
+nav.tabs button { background: none; border: 1px solid transparent; border-radius: var(--r); padding: 6px 12px; white-space: nowrap; color: var(--muted) }
+nav.tabs button[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); font-weight: 500 }
+section.view { padding-block: 22px; display: grid; gap: 22px }
+.lede { max-width: 75ch; color: var(--muted) }
+
+.lvl1 { --c: var(--l1); --cs: var(--l1-soft) } .lvl2 { --c: var(--l2); --cs: var(--l2-soft) } .lvl3 { --c: var(--l3); --cs: var(--l3-soft) }
+.tag { display: inline-block; font: 500 .72rem/1.5 var(--mono); padding: 0 6px; border-radius: 4px; background: var(--cs, var(--sunk)); color: var(--c, var(--muted)); white-space: nowrap }
+.chip { display: inline-block; font: .72rem/1.6 var(--mono); padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted) }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .82rem; color: var(--muted) }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; background: var(--c) }
+
+.flow { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px }
+.flow svg { display: block; min-width: 980px; width: 100% }
+.flow text { fill: var(--ink); font: 11px var(--body) }
+.flow .lnk { fill: none; stroke-opacity: .22; transition: stroke-opacity .15s }
+.flow .dim .lnk { stroke-opacity: .05 } .flow .hi { stroke-opacity: .6 }
+
+.dimcard { border-left: 3px solid var(--l3); background: var(--surface); border-radius: 0 var(--r) var(--r) 0; padding: 16px 18px; display: grid; gap: 10px }
+.dimcard .ans { max-width: 80ch; font-size: .93rem }
+.themes { display: grid; gap: 6px }
+details.theme { border: 1px solid var(--line); border-radius: var(--r); background: var(--bg) }
+details.theme > summary { list-style: none; cursor: pointer; padding: 8px 12px; display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: baseline }
+details.theme > summary::-webkit-details-marker { display: none }
+details.theme[open] > summary { border-bottom: 1px solid var(--line) }
+.tbody { padding: 10px 12px; display: grid; gap: 8px }
+.why { font-size: .85rem; color: var(--muted); max-width: 85ch }
+.why b { color: var(--ink); font-weight: 500 }
+ul.clist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px }
+ul.clist li { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: baseline }
+.clink { background: none; border: 0; padding: 0; text-align: left; color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px }
+.clink:hover { text-decoration-color: var(--l1) }
+
+.matrix { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r) }
+table { border-collapse: collapse; width: 100% }
+th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: .86rem }
+th { font-weight: 500; color: var(--muted); font-size: .76rem; letter-spacing: .03em }
+td.n { text-align: center; font: .78rem var(--mono); font-variant-numeric: tabular-nums; min-width: 30px }
+.matrix td.th { white-space: nowrap; max-width: 380px; overflow: hidden; text-overflow: ellipsis }
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r) }
+
+.split { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 20px; align-items: start }
+.ilist { display: grid; gap: 2px; position: sticky; top: 64px }
+.ilist button { display: flex; justify-content: space-between; gap: 8px; background: none; border: 1px solid transparent; border-radius: var(--r); padding: 6px 10px; text-align: left; font-variant-numeric: tabular-nums }
+.ilist button[aria-current="true"] { background: var(--surface); border-color: var(--line); font-weight: 500 }
+@media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr) } .ilist { position: static; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)) } }
+
+.memo { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 6px; min-width: 0 }
+.memo .md { font-size: .9rem }
+.memos { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 10px }
+.md p { margin: 0 0 .6em } .md p:last-child { margin-bottom: 0 } .md ul, .md ol { margin: 0 0 .6em; padding-left: 1.3em }
+.md table { margin: .4em 0 } .md pre { white-space: pre-wrap; background: var(--sunk); padding: 8px; border-radius: 4px }
+.md h1, .md h2, .md h3 { font-size: 1.05rem; margin: .8em 0 .3em }
+.quote { border-left: 2px solid var(--l1); padding: 2px 0 2px 10px; display: grid; gap: 2px }
+.quote q { font-style: italic } .quote q::before, .quote q::after { content: none }
+
+.steps { display: grid; gap: 26px }
+.step { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px }
+.step .no { font: 600 1.4rem var(--display); color: var(--muted); text-align: right }
+.step .body { display: grid; gap: 12px; min-width: 0 }
+.sess { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 8px; min-width: 0 }
+.sess .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font: .78rem var(--mono); color: var(--muted); font-variant-numeric: tabular-nums }
+.decision { font-size: .86rem; border-left: 3px solid var(--good); padding-left: 10px }
+.decision.auto { border-color: var(--warn) }
+.cp { border-left: 3px solid var(--accent); padding-left: 10px; display: grid; gap: 6px; font-size: .9rem }
+details.more > summary { cursor: pointer; color: var(--accent); font-size: .85rem }
+details.more[open] > summary { margin-bottom: 6px }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+input[type=search], select { font: inherit; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 10px; min-width: 0 }
+input[type=search] { flex: 1 1 240px }
+.doc { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 20px; max-width: 900px }
+.doc .md { font-size: .93rem }
+
+dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); padding: 0; width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 48px) }
+dialog::backdrop { background: rgb(10 14 20 / .45) }
+dialog .dhead { position: sticky; top: 0; background: var(--surface); padding: 16px 20px 12px; border-bottom: 1px solid var(--line); display: grid; gap: 6px }
+dialog .dbody { padding: 16px 20px 20px; display: grid; gap: 14px }
+dialog .close { position: absolute; right: 12px; top: 10px; background: none; border: 1px solid var(--line); border-radius: var(--r); padding: 2px 10px }
+/* interview reader: transcript left, concepts right */
+.reader { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start }
+.rtext, .rside { max-height: 78vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px }
+.rside { display: grid; gap: 10px; align-content: start; background: var(--bg) }
+@media (max-width: 860px) { .reader { grid-template-columns: minmax(0, 1fr) } .rtext, .rside { max-height: 60vh } }
+.turn { margin: 0 0 .8em; font-size: .92rem; line-height: 1.6 }
+.turn .spk { font: 600 .85rem var(--body); color: var(--muted); margin-right: 4px }
+.turn.int { color: var(--muted) } .turn.meta { font: .78rem var(--mono); color: var(--muted); white-space: pre-wrap }
+mark { background: var(--l1-soft); color: inherit; border-bottom: 2px solid color-mix(in srgb, var(--l1) 45%, transparent); cursor: pointer; border-radius: 2px }
+mark.sel { background: color-mix(in srgb, var(--l1) 30%, var(--surface)); border-bottom-color: var(--l1) }
+.ccard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: grid; gap: 6px; scroll-margin: 8px }
+.ccard.sel { border-color: var(--l1); box-shadow: 0 0 0 1px var(--l1) }
+.ccard .chead { display: flex; gap: 8px; align-items: baseline; cursor: pointer }
+.ccard .chead b { font-weight: 500 }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden }
+.seg button { background: var(--surface); border: 0; padding: 4px 10px; font-size: .82rem } .seg button[aria-pressed="true"] { background: var(--sunk); font-weight: 500 }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="run" id="top"></header>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <main id="views"></main>
+</div>
+<dialog id="dlg"><button class="close" id="dlgclose">Close</button><div id="dlgbody"></div></dialog>
+
+<script>
+const D = /*__DATA__*/null;
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+/* a small markdown renderer (headings, lists, tables, code, bold, italics): the page needs nothing from outside */
+const inline = s => s.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+  .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>").replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+function md(src) {
+  const lines = esc(src).split(/\r?\n/), out = []; let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (!l.trim()) { i++; continue; }
+    if (/^```/.test(l)) { const buf = []; i++; while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]); i++; out.push(`<pre>${buf.join("\n")}</pre>`); continue; }
+    const h = l.match(/^(#{1,6})\s+(.*)/); if (h) { out.push(`<h3>${inline(h[2])}</h3>`); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(l)) { const rows = []; while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]);
+      const cells = r => r.trim().replace(/^\||\|$/g, "").split("|").map(c => inline(c.trim()));
+      const body = rows.filter(r => !/^\s*\|[\s:|-]+\|\s*$/.test(r));
+      out.push(`<table><thead><tr>${cells(body[0]).map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${body.slice(1).map(r => `<tr>${cells(r).map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`); continue; }
+    if (/^\s*([-*]|\d+[.)])\s+/.test(l)) { const ordered = /^\s*\d/.test(l), items = [];
+      while (i < lines.length && /^\s*([-*]|\d+[.)])\s+/.test(lines[i])) { let it = lines[i++].replace(/^\s*([-*]|\d+[.)])\s+/, "");
+        while (i < lines.length && lines[i].trim() && !/^\s*([-*]|\d+[.)])\s+/.test(lines[i]) && /^\s{2,}/.test(lines[i])) it += " " + lines[i++].trim();
+        items.push(`<li>${inline(it)}</li>`); }
+      out.push(ordered ? `<ol>${items.join("")}</ol>` : `<ul>${items.join("")}</ul>`); continue; }
+    const buf = []; while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|\s*\||\s*([-*]|\d+[.)])\s+)/.test(lines[i])) buf.push(lines[i++]);
+    if (!buf.length) buf.push(lines[i++]);
+    out.push(`<p>${inline(buf.join("<br>"))}</p>`);
+  }
+  return out.join("");
+}
+/* ---------- the method's structure: works for any method (levels bottom-up, codes at level 0) ---------- */
+const LV = D.method.levels, CODE = LV[0].type;
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const OBJ = D.objects;
+const byId = Object.fromEntries([...OBJ, ...D.memos, ...D.codebook].map(o => [o.id, o]));
+const codes = OBJ.filter(o => o.type === CODE);
+const ofType = t => OBJ.filter(o => o.type === t);
+const lvName = (o, plural) => { const l = LV.find(x => x.type === o.type); return l ? (plural ? l.plural : l.name) : o.type; };
+const lvl = id => { const o = byId[id]; return o && o.level !== undefined ? `lvl${Math.min(3, o.level + 1)}` : ""; };
+const tag = id => `<span class="tag ${lvl(id)}">${esc(id)}</span>`;
+const clink = id => byId[id] ? `<button class="clink" data-open="${esc(id)}">${esc(byId[id].label || id)}</button>` : esc(id);
+const memosAbout = id => D.memos.filter(m => m.about.includes(id));
+const srcIds = D.sources.map(s => s.id);
+const fmtTime = t => t ? t.replace("T", " ").slice(0, 16) : "";
+const STAGES = D.docs.stages.map(s => s.id);
+const STAGE_NAME = Object.fromEntries(D.docs.stages.map(s => [s.id, s.title || s.id]));
+const FIELD_NAME = {in_vivo: "in vivo", period: "when", direction: "direction", origin: "origin", parent: "refines"};
+const fieldChips = o => Object.entries(o.fields || {}).filter(([k, v]) => v && k !== "in_vivo")
+  .map(([k, v]) => `<span class="chip">${esc(FIELD_NAME[k] || k)}: ${k === "parent" && byId[v] ? esc(v) : esc(v)}</span>`).join(" ");
+const placedIn = o => (o.in || []).map(x => `${tag(x.id)} ${clink(x.id)}`).join(" · ");
+
+/* ---------- header ---------- */
+(function header() {
+  const q = codes.reduce((n, c) => n + c.quotes.length, 0);
+  const cost = D.sessions.reduce((n, s) => n + (s.cost || 0), 0);
+  const fork = D.run.parent ? ` · fork of <code>${esc(D.run.parent)}</code> after event #${D.run.fork_at}` : "";
+  $("#top").innerHTML = `
+    <div class="eyebrow">${esc(D.method.title)} · run <code>${esc(D.run.id)}</code>${fork} · ${esc(D.run.note || "")}</div>
+    <h1>${esc(D.project)}</h1>
+    <div class="rq">${esc(D.intent.research_question)}</div>
+    <div class="stats">
+      ${[[D.sources.length, "interviews"], ...LV.map(l => [ofType(l.type).length, l.plural]), [q, "verified quotes"],
+         [D.memos.length, "memos"], ...(D.codebook.length ? [[D.codebook.length, "codebook entries"]] : []),
+         [D.sessions.length, "agent sessions"], ["$" + cost.toFixed(0), "API-equivalent cost"]]
+        .map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("")}
+    </div>`;
+})();
+
+/* ---------- tabs ---------- */
+const VIEWS = [["structure", "Data structure"], ["process", "Step by step"], ["interviews", "Interviews"],
+               ...(D.codebook.length ? [["codebook", "Codebook"]] : []), ["instructions", "Instructions"], ["log", "Decision log"]];
+$("#tabs").innerHTML = VIEWS.map(([id, l]) => `<button role="tab" data-tab="${id}" aria-selected="false">${l}</button>`).join("");
+$("#views").innerHTML = VIEWS.map(([id]) => `<section class="view" id="v-${id}" hidden></section>`).join("");
+const built = {};
+function show(id) {
+  if (!VIEWS.some(v => v[0] === id)) id = "structure";
+  for (const [v] of VIEWS) { $(`#v-${v}`).hidden = v !== id; $(`[data-tab=${v}]`).setAttribute("aria-selected", v === id); }
+  if (!built[id]) { built[id] = true; RENDER[id]($(`#v-${id}`)); }
+  try { history.replaceState(null, "", "#" + id); } catch {}
+}
+$("#tabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) show(b.dataset.tab); });
+
+/* ---------- object dialog ---------- */
+function openObj(id) {
+  const o = byId[id]; if (!o) return;
+  const memoList = ms => ms.length ? `<div class="memos">${ms.map(memoCard).join("")}</div>` : `<p class="muted">No memos.</p>`;
+  let h = "";
+  if (o.type === CODE) {
+    h = `<div class="dhead"><div class="eyebrow">${esc(lvName(o))} ${tag(id)} · from ${o.sources.join(", ")}${o.codebook_version != null ? ` · codebook v${o.codebook_version}` : ""} · event #${o.event}</div>
+         <h2>${esc(o.label)}</h2>${o.fields.in_vivo ? `<div class="muted">In vivo: <i>${esc(o.fields.in_vivo)}</i></div>` : ""}<div>${fieldChips(o)}</div></div>
+         <div class="dbody">${o.description ? `<p>${esc(o.description)}</p>` : ""}
+         <div class="eyebrow">Quotes and why they show this</div>
+         ${o.quotes.map(q => `<div class="quote"><q>${esc(q.text)}</q><span class="why"><span class="chip">${esc(q.unit)}</span> ${esc(q.reason)}</span></div>`).join("")}
+         <div class="eyebrow">Placed in</div>
+         ${o.in.length ? o.in.map(x => `<div class="why">${tag(x.id)} ${clink(x.id)}<br><b>Reason:</b> ${esc(x.reason)}</div>`).join("") : `<p class="muted">Not placed.</p>`}
+         <div class="eyebrow">Memos about it</div>${memoList(memosAbout(id))}</div>`;
+  } else if (o.level !== undefined) {
+    const kids = OBJ.filter(x => x.fields && x.fields.parent === id);
+    h = `<div class="dhead"><div class="eyebrow">${esc(lvName(o))} ${tag(id)} · ${o.members.length} members · event #${o.event}</div><h2>${esc(o.label)}</h2><div>${fieldChips(o)}</div></div>
+         <div class="dbody"><p>${esc(o.description)}</p>
+         ${o.answers ? `<div class="eyebrow">How it answers the research question</div><p>${esc(o.answers)}</p>` : ""}
+         ${o.in.length ? `<div class="eyebrow">Placed in</div>${o.in.map(x => `<div class="why">${tag(x.id)} ${clink(x.id)}<br><b>Reason:</b> ${esc(x.reason)}</div>`).join("")}` : ""}
+         ${kids.length ? `<div class="eyebrow">Finer categories under it</div><ul class="clist">${kids.map(k => `<li>${tag(k.id)}<div>${clink(k.id)} <span class="muted mono">${k.members.length}</span></div></li>`).join("")}</ul>` : ""}
+         <div class="eyebrow">Members and why each belongs</div>
+         <ul class="clist">${o.members.map(m => `<li>${tag(m.id)}<div>${clink(m.id)} <span class="chip">${(byId[m.id]?.sources || []).join(" ")}</span><div class="why">${esc(m.reason)}</div></div></li>`).join("")}</ul>
+         <div class="eyebrow">Memos about it</div>${memoList(memosAbout(id))}</div>`;
+  } else if (id.startsWith("M-")) {
+    h = `<div class="dhead"><div class="eyebrow">Memo ${esc(id)}</div></div><div class="dbody">${memoCard(o)}</div>`;
+  } else if (id.startsWith("CB-")) {
+    h = `<div class="dhead"><div class="eyebrow">Codebook entry ${esc(id)} · ${esc(o.status)} · v${o.version ?? "–"}</div><h2>${esc(o.label)}</h2></div>
+         <div class="dbody"><p>${esc(o.definition)}</p><p><b>Use when:</b> ${esc(o.use_when || "–")}</p><p><b>Do not use when:</b> ${esc(o.not_when || "–")}</p></div>`;
+  }
+  $("#dlgbody").innerHTML = h;
+  const dlg = $("#dlg"); if (!dlg.open) dlg.showModal();
+  $("#dlgbody").scrollTop = 0;
+}
+document.addEventListener("click", e => { const b = e.target.closest("[data-open]"); if (b) { e.preventDefault(); openObj(b.dataset.open); } });
+$("#dlgclose").addEventListener("click", () => $("#dlg").close());
+$("#dlg").addEventListener("click", e => { if (e.target === $("#dlg")) $("#dlg").close(); });
+
+function memoCard(m) {
+  const about = m.about.map(a => byId[a] ? `<button class="clink" data-open="${esc(a)}">${esc(a)}</button>` : `<span class="chip">${esc(a)}</span>`).join(" ");
+  const cites = m.cites.length ? ` · cites ${m.cites.map(c => `<button class="clink" data-open="${esc(c)}">${esc(c)}</button>`).join(" ")}` : "";
+  return `<div class="memo"><div class="eyebrow">${esc(m.id)} · ${esc(m.kind)} · ${esc(m.level)} · about ${about}${cites}</div><div class="md">${md(m.body)}</div></div>`;
+}
+
+/* ---------- interview reader: the whole transcript, with every quoted passage marked ---------- */
+const codingOrder = (() => { const seen = []; for (const s of [...D.sessions].sort((a, b) => a.started < b.started ? -1 : 1))
+  for (const x of s.sources) if (!seen.includes(x)) seen.push(x); for (const x of srcIds) if (!seen.includes(x)) seen.push(x); return seen; })();
+const firstStart = (c, sid) => Math.min(...c.quotes.filter(q => q.source === sid).map(q => q.start));
+function readerHTML(sid) { return `<div class="reader" data-reader="${esc(sid)}"><div class="rtext">Loading…</div><div class="rside"></div></div>`; }
+function initReader(box) {
+  if (box.dataset.ready) return; box.dataset.ready = "1";
+  const sid = box.dataset.reader, src = D.sources.find(s => s.id === sid);
+  const cs = codes.filter(c => c.sources.includes(sid)).sort((a, b) => firstStart(a, sid) - firstStart(b, sid));
+  const ranges = cs.flatMap(c => c.quotes.filter(q => q.source === sid).map(q => [q.start, q.end, c.id]));
+  let html = "";
+  for (const t of src.turns) {
+    const inTurn = ranges.filter(r => r[1] > t.start && r[0] < t.end), pts = new Set([t.start, t.end]);
+    for (const [a, b] of inTurn) { pts.add(Math.max(a, t.start)); pts.add(Math.min(b, t.end)); }
+    const P = [...pts].sort((x, y) => x - y); let body = "";
+    for (let k = 0; k < P.length - 1; k++) {
+      const a = P[k], b = P[k + 1], txt = esc(src.text.slice(a, b)).replace(/\n/g, "<br>");
+      const ids = [...new Set(inTurn.filter(r => r[0] <= a && r[1] >= b).map(r => r[2]))];
+      body += ids.length ? `<mark data-c="${ids.join(" ")}" title="${ids.map(i => esc(i + " " + byId[i].label)).join("&#10;")}">${txt}</mark>` : txt;
+    }
+    const cls = t.role === "informant" ? "inf" : t.role === "interviewer" ? "int" : "meta";
+    html += `<p class="turn ${cls}">${cls !== "meta" ? `<span class="spk">${esc(t.speaker)}:</span>` : ""}${body}</p>`;
+  }
+  const rtext = box.querySelector(".rtext"), rside = box.querySelector(".rside");
+  rtext.innerHTML = html;
+  rside.innerHTML = `<div class="eyebrow">${cs.length} ${esc(LV[0].plural)} from ${sid}, in the order they appear</div>` + cs.map(c => {
+    const top = (c.under || []).filter(g => byId[g] && byId[g].level > 1);
+    return `<div class="ccard" data-cid="${c.id}"><div class="chead">${tag(c.id)}<b>${esc(c.label)}</b></div>
+      ${c.description || c.fields.in_vivo ? `<div class="why">${esc(c.description)}${c.fields.in_vivo ? ` <i>(${esc(c.fields.in_vivo)})</i>` : ""}</div>` : ""}
+      ${fieldChips(c) ? `<div>${fieldChips(c)}</div>` : ""}
+      ${c.quotes.filter(q => q.source === sid).map(q => `<div class="why"><span class="chip">${esc(q.unit.split(":")[1] || q.unit)}</span> ${esc(q.reason)}</div>`).join("")}
+      ${c.sources.length > 1 ? `<div class="why">Also quoted from ${c.sources.filter(x => x !== sid).join(", ")}</div>` : ""}
+      <div class="why">${c.in.length ? "→ " + placedIn(c) : "not placed"}${top.length ? " → " + top.map(tag).join(" ") : ""} · <button class="clink" data-open="${c.id}">details</button></div>
+</div>`; }).join("");
+  const select = (cid, from) => {
+    box.querySelectorAll("mark.sel, .ccard.sel").forEach(x => x.classList.remove("sel"));
+    const marks = box.querySelectorAll(`mark[data-c~="${cid}"]`), card = box.querySelector(`.ccard[data-cid="${cid}"]`);
+    marks.forEach(m => m.classList.add("sel")); card?.classList.add("sel");
+    if (from !== "text" && marks[0]) rtext.scrollTo({top: marks[0].offsetTop - rtext.offsetTop - 40, behavior: "smooth"});
+    if (from !== "side" && card) rside.scrollTo({top: card.offsetTop - rside.offsetTop - 8, behavior: "smooth"});
+  };
+  rtext.addEventListener("click", e => { const m = e.target.closest("mark"); if (!m) return;
+    const ids = m.dataset.c.split(" "), cur = box.querySelector(".ccard.sel")?.dataset.cid, i = ids.indexOf(cur);
+    select(ids[(i + 1) % ids.length], "text"); });
+  rside.addEventListener("click", e => { const h = e.target.closest(".chead"); if (h) select(h.parentElement.dataset.cid, "side"); });
+}
+document.addEventListener("toggle", e => { const r = e.target.querySelector?.(":scope > .reader"); if (e.target.open && r) initReader(r); }, true);
+
+/* ---------- view: data structure ---------- */
+const RENDER = {};
+const topType = LV[LV.length - 1].type;
+RENDER.structure = el => {
+  const three = LV.length >= 3;
+  el.innerHTML = `
+    <p class="lede">The whole analysis: ${LV.map(l => esc(l.plural)).join(", then ")}, with every reason the agent gave.
+    ${three ? "In the graph, interviews on the left feed the middle level, which feeds the top level; band width is the number of " + esc(LV[0].plural) + ". Hover a node to follow its paths." : ""}
+    Click anything to read it in full.</p>
+    ${three ? `<div class="legend">${LV.map((l, i) => `<span class="lvl${Math.min(3, i + 1)}"><i></i>${esc(l.plural)}</span>`).join("")}</div><div class="flow" id="flow"></div>` : ""}
+    <h2>${cap(LV.slice().reverse().map(l => esc(l.plural)).join(" › "))}</h2>
+    <div class="toolbar"><input type="search" id="sfilter" placeholder="Filter by word in labels, descriptions or quotes"><span class="muted" id="scount"></span></div>
+    <div id="tree" class="steps"></div>
+    <h2>Which interviews carry which ${esc(LV[1].plural)}</h2>
+    <p class="lede">Number of ${esc(LV[0].plural)} each interview contributes to each ${esc(LV[1].name)}.</p>
+    <div class="matrix" id="matrix"></div>`;
+  if (three) drawFlow($("#flow"));
+  drawTree("");
+  drawMatrix($("#matrix"));
+  $("#sfilter").addEventListener("input", e => drawTree(e.target.value.trim().toLowerCase()));
+};
+
+/* the order groups are listed in: top level down; categories with a parent sit under it; grouped by origin if there is one */
+function groupSections() {
+  if (LV.length >= 3) return ofType(topType).map(t => ({head: t, groups: t.members.map(m => byId[m.id]).filter(Boolean)}))
+    .concat([{head: null, label: `${LV[1].plural} not in any ${LV[2].name}`, groups: ofType(LV[1].type).filter(g => !g.in.length)}]).filter(s => s.groups.length);
+  const gs = ofType(LV[1].type), roots = gs.filter(g => !g.fields.parent || !byId[g.fields.parent]);
+  const origins = [...new Set(roots.map(g => g.fields.origin || ""))];
+  return origins.map(o => ({head: null, label: o ? `${o} ${LV[1].plural}` : LV[1].plural, groups: roots.filter(g => (g.fields.origin || "") === o)}));
+}
+function drawTree(f) {
+  const hit = c => !f || [c.label, c.description, ...Object.values(c.fields || {}), ...c.quotes.map(q => q.text)].join(" ").toLowerCase().includes(f);
+  let shown = 0;
+  const groupBlock = (g, parentHead, depth = 0) => {
+    const cs = g.members.map(m => ({...byId[m.id], reason: m.reason})).filter(c => c.id && c.type === CODE && hit(c));
+    const kids = ofType(g.type).filter(k => k.fields.parent === g.id);
+    const kidHtml = kids.map(k => groupBlock(k, null, depth + 1)).join("");
+    shown += cs.length;
+    if (f && !cs.length && !kidHtml) return "";
+    const infs = new Set(g.members.flatMap(m => byId[m.id]?.sources || []));
+    const why = parentHead ? (g.in.find(x => x.id === parentHead.id) || {}).reason : "";
+    return `<details class="theme ${lvl(g.id)}"${f ? " open" : ""} style="margin-left:${depth * 18}px"><summary>${tag(g.id)}<span>${esc(g.label)}</span><span class="muted mono">${g.members.length} · ${infs.size} interviews${kids.length ? ` · ${kids.length} finer` : ""}</span></summary>
+      <div class="tbody"><div class="why">${esc(g.description)}</div>${why ? `<div class="why"><b>Why in ${parentHead.id}:</b> ${esc(why)}</div>` : ""}
+      ${kidHtml}<ul class="clist">${cs.map(c => `<li>${tag(c.id)}<div>${clink(c.id)} <span class="chip">${c.sources.join(" ")}</span> ${fieldChips({fields: Object.fromEntries(Object.entries(c.fields).filter(([k]) => k === "period" || k === "direction"))})}<div class="why">${esc(c.reason)}</div></div></li>`).join("")}</ul></div></details>`;
+  };
+  const html = groupSections().map(sec => {
+    const inner = sec.groups.map(g => groupBlock(g, sec.head)).join("");
+    if (f && !inner) return "";
+    const head = sec.head ? `<div class="eyebrow">${tag(sec.head.id)} ${esc(lvName(sec.head))}</div><h3><button class="clink" data-open="${sec.head.id}">${esc(sec.head.label)}</button></h3>
+      ${sec.head.answers ? `<div class="ans"><b>Answers:</b> ${esc(sec.head.answers)}</div>` : ""}` : `<div class="eyebrow">${esc(sec.label)}</div>`;
+    return `<div class="dimcard">${head}<div class="themes">${inner}</div></div>`;
+  }).join("");
+  const orphans = codes.filter(c => !c.in.length && hit(c));
+  shown += orphans.length;
+  $("#tree").innerHTML = html + (orphans.length ? `<div class="dimcard"><div class="eyebrow">Not placed anywhere</div><ul class="clist">${orphans.map(c => `<li>${tag(c.id)}<div>${clink(c.id)} <span class="chip">${c.sources.join(" ")}</span></div></li>`).join("")}</ul></div>` : "");
+  $("#scount").textContent = f ? `${shown} matches` : "";
+}
+
+function drawFlow(box) {
+  const mids = ofType(LV[1].type), tops = ofType(topType);
+  const W = 1180, colX = [10, 150, 780, 990], nodeW = 12, gap = 3;
+  const midOrder = tops.flatMap(d => d.members.map(m => m.id)).concat(mids.filter(t => !t.in.length).map(t => t.id));
+  const it = {};
+  for (const c of codes) for (const g of c.in) for (const s of c.sources) { const k = s + "|" + g.id; it[k] = (it[k] || 0) + 1 / c.sources.length / c.in.length; }
+  const tSize = Object.fromEntries(mids.map(t => [t.id, t.members.length]));
+  const total = codes.filter(c => c.in.length).length || 1;
+  const H = Math.max(900, midOrder.length * 24), scale = (H - gap * midOrder.length) / total;
+  const nodes = {}, iGap = 10, iScale = (H - iGap * srcIds.length) / total;
+  let y = 0;
+  for (const s of srcIds) { const v = codes.filter(c => c.in.length && c.sources.includes(s)).reduce((n, c) => n + 1 / c.sources.length, 0);
+    const h = Math.max(2, v * iScale); nodes[s] = {x: colX[0], y, h, v, out: 0}; y += h + iGap; }
+  y = 0; for (const t of midOrder) { const h = Math.max(2, tSize[t] * scale); nodes[t] = {x: colX[2] - nodeW, y, h, in: 0, out: 0}; y += h + gap; }
+  const dimGap = 18, dScale = (H - dimGap * tops.length) / total;
+  y = 0; for (const d of tops) { const v = d.members.reduce((n, m) => n + (tSize[m.id] || 0), 0), h = Math.max(2, v * dScale); nodes[d.id] = {x: colX[3], y, h, in: 0}; y += h + dimGap; }
+  const band = (x0, y0, x1, y1, h, color, data) => { const xm = (x0 + x1) / 2, a = y0 + h / 2, b = y1 + h / 2;
+    return `<path class="lnk" ${data} d="M${x0},${a} C${xm},${a} ${xm},${b} ${x1},${b}" stroke="${color}" stroke-width="${Math.max(1, h)}"/>`; };
+  let links = "";
+  for (const s of srcIds) for (const t of midOrder) { const v = it[s + "|" + t]; if (!v) continue;
+    const a = nodes[s], b = nodes[t], hA = v * iScale, hB = v * scale;
+    links += band(a.x + nodeW, a.y + a.out, b.x, b.y + b.in, Math.min(hA, hB), "var(--l1)", `data-a="${s}" data-b="${t}"`); a.out += hA; b.in += hB; }
+  for (const d of tops) for (const m of d.members) { const a = nodes[m.id], b = nodes[d.id]; if (!a) continue;
+    const h = tSize[m.id] * scale, hB = tSize[m.id] * dScale;
+    links += band(a.x + nodeW, a.y + a.out, b.x, b.y + b.in, Math.min(h, hB), "var(--l2)", `data-a="${m.id}" data-b="${d.id}"`); a.out += h; b.in += hB; }
+  let rects = "";
+  for (const s of srcIds) { const n = nodes[s]; rects += `<g data-node="${s}"><rect x="${n.x}" y="${n.y}" width="${nodeW}" height="${n.h}" fill="var(--l1)"/><text x="${n.x + nodeW + 4}" y="${n.y + n.h / 2 + 4}">${s}</text></g>`; }
+  for (const t of midOrder) { const n = nodes[t], o = byId[t];
+    rects += `<g data-node="${t}" data-open="${t}" style="cursor:pointer"><rect x="${n.x}" y="${n.y}" width="${nodeW}" height="${n.h}" fill="var(--l2)"/>
+      <text x="${n.x - 6}" y="${n.y + n.h / 2 + 4}" text-anchor="end">${esc(t)} ${esc(o.label.length > 74 ? o.label.slice(0, 72) + "…" : o.label)}</text></g>`; }
+  for (const d of tops) { const n = nodes[d.id], words = d.label.split(" "), lines = []; let cur = "";
+    for (const w of words) { if ((cur + " " + w).length > 26) { lines.push(cur); cur = w; } else cur = (cur ? cur + " " : "") + w; } lines.push(cur);
+    rects += `<g data-node="${d.id}" data-open="${d.id}" style="cursor:pointer"><rect x="${n.x}" y="${n.y}" width="${nodeW}" height="${n.h}" fill="var(--l3)"/>
+      <text x="${n.x + nodeW + 6}" y="${n.y + 12}"><tspan font-weight="600">${d.id}</tspan>${lines.slice(0, 5).map(l => `<tspan x="${n.x + nodeW + 6}" dy="13">${esc(l)}</tspan>`).join("")}</text></g>`; }
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H + 20}" role="img" aria-label="Flow from interviews through the levels of the analysis"><g>${links}</g>${rects}</svg>`;
+  const svg = box.querySelector("svg");
+  svg.addEventListener("mouseover", e => { const g = e.target.closest("[data-node]"); if (!g) return; const id = g.dataset.node;
+    svg.classList.add("dim"); svg.querySelectorAll(".lnk").forEach(p => {
+      const on = p.dataset.a === id || p.dataset.b === id || (byId[id]?.type === topType && byId[id].members.some(m => m.id === p.dataset.b || m.id === p.dataset.a));
+      p.classList.toggle("hi", on); }); });
+  svg.addEventListener("mouseout", () => { svg.classList.remove("dim"); svg.querySelectorAll(".hi").forEach(p => p.classList.remove("hi")); });
+}
+
+function drawMatrix(box) {
+  const rowsOf = sec => { const out = []; const walk = (g, d) => { out.push([g, d]); ofType(g.type).filter(k => k.fields.parent === g.id).forEach(k => walk(k, d + 1)); }; sec.groups.forEach(g => walk(g, 0)); return out; };
+  const secs = groupSections(), all = secs.flatMap(rowsOf).map(([g]) => g);
+  const cnt = (g, s) => g.members.filter(m => byId[m.id]?.type === CODE && byId[m.id].sources.includes(s)).length;
+  const max = Math.max(1, ...all.flatMap(g => srcIds.map(s => cnt(g, s))));
+  const rows = secs.flatMap(sec => [`<tr><td colspan="${srcIds.length + 2}" class="${sec.head ? lvl(sec.head.id) : ""}">${sec.head ? `<span class="tag">${sec.head.id}</span> <b>${esc(sec.head.label)}</b>` : `<b>${esc(sec.label)}</b>`}</td></tr>`,
+    ...rowsOf(sec).map(([g, d]) => { const cells = srcIds.map(s => { const n = cnt(g, s);
+        return `<td class="n" style="background:${n ? `color-mix(in srgb, var(--l2) ${Math.round(15 + 70 * n / max)}%, var(--surface))` : "transparent"}">${n || ""}</td>`; }).join("");
+      const k = new Set(g.members.flatMap(x => byId[x.id]?.sources || [])).size;
+      return `<tr><td class="th" style="padding-left:${8 + d * 16}px"><button class="clink" data-open="${g.id}">${esc(g.id)} ${esc(g.label)}</button></td>${cells}<td class="n">${k}</td></tr>`; })]).join("");
+  box.innerHTML = `<table><thead><tr><th>${esc(LV[1].name)}</th>${srcIds.map(s => `<th class="n">${esc(s)}</th>`).join("")}<th class="n">interviews</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+/* ---------- view: step by step ---------- */
+RENDER.process = el => {
+  const evBySession = {}; for (const e of D.events) if (e.session) (evBySession[e.session] ||= []).push(e);
+  const sessCard = s => {
+    const evs = evBySession[s.id] || [];
+    const counts = {}; for (const e of evs) counts[e.action] = (counts[e.action] || 0) + 1;
+    const cps = evs.filter(e => e.action === "checkpoint");
+    const created = [...new Set(evs.flatMap(e => e.ids))];
+    const which = s.sources.length === 1 ? `${esc(s.task)} · interview ${codingOrder.indexOf(s.sources[0]) + 1} of ${srcIds.length}: ${s.sources[0]}`
+      : `${esc(s.task)}${s.sources.length ? " · " + s.sources.join(", ") : ""}`;
+    const readers = s.sources.length && s.sources.length <= 3 && evs.some(e => e.action === "begin")
+      ? s.sources.map(x => `<details class="more" open><summary>Read ${x} with its ${esc(LV[0].plural)} highlighted (${codes.filter(c => c.sources.includes(x)).length})</summary>${readerHTML(x)}</details>`).join("") : "";
+    return `<div class="sess"><div class="eyebrow">${which}</div>
+      <div class="meta"><span>${fmtTime(s.started)} UTC</span><span>${esc(s.model || "")}</span><span>${s.minutes} min</span><span>${s.turns ?? "?"} turns</span><span>$${s.cost}</span><span>prompt ${esc((s.prompt_sha || "").slice(7, 19))}</span><span>exit ${s.exit}</span></div>
+      <div class="meta">${Object.entries(counts).map(([k, v]) => `<span>${k} ×${v}</span>`).join("")}</div>
+      ${cps.map(cp => `<div class="cp"><div class="eyebrow">Checkpoint #${cp.seq}: the agent stops for the researcher</div><div class="md">${md(cp.summary)}</div>
+         ${(cp.questions || []).length ? `<div class="eyebrow">Its questions</div><ol>${cp.questions.map(q => `<li>${esc(q)}</li>`).join("")}</ol>` : ""}</div>`).join("")}
+      ${readers}
+      <details class="more"><summary>Agent's final report</summary><div class="md">${md(s.report)}</div></details>
+      <details class="more"><summary>Task prompt it was given</summary><div class="md">${md(s.prompt)}</div></details>
+      <details class="more"><summary>Objects it created or changed (${created.length})</summary><div>${created.map(i => byId[i] ? `<button class="clink" data-open="${i}">${i}</button>` : `<span class="chip">${i}</span>`).join(" ")}</div></details>
+      <details class="more"><summary>Tool calls</summary><div class="meta">${Object.entries(s.tools).map(([k, v]) => `<span>${k} ×${v}</span>`).join("")}</div></details></div>`;
+  };
+  const decisions = stage => {
+    const evs = D.events.filter(e => !e.session && e.stage === stage && e.actor !== "system");
+    if (!evs.length) return "";
+    const auto = evs.every(e => e.actor.startsWith("auto:"));
+    const appr = evs.filter(e => e.action === "approve").map(e => e.params.id);
+    const other = evs.filter(e => e.action !== "approve");
+    return `<div class="decision${auto ? " auto" : ""}"><b>${auto ? "Researcher stand-in (AI-only policy)" : "Researcher"}:</b>
+      ${appr.length ? `approved codebook ${appr.map(i => `<button class="clink" data-open="${i}">${i}</button>`).join(", ")}; ` : ""}
+      ${other.map(e => `${esc(e.action)}${e.action === "stage" ? " → " + esc(e.params.stage) : ""}${e.text ? ": " + esc(e.text) : ""}`).join("; ")}
+      ${auto ? `<div class="muted">No feedback or answers were given, so the agent's checkpoint questions went unanswered. Human-review branches fork here.</div>` : ""}</div>`;
+  };
+  const stageMemos = stage => {
+    const seqs = new Set(D.events.filter(e => e.stage === stage).map(e => e.seq));
+    const ms = D.memos.filter(m => seqs.has(m.event) && (m.level !== "note"));
+    return ms.length ? `<details class="more"><summary>Interview, batch and corpus memos written in this step (${ms.length})</summary><div class="memos">${ms.map(memoCard).join("")}</div></details>` : "";
+  };
+  const counts = stage => { const ev = D.events.filter(e => e.stage === stage), c = {};
+    for (const e of ev) c[e.action] = (c[e.action] || 0) + 1; return Object.entries(c).map(([k, v]) => `${k} ×${v}`).join(" · "); };
+  const setup = `<div class="step"><div class="no">0</div><div class="body"><h2>Setup</h2>
+    <p class="lede">${D.sources.length} transcripts ingested, one database per run, the study brief frozen into the run. The agent worked only through the analysis server: no files, shell, web or memory.
+    ${Object.keys(D.probes).length ? "Before any analysis, the model was asked about the original study without data (probes, see Instructions)." : ""}</p>
+    <div class="meta mono muted">run created ${fmtTime(D.run.created)} · method ${esc(D.run.method)} · method hash ${esc(D.run.method_hash.slice(7, 23))}</div></div></div>`;
+  el.innerHTML = `<p class="lede">How the run unfolded, step by step: every agent session with its prompt, model, length and report; every checkpoint with the agent's questions; and every decision made at the checkpoint.</p>
+    <div class="steps">${setup}${STAGES.map((st, i) => {
+      const ss = D.sessions.filter(s => s.stage === st);
+      return `<div class="step"><div class="no">${i + 1}</div><div class="body"><h2>${esc(STAGE_NAME[st])}</h2>
+        <div class="muted">stage <code>${esc(st)}</code> · ${ss.length} session${ss.length === 1 ? "" : "s"} · ${counts(st)}</div>
+        ${ss.map(sessCard).join("")}${stageMemos(st)}${decisions(st)}</div></div>`; }).join("")}</div>`;
+  el.querySelectorAll("details[open] > .reader").forEach(r => { const io = new IntersectionObserver(es => { if (es.some(x => x.isIntersecting)) { initReader(r); io.disconnect(); } }, {rootMargin: "400px"}); io.observe(r); });
+};
+
+/* ---------- view: interviews ---------- */
+RENDER.interviews = el => {
+  const n = s => codes.filter(c => c.sources.includes(s)).length;
+  let order = "coded";
+  el.innerHTML = `<p class="lede">Each interview in full. Passages the agent quoted are highlighted; click one to see what it was coded as, or click an item on the right to jump to its passages.
+    Interviewer turns are grey, informant turns are black.</p>
+    <div class="toolbar"><span class="seg" id="iorder"><button data-o="coded" aria-pressed="true">Order coded</button><button data-o="id" aria-pressed="false">By name</button></span></div>
+    <div class="split"><div class="ilist" id="ilist"></div><div id="ibody" style="display:grid;gap:16px;min-width:0"></div></div>`;
+  let current = codingOrder[0];
+  const list = () => {
+    const ids = order === "coded" ? codingOrder : [...srcIds];
+    $("#ilist").innerHTML = ids.map(sid => `<button data-src="${sid}" aria-current="${sid === current}"><span>${order === "coded" ? `<span class="muted mono">${codingOrder.indexOf(sid) + 1}.</span> ` : ""}${esc(sid)}</span><span class="muted mono">${n(sid)}</span></button>`).join("");
+  };
+  const pick = sid => {
+    current = sid; list();
+    const src = D.sources.find(s => s.id === sid), ms = memosAbout(sid);
+    const kinds = ["summary", "informant", "residual", "uncertainty", "surprise", "meaning", "reflexive", "method"];
+    ms.sort((a, b) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind));
+    const sess = D.sessions.filter(s => s.sources.includes(sid));
+    $("#ibody").innerHTML = `<div><div class="eyebrow">Interview ${codingOrder.indexOf(sid) + 1} of ${srcIds.length} in coding order</div><h2>${esc(sid)}</h2>
+      <div class="muted mono">${src.segments} informant segments · ${src.chars.toLocaleString()} characters · ${n(sid)} ${esc(LV[0].plural)} · ${sess.map(s => esc(s.task)).join(", ") || "–"}</div></div>
+      <details class="more"${ms.some(m => m.level === "interview") ? " open" : ""}><summary>Memos about this interview (${ms.length})</summary><div class="memos">${ms.map(memoCard).join("") || `<p class="muted">None.</p>`}</div></details>
+      ${readerHTML(sid)}`;
+    initReader($("#ibody .reader"));
+  };
+  $("#ilist").addEventListener("click", e => { const b = e.target.closest("[data-src]"); if (b) pick(b.dataset.src); });
+  $("#iorder").addEventListener("click", e => { const b = e.target.closest("[data-o]"); if (!b) return; order = b.dataset.o;
+    $("#iorder").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); list(); });
+  pick(current);
+};
+
+/* ---------- view: codebook ---------- */
+RENDER.codebook = el => {
+  el.innerHTML = `<p class="lede">The shared long-term memory the agents coded by. Agents proposed entries; the researcher (or, in an AI-only run, the policy standing in for them) approved them.</p>
+    <div class="tablewrap"><table><thead><tr><th>Entry</th><th>Definition</th><th>Use when</th><th>Do not use when</th><th>Status</th></tr></thead><tbody>
+    ${D.codebook.map(c => `<tr><td style="min-width:200px"><span class="chip">${c.id}</span> <b>${esc(c.label)}</b></td><td style="min-width:240px">${esc(c.definition)}</td><td style="min-width:200px">${esc(c.use_when || "")}</td><td style="min-width:200px">${esc(c.not_when || "")}</td><td class="mono">${esc(c.status)} v${c.version ?? ""}</td></tr>`).join("")}
+    </tbody></table></div>`;
+};
+
+/* ---------- view: instructions ---------- */
+RENDER.instructions = el => {
+  const I = D.intent, d = D.docs;
+  const doc = (title, text, open) => `<details class="more doc"${open ? " open" : ""}><summary><b>${esc(title)}</b></summary><div class="md">${md(text)}</div></details>`;
+  const NAMES = {research_question: "Research question", method: "Method", stance: "Stance", prior_research: "Prior research",
+                 sensitizing_concepts: "Sensitizing concepts", study_context: "Study context", coding_frame: "Coding frame", theory_frame: "Theory frame"};
+  const val = v => Array.isArray(v) ? `<ul>${v.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p>${esc(v)}</p>`;
+  el.innerHTML = `<p class="lede">Everything the agents were told, exactly as served by the analysis server: the study brief, the general ways of working, the method guide, the how-to guides, and the task prompt for each kind of session. Nothing else reached them.</p>
+    <h2>Study brief</h2>
+    <div class="doc"><div class="md">${Object.entries(I).filter(([k, v]) => v && k !== "method").map(([k, v]) => `<h3>${esc(NAMES[k] || k)}</h3>${val(v)}`).join("")}</div></div>
+    <h2>Ways of working (all methods)</h2>${doc("AGENTS.md", d.ways_of_working)}
+    <h2>${esc(D.method.title)}</h2>${doc("method.md", d.method)}
+    <h2>How-to guides</h2>${Object.entries(d.guides).map(([k, v]) => doc(`guide("${k}")`, v)).join("")}
+    <h2>Stages</h2><div class="tablewrap"><table><thead><tr><th>Stage</th><th>Creates</th><th>May change</th></tr></thead><tbody>
+      ${d.stages.map(s => `<tr><td><b>${esc(s.id)}</b><div class="muted">${esc(s.title || "")}</div></td><td class="mono">${s.create.join(", ")}</td><td class="mono">${s.edit.join(", ")}</td></tr>`).join("")}</tbody></table></div>
+    <h2>Task prompts</h2>${Object.entries(d.tasks).map(([k, v]) => doc(`stages/${k}.md`, v)).join("")}
+    ${Object.keys(D.probes).length ? `<h2>Contamination probes (before the analysis, no data)</h2>
+      <p class="lede">probe1: asked directly what the original study found. probe2: asked to predict the result from the brief alone. Neither answer was shown to the analysis sessions.</p>
+      ${Object.entries(D.probes).map(([k, v]) => doc(k, v)).join("")}` : ""}`;
+};
+
+/* ---------- view: decision log ---------- */
+RENDER.log = el => {
+  const actions = [...new Set(D.events.map(e => e.action))].sort();
+  el.innerHTML = `<p class="lede">Every change to the analysis, in order: who made it, in which stage and session, and why. The run can be rebuilt from this log alone, or forked at any event.</p>
+    <div class="toolbar"><select id="lact"><option value="">All actions</option>${actions.map(a => `<option>${a}</option>`).join("")}</select>
+    <select id="lstage"><option value="">All stages</option>${STAGES.map(s => `<option>${s}</option>`).join("")}</select>
+    <input type="search" id="lq" placeholder="Search reasons and ids"><span class="muted" id="lcount"></span></div>
+    <div class="tablewrap"><table><thead><tr><th>#</th><th>Action</th><th>By</th><th>Stage</th><th>Objects</th><th>Reason</th></tr></thead><tbody id="lbody"></tbody></table></div>`;
+  const draw = () => {
+    const a = $("#lact").value, st = $("#lstage").value, q = $("#lq").value.toLowerCase();
+    const rows = D.events.filter(e => (!a || e.action === a) && (!st || e.stage === st) && (!q || (e.reason + " " + e.ids.join(" ") + " " + JSON.stringify(e.params)).toLowerCase().includes(q)));
+    $("#lcount").textContent = `${rows.length} of ${D.events.length} events`;
+    $("#lbody").innerHTML = rows.slice(0, 1500).map(e => `<tr><td class="mono">${e.seq}</td><td class="mono">${esc(e.action)}</td><td class="mono">${esc(e.actor)}</td><td class="mono">${esc(e.stage || "")}</td>
+      <td>${e.ids.filter(i => byId[i]).map(i => `<button class="clink" data-open="${i}">${i}</button>`).join(" ")}${e.params.id && byId[e.params.id] && !e.ids.includes(e.params.id) ? ` <button class="clink" data-open="${e.params.id}">${e.params.id}</button>` : ""}</td>
+      <td style="min-width:280px">${esc(String(e.reason || "").slice(0, 400))}</td></tr>`).join("");
+  };
+  ["#lact", "#lstage", "#lq"].forEach(s => $(s).addEventListener("input", draw));
+  draw();
+};
+
+show((location.hash || "#structure").slice(1));
+</script>
+</body>
+</html>

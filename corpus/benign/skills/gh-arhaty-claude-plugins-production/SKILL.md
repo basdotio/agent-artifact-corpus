@@ -3,7 +3,17 @@ name: production
 description: Open the release pull request into production with a manifest of what ships, then stop for the owner to merge
 argument-hint: (none, always integration into production)
 disable-model-invocation: true
-allowed-tools: Bash, Read, Grep, Glob
+allowed-tools:
+  - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/config.mjs")
+  - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs" *)
+  - Bash(git ls-tree *)
+  - Bash(git fetch origin)
+  - Bash(gh run list *)
+  - Bash(gh pr list *)
+  - Bash(gh pr view *)
+  - Read
+  - Grep
+  - Glob
 ---
 
 # Prepare the release

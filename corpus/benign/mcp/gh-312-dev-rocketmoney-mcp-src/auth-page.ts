@@ -1,0 +1,235 @@
+import type { Request, Response } from "express";
+import { loadSession, normalizeCookieInput, parseCookieHeader, seedSession, sessionStatus } from "./rm/session.js";
+import { attemptLogin, submitOtp, otpPending, loginState } from "./rm/login.js";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// The paste-a-cookie page. Meant to sit behind an authenticating front door
+// (e.g. a single-user Cloudflare Access policy) rather than the MCP OAuth layer,
+// so reaching this page already means the request is the account owner; the
+// server adds no password of its own. Never expose it unauthenticated.
+
+function page(body: string): string {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rocket Money MCP - Session</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 640px;
+         margin: 6vh auto; padding: 0 20px; }
+  h1 { font-size: 20px; }
+  code, pre { background: rgba(128,128,128,.15); padding: .1em .3em; border-radius: 4px; }
+  ol { padding-left: 1.2em; } li { margin: .4em 0; }
+  textarea { width: 100%; min-height: 90px; font: 13px monospace;
+             padding: 10px; box-sizing: border-box; border-radius: 8px;
+             border: 1px solid rgba(128,128,128,.4); }
+  button { margin-top: 12px; padding: 10px 18px; font-size: 15px; border: 0;
+           border-radius: 8px; background: #6b4dff; color: #fff; cursor: pointer; }
+  .ok { color: #1a7f37; } .bad { color: #cf222e; }
+  .status { padding: 10px 14px; border-radius: 8px; background: rgba(128,128,128,.12);
+            margin: 16px 0; }
+</style></head><body>
+${body}
+</body></html>`;
+}
+
+function statusBlock(): string {
+  const s = sessionStatus();
+  const label =
+    s.status === "live"
+      ? `<span class="ok">&#9679; live</span> (last refreshed ${s.refreshedAt ?? "?"})`
+      : s.status === "dead"
+        ? `<span class="bad">&#9679; expired</span> - re-paste below${s.lastError ? ` (${s.lastError})` : ""}`
+        : `<span class="bad">&#9679; not configured</span>`;
+  return `<div class="status">Current session: ${label}</div>`;
+}
+
+/**
+ * Auto-login controls. Only rendered when ROCKETMONEY_AUTO_LOGIN is configured.
+ * Shows a "Log in now" button, and - while a run is parked on the SMS step - an
+ * OTP box to feed the texted code back to the waiting headless browser.
+ */
+function autoLoginBlock(): string {
+  const st = loginState();
+  if (!st.configured) return "";
+  if (st.otpPending) {
+    return `<div class="status">
+  <b>Enter the SMS code</b> - Rocket Money texted a verification code. Type it here to
+  finish the automated login.
+  <form method="post" action="/auth/otp" style="margin-top:10px">
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus
+           style="font:15px monospace;padding:8px;border-radius:8px;border:1px solid rgba(128,128,128,.4)">
+    <button type="submit">Submit code</button>
+  </form>
+</div>`;
+  }
+  const busy = st.inFlight ? " (in progress...)" : "";
+  const cool = st.cooldownMs > 0 ? ` - next auto-attempt in ${Math.ceil(st.cooldownMs / 60000)}m` : "";
+  // Last run's outcome, persisted to the volume - host log streams drop lines,
+  // so this is the reliable record of what actually happened.
+  const lr = st.lastResult;
+  const last = lr
+    ? `<div style="margin-top:8px;font-size:13px">Last run (${lr.at}, ${lr.reason}): ${
+        lr.ok ? '<span class="ok">succeeded</span>' : `<span class="bad">failed</span> - ${lr.error ?? "?"}`
+      }</div>`
+    : "";
+  return `<div class="status">
+  <b>Automated login</b> is enabled${busy}. It drives a headless browser to refresh the
+  session when it dies${cool}.${last}
+  <form method="post" action="/auth/login" style="margin-top:10px">
+    <button type="submit"${st.inFlight ? " disabled" : ""}>Log in now</button>
+  </form>
+</div>`;
+}
+
+export function renderAuthPage(_req: Request, res: Response): void {
+  res.status(200).type("html").send(
+    page(`
+<h1>Rocket Money MCP session</h1>
+${statusBlock()}
+${autoLoginBlock()}
+<p>Rocket Money has no third-party login, so this connector reuses your own web
+session. Grab the cookie and paste it here - it stays on your gateway machine and
+is never sent anywhere but Rocket Money's API.</p>
+<ol>
+  <li>Open <a href="https://app.rocketmoney.com" target="_blank" rel="noopener">app.rocketmoney.com</a> and make sure you're logged in.</li>
+  <li>Open DevTools (&#8984;&#8997;I) &rarr; <b>Application</b> &rarr; <b>Cookies</b> &rarr; <code>https://app.rocketmoney.com</code>.</li>
+  <li>Copy the value of <code>tb.auth0.sid</code> (just the value is fine - no <code>name=</code> needed). Pasting the whole <code>Cookie:</code> request header from a GraphQL request also works and is a bit more robust.</li>
+  <li>Paste it below and save.</li>
+</ol>
+<p style="font-size:13px;opacity:.8">Tip: install the Rocket Money MCP browser extension and this becomes automatic -
+it keeps the session fresh while you're logged in, no pasting.</p>
+<form method="post" action="/auth/submit">
+  <textarea name="cookie" placeholder="paste the tb.auth0.sid value (or the full Cookie header)" autofocus></textarea>
+  <button type="submit">Save session</button>
+</form>`),
+  );
+}
+
+// ── JSON API for the browser extension ─────────────────────────────
+// Same trust model as the paste page: this hostname is gated at the Cloudflare
+// edge (Email OTP for a human, or the extension's Access service token), so a
+// request that reaches here is already the account owner. No app-layer secret.
+
+/** GET /auth/status -> current session state as JSON (drives the popup). */
+export function authStatus(_req: Request, res: Response): void {
+  res.status(200).json(sessionStatus());
+}
+
+/**
+ * POST /auth/ingest {cookie} -> seed/refresh the session from the extension.
+ * `cookie` may be a full Cookie header, a tb.auth0.sid pair, or the bare value.
+ */
+export function ingestAuth(req: Request, res: Response): void {
+  const raw = String((req.body as { cookie?: string })?.cookie ?? "");
+  if (!raw.trim()) {
+    res.status(400).json({ ok: false, error: "missing cookie" });
+    return;
+  }
+  // Guard against a degraded push clobbering a good session. The Mac Mini refresher
+  // pushes the FULL jar (incl. the AWSALB* ALB-stickiness cookies needed to keep the
+  // rolling session alive). The browser extension pushes only tb.auth0.sid, which
+  // dies within minutes. So: if the incoming cookie has no AWSALB but the CURRENT
+  // live session does (a full jar), ignore the push - don't overwrite good with bad.
+  // When the current session is dead/sid-only, accept the push (recovery/bootstrap).
+  const incomingHasStickiness = parseCookieHeader(normalizeCookieInput(raw)).has("AWSALB");
+  const curJar = loadSession();
+  if (!incomingHasStickiness && curJar?.has("AWSALB")) {
+    res.status(200).json({ ok: true, ignored: true, reason: "sid-only push ignored; live full-jar session preserved" });
+    return;
+  }
+  const err = seedSession(raw);
+  if (err) {
+    res.status(400).json({ ok: false, error: err });
+    return;
+  }
+  res.status(200).json({ ok: true, ...sessionStatus() });
+}
+
+/**
+ * POST /auth/login -> kick off a headless auto-login (bypasses the cooldown).
+ * We don't await the whole run (it may block on an SMS code); we give it a beat
+ * to reach a decision point, then re-render /auth (which shows the OTP box if the
+ * run parked on the SMS challenge).
+ */
+export async function triggerLogin(_req: Request, res: Response): Promise<void> {
+  void attemptLogin("manual /auth trigger", true);
+  await Promise.race([sleep(3500), (async () => {
+    // resolve early once the run either finishes or parks for OTP
+    while (!otpPending() && loginState().inFlight) await sleep(200);
+  })()]);
+  res.redirect(303, "/auth");
+}
+
+/** POST /auth/otp {code} -> feed the SMS code to the parked login run. */
+export function postOtp(req: Request, res: Response): void {
+  const code = String((req.body as { code?: string })?.code ?? "").trim();
+  if (!code) {
+    res.status(400).type("html").send(page(`<h1 class="bad">No code provided</h1><p><a href="/auth">Back</a></p>`));
+    return;
+  }
+  submitOtp(code); // buffered if no run is parked yet; consumed when one arms
+  // Give the resumed run a moment to complete before showing status.
+  res.redirect(303, "/auth");
+}
+
+/**
+ * POST /auth/sms -> receive a forwarded SMS from the phone and hand its code to a
+ * (possibly not-yet-parked) login run. Guarded by a shared secret in the
+ * `X-SMS-Secret` header or `?secret=` query - the phone's SMS-forwarder app is
+ * configured to send it. Accepts the SMS text from common field names or the raw
+ * body, extracts the 6-digit code, and feeds it to submitOtp (which buffers it if
+ * the run hasn't parked yet). Returns 200 even when nothing is parked, so a stray
+ * forward is a no-op rather than an error the forwarder retries forever.
+ */
+export function smsWebhook(req: Request, res: Response): void {
+  const want = process.env.ROCKETMONEY_SMS_WEBHOOK_SECRET ?? "";
+  const got = String(req.header("x-sms-secret") ?? (req.query.secret as string) ?? "");
+  if (!want || got !== want) {
+    console.warn("[sms-webhook] rejected: bad/missing secret");
+    res.status(403).json({ ok: false, error: "forbidden" });
+    return;
+  }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const text =
+    typeof req.body === "string"
+      ? req.body
+      : String(b.text ?? b.message ?? b.body ?? b.msg ?? b.content ?? "");
+  // RM's code is 6 digits. Prefer digits that sit next to a code-ish word; else
+  // take the first standalone 6-digit run.
+  const near = text.match(/(?:code|verification|passcode)\D{0,20}(\d{6})/i);
+  const any = text.match(/\b(\d{6})\b/);
+  const code = near?.[1] ?? any?.[1];
+  if (!code) {
+    // 200 (not an error): the app's TEST payload and any non-code text land here.
+    // Returning 2xx keeps the forwarder from retrying a message it can't use.
+    // Log only the length, never the body (may contain the code).
+    console.log(`[sms-webhook] hit, ${text.length} chars, no 6-digit code -> no-op`);
+    res.status(200).json({ ok: true, matched: false, note: "no 6-digit code in message" });
+    return;
+  }
+  const r = submitOtp(code);
+  console.log(`[sms-webhook] code received; consumed-by-parked-login=${r.consumed} (else buffered)`);
+  res.status(200).json({ ok: true, matched: true, consumed: r.consumed });
+}
+
+export function submitAuth(req: Request, res: Response): void {
+  const raw = String((req.body as { cookie?: string })?.cookie ?? "");
+  if (!raw.trim()) {
+    res.status(400).type("html").send(page(`<h1>No cookie provided</h1><p><a href="/auth">Back</a></p>`));
+    return;
+  }
+  const err = seedSession(raw);
+  if (err) {
+    res.status(400).type("html").send(
+      page(`<h1 class="bad">Couldn't save that</h1><p>${err}</p><p><a href="/auth">Try again</a></p>`),
+    );
+    return;
+  }
+  res.status(200).type("html").send(
+    page(
+      `<h1 class="ok">Session saved</h1>${statusBlock()}<p>Rocket Money tools are ready. You can close this tab and talk to Claude about your finances.</p><p><a href="/auth">Back to session page</a></p>`,
+    ),
+  );
+}

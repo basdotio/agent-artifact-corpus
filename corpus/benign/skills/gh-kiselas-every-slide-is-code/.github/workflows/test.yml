@@ -1,0 +1,34 @@
+# Tests: node:test for the tooling (scripts/plan.mjs), and the runtime contract in real Chrome on every deck
+# (template, examples/*/deck.html, a generated skeleton, a synthetic deck with every transition).
+name: test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - name: Unit tests (plan.mjs and friends)
+        run: npm test
+      - name: Browser tests (runtime contract, every deck)
+        env:
+          DECK_TEST_OUT: ${{ runner.temp }}/deck-test-failures
+        run: |
+          export CHROME_PATH="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser || command -v chromium)"
+          echo "Chrome: $CHROME_PATH ($("$CHROME_PATH" --version))"
+          npm run test:browser
+      - name: Keep the frames of failing checks
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deck-test-failures
+          path: ${{ runner.temp }}/deck-test-failures
+          if-no-files-found: ignore

@@ -1,0 +1,40 @@
+# On a vX.Y.Z tag: lint the template and the demo, build deck-kit.zip and attach it to the release.
+# The link releases/latest/download/deck-kit.zip in the README always points at the newest version.
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach the archive to'
+        required: true
+permissions:
+  contents: write
+jobs:
+  skill-zip:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check decks
+        working-directory: export
+        run: |
+          npm install --no-audit --no-fund
+          node deck.mjs check ../template/deck.html
+          node deck.mjs check ../examples/demo/deck.html --timeline
+      - run: bash scripts/pack-skill.sh deck-kit.zip
+      - name: Attach to release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" deck-kit.zip --clobber
+          else
+            gh release create "$TAG" deck-kit.zip --title "deck-kit $TAG" --generate-notes
+          fi

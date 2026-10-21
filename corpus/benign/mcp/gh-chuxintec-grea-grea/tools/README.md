@@ -6,4 +6,4 @@ CLI/MCP → application → registry/runner → launch_tool.py → grea.tools �
 
 模块导入不得解析命令行或写文件。可复用逻辑用函数提供；main 仅负责参数与调用。可选依赖保持独立，不强行装入核心运行时。测试按原输入输出和错误行为验证，修改路径不修改工具 ID。
 
-文件路径迁移见 [映射](../../../docs/路径迁移表.json)，运行方法见 [使用指南](../../../docs/使用指南.md)。
+文件路径迁移见 [映射](../../../schemas/document-path-map.json)，运行方法见 [使用指南](../../../docs/使用指南.md)。

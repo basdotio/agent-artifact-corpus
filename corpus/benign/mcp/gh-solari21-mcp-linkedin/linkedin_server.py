@@ -33,6 +33,7 @@ from linkedin_interactive_login import (
     get_brave_path
 )
 import linkedin_extended as le
+import linkedin_intelligence as li
 
 mcp = FastMCP("linkedin")
 
@@ -295,9 +296,21 @@ async def ensure_authenticated(page, creds: dict):
     # desplegar ventana interactiva física de Brave Browser en el escritorio del usuario (/IT).
 
     if needs_interactive:
+        print("[MCP Linkedin] Sesión no detectada. Invocando renovación interactiva en pantalla...")
+        renewed = trigger_interactive_session_renewal(timeout_sec=180)
+        if renewed and STORAGE_STATE_FILE.exists():
+            with open(STORAGE_STATE_FILE, "r", encoding="utf-8") as f:
+                new_st = json.load(f)
+            if "cookies" in new_st and new_st["cookies"]:
+                await page.context.clear_cookies()
+                await page.context.add_cookies(new_st["cookies"])
+                await page.goto("https://www.linkedin.com/feed/", wait_until="commit", timeout=12000)
+                await page.wait_for_timeout(2500)
+                if ("feed" in page.url or "/in/" in page.url) and "login" not in page.url and "checkpoint" not in page.url and "uas" not in page.url:
+                    return page
         raise PermissionError(
-            f"No hay sesión activa de LinkedIn en storage_state.json ni en Brave CDP (URL actual: {page.url}). "
-            "Por favor, inicia sesión en Brave para sincronizarla pasivamente sin ventanas emergentes."
+            f"No se pudo completar el inicio de sesión interactivo o tiempo de espera agotado (URL actual: {page.url}). "
+            "Por favor, completa el login en la ventana interactiva para continuar."
         )
 
     return page
@@ -468,14 +481,8 @@ async def linkedin_create_post(
 
                     if await comment_box.count() > 0:
                         await comment_box.click()
-                        await page.wait_for_timeout(400)
-                        lines = first_comment.split("\n")
-                        for idx, l in enumerate(lines):
-                            if l:
-                                await page.keyboard.type(l, delay=5)
-                            if idx < len(lines) - 1:
-                                await page.keyboard.press("Shift+Enter")
-                            await page.wait_for_timeout(30)
+                        # Inyección nativa multilínea para que Tiptap/ProseMirror genere bloques <p> y saltos reales
+                        await page.keyboard.insert_text(first_comment)
 
                         await page.wait_for_timeout(1500)
                         submit_btn = page.locator('button.comments-comment-box__submit-button, button.hcbgmy, button:has-text("Comentar")').last
@@ -484,7 +491,8 @@ async def linkedin_create_post(
 
                         # Verificación en el DOM
                         content = await page.content()
-                        snippet = lines[0][:25] if lines else "http"
+                        fc_lines = [l.strip() for l in first_comment.split("\n") if l.strip()]
+                        snippet = fc_lines[0][:25] if fc_lines else "http"
                         if snippet in content:
                             comment_status = "posted_and_verified"
                         else:
@@ -976,17 +984,83 @@ async def linkedin_get_comment_settings_url(post_url: str = None, post_index: in
                 "comment_control_url": href or "https://www.linkedin.com/sharing/commentControl",
 
                 "description": "LinkedIn permite configurar quién puede comentar mediante la página de privacidad de comentarios."
-
             }
-
         finally:
+            await browser.close()
 
+@mcp.tool()
+async def linkedin_add_comment(
+    post_url: str,
+    comment_text: str,
+    verify_author: str = None,
+    verify_topic: str = None
+) -> dict:
+    """
+    Publica un comentario estructurado en una publicación de LinkedIn con validación estricta de autoría y topic.
+    Aplica inyección nativa multilínea (párrafos <p> en Tiptap) evitando el colapso de saltos de línea.
+    
+    Args:
+        post_url: URL completa de la publicación en LinkedIn (https://www.linkedin.com/feed/update/urn:li:activity:...).
+        comment_text: Texto completo del comentario con saltos de línea y viñetas.
+        verify_author: (Opcional pero recomendado) Nombre del autor esperado en el post para evitar comentar en hilos ajenos.
+        verify_topic: (Opcional) Texto o tema clave que debe contener la publicación.
+    """
+    creds = get_creds()
+    async with async_playwright() as p:
+        browser, context = await get_browser_and_context(p)
+        page = await context.new_page()
+        try:
+            await ensure_authenticated(page, creds)
+            await page.goto(post_url, wait_until="domcontentloaded", timeout=25000)
+            await page.wait_for_timeout(3000)
+
+            # Validación estricta de autoría y contenido
+            content = await page.content()
+            if verify_author and verify_author.lower() not in content.lower():
+                return {
+                    "status": "aborted",
+                    "reason": f"El autor verificado '{verify_author}' no coincide con el contenido de la publicación.",
+                    "url": post_url
+                }
+            if verify_topic and verify_topic.lower() not in content.lower():
+                return {
+                    "status": "aborted",
+                    "reason": f"El tema clave '{verify_topic}' no fue encontrado en la publicación.",
+                    "url": post_url
+                }
+
+            # Localizar caja de comentarios
+            comment_box = page.locator('div.tiptap.ProseMirror, div[role="textbox"][aria-label*="comentario"], div[role="textbox"][contenteditable="true"]').first
+            if await comment_box.count() == 0:
+                comment_btn = page.locator('button[aria-label*="Comentar"], button:has-text("Comentar")').first
+                if await comment_btn.count() > 0:
+                    await comment_btn.click()
+                    await page.wait_for_timeout(1000)
+                comment_box = page.locator('div.tiptap.ProseMirror, div[role="textbox"][aria-label*="comentario"], div[role="textbox"][contenteditable="true"]').first
+
+            if await comment_box.count() == 0:
+                return {"status": "error", "message": "No se encontró el editor de comentarios de LinkedIn."}
+
+            await comment_box.click()
+            await page.wait_for_timeout(400)
+            # Inyección nativa multilínea para párrafos <p> independientes
+            await page.keyboard.insert_text(comment_text)
+            await page.wait_for_timeout(1500)
+
+            submit_btn = page.locator('button.comments-comment-box__submit-button, button.hcbgmy, button:has-text("Comentar"), button:has-text("Publicar")').last
+            await submit_btn.click()
+            await page.wait_for_timeout(4000)
+
+            return {
+                "status": "success",
+                "message": "Comentario publicado exitosamente con formateo multilínea verificado.",
+                "post_url": post_url
+            }
+        finally:
             await browser.close()
 
 # ==========================================
-
 # BÚSQUEDA Y PROSPECCIÓN (Gente, Empleos, etc.)
-
 # ==========================================
 
 @mcp.tool()
@@ -1462,6 +1536,125 @@ async def linkedin_get_company_details(company_url_or_slug: str) -> dict:
             return await le.extract_company_details(page, company_url_or_slug=company_url_or_slug)
         finally:
             await browser.close()
+
+# ==============================================================================
+# HERRAMIENTAS DE INTELIGENCIA EDITORIAL, ESTRATEGIA Y HEURÍSTICA ANTI-IA
+# (Inspiradas en el benchmark Jakeschincariol/linkedin-agent-skill)
+# ==============================================================================
+
+@mcp.tool()
+async def linkedin_humanize(text: str) -> dict:
+    """
+    Limpia el texto en 3 pasadas eliminando la huella sintética de IA:
+    1. Caracteres invisibles (zero-width, BOMs, formato).
+    2. Tipografía no estándar (em-dashes a comas, comillas curvas a rectas).
+    3. Sustitución de 113+ términos corporativos trillados (slop) por lenguaje natural.
+    Alerta además sobre estructuras sospechosas sin alterarlas automáticamente.
+    """
+    cleaned, report = li.humanize_text(text)
+    return {
+        "cleaned_text": cleaned,
+        "report": report
+    }
+
+@mcp.tool()
+async def linkedin_detect_ai(text: str) -> dict:
+    """
+    Evalúa el texto mediante un panel heurístico local de 5 verificaciones:
+    BURSTINESS (variación de longitud de oraciones), SPECIFICITY (densidad de números y nombres),
+    SLOP DENSITY (frecuencia de términos cliché), FINGERPRINT (caracteres no generados por teclado humano),
+    y VOICE (contracciones, pronombres personales y estructuras IA).
+    Devuelve puntuación humana (0-100) y veredicto ('PASS', 'REVIEW', 'FLAGGED').
+    """
+    return li.detect_ai_markers(text)
+
+@mcp.tool()
+async def linkedin_hook_score(text: str, formula_id: int = None) -> dict:
+    """
+    Analiza el gancho (líneas 1 y 2) de un post de LinkedIn contra las 21 fórmulas probadas (hooks.json).
+    Verifica la visibilidad antes del corte de 'Ver más' (140 car en móvil, 210 en escritorio)
+    y detecta trampas habituales (falta de números, preguntas genéricas, etc.).
+    """
+    return li.score_hook(text, formula_id=formula_id)
+
+@mcp.tool()
+async def linkedin_score_profile(profile_url_or_username: str = "me") -> dict:
+    """
+    Audita un perfil de LinkedIn frente a la rúbrica objetiva de 12 elementos (100 puntos totales).
+    Extrae los datos en vivo del perfil (vía navegador o CDP) y emite puntuación global,
+    diagnóstico por sección y plan de acción prioritario 'Fix-First'.
+    """
+    details = await linkedin_get_profile_details(profile_url_or_username=profile_url_or_username)
+    rubric_eval = li.score_profile_rubric(details)
+    return {
+        "profile_evaluated": profile_url_or_username,
+        "profile_name": details.get("name", ""),
+        "headline": details.get("headline", ""),
+        **rubric_eval
+    }
+
+@mcp.tool()
+async def linkedin_generate_comment(post_text: str, comment_type: int = None, author_name: str = None) -> dict:
+    """
+    Genera propuestas de comentarios de alto valor basadas en 9 arquetipos profesionales:
+    1. Añadir dato, 2. Caso faltante, 3. Desacuerdo respetuoso, 4. Extender una línea,
+    5. Pregunta incisiva, 6. El recibo / prueba, 7. Corrección constructiva, 8. Reencuadre, 9. Frase contundente.
+    Prohíbe comentarios genéricos vacíos ('¡Gran post!').
+    """
+    return li.generate_comment_options(post_text, comment_type=comment_type, author_name=author_name)
+
+@mcp.tool()
+async def linkedin_triage_inbox(limit: int = 10, unread_only: bool = False) -> dict:
+    """
+    Extrae las conversaciones de la bandeja de entrada (/messaging/) y las clasifica automáticamente en:
+    LEAD (clientes potenciales), RECRUITER (ofertas laborales), PEER (networking genuino),
+    ASK (peticiones de favores/dudas) y SPAM (secuencias automatizadas de prospección en frío con enlaces a calendario).
+    """
+    inbox_data = await linkedin_get_inbox_messages(limit=limit, unread_only=unread_only)
+    convs = inbox_data.get("conversations", [])
+    triage_res = li.triage_inbox_conversations(convs)
+    return {
+        "inbox_total": inbox_data.get("total_found", len(convs)),
+        **triage_res
+    }
+
+@mcp.tool()
+async def linkedin_triage_replies(comments: list) -> dict:
+    """
+    Clasifica los comentarios recibidos bajo una publicación propia en 5 niveles estratégicos:
+    LEAD (potencial cliente), SUBSTANCE (argumentación o desacuerdo), PEER (contacto relevante),
+    SUPPORT (reacciones y felicitaciones) y NOISE (spam/irrelevante).
+    Prioriza las respuestas para maximizar el alcance en la primera hora.
+    """
+    return li.triage_post_replies(comments)
+
+@mcp.tool()
+async def linkedin_carousel_planner(topic: str, num_slides: int = 10) -> dict:
+    """
+    Diseña la arquitectura diapositiva a diapositiva de un post documental (carrusel PDF 1080x1350, ratio 4:5).
+    Incluye reglas de menos de 25 palabras por slide, diapositiva de recapitulación y plantilla HTML/CSS para imprimir a PDF.
+    """
+    return li.plan_carousel_deck(topic=topic, num_slides=num_slides)
+
+@mcp.tool()
+async def linkedin_repurpose_content(source_text: str) -> dict:
+    """
+    Desglosa un contenido largo (artículo, vídeo, transcripción o llamada) en elementos atómicos:
+    afirmaciones polémicas, cifras clave, historias, mecanismos de acción, errores y frases destacadas.
+    Genera una propuesta de calendario semanal de 4 publicaciones con fórmulas de ganchos asignadas.
+    """
+    return li.repurpose_asset(source_text=source_text)
+
+@mcp.tool()
+async def linkedin_dm_sequence(name: str, hook_reason: str, offer_goal: str = "") -> dict:
+    """
+    Genera una secuencia de mensajería directa en 4 fases respetando el límite de LinkedIn:
+    1. Nota de invitación (estrictamente <= 200 caracteres, sin pedir nada).
+    2. Primer mensaje (+1 día tras aceptar, aportando valor).
+    3. Seguimiento 1 (+4 días, con recurso adicional).
+    4. Seguimiento 2 (+10 días, cierre de ciclo sin presión).
+    """
+    return li.generate_dm_sequence(name=name, hook_reason=hook_reason, offer_goal=offer_goal)
 
 def main():
     """Punto de entrada de consola para iniciar el servidor MCP."""
