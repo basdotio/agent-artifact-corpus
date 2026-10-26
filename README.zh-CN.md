@@ -118,11 +118,12 @@ make test        # harness 单元测试
 - **`sha256` 在第 1 层已被校验，在第 2 层仍然是空的。** 393 个采集来的配置文件各自带着采集时那份字节的哈希，`make validate` 会从 vendoring 的 artifact 重新算出全部 393 个并在不一致时失败。1,197 个采集来的服务器和 skill **树**做不到这一点：标签的 `sha256` 指一个文件，放在树上会被拒绝，所以它们的完整性声明是 `manifest/pins/mcp-servers.json` 里的 `tree_sha256`，由 `scripts/harvest-mcp-servers.py --from-pins` 重算，不由 `make validate` 校验。而每条 *manifest* 条目的 `sha256` 依然是空的、拉取器只核对钉住的 commit：一个引用在本地没有字节可供哈希，所以第 2 层的完整性仍然只靠 git。
 - **表格形态的上游没法只靠 `make fetch` 复现。** `automatelab-mcp-tools` 和 `SkillMD-138K` 给的是 parquet 表格而不是样本树，所以在 fetch 和 derive 之间各自还要过一个 `scripts/` 下的脚本。脚本本身是钉住且带固定种子的，但 `make derive` 不会去调它们，所以一个干净的 clone 没法用一条命令重建这两条。
 - **良性侧是抽样，恶性侧是普查，只有一个例外。** 4,506 个良性样本是按写明的方案从写明的总体里抽出来的；550 个恶性样本里有 310 个是各自上游手里的全部，另外 240 个来自 SkillHarm，是从 641 个里按固定种子每类风险抽 20 个得到的。因此这份语料给出的召回数字和假阳性数字，靠的是两种不同性质的分母，不能合成一个分数。
-- **只接入了一个工具。** `taxonomy/tools.yaml` 里只有一条 entry。
+- **还没有任何维度有野生召回率。** `corpus score` 把召回拆成 wild、fixture、constructed 三类；wild 那一行没有任何维度的样本够报出率——最多 13 个。能再分发的真实世界恶意 skill 来源现在都已读完：`datadog-ai-skills` 全部 204 个（去掉 fixture 和同一活动载荷的副本后派生 23 个），以及 `agent-skill-malware` 的 124 个（每一个都是同几个 ClawHub 诱饵的副本，或是因为引用了它们的 IOC 而被误标的防御扫描器）。含更多不同野生样本的更大数据集存在，但不能再分发（MalSkillBench 仅限学术使用，SkillTrustBench 是 NC-SA）。在出现新的公开材料之前，wild 那一行代表的是覆盖度；这份语料今天能报的召回率，是关于旁边标明的那些 fixture 来源的率。
+- **只有一个工具带规则级期望。** `taxonomy/tools.yaml` 登记了三个扫描器（aguard、ccaudit、skill-scanner），但只有 aguard 带 `expect` 块，覆盖 6 个样本；另外两个只按 `truth` 计分。
 - **`NOTICE` 没有被 `make validate` 与标签的许可证做交叉校验。**
 - **harness 里有一个包没有测试**：`fetch`。
-- **32 个「维度 × 层级」格子里有 7 个没有样本。** `make stats` 会把它们点名列出。
-- **三个作用面只有良性侧，没有恶性侧。** hooks、permission、connector 现在有 391 个真实采集来的配置和 2 个手工读出来的硬负样本，但恶性样本是零——因为没有任何公开语料把「被武器化的 hook 或权限授予」当作 artifact 收录过。所以在这三个作用面上，这份语料能量过度告警，**完全量不了召回**。那两个硬负样本配对的双胞胎也在 *skills* 作用面上（标签里写明了），这意味着一个从不解析设置文件的扫描器会安静下来，但那是因为它没有覆盖，不是因为它会分辨。
+- **36 个「维度 × 层级」格子里有 5 个没有样本。** `make stats` 会把它们点名列出。
+- **三个作用面没有野生恶性样本。** hooks、permission、connector 分别有 5、6、5 个恶性样本，全部是按具名披露（CVE-2025-59536 等）重构的，因为没有任何公开语料把武器化的 hook 或权限授予作为 artifact 收录。在这些面上，这份语料能对照真实配置测过度告警（`make stats` 计良性 188、168、121 个），并测这些披露形状的覆盖度——但测不出召回率。那里的部分硬负样本和 *skills* 面上的孪生样本配对（标签里写明了），所以一个从不解析 settings 文件的扫描器，可能是因为没覆盖而安静，而不是因为分辨出来了。
 - **配置采集无法只靠脚本复现。** GitHub 代码搜索按相关性排序，每天返回的那一百个都不一样，所以 `scripts/harvest-claude-config.py` 是往 `manifest/pins/claude-config.json` 里累加的，`--from-pins` 才能精确重建那份记录下来的集合。一个已发布的数字只能从 pins 文件复现，绝不能靠重新搜索。 `scripts/harvest-mcp-servers.py` 和 `manifest/pins/mcp-servers.json`（服务器源码和新近的 skill）同理，它的 `--from-pins` 还会重算每棵树的哈希。
 
 ## 许可证
