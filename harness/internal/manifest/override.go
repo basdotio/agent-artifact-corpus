@@ -42,6 +42,11 @@ type Evidence struct {
 type DimensionOverride struct {
 	Dimensions Targets
 	Evidence   *Evidence
+
+	// ReadBy names who read the sample when it was not a person — `read` is defined as a
+	// person's reading, and a label published from a machine's reading must say so rather than
+	// call itself hand-read. Empty means a person read it, the case every older override is.
+	ReadBy string
 }
 
 // longOverride is the mapping form. A separate type so KnownFields can reject a typo'd key:
@@ -49,6 +54,7 @@ type DimensionOverride struct {
 type longOverride struct {
 	Dimensions Targets   `yaml:"dimensions"`
 	Evidence   *Evidence `yaml:"evidence"`
+	ReadBy     *string   `yaml:"read_by"`
 }
 
 func (o *DimensionOverride) UnmarshalYAML(value *yaml.Node) error {
@@ -59,10 +65,10 @@ func (o *DimensionOverride) UnmarshalYAML(value *yaml.Node) error {
 		// becomes an override with no dimensions.
 		for i := 0; i+1 < len(value.Content); i += 2 {
 			switch k := value.Content[i].Value; k {
-			case "dimensions", "evidence":
+			case "dimensions", "evidence", "read_by":
 			default:
 				return fmt.Errorf("dimension override has unknown field %q "+
-					"(expected `dimensions` or `evidence`)", k)
+					"(expected `dimensions`, `evidence` or `read_by`)", k)
 			}
 		}
 		var lo longOverride
@@ -79,7 +85,15 @@ func (o *DimensionOverride) UnmarshalYAML(value *yaml.Node) error {
 				return err
 			}
 		}
+		if lo.ReadBy != nil && *lo.ReadBy == "" {
+			// Present but empty looks like a disclosure and discloses nothing.
+			return fmt.Errorf("dimension override has an empty read_by; name who read the " +
+				"sample, or drop the field if a person did")
+		}
 		o.Dimensions, o.Evidence = lo.Dimensions, lo.Evidence
+		if lo.ReadBy != nil {
+			o.ReadBy = *lo.ReadBy
+		}
 		return nil
 	}
 
