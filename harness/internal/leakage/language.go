@@ -156,16 +156,21 @@ func reportable(r LanguageRow) bool {
 	return with >= MinSupport && r.Ratio() >= SkewRatio
 }
 
-func familiesOf(files []string) map[string]bool {
-	byExt := map[string]string{}
+// familyOfExt inverts LanguageFamilies once, rather than once per sample.
+var familyOfExt = func() map[string]string {
+	out := map[string]string{}
 	for fam, exts := range LanguageFamilies {
 		for _, e := range exts {
-			byExt[e] = fam
+			out[e] = fam
 		}
 	}
+	return out
+}()
+
+func familiesOf(files []string) map[string]bool {
 	out := map[string]bool{}
 	for _, f := range files {
-		if fam, ok := byExt[strings.ToLower(filepath.Ext(f))]; ok {
+		if fam, ok := familyOfExt[strings.ToLower(filepath.Ext(f))]; ok {
 			out[fam] = true
 		}
 	}
