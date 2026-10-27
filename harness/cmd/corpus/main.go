@@ -256,6 +256,7 @@ func cmdValidate(root string) int {
 			"shared half\n", len(neutralProblems))
 	}
 	problems = append(problems, reportPins(pinStatuses)...)
+	problems = append(problems, reportHarvestTrees(root)...)
 	fmt.Println("rule ids")
 	for _, line := range ruleLines {
 		fmt.Println(line)
