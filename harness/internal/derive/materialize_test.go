@@ -305,3 +305,26 @@ func TestSampleDirsIgnoresFilesUnlessAsked(t *testing.T) {
 		t.Fatalf("overlapping globs name a sample once, got %+v (%v)", got, err)
 	}
 }
+
+// A dimension read by a machine must not be published as "hand-read": the label is what a
+// consumer reads, and `read` is defined as a person's reading. The note names the reader and
+// leaves the basis to the maintainer, as the benign review records read by an AI assistant do.
+func TestMachineReadDimensionIsDisclosedInTheLabel(t *testing.T) {
+	c := Coord{Class: "malicious", Dimensions: []string{"execution"}, HandReadDimension: true,
+		ReadBy: "an AI assistant for the corpus maintainer"}
+	got := originNote(materialEntry(), c)
+	for _, want := range []string{"read from the sample by an AI assistant for the corpus maintainer",
+		"a person's reading", "maintainer's call"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("note missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "hand-read") {
+		t.Fatalf("a machine reading must not be called hand-read: %s", got)
+	}
+	// The derivation's fidelity line travels with the label too, and must not say it either.
+	label := renderLabel(materialEntry(), Plan{Coord: c, LocalID: "mal-skill-x"}, "")
+	if strings.Contains(label, "hand-read") || !strings.Contains(label, "dimension read into dimension_overrides by an AI assistant") {
+		t.Fatalf("the rendered label must name the reader everywhere it describes the reading:\n%s", label)
+	}
+}
