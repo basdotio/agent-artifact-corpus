@@ -142,3 +142,110 @@ class TestExistingTreeState:
     def test_drifted_tree(self, tmp_path):
         _write(tmp_path, "a.py", b"x")
         assert H.existing_tree_state(tmp_path, _Pin("0" * 64)) == "drifted"
+
+
+class TestUnmodelledAttributes:
+    """git can also rewrite a file on add through a filter (LFS), a working-tree encoding or
+    `ident`, and whether it does depends on the committer's machine. Those files are not
+    vendored, so a pin never depends on which drivers happen to be installed."""
+
+    def test_filter_encoding_and_ident_files_are_dropped(self, repo):
+        tree = repo / "t"
+        _write(tree, ".gitattributes",
+               b"*.json filter=lfs\n*.c ident\n*.txt working-tree-encoding=UTF-16\n")
+        keep = _write(tree, "server.py", b"x\r\n")
+        lfs = _write(tree, "data.json", b"{}")
+        ident = _write(tree, "x.c", b"/* $Id$ */")
+        enc = _write(tree, "notes.txt", b"hi")
+        written = [tree / ".gitattributes", keep, lfs, ident, enc]
+        dropped = H.commit_view(written, repo)
+        assert dropped == 3
+        assert keep.exists() and not lfs.exists() and not ident.exists() and not enc.exists()
+
+
+def _pin(**kw):
+    base = dict(repo="o/r", dir="", hit="server.py", commit="c" * 40, license="MIT",
+                created_at="2026-01-01", stars=0, phase="servers", surface="mcp",
+                files=1, omitted=0, bytes=1, tree_sha256="0" * 64, name="gh-o-r")
+    base.update(kw)
+    return H.Pin(**base)
+
+
+class TestCloneDirSurvivesGitFailure:
+    """A git error while making the committed view used to raise out of a clone thread and
+    abort the whole harvest after other trees were already written. It now fails that tree."""
+
+    def test_returns_none_and_cleans_up(self, tmp_path, monkeypatch):
+        def fake_run(cmd, **kw):
+            if cmd[:2] == ["git", "clone"]:
+                d = pathlib.Path(cmd[-1])
+                d.mkdir(parents=True)
+                (d / "server.py").write_text("x")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        def boom(written, repo=None):
+            raise RuntimeError("git check-attr failed: bad .gitattributes")
+
+        monkeypatch.setattr(H.subprocess, "run", fake_run)
+        monkeypatch.setattr(H, "commit_view", boom)
+        dest = tmp_path / "gh-x"
+        assert H.clone_dir("o/r", "c" * 40, "", dest) is None
+        assert not dest.exists()
+
+
+class TestRebuildSwapsOnlyAMatch:
+    """--from-pins used to rebuild straight into the committed tree, so a drifted rebuild had
+    already replaced it by the time the hash was compared, while the run said nothing was
+    rewritten. A rebuild now lands beside the tree and replaces it only if it matches."""
+
+    def _fake_clone(self, content, digest):
+        def clone(repo, commit, directory, dest):
+            dest.mkdir(parents=True)
+            (dest / "server.py").write_text(content)
+            return 1, len(content), digest, 0
+        return clone
+
+    def test_a_match_replaces_the_tree(self, tmp_path):
+        dest = tmp_path / "gh-o-r"
+        _write(dest, "server.py", b"old")
+        state = H.rebuild_if_matches(_pin(tree_sha256="a" * 64), dest, self._fake_clone("new", "a" * 64))
+        assert state == "ok"
+        assert (dest / "server.py").read_text() == "new"
+        assert not dest.with_name("gh-o-r.rebuild").exists()
+
+    def test_drift_leaves_the_committed_tree_untouched(self, tmp_path):
+        dest = tmp_path / "gh-o-r"
+        _write(dest, "server.py", b"committed")
+        state = H.rebuild_if_matches(_pin(tree_sha256="a" * 64), dest, self._fake_clone("new", "b" * 64))
+        assert state == "drifted"
+        assert (dest / "server.py").read_text() == "committed"
+        assert not dest.with_name("gh-o-r.rebuild").exists()
+
+    def test_failure_leaves_the_committed_tree_untouched(self, tmp_path):
+        dest = tmp_path / "gh-o-r"
+        _write(dest, "server.py", b"committed")
+        state = H.rebuild_if_matches(_pin(), dest, lambda *a: None)
+        assert state == "failed"
+        assert (dest / "server.py").read_text() == "committed"
+
+
+class TestReconcileNeverDeletesAPinnedTree:
+    """The regression behind the orphan pins: a tree an earlier run pinned, whose bytes no
+    longer match, was deleted while its pin was kept. It must be kept and reported."""
+
+    def test_drifted_tree_is_kept_and_reported(self, tmp_path, monkeypatch):
+        out = tmp_path / "corpus" / "benign"
+        monkeypatch.setattr(H, "ROOT", tmp_path)
+        monkeypatch.setattr(H, "OUT", out)
+        tree = out / "mcp" / "gh-o-r"
+        _write(tree, "server.py", b"committed")
+        label = tree.with_suffix(".yaml")
+        label.write_text(f"# {H.MARKER}\nid: ben-mcp-gh-o-r\n")
+        stale = out / "mcp" / "gh-gone.yaml"
+        stale.write_text(f"# {H.MARKER}\nid: ben-mcp-gh-gone\n")
+
+        stats = H.reconcile_labels([_pin(tree_sha256="0" * 64)], fresh=set(), added="2026-10-27")
+
+        assert tree.exists() and label.exists()
+        assert stats["drifted"] == [("gh-o-r", "drifted")]
+        assert not stale.exists() and stats["removed"] == 1

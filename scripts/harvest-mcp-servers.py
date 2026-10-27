@@ -417,7 +417,14 @@ def clone_dir(repo: str, commit: str, directory: str, dest: pathlib.Path) -> tup
                 written.append(out)
         # Every file is written first so that the tree's own .gitignore and .gitattributes are
         # on disk when git is asked about them.
-        ignored = commit_view(written)
+        try:
+            ignored = commit_view(written)
+        except RuntimeError as e:
+            # One tree's git failure fails that tree. Raised out of a clone thread it used to
+            # abort the whole harvest after other trees were already written, unpinned.
+            print(f"    {repo}: {e}", file=sys.stderr, flush=True)
+            shutil.rmtree(dest, ignore_errors=True)
+            return None
         files, total, th = tree_hash_of(dest)
         return files, total, th, ignored
     except subprocess.TimeoutExpired:
@@ -441,6 +448,24 @@ def tree_hash_of(dest: pathlib.Path) -> tuple[int, int, str]:
     return len(files), total, h.hexdigest()
 
 
+def rebuild_if_matches(pin: Any, dest: pathlib.Path, clone: Any = None) -> str:
+    """Rebuild a pinned tree BESIDE its committed copy and swap it in only if it hashes to the
+    pin: 'ok', 'drifted' or 'failed'. A drifted or failed rebuild leaves the committed tree
+    exactly as it was. The sibling's name keeps the `gh-` prefix, so the repository's own
+    .gitattributes rules for harvested trees apply to it unchanged."""
+    clone = clone or clone_dir
+    side = dest.with_name(dest.name + ".rebuild")
+    shutil.rmtree(side, ignore_errors=True)
+    got = clone(pin.repo, pin.commit, pin.dir, side)
+    if got is None or got[2] != pin.tree_sha256:
+        shutil.rmtree(side, ignore_errors=True)
+        return "failed" if got is None else "drifted"
+    if dest.exists():
+        shutil.rmtree(dest)
+    side.rename(dest)
+    return "ok"
+
+
 # A pin is only an integrity claim if it describes what git COMMITS, and a vendored tree brings
 # its own git rules with it. Thirteen trees drifted because their own .gitignore made `git add`
 # skip files the hash had counted (one lost every *.md, another its .env), and the re-harvest
@@ -460,23 +485,34 @@ def git_ignored(paths: list[pathlib.Path], repo: pathlib.Path = ROOT) -> set[pat
     return {rel[s] for s in r.stdout.split("\0") if s}
 
 
-def git_text_attrs(paths: list[pathlib.Path], repo: pathlib.Path = ROOT) -> dict[pathlib.Path, tuple[str, str]]:
-    """Each path's (`text`, `eol`) attributes as `git add` will apply them, nested
-    .gitattributes included."""
+# Attributes that make `git add` rewrite a file in ways this script does not model, and that
+# depend on the committer's machine (an LFS or other filter driver, a working-tree encoding,
+# `ident` collapsing $Id$). A file carrying one is not vendored, so a pin never depends on
+# which drivers happen to be installed where the harvest ran.
+UNMODELLED_ATTRS = ("filter", "working-tree-encoding", "ident")
+
+
+def git_attrs(paths: list[pathlib.Path], names: tuple[str, ...],
+              repo: pathlib.Path = ROOT) -> dict[pathlib.Path, dict[str, str]]:
+    """Each path's value for each named attribute as `git add` will apply them, nested
+    .gitattributes included. Unset attributes read "unspecified"."""
     if not paths:
         return {}
     rel = {p.relative_to(repo).as_posix(): p for p in paths}
-    r = subprocess.run(["git", "-C", str(repo), "check-attr", "-z", "--stdin", "text", "eol"],
+    r = subprocess.run(["git", "-C", str(repo), "check-attr", "-z", "--stdin", *names],
                        input="\0".join(rel) + "\0", capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"git check-attr failed: {r.stderr.strip()[:200]}")
-    out = {p: ("unspecified", "unspecified") for p in rel.values()}
+    out = {p: {n: "unspecified" for n in names} for p in rel.values()}
     parts = r.stdout.split("\0")
     for i in range(0, len(parts) - 2, 3):
-        p, attr, value = rel[parts[i]], parts[i + 1], parts[i + 2]
-        text, eol = out[p]
-        out[p] = (value, eol) if attr == "text" else (text, value)
+        out[rel[parts[i]]][parts[i + 1]] = parts[i + 2]
     return out
+
+
+def git_text_attrs(paths: list[pathlib.Path], repo: pathlib.Path = ROOT) -> dict[pathlib.Path, tuple[str, str]]:
+    """Each path's (`text`, `eol`) attributes as `git add` will apply them."""
+    return {p: (a["text"], a["eol"]) for p, a in git_attrs(paths, ("text", "eol"), repo).items()}
 
 
 def as_committed(data: bytes, text: str, eol: str) -> bytes:
@@ -495,18 +531,23 @@ def as_committed(data: bytes, text: str, eol: str) -> bytes:
 
 def commit_view(written: list[pathlib.Path], repo: pathlib.Path = ROOT) -> int:
     """Make the vendored files on disk exactly what `git add` will commit: delete what git
-    ignores, and rewrite line endings git would normalise. Returns how many files were dropped,
-    which the caller adds to the pin's `omitted`."""
+    ignores and what an unmodelled attribute would rewrite, and normalise line endings git would
+    normalise. Returns how many files were dropped, which the caller adds to `omitted`."""
     ignored = git_ignored(written, repo)
-    for p in ignored:
-        p.unlink()
     kept = [p for p in written if p not in ignored]
-    for p, (text, eol) in git_text_attrs(kept, repo).items():
+    attrs = git_attrs(kept, ("text", "eol") + UNMODELLED_ATTRS, repo)
+    unmodelled = {p for p, a in attrs.items()
+                  if any(a[n] not in ("unspecified", "unset") for n in UNMODELLED_ATTRS)}
+    for p in ignored | unmodelled:
+        p.unlink()
+    for p in kept:
+        if p in unmodelled:
+            continue
         data = p.read_bytes()
-        stored = as_committed(data, text, eol)
+        stored = as_committed(data, attrs[p]["text"], attrs[p]["eol"])
         if stored != data:
             p.write_bytes(stored)
-    return len(ignored)
+    return len(ignored) + len(unmodelled)
 
 
 def still_qualifies(tree: pathlib.Path, surface: str) -> bool:
@@ -667,6 +708,59 @@ def promoted_elsewhere(pin: Pin) -> bool:
             if needle in lab.read_text():
                 return True
     return False
+
+
+def reconcile_labels(all_pins: list[Any], fresh: set[str], added: str) -> dict[str, Any]:
+    """Write a label for every freshly vendored tree, keep every tree an earlier run pinned, and
+    remove harvest labels no pin claims any more. A previously pinned tree is never deleted for
+    no longer matching its pin: that is the path that turned drifted trees into orphan pins."""
+    written = unchanged = promoted_skips = 0
+    drifted_existing: list[tuple[str, str]] = []
+    keep_paths: set[pathlib.Path] = set()
+    for pin in all_pins:
+        tree = OUT / pin.surface / pin.name
+        label = tree.with_suffix(".yaml")
+        if promoted_elsewhere(pin):
+            promoted_skips += 1
+            continue
+        if label.exists() and MARKER not in label.read_text():
+            print(f"  refusing to overwrite a label this script did not write: {label.relative_to(ROOT)}")
+            keep_paths.update((label, tree))
+            continue
+        if pin.name not in fresh:
+            # A tree an earlier run pinned is never deleted here. This branch used to keep only
+            # trees that still hashed to their pin and let the removal pass below delete the rest
+            # while the pin survived — which is how the re-harvest turned three trees whose
+            # committed bytes had drifted into orphan pins. Drift is reported and the run fails.
+            state = existing_tree_state(tree, pin)
+            if state == "ok":
+                unchanged += 1
+            else:
+                drifted_existing.append((pin.name, state))
+            keep_paths.update((label, tree))
+            continue
+        single = ""
+        if pin.files == 1:
+            only_file = next(p for p in tree.rglob("*") if p.is_file())
+            single = hashlib.sha256(only_file.read_bytes()).hexdigest()
+        label.write_text(render_label(pin, added, single))
+        keep_paths.update((label, tree))
+        written += 1
+
+    removed = 0
+    for surface in ("mcp", "skills"):
+        d = OUT / surface
+        for lab in sorted(d.glob("gh-*.yaml")):
+            if lab in keep_paths or MARKER not in lab.read_text():
+                continue
+            tree = lab.with_suffix("")
+            if tree.is_dir():
+                shutil.rmtree(tree)
+            lab.unlink()
+            removed += 1
+
+    return {"written": written, "unchanged": unchanged, "promoted": promoted_skips,
+            "removed": removed, "drifted": drifted_existing}
 
 
 def main() -> int:
@@ -905,11 +999,7 @@ def main() -> int:
         drifted = failed = 0
 
         def rebuild(pin: Pin) -> str:
-            dest = OUT / pin.surface / pin.name
-            got = clone_dir(pin.repo, pin.commit, pin.dir, dest)
-            if got is None:
-                return "failed"
-            return "ok" if got[2] == pin.tree_sha256 else "drifted"
+            return rebuild_if_matches(pin, OUT / pin.surface / pin.name)
 
         with ThreadPoolExecutor(CLONE_WORKERS) as ex:
             for pin, status in zip(rows, ex.map(rebuild, rows)):
@@ -933,51 +1023,9 @@ def main() -> int:
     all_pins = sorted(merged.values(), key=lambda p: (p.surface, p.name))
     print(f"\npins: {before} recorded before this run, {len(merged) - before} newly found, {len(merged)} total")
 
-    written = unchanged = promoted_skips = 0
-    drifted_existing: list[tuple[str, str]] = []
-    keep_paths: set[pathlib.Path] = set()
-    fresh = {p.name for p in new_pins}
-    for pin in all_pins:
-        tree = OUT / pin.surface / pin.name
-        label = tree.with_suffix(".yaml")
-        if promoted_elsewhere(pin):
-            promoted_skips += 1
-            continue
-        if label.exists() and MARKER not in label.read_text():
-            print(f"  refusing to overwrite a label this script did not write: {label.relative_to(ROOT)}")
-            keep_paths.update((label, tree))
-            continue
-        if pin.name not in fresh:
-            # A tree an earlier run pinned is never deleted here. This branch used to keep only
-            # trees that still hashed to their pin and let the removal pass below delete the rest
-            # while the pin survived — which is how the re-harvest turned three trees whose
-            # committed bytes had drifted into orphan pins. Drift is reported and the run fails.
-            state = existing_tree_state(tree, pin)
-            if state == "ok":
-                unchanged += 1
-            else:
-                drifted_existing.append((pin.name, state))
-            keep_paths.update((label, tree))
-            continue
-        single = ""
-        if pin.files == 1:
-            only_file = next(p for p in tree.rglob("*") if p.is_file())
-            single = hashlib.sha256(only_file.read_bytes()).hexdigest()
-        label.write_text(render_label(pin, added, single))
-        keep_paths.update((label, tree))
-        written += 1
-
-    removed = 0
-    for surface in ("mcp", "skills"):
-        d = OUT / surface
-        for lab in sorted(d.glob("gh-*.yaml")):
-            if lab in keep_paths or MARKER not in lab.read_text():
-                continue
-            tree = lab.with_suffix("")
-            if tree.is_dir():
-                shutil.rmtree(tree)
-            lab.unlink()
-            removed += 1
+    stats = reconcile_labels(all_pins, {p.name for p in new_pins}, added)
+    written, unchanged, promoted_skips = stats["written"], stats["unchanged"], stats["promoted"]
+    removed, drifted_existing = stats["removed"], stats["drifted"]
 
     PINS.parent.mkdir(parents=True, exist_ok=True)
     PINS.write_text(json.dumps(

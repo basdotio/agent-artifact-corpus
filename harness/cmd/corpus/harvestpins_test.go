@@ -45,7 +45,7 @@ func writeHarvest(t *testing.T, root string, pinHash string, files map[string]st
 		}
 	}
 	pins := map[string]any{"pins": []map[string]any{
-		{"name": "gh-a", "surface": "mcp", "tree_sha256": pinHash, "files": len(files)},
+		{"name": "gh-a", "repo": "owner/a", "surface": "mcp", "tree_sha256": pinHash, "files": len(files)},
 	}}
 	b, _ := json.Marshal(pins)
 	p := filepath.Join(root, filepath.FromSlash(harvestPinsRel))
@@ -101,5 +101,31 @@ func TestNoHarvestPinsFile(t *testing.T) {
 	checked, drift, err := CheckHarvestTrees(t.TempDir())
 	if err != nil || checked != 0 || len(drift) != 0 {
 		t.Fatalf("no pins file means nothing checked: %d, %+v, %v", checked, drift, err)
+	}
+}
+
+// The harvester deliberately writes no benign tree for a pin whose repository a malicious or
+// hard-negative label has claimed (promoted_elsewhere), and keeps the pin. That is not an
+// orphan, and validate must not fail the build over a state the harvester produces by design.
+func TestPromotedPinIsNotMissing(t *testing.T) {
+	root := t.TempDir()
+	writeHarvest(t, root, treeHashByHand(harvestFiles), harvestFiles)
+	if err := os.RemoveAll(filepath.Join(root, "corpus", "benign")); err != nil {
+		t.Fatal(err)
+	}
+	hn := filepath.Join(root, "corpus", "hard-negative", "mcp", "hn-mcp-a.yaml")
+	if err := os.MkdirAll(filepath.Dir(hn), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := "origin:\n  source: \"https://github.com/owner/a/tree/abc\"\n"
+	if err := os.WriteFile(hn, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checked, drift, err := CheckHarvestTrees(root)
+	if err != nil || checked != 1 || len(drift) != 1 || drift[0].State != "promoted" {
+		t.Fatalf("want gh-a reported as promoted: checked=%d drift=%+v err=%v", checked, drift, err)
+	}
+	if got := reportHarvestTrees(root); len(got) != 0 {
+		t.Fatalf("a promoted pin must not become a problem: %q", got)
 	}
 }
