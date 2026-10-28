@@ -86,7 +86,7 @@ func basisBlock(e manifest.Entry, c Coord) string {
 	} else if tierBasis == "assumed" {
 		assumption += fmt.Sprintf(". Tier is likewise the constant %q", c.Tier)
 	}
-	if tierBasis == "derived" || (len(c.Evasion) > 0 && len(d.CategoryAxisMap) > 0) {
+	if tierBasis == "derived" || (len(c.Evasion)+len(c.Locus) > 0 && len(d.CategoryAxisMap) > 0) {
 		needRule = true
 	}
 	if sevBasis == "upstream" && sourceField == "" {
@@ -133,6 +133,11 @@ func basisBlock(e manifest.Entry, c Coord) string {
 		// Evasion only ever arrives through the category map, which is the lossy path: an
 		// upstream category is a FAMILY and the map could pin it to one member.
 		add("evasion: derived")
+	}
+	if len(c.Locus) > 0 && len(d.CategoryAxisMap) > 0 {
+		// Locus arrives the same way as evasion, through the category map, and inherits the
+		// same ceiling: the token says which KIND of place, the map pins it to one value.
+		add("locus: derived")
 	}
 
 	return "basis:\n" + strings.Join(lines, "\n") + "\n"

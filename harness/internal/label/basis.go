@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Basis records what each of a label's axes rests on, drawn from taxonomy/basis.yaml.
@@ -37,9 +39,15 @@ type Basis struct {
 	// author to fix something that was never broken.
 	Tier    string `yaml:"tier"`
 	Evasion string `yaml:"evasion"`
+	// Locus is the fourth explanatory axis (where the deciding content sits), with the same
+	// standing as tier and evasion: never scored, still owed a basis when present.
+	Locus string `yaml:"locus"`
 
-	// Evidence belongs to `read` and to nothing else. See validateEvidencePlacement.
-	Evidence *Evidence `yaml:"evidence"`
+	// Evidence belongs to `read` and to nothing else. See validateEvidencePlacement. One
+	// entry per deciding element: a sample that reads /etc/passwd AND posts it carries two
+	// dimensions and should carry two quotes, each naming its dimension, so that "caught the
+	// reconnaissance, missed the exfiltration" is something the scorer can say.
+	Evidence EvidenceList `yaml:"evidence"`
 
 	Assumption  string `yaml:"assumption"`   // `assumed`
 	SourceField string `yaml:"source_field"` // `upstream`
@@ -53,6 +61,51 @@ type Evidence struct {
 	File  string `yaml:"file"`
 	Lines string `yaml:"lines"`
 	Quote string `yaml:"quote"`
+
+	// Dimension names which of the sample's dimensions this quote establishes. Optional on a
+	// single-dimension sample, where it is implied; on a multi-dimension sample a quote with
+	// no dimension still verifies but cannot be attributed, and `corpus stats` counts those.
+	Dimension string `yaml:"dimension"`
+}
+
+// EvidenceList reads either the single mapping the first 309 labels wrote or a sequence of
+// them. The mapping form stays legal on purpose: converting 309 labels to a one-element list
+// would change bytes that carry no new information, and a reader of a single-quote label
+// should still see a single quote.
+type EvidenceList []Evidence
+
+func (e *EvidenceList) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.MappingNode:
+		var one Evidence
+		if err := n.Decode(&one); err != nil {
+			return err
+		}
+		*e = EvidenceList{one}
+	case yaml.SequenceNode:
+		var many []Evidence
+		if err := n.Decode(&many); err != nil {
+			return err
+		}
+		*e = EvidenceList(many)
+	default:
+		return fmt.Errorf("basis.evidence must be a mapping (file, lines, quote) or a list of them")
+	}
+	return nil
+}
+
+// all reports whether every entry satisfies f; an empty list satisfies nothing, because a
+// `requires` check that passed on no evidence would be the exact hole the field exists to close.
+func (e EvidenceList) all(f func(Evidence) bool) bool {
+	if len(e) == 0 {
+		return false
+	}
+	for _, ev := range e {
+		if !f(ev) {
+			return false
+		}
+	}
+	return true
 }
 
 // RefutationSearch is what a benign sample records after the refutation ruleset has been run
@@ -89,11 +142,11 @@ func (b *Basis) axisValues() map[string]string {
 func (b *Basis) has(field string) bool {
 	switch field {
 	case "evidence.file":
-		return b.Evidence != nil && b.Evidence.File != ""
+		return b.Evidence.all(func(e Evidence) bool { return e.File != "" })
 	case "evidence.lines":
-		return b.Evidence != nil && b.Evidence.Lines != ""
+		return b.Evidence.all(func(e Evidence) bool { return e.Lines != "" })
 	case "evidence.quote":
-		return b.Evidence != nil && b.Evidence.Quote != ""
+		return b.Evidence.all(func(e Evidence) bool { return e.Quote != "" })
 	case "assumption":
 		return b.Assumption != ""
 	case "source_field":
@@ -145,7 +198,7 @@ func (l *Label) ValidateBasis(spec *taxonomy.BasisSpec) []error {
 // coordinate makes a batch constant look like something a person verified, and once that is
 // permitted every distinction the file draws can be borrowed by the value below it.
 func (l *Label) validateEvidencePlacement() []error {
-	if l.Basis.Evidence == nil {
+	if len(l.Basis.Evidence) == 0 {
 		return nil
 	}
 	for _, v := range l.Basis.axisValues() {
@@ -164,16 +217,25 @@ func (l *Label) validateEvidencePlacement() []error {
 // in the artifact, either the label is wrong or the artifact changed under it, and both are
 // worth failing over: this is the one basis allowed to score the attribution axis.
 func (l *Label) VerifyEvidence() []error {
-	if l.Basis == nil || l.Basis.Evidence == nil || l.Basis.Evidence.Quote == "" {
-		return nil
-	}
-	if l.Path == "" {
+	if l.Basis == nil || len(l.Basis.Evidence) == 0 || l.Path == "" {
 		return nil
 	}
 	var errs []error
+	for _, ev := range l.Basis.Evidence {
+		if ev.Quote == "" {
+			continue
+		}
+		errs = append(errs, l.verifyOneEvidence(ev)...)
+	}
+	return errs
+}
+
+// verifyOneEvidence locates one quote: in the named file when there is one, anywhere in the
+// tree when there is not — and says so when it is nowhere.
+func (l *Label) verifyOneEvidence(ev Evidence) []error {
+	var errs []error
 	bad := func(f string, a ...any) { errs = append(errs, fmt.Errorf(f, a...)) }
 
-	ev := l.Basis.Evidence
 	if ev.File != "" {
 		full := filepath.Join(l.Path, filepath.FromSlash(ev.File))
 		b, err := os.ReadFile(full)
@@ -189,7 +251,6 @@ func (l *Label) VerifyEvidence() []error {
 		return errs
 	}
 
-	// No file named: accept the quote anywhere in the tree, but say so when it is nowhere.
 	files, err := regularFiles(l.Path)
 	if err != nil {
 		bad("basis.evidence is set but the sample tree cannot be read: %v", err)

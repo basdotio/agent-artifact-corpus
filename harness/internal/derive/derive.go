@@ -50,6 +50,7 @@ type Coord struct {
 	Class      string
 	Dimensions []string
 	Evasion    []string
+	Locus      []string // where the deciding content sits; explanatory, from the category map
 	Tier       string
 	Severity   string
 
@@ -136,6 +137,10 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			case "tier":
 				if _, ok := tax.Tiers[val]; !ok {
 					bad("%s: category_axis_map[%q] targets tier %q, which is not in the vocabulary", e.ID, cat, val)
+				}
+			case "locus":
+				if _, ok := tax.Loci[val]; !ok {
+					bad("%s: category_axis_map[%q] targets locus %q, which is not in the vocabulary", e.ID, cat, val)
 				}
 			}
 		}
@@ -291,7 +296,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			targets, mapped := d.CategoryAxisMap[cat]
 			if !mapped {
 				bad("%s: upstream category %q has no category_axis_map entry — map it to dim:, "+
-					"evasion:, tier: or ignore; leaving it out silently drops the axis it carries", e.ID, cat)
+					"evasion:, tier:, locus: or ignore; leaving it out silently drops the axis it carries", e.ID, cat)
 				continue
 			}
 			for _, target := range targets {
@@ -307,6 +312,10 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 				case "evasion":
 					if c.Class == "malicious" {
 						c.Evasion = appendUnique(c.Evasion, val)
+					}
+				case "locus":
+					if c.Class == "malicious" {
+						c.Locus = appendUnique(c.Locus, val)
 					}
 				case "tier":
 					// Where an id prefix gave a tier it is authoritative and a disagreement is

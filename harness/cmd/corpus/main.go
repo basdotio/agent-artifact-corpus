@@ -22,6 +22,7 @@ import (
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/leakage"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/manifest"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/refute"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/score"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
 )
 
@@ -500,16 +501,82 @@ func cmdStats(root string) int {
 		fmt.Printf("    %-14s mal %-4d ben %-4d hard-neg %d\n", s, m["malicious"], m["benign"], m["hard-negative"])
 	}
 
-	fmt.Println("  by origin")
+	fmt.Println("  by origin — how the LABEL was made (a rule, a person, a collector)")
 	for _, o := range []string{"real-world", "promoted", "reconstruction", "synthetic", "harvested", "derived"} {
 		if byOrigin[o] > 0 {
 			fmt.Printf("    %-14s %d\n", o, byOrigin[o])
 		}
 	}
 
+	// What the SAMPLE is, as opposed to how its label was made. The two were one report
+	// until 2026-10-28, and reading `derived 3427` as "3,427 not-real samples" was the
+	// natural mistake: that row mixes 1,973 real public skills with 240 LLM-written attacks.
+	// The buckets are the scorer's own, from the same function, so a reader of this table
+	// and of a scorecard are looking at the same split.
+	prov := provenanceMap(root)
+	byProv := map[string]map[string]int{}
+	for _, l := range labels {
+		ev := score.EvidenceClass(l, prov)
+		if byProv[ev] == nil {
+			byProv[ev] = map[string]int{}
+		}
+		byProv[ev][string(l.Class)]++
+	}
+	fmt.Println("  by provenance — what the SAMPLE is; never summed across rows")
+	for _, ev := range []string{score.Wild, score.Fixture, score.Synthetic, score.Injected, score.Constructed, score.Unclassified} {
+		if m := byProv[ev]; m != nil {
+			fmt.Printf("    %-14s mal %-4d ben %-4d hard-neg %d\n", ev, m["malicious"], m["benign"], m["hard-negative"])
+		}
+	}
+
 	// Truth-side composition. This is the half that describes the corpus to someone who has
 	// never run any scanner of ours, so every value in the vocabulary is listed including the
 	// ones with no sample: a named hole is actionable, an omitted one reads as covered.
+	// Locus, listed in vocabulary order including empty rows, like every other explanatory
+	// axis: a named hole is actionable, an omitted one reads as covered.
+	byLocus := map[string]int{}
+	withLocus := 0
+	for _, l := range labels {
+		if l.Class != label.Malicious {
+			continue
+		}
+		if len(l.Truth.Locus) > 0 {
+			withLocus++
+		}
+		for _, lc := range l.Truth.Locus {
+			byLocus[lc]++
+		}
+	}
+	fmt.Printf("  by locus — where the deciding content sits (%d of %d malicious carry one; a sample may carry several)\n",
+		withLocus, byClass["malicious"])
+	for _, lc := range tax.LocusOrder {
+		fmt.Printf("    %-18s %d\n", lc, byLocus[lc])
+	}
+
+	// Quoted evidence: how many malicious samples carry a located quote at all, and how many
+	// of the multi-dimension ones carry a quote that says which dimension it establishes.
+	withEv, multi, multiAttributed := 0, 0, 0
+	for _, l := range labels {
+		if l.Class != label.Malicious || l.Basis == nil || len(l.Basis.Evidence) == 0 {
+			continue
+		}
+		withEv++
+		if len(l.DimensionSet(tax)) > 1 {
+			multi++
+			named := 0
+			for _, ev := range l.Basis.Evidence {
+				if ev.Dimension != "" {
+					named++
+				}
+			}
+			if named > 0 {
+				multiAttributed++
+			}
+		}
+	}
+	fmt.Printf("  evidence — %d of %d malicious carry a located quote; of the %d on two or more dimensions,\n"+
+		"    %d say which dimension each quote establishes\n", withEv, byClass["malicious"], multi, multiAttributed)
+
 	fmt.Println("  by technique (truth — tool-neutral)")
 	for _, t := range sortedKeys(tax.Techniques) {
 		fmt.Printf("    %-22s performed %-4d resembled %d\n", t, performed[t], resembled[t])
@@ -1023,6 +1090,25 @@ func addCell(grid map[string]map[string]int, dimension, tier string) {
 		grid[dimension] = map[string]int{}
 	}
 	grid[dimension][tier]++
+}
+
+// provenanceMap reads every manifest entry's provenance, keyed by entry id — the scorer's
+// input for EvidenceClass, built here so `stats` and `score` split on the same reading.
+func provenanceMap(root string) map[string]string {
+	prov := map[string]string{}
+	manifests, _ := filepath.Glob(filepath.Join(root, "manifest", "*.yaml"))
+	for _, mp := range manifests {
+		f, err := manifest.Load(mp)
+		if err != nil {
+			continue
+		}
+		for _, e := range f.Entries {
+			if e.Provenance != "" {
+				prov[e.ID] = e.Provenance
+			}
+		}
+	}
+	return prov
 }
 
 // deferLicenceFailures turns the per-label "may not be vendored into layer 1" failures of an

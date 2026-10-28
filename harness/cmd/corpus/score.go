@@ -166,12 +166,20 @@ func printReport(rep score.Report, labels []*label.Label) {
 	fmt.Println("  wild        the artifact existed because somebody made it for real. ONLY these")
 	fmt.Println("              can back a claim about the world.")
 	fmt.Println("  fixture     a third party wrote it as a test case — coverage of THEIR shapes.")
+	fmt.Println("  synthetic   a third party's generator wrote it outright — coverage of ITS shapes.")
+	fmt.Println("  injected    a generator put a payload into a real benign artifact — the base is")
+	fmt.Println("              wild, the attack is not; a score here is about the template.")
 	fmt.Println("  constructed we wrote it — coverage of OURS.")
-	fmt.Println("  The three never merge. Adding them produces a number that means nothing.")
+	fmt.Println("  None of these merge. Adding them produces a number that means nothing.")
 	printRecall(rep.RecallByDimension)
 
 	fmt.Println("\n  per source — a rate over one source is a rate ABOUT that source, not the world:")
 	printGroups(rep.RecallBySource)
+
+	fmt.Println("\n  by what the label rests on — read: a person located and quoted the attack;")
+	fmt.Println("  upstream: the upstream said so; derived: our rule read the upstream's category;")
+	fmt.Println("  assumed: a batch constant. Kinds of evidence, never averaged:")
+	printGroups(rep.RecallByBasis)
 
 	// FLAG RATE, not false-positive rate, and the distinction is the corpus's own. A benign
 	// label here means "somebody committed this to be loaded" and its class rests on `assumed`
@@ -184,6 +192,7 @@ func printReport(rep score.Report, labels []*label.Label) {
 	fmt.Println("  not confirmed false positives. Read one before you count it as an error.")
 	printGroups(rep.FPByPopulation)
 	printReviewed(rep)
+	printAlertJustified(rep)
 
 	fmt.Println("\nhard negatives — the precision probe, a census, never pooled with the estimate above:")
 	g := rep.HardNegFlagged
@@ -203,6 +212,15 @@ func printReport(rep score.Report, labels []*label.Label) {
 	} else {
 		fmt.Printf("  %d of %d correct (%.0f%%, [%.0f, %.0f])\n",
 			a.Correct, a.Scoreable, a.Point*100, a.Lo*100, a.Hi*100)
+	}
+
+	fmt.Println("\nlocation — of caught malicious with a quoted file, did the scanner name that file:")
+	if rep.LocationScoreable == 0 {
+		fmt.Println("  nothing scoreable: the verdicts name no files, or no caught sample carries quoted evidence")
+	} else {
+		p, lo, hi := score.Wilson(rep.LocationHits, rep.LocationScoreable)
+		fmt.Printf("  %d of %d (%.0f%%, [%.0f, %.0f]) — a flag on the right file, not just on the tree\n",
+			rep.LocationHits, rep.LocationScoreable, p*100, lo*100, hi*100)
 	}
 
 	if rep.Uncovered > 0 {
@@ -323,6 +341,16 @@ func printList(ids []string) {
 	for i := 0; i < len(ids); i += perLine {
 		fmt.Println("  " + strings.Join(ids[i:min(i+perLine, len(ids))], "  "))
 	}
+}
+
+// printAlertJustified reports the benign samples set aside from the flag rate because their
+// behaviour crosses a safety boundary in the open — a flag on them is right, a silence is not
+// wrong. It prints when the count is zero too: a reader comparing two scorecards needs to know
+// whether the set-aside existed, not infer it from a missing line.
+func printAlertJustified(rep score.Report) {
+	fmt.Printf("  alert justified: %d benign sample(s) cross a safety boundary in the open (sandbox off,\n", rep.AlertJustified)
+	fmt.Printf("  borrowed credentials, remote rewrite of global instructions); %d flagged. They are outside\n", rep.AlertJustifiedFlagged)
+	fmt.Println("  the flag rate above on both sides — a flag there is correct, and so is a silence.")
 }
 
 // printReviewed reports the reviewed subset — the only part of the benign pool where a flag can

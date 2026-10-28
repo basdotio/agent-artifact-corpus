@@ -4,6 +4,7 @@ package score
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/label"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
@@ -27,6 +28,15 @@ const (
 	// Fixture — a third party authored it as a test case. Worth catching and not ours to
 	// imagine, but coverage of THEIR chosen shapes rather than a sample of the world's.
 	Fixture = "fixture"
+	// Synthetic — a third party's generator (an LLM, a template) authored it with no real base.
+	// Coverage of the generator's shapes. Kept apart from Fixture since 2026-10-28 because a
+	// person's test case and a model's output are different populations with different leaks.
+	Synthetic = "synthetic"
+	// Injected — a third party's generator inserted a payload into a REAL benign artifact. The
+	// base is wild and the attack is not; MaliciousSkillBench's cross-source result is that a
+	// learned model keeps recall here while its benign false-positive rate collapses, because
+	// what it learned was the template. Never pooled with Wild, and never with Synthetic.
+	Injected = "injected"
 	// Constructed — we authored it. Coverage of the shapes WE chose.
 	Constructed = "constructed"
 	// Unclassified — the sample's source declares no provenance. Reported as its own row and
@@ -40,7 +50,7 @@ const (
 // to call a rate — the caller prints the count alone and says why.
 type Group struct {
 	Key      string
-	Evidence string // Wild | Fixture | Constructed | Unclassified; empty for FP populations
+	Evidence string // Wild | Fixture | Synthetic | Injected | Constructed | Unclassified; empty for FP populations
 	N        int
 	Hits     int // caught, for recall; flagged, for false positives
 	Point    float64
@@ -87,12 +97,33 @@ type Report struct {
 	BenignReviewed  int
 	FlagsOnReviewed int
 
+	// AlertJustified is the benign samples whose behaviour crosses a safety boundary in the
+	// open (truth.alert_justified), and AlertJustifiedFlagged how many the scanner raised.
+	// They are outside FPByPopulation entirely — neither numerator nor denominator — because
+	// on these a flag is not an error and a silence is not one either. Reported on their own
+	// line so a reader can see what was set aside.
+	AlertJustified        int
+	AlertJustifiedFlagged int
+
 	RecallByDimension []Group // split by Evidence; never a pooled total
 	RecallBySource    []Group // one source is a rate about that source
-	FPByPopulation    []Group
-	HardNegFlagged    Group // census over the precision probe, reported alone
+	// RecallByBasis splits recall by what each malicious LABEL rests on — read, upstream,
+	// derived, assumed (taxonomy/basis.yaml). It is the corpus's answer to MaliciousSkillBench's
+	// "label strength" axis without the ordinal scale: a miss on a `read` sample is a miss on
+	// an attack a person located and quoted; a miss on an `assumed` one is a miss on a batch
+	// constant. The rows are kinds of evidence, never averaged.
+	RecallByBasis  []Group
+	FPByPopulation []Group
+	HardNegFlagged Group // census over the precision probe, reported alone
 
 	Attribution Attribution
+
+	// LocationScoreable is the caught malicious samples where both sides named a file — the
+	// label's evidence and the scanner's verdict — and LocationHits how many of those agree.
+	// Scoreable only where both exist, so a scanner that reports no files is "not scored
+	// here", not "wrong here".
+	LocationScoreable int
+	LocationHits      int
 }
 
 // Score computes the report. population is injected rather than recomputed so the scorer groups
@@ -118,6 +149,7 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 	type tally struct{ n, hits int }
 	recall := map[string]map[string]*tally{}
 	bySource := map[string]*tally{}
+	byBasis := map[string]*tally{}
 	fp := map[string]*tally{}
 	hn := tally{}
 	attr := Attribution{}
@@ -164,6 +196,24 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 			bySource[src].n++
 			bySource[src].hits += hit
 
+			basis := "unrecorded"
+			if l.Basis != nil && l.Basis.Class != "" {
+				basis = l.Basis.Class
+			}
+			if byBasis[basis] == nil {
+				byBasis[basis] = &tally{}
+			}
+			byBasis[basis].n++
+			byBasis[basis].hits += hit
+
+			// Location: did the scanner point at the file the deciding quote came from.
+			if v.Flagged() && l.Basis != nil && len(l.Basis.Evidence) > 0 && len(v.Files) > 0 {
+				rep.LocationScoreable++
+				if locationHit(v.Files, l.Basis.Evidence) {
+					rep.LocationHits++
+				}
+			}
+
 			// Attribution: only where the dimension may be scored, and only when caught.
 			if v.Flagged() && l.Basis != nil && spec.AllowsAxis("dimension", l.Basis.Dimension) {
 				truth := dimensionsOf(l, tax)
@@ -176,6 +226,15 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 			}
 
 		case label.Benign:
+			if l.Truth.AlertJustified {
+				// Set aside before the tally: a flag here is correct behaviour and a silence
+				// is defensible too, so the sample can sit in neither side of a flag rate.
+				rep.AlertJustified++
+				if v.Flagged() {
+					rep.AlertJustifiedFlagged++
+				}
+				continue
+			}
 			pop := population(l)
 			if fp[pop] == nil {
 				fp[pop] = &tally{}
@@ -218,6 +277,10 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 	for src, t := range bySource {
 		rep.RecallBySource = append(rep.RecallBySource, newGroup(src, "", t.n, t.hits))
 	}
+	for b, t := range byBasis {
+		rep.RecallByBasis = append(rep.RecallByBasis, newGroup(b, "", t.n, t.hits))
+	}
+	sort.Slice(rep.RecallByBasis, func(i, j int) bool { return rep.RecallByBasis[i].Key < rep.RecallByBasis[j].Key })
 	for pop, t := range fp {
 		rep.FPByPopulation = append(rep.FPByPopulation, newGroup(pop, "", t.n, t.hits))
 	}
@@ -244,10 +307,24 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 //
 // Ours is decided by the label; everyone else's by the manifest entry that supplied it, which
 // is where the reading of that upstream was written down.
-func evidenceClass(l *label.Label, prov map[string]string) string {
+func evidenceClass(l *label.Label, prov map[string]string) string { return EvidenceClass(l, prov) }
+
+// EvidenceClass is evidenceClass for callers outside the scorer — `corpus stats` reports the
+// corpus by the same buckets the scorecard splits on, from the same function, so the two
+// cannot drift.
+func EvidenceClass(l *label.Label, prov map[string]string) string {
 	switch l.Origin.Type {
 	case "reconstruction", "synthetic":
 		return Constructed
+	case "harvested":
+		// A harvested sample is one the collector copied out of a public repository at a
+		// pinned commit, which is the definition of wild. Until 2026-10-28 these 1,584 fell
+		// through to Unclassified because no manifest entry speaks for them and no label
+		// states it — the scorer was reporting "provenance unknown" for the half of the
+		// corpus whose provenance is the best documented (a permalink and a hash on every
+		// label). A harvested sample promoted by hand to another class is still the same
+		// artifact, so the class does not change this.
+		return Wild
 	}
 	if l.Origin.DerivedFrom != nil && l.Origin.DerivedFrom.Entry != "" {
 		if p := prov[l.Origin.DerivedFrom.Entry]; p != "" {
@@ -302,4 +379,32 @@ func sortGroups(gs []Group) {
 		}
 		return gs[i].Evidence < gs[j].Evidence
 	})
+}
+
+// locationHit is true when any file the scanner named is a file the evidence quotes. Paths are
+// compared as slash-separated suffixes on a "/" boundary in either direction, so
+// `scripts/run.sh` matches `run.sh` and `./scripts/run.sh` alike; a bare basename match on a
+// tree with two files of that name is accepted, because a scanner is not expected to know
+// which copy the label meant.
+func locationHit(named []string, evidence []label.Evidence) bool {
+	norm := func(p string) string {
+		p = strings.TrimPrefix(strings.ReplaceAll(p, "\\", "/"), "./")
+		return strings.TrimPrefix(p, "/")
+	}
+	for _, f := range named {
+		a := norm(f)
+		if a == "" {
+			continue
+		}
+		for _, ev := range evidence {
+			b := norm(ev.File)
+			if b == "" {
+				continue
+			}
+			if a == b || strings.HasSuffix(a, "/"+b) || strings.HasSuffix(b, "/"+a) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -331,6 +331,9 @@ func renderLabel(e manifest.Entry, p Plan, treeDir string) string {
 		fmt.Fprintf(&b, "  severity: %s\n", c.Severity)
 		fmt.Fprintf(&b, "  tier: %s\n", c.Tier)
 		fmt.Fprintf(&b, "  evasion: [%s]\n", strings.Join(c.Evasion, ", "))
+		if len(c.Locus) > 0 {
+			fmt.Fprintf(&b, "  locus: [%s]\n", strings.Join(c.Locus, ", "))
+		}
 	}
 	return b.String()
 }
