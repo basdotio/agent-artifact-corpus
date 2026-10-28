@@ -240,10 +240,8 @@ func renderLabel(e manifest.Entry, p Plan, treeDir string) string {
 		// The originating repository's licence, not the compilation's — see license_from.
 		lic = c.License
 	}
-	fmt.Fprintf(&b, "  license: %s
-", lic)
-	fmt.Fprintf(&b, "  note: %q
-", originNote(e, c))
+	fmt.Fprintf(&b, "  license: %s\n", lic)
+	fmt.Fprintf(&b, "  note: %q\n", originNote(e, c))
 	fmt.Fprintf(&b, "  added: %s\n", time.Now().Format("2006-01-02"))
 	// Derived coordinates come from an upstream label through a stated rule, not from running
 	// a scanner, so there is no run whose result could have leaked into the answer.
