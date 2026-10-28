@@ -55,6 +55,12 @@ type Evasion struct {
 	What        string `yaml:"what"`
 }
 
+// Locus is one place the deciding content can sit. Closed vocabulary, same reason as Evasion.
+type Locus struct {
+	ID   string `yaml:"id"`
+	What string `yaml:"what"`
+}
+
 type Technique struct {
 	ID        string `yaml:"id"`
 	Title     string `yaml:"title"`
@@ -125,6 +131,7 @@ type techniqueFile struct {
 	Dimensions []Dimension `yaml:"dimensions"`
 	Tiers      []Tier      `yaml:"tiers"`
 	Evasion    []Evasion   `yaml:"evasion"`
+	Locus      []Locus     `yaml:"locus"`
 	Techniques []Technique `yaml:"techniques"`
 }
 
@@ -141,6 +148,8 @@ type Set struct {
 	TierOrder     []string // ordinal, easiest first
 	Tiers         map[string]Tier
 	Evasions      map[string]Evasion
+	LocusOrder    []string // as declared, for reports
+	Loci          map[string]Locus
 	Techniques    map[string]Technique
 	Tools         map[string]Tool
 }
@@ -160,6 +169,7 @@ func Load(dir string) (*Set, error) {
 		DimensionDefs: map[string]Dimension{},
 		Tiers:         map[string]Tier{},
 		Evasions:      map[string]Evasion{},
+		Loci:          map[string]Locus{},
 		Techniques:    map[string]Technique{},
 		Tools:         map[string]Tool{},
 	}
@@ -174,6 +184,10 @@ func Load(dir string) (*Set, error) {
 	}
 	for _, e := range tf.Evasion {
 		s.Evasions[e.ID] = e
+	}
+	for _, lc := range tf.Locus {
+		s.Loci[lc.ID] = lc
+		s.LocusOrder = append(s.LocusOrder, lc.ID)
 	}
 	for _, t := range tf.Techniques {
 		s.Techniques[t.ID] = t

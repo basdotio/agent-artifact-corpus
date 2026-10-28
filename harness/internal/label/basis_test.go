@@ -70,7 +70,7 @@ func TestValidateBasisRequiresCompanionFields(t *testing.T) {
 func TestValidateBasisAcceptsComplete(t *testing.T) {
 	spec := basisSpec(t)
 	good := []*Basis{
-		{Class: "read", Evidence: &Evidence{File: "a.md", Lines: "1-2", Quote: "q"}},
+		{Class: "read", Evidence: EvidenceList{{File: "a.md", Lines: "1-2", Quote: "q"}}},
 		{Class: "upstream", SourceField: "verdict", SourceValue: "malicious"},
 		{Class: "derived", Rule: "category_axis_map"},
 		{Class: "assumed", Assumption: "collected from a batch treated as one class"},
@@ -111,7 +111,7 @@ func TestVerifyEvidenceFindsQuote(t *testing.T) {
 	}
 	l := &Label{ID: "x", Path: dir, Basis: &Basis{
 		Class:    "read",
-		Evidence: &Evidence{File: "SKILL.md", Lines: "3", Quote: "archive@vault.example"},
+		Evidence: EvidenceList{{File: "SKILL.md", Lines: "3", Quote: "archive@vault.example"}},
 	}}
 	if errs := l.VerifyEvidence(); len(errs) != 0 {
 		t.Errorf("a quote that is present produced %v", errs)
@@ -125,7 +125,7 @@ func TestVerifyEvidenceRejectsAbsentQuote(t *testing.T) {
 	}
 	l := &Label{ID: "x", Path: dir, Basis: &Basis{
 		Class:    "read",
-		Evidence: &Evidence{File: "SKILL.md", Lines: "1", Quote: "archive@vault.example"},
+		Evidence: EvidenceList{{File: "SKILL.md", Lines: "1", Quote: "archive@vault.example"}},
 	}}
 	errs := l.VerifyEvidence()
 	if len(errs) == 0 {
@@ -143,7 +143,7 @@ func TestVerifyEvidenceRejectsAbsentFile(t *testing.T) {
 	}
 	l := &Label{ID: "x", Path: dir, Basis: &Basis{
 		Class:    "read",
-		Evidence: &Evidence{File: "scripts/gone.py", Lines: "1", Quote: "x"},
+		Evidence: EvidenceList{{File: "scripts/gone.py", Lines: "1", Quote: "x"}},
 	}}
 	if errs := l.VerifyEvidence(); len(errs) == 0 {
 		t.Fatal("evidence naming a file that is not in the tree validated")
@@ -156,7 +156,7 @@ func TestVerifyEvidenceRejectedOnNonReadBasis(t *testing.T) {
 	l := &Label{ID: "x", Class: Malicious, Basis: &Basis{
 		Class:      "assumed",
 		Assumption: "batch",
-		Evidence:   &Evidence{File: "a", Lines: "1", Quote: "q"},
+		Evidence:   EvidenceList{{File: "a", Lines: "1", Quote: "q"}},
 	}}
 	errs := l.ValidateBasis(basisSpec(t))
 	if len(errs) == 0 {
@@ -177,7 +177,7 @@ func TestBasisDebtCountsUnlabelledAndAssumedMalicious(t *testing.T) {
 		{ID: "a", Class: Malicious}, // no basis at all
 		{ID: "b", Class: Malicious, Basis: &Basis{Class: "assumed", Assumption: "batch"}}, // debt
 		{ID: "c", Class: Benign, Basis: &Basis{Class: "assumed", Assumption: "batch"}},    // expected resting state
-		{ID: "d", Class: Malicious, Basis: &Basis{Class: "read", Evidence: &Evidence{Quote: "q"}}},
+		{ID: "d", Class: Malicious, Basis: &Basis{Class: "read", Evidence: EvidenceList{{Quote: "q"}}}},
 	}
 	d := BasisDebt(labels, spec)
 	if d.NoBasis != 1 {
@@ -199,7 +199,7 @@ func TestScoreableOnDimension(t *testing.T) {
 	labels := []*Label{
 		{ID: "a", Class: Malicious, Truth: Truth{Dimensions: []string{"exfiltration"}},
 			Basis: &Basis{Class: "upstream", SourceField: "v", SourceValue: "malicious",
-				Dimension: "read", Evidence: &Evidence{File: "f", Lines: "1", Quote: "q"}}},
+				Dimension: "read", Evidence: EvidenceList{{File: "f", Lines: "1", Quote: "q"}}}},
 		{ID: "b", Class: Malicious, Truth: Truth{Dimensions: []string{"execution"}},
 			Basis: &Basis{Class: "assumed", Assumption: "batch", Dimension: "derived", Rule: "map"}},
 		{ID: "c", Class: Malicious, Truth: Truth{Dimensions: []string{"backdoor"}},

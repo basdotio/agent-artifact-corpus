@@ -53,6 +53,8 @@ type Entry struct {
 	// `fixture` a third party authored it as a test case. Real enough to be worth catching and
 	//           not ours to imagine, but coverage of THEIR chosen shapes, not a sample of the
 	//           world's.
+	// `synthetic` / `injected` — see validProvenance: generated outright, or generated into a
+	//           real base. Both are coverage, and the scorer keeps them apart from `fixture`.
 	//
 	// Samples we author ourselves never reach here: their labels carry origin.type
 	// `reconstruction` or `synthetic` and the scorer classes them from that.
@@ -367,11 +369,24 @@ func Load(path string) (*File, error) {
 
 var validRoles = []string{"fp-denominator", "recall", "hard-negative", "touchstone", "probe"}
 
-// validProvenance is deliberately two words and not three. "Ours" is not an option here: a
+// validProvenance names what a third party's artifacts ARE. "Ours" is not an option here: a
 // sample this repository authored carries it in its own label (origin.type reconstruction or
 // synthetic) and never reaches a manifest entry, so offering the value would create a second
 // place to make the same claim — and eventually two places that disagree.
-var validProvenance = []string{"wild", "fixture"}
+//
+//	wild       existed because somebody made it for real
+//	fixture    a person authored it as a test case (skillsgoat, cisco's numbered examples)
+//	synthetic  a generator authored it — an LLM or a template — with no real base artifact
+//	           (SkillHarm: every sample names the model that wrote it)
+//	injected   a generator inserted a payload into a REAL benign base artifact (Skill-Inject:
+//	           84 templates over real carrier skills). The base is wild, the attack is not,
+//	           and a scanner's score on it says something about neither alone
+//
+// `synthetic` and `injected` were one word, `fixture`, until 2026-10-28. MaliciousSkillBench's
+// cross-source result is the reason they are not: a learned model keeps its recall on synthetic
+// samples and loses it on injected ones, because the injected half teaches the template rather
+// than the attack. Pooling the two hides exactly that.
+var validProvenance = []string{"wild", "fixture", "synthetic", "injected"}
 
 // validAxisTarget checks the shape of a category_axis_map value. The value after the colon
 // (the actual axis member) is checked against the taxonomy in the derive package, where the
@@ -380,7 +395,7 @@ func validAxisTarget(t string) bool {
 	if t == "ignore" {
 		return true
 	}
-	for _, prefix := range []string{"dim:", "evasion:", "tier:"} {
+	for _, prefix := range []string{"dim:", "evasion:", "tier:", "locus:"} {
 		if strings.HasPrefix(t, prefix) && len(t) > len(prefix) {
 			return true
 		}

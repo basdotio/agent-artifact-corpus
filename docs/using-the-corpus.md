@@ -59,6 +59,7 @@ For each line: point your scanner at `path`, decide one word, emit one line.
 | `verdict` | yes | exactly `malicious` or `benign` — nothing else parses |
 | `severity` | no | your severity, on the ordinary ladder |
 | `dimensions` | no | which KIND, in this corpus's vocabulary — unlocks the attribution score |
+| `files` | no | which files you flagged, relative to the sample tree — unlocks the location score: on a caught sample with a quoted deciding line, did you name the file it is in |
 
 Malformed input is refused with a line number rather than skipped. A scorer that silently
 drops records reports a rate over an unknown denominator, which is worse than not running.

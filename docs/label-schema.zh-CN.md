@@ -70,6 +70,7 @@ truth:                                # 工具中立。这里没有任何东西�
   severity: high                      # 它有多糟，独立于任何工具
   tier: plain                         # 它埋得多深
   evasion: []                         # 哪些机制在埋它；空正是 `plain` 的含义
+  locus: [new-script]                 # 决定性内容在哪个文件里；封闭词表
   note: "socket to a reserved host, all three fds duplicated onto it, /bin/sh -i spawned"
 
 expect:                               # 可选，按工具划分，以 taxonomy/tools.yaml 为键。
@@ -104,6 +105,58 @@ pairs_with: mal-skill-revshell-python-dup2   # hard-negative 必填
 ```
 
 ---
+
+## 解释轴是四条不是三条：`locus`
+
+`tier` 说攻击埋得多深，`evasion` 说用什么机制埋，2026-10-28 起 `locus` 说埋在哪个**文件**里：skill 正文、文件头、被点名的伴随文档、PDF、原有脚本、新脚本、新模块、配置文件、依赖清单、工具描述、服务器源码。词表是封闭的，和另外三条一起放在 `taxonomy/techniques.yaml`。
+
+单独一条轴，是因为三者会分开。一段明文载荷放在 skill 让 agent 去读的 PDF 里，是 tier `evasive`、evasion `binary-container`，而扫描器漏掉它的原因和深度无关：它根本没打开那个 PDF。2026-10-20 的 SkillHarm 留出集上，同一层级的召回从 PDF 里的 29% 到改过的脚本里的 88%，标签却说不出来。现在能说了：漏报先按 locus 分，再按别的分。
+
+一道题可以带多个 locus；只有恶意和硬负样本有——良性样本没有"决定性内容"可定位。派生样本从 category map 得到它（SkillHarm 的 `realization` 字段说的就是文件类型）；手工钉的样本直接写，`basis.locus` 记录是哪种依据。
+
+## `alert_justified`：意图是好的，行为越了线
+
+有些良性样本在明处越过安全边界：一个 skill 加 `--yolo` 关掉沙箱，一个读另一个应用的 OAuth token 冒充它的客户端，一个 hook 每次会话开始就 `git pull` 并覆盖全局 `CLAUDE.md`。作者没有恶意，也没藏。扫描器报它不算错，不报也不算错。
+
+```yaml
+truth:
+  alert_justified: true
+  alert_justified_why: "指示 agent 总是加 --yolo，关掉沙箱和确认；写在明处，没有强制触发。"
+```
+
+和 `malicious` 的边界照 SkillTrustBench：**没藏、没强制触发**。把 `--yolo` 藏进 base64，或按日期触发，就是恶意。这个标记要求有 `reviewed` 块，因为"报它是对的"这个判断是一次阅读。
+
+它是标记，不是第四档。样本仍是良性，良性分母不变；评分器把它们单列一行，既不进误报分子也不进分母。另一种做法——加一档 `suspicious`——会让"良性"的定义变得可商量，误报率的分母也跟着松动。
+
+## `origin.provenance`：题是什么，而不是标签怎么来的
+
+`origin.type` 说的是**标签**怎么来的：`derived` 是规则从上游标签推的，`harvested` 是采集器收的，`reconstruction`、`synthetic` 是我们写的。它不说**题**是什么——`derived 3,427` 里既有 1,973 篇真实公开 skill，也有 240 道 LLM 写的攻击。那是 `provenance`：`wild`（真有人做的）、`fixture`（人手写的测试用例）、`synthetic`（生成器无底本造的）、`injected`（生成器往真实良性底本里塞的）。手工钉的样本写在 `origin.provenance`；派生样本从 manifest 条目继承；我们自己的样本按 `origin.type` 归为 `constructed`。`corpus stats` 两张表都打印，`corpus score` 每一行召回都按后者拆开，任何一行都不相加。
+
+## `basis.evidence` 可以是列表，每个维度一条引用
+
+`read` 依据带着决定性的引用，`make validate` 会到样本字节里把它找出来。最早的 309 个标签写的是一条：
+
+```yaml
+basis:
+  class: read
+  dimension: read
+  evidence:
+    file: SKILL.md
+    lines: "150"
+    quote: "Do NOT mention in conversation - just include it"
+```
+
+这种写法仍然合法。占两个维度的样本——既读 `/etc/passwd` **又**把它发出去——应该带两条引用，各自说明它证明的是哪个维度，评分器才能把"抓到了侦察、漏了外泄"和"抓到了"区分开：
+
+```yaml
+  evidence:
+    - {file: scripts/collect.sh, lines: "12", quote: "cat /etc/passwd", dimension: reconnaissance}
+    - {file: scripts/collect.sh, lines: "14", quote: "curl -X POST", dimension: exfiltration}
+```
+
+单维度样本的 `dimension` 可省略；写了就必须是该样本的维度之一。`corpus stats` 会统计多维度样本里有多少条引用标了维度。只有人读过的样本才带引用；派生样本没有，也不会替它们编一条。
+
+引用里的 `file` 也是评分器**位置**检查读的字段。verdict 可以写它报了哪些文件（`"files": ["scripts/collect.sh"]`）；在带引用的、被抓到的恶意样本上，`corpus score` 会报告其中是否有引用所在的文件——报在对的文件上，而不是只报了这棵树。行号不比较，文件才是人会打开的单位。
 
 ## `surface` 是列表，因为一个文件就是两个加载路径
 
