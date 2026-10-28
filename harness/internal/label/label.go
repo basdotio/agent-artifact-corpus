@@ -289,7 +289,13 @@ var (
 	// permissiveLicenses may be vendored into layer 1. Everything else belongs in manifest/
 	// — see docs/licensing.md. No-license material is the strictest case (zero grant), not
 	// the loosest.
-	permissiveLicenses = []string{"MIT", "Apache-2.0", "BSD-3-Clause", "BSD-2-Clause", "CC-BY-4.0", "CC0-1.0", "ISC"}
+	permissiveLicenses = []string{"MIT", "Apache-2.0", "BSD-3-Clause", "BSD-2-Clause", "CC-BY-4.0", "CC0-1.0", "ISC",
+		// Added 2026-10-28 when origin.license started recording the ORIGINATING repository's
+		// licence rather than the compilation's: these four are permissive in the same sense
+		// as the seven above, and real repositories behind SkillMD-138K use them. MPL-2.0 is
+		// deliberately absent: file-level copyleft is still copyleft, and five samples are
+		// not worth a special case.
+		"Unlicense", "MIT-0", "0BSD", "Zlib"}
 )
 
 func Load(path string) (*Label, error) {

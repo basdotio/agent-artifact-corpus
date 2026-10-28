@@ -57,6 +57,10 @@ type Coord struct {
 	// the entry itself is the source.
 	Source string
 
+	// License is the originating repository's or package's licence when the entry's derive rule
+	// names a pins file (license_from). Empty means the entry's own licence applies.
+	License string
+
 	// IsFile says the upstream sample is a single file, to be wrapped in a directory of its own
 	// when vendored. Set from sample_is_file, or per match under mixed_shapes.
 	IsFile bool
@@ -229,6 +233,15 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			fmt.Sscanf(n, "%d", &want)
 			if parts := strings.Split(filepath.Base(dir), "__"); want > 0 && len(parts) >= want {
 				c.Source = strings.Join(parts[:want], "/")
+			}
+		}
+
+		if d.LicenseFrom != "" {
+			lic, lerr := licenseFromPins(d.LicenseFrom, c.Source, filepath.Base(dir))
+			if lerr != nil {
+				bad("%s/%s: %v", e.ID, up.ID, lerr)
+			} else {
+				c.License = lic
 			}
 		}
 
@@ -647,4 +660,53 @@ func sameSet(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// pinsRecord is the one field this package reads from a pins file; the scripts that write the
+// files record more (when it was checked, via what) for a reader, not for the derivation.
+type pinsRecord struct {
+	License string `json:"license"`
+}
+
+// licenseFromPins resolves a `license_from` spec for one sample. The pins file path is used as
+// given — the caller resolves it against the repository root — and is read once per call,
+// which is cheap next to walking a tree and keeps this function free of hidden state.
+func licenseFromPins(spec, source, name string) (string, error) {
+	rest, ok := strings.CutPrefix(spec, "pins:")
+	if !ok {
+		return "", fmt.Errorf("license_from %q must be pins:<file>:<source-repo|name>", spec)
+	}
+	i := strings.LastIndex(rest, ":")
+	if i < 0 {
+		return "", fmt.Errorf("license_from %q must be pins:<file>:<source-repo|name>", spec)
+	}
+	file, key := rest[:i], rest[i+1:]
+	var k string
+	switch key {
+	case "source-repo":
+		if source == "" {
+			return "", fmt.Errorf("license_from keys by source-repo but source_from recovered no repository")
+		}
+		k = source
+	case "name":
+		k = name
+	default:
+		return "", fmt.Errorf("license_from key %q is neither source-repo nor name", key)
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("license_from pins file: %w", err)
+	}
+	var pins map[string]pinsRecord
+	if err := json.Unmarshal(b, &pins); err != nil {
+		return "", fmt.Errorf("license_from pins file %s is not a JSON object: %w", filepath.Base(file), err)
+	}
+	rec, has := pins[k]
+	if !has {
+		return "", fmt.Errorf("pins file %s has no entry for %q — run the resolve script", filepath.Base(file), k)
+	}
+	if rec.License == "" {
+		return "", fmt.Errorf("pins file %s records no licence for %q", filepath.Base(file), k)
+	}
+	return rec.License, nil
 }

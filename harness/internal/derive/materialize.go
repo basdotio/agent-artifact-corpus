@@ -235,7 +235,12 @@ func renderLabel(e manifest.Entry, p Plan, treeDir string) string {
 		src = fmt.Sprintf("https://github.com/%s (via %s @ %s)", c.Source, e.ID, short12(e.Commit))
 	}
 	fmt.Fprintf(&b, "  source: %q\n", src)
-	fmt.Fprintf(&b, "  license: %s\n", e.License)
+	lic := e.License
+	if c.License != "" {
+		// The originating repository's licence, not the compilation's — see license_from.
+		lic = c.License
+	}
+	fmt.Fprintf(&b, "  license: %s\n", lic)
 	fmt.Fprintf(&b, "  note: %q\n", originNote(e, c))
 	fmt.Fprintf(&b, "  added: %s\n", time.Now().Format("2006-01-02"))
 	// Derived coordinates come from an upstream label through a stated rule, not from running

@@ -246,6 +246,7 @@ func cmdValidate(root string) int {
 	// What each label RESTS ON, and — for the benign half — whether anything was searched for
 	// before the word "benign" was written down. Both were previously unrecorded, which let a
 	// batch constant and a hand-read artifact print as the same kind of claim.
+	problems = deferLicenceFailures(problems, labels, allEntries)
 	problems = append(problems, reportBasis(labels, basisSpec)...)
 	problems = append(problems, reportRefutation(labels, refuteRules, allEntries, allAdjudications)...)
 	// Named even when clean, because the point of these three is that they were each added
@@ -752,6 +753,16 @@ func cmdDerive(root string, want []string) int {
 			continue
 		}
 
+		if d := e.Derive; strings.HasPrefix(d.LicenseFrom, "pins:") {
+			// The manifest names the pins file relative to the repository root; the derivation
+			// is handed an absolute path and never has to know where the repository is.
+			dd := *d
+			rest := strings.TrimPrefix(d.LicenseFrom, "pins:")
+			if i := strings.LastIndex(rest, ":"); i > 0 && !filepath.IsAbs(rest[:i]) {
+				dd.LicenseFrom = "pins:" + filepath.Join(root, rest[:i]) + rest[i:]
+			}
+			e.Derive = &dd
+		}
 		res, errs := derive.Derive(e, upRoot, tax)
 		fmt.Printf("%s — %s\n", id, e.Derive.Fidelity)
 		if res != nil {
@@ -1023,4 +1034,51 @@ func addCell(grid map[string]map[string]int, dimension, tier string) {
 		grid[dimension] = map[string]int{}
 	}
 	grid[dimension][tier]++
+}
+
+// deferLicenceFailures turns the per-label "may not be vendored into layer 1" failures of an
+// entry whose manifest record says license_review: deferred into ONE line that prints on every
+// run. The labels keep the true licence; nothing is relabelled to pass. It exists because on
+// 2026-10-28 the originating-repository lookup put 1,601 derived labels outside the permissive
+// set at once, and the decision about them (drop, or rebuild locally as layer 2) was deferred
+// rather than taken — a deferral has to stay visible or it becomes the new normal.
+func deferLicenceFailures(problems []string, labels []*label.Label, entries []manifest.Entry) []string {
+	deferred := map[string]string{}
+	for _, e := range entries {
+		if e.LicenseReview == "deferred" {
+			deferred[e.ID] = e.LicenseReviewNote
+		}
+	}
+	if len(deferred) == 0 {
+		return problems
+	}
+	relEntry := map[string]string{}
+	for _, l := range labels {
+		if l.Origin.DerivedFrom != nil {
+			relEntry[l.Rel] = l.Origin.DerivedFrom.Entry
+		}
+	}
+	const marker = "may not be vendored into layer 1"
+	kept := problems[:0]
+	count := map[string]int{}
+	for _, p := range problems {
+		rel, _, _ := strings.Cut(p, ": ")
+		if id, ok := relEntry[rel]; ok && deferred[id] != "" && strings.Contains(p, marker) {
+			count[id]++
+			continue
+		}
+		kept = append(kept, p)
+	}
+	if len(count) > 0 {
+		total := 0
+		for _, id := range sortedKeys(count) {
+			total += count[id]
+		}
+		fmt.Printf("licence     DEFERRED, not passed — %d label(s) sit on upstream licences outside "+
+			"the permissive set and stay in layer 1 by a recorded decision:\n", total)
+		for _, id := range sortedKeys(count) {
+			fmt.Printf("              %-26s %5d   %s\n", id, count[id], deferred[id])
+		}
+	}
+	return kept
 }
