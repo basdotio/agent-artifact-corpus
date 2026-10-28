@@ -229,10 +229,12 @@ func cmdValidate(root string) int {
 		group := populationOf(l)
 		samples = append(samples, leakage.Sample{
 			ID: l.ID, Class: string(l.Class), Files: files, Group: group,
+			Surfaces: []string(l.Surface),
 		})
 	}
 	leaks := leakage.Check(samples)
 	crossPop := leakage.CrossPopulation(samples)
+	langSkew := leakage.LanguageSkew(samples)
 
 	fmt.Printf("labels      %d\n", len(labels))
 	fmt.Printf("techniques  %d across %d dimensions\n", len(tax.Techniques), len(tax.Dimensions))
@@ -257,6 +259,7 @@ func cmdValidate(root string) int {
 			"shared half\n", len(neutralProblems))
 	}
 	problems = append(problems, reportPins(pinStatuses)...)
+	problems = append(problems, reportHarvestTrees(root)...)
 	fmt.Println("rule ids")
 	for _, line := range ruleLines {
 		fmt.Println(line)
@@ -319,7 +322,13 @@ func cmdValidate(root string) int {
 	}
 
 	// Duplicates: cross-class is an error, same-class is named and counted.
-	problems = append(problems, reportDuplicates(DuplicateTrees(labels))...)
+	excludedByAdj := map[string]bool{}
+	for id, a := range allAdjudications {
+		if a.Verdict == "exclude" {
+			excludedByAdj[id] = true
+		}
+	}
+	problems = append(problems, reportDuplicates(DuplicateTrees(labels), excludedByAdj)...)
 
 	// A pair that guards nothing passes every structural check. It is reported, named and
 	// counted rather than rejected, because the twin's known_gap is an honest declaration
@@ -357,6 +366,8 @@ func cmdValidate(root string) int {
 			fmt.Printf("  %-22s %d samples, %d %s (%.0f%%)\n", f.Name, f.Total, f.With, f.Class, f.Purity()*100)
 		}
 	}
+
+	problems = append(problems, reportLanguageSkew(langSkew)...)
 
 	if len(problems) == 0 {
 		fmt.Println("\nok")

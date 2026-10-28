@@ -240,47 +240,10 @@ func renderLabel(e manifest.Entry, p Plan, treeDir string) string {
 		// The originating repository's licence, not the compilation's — see license_from.
 		lic = c.License
 	}
-	fmt.Fprintf(&b, "  license: %s\n", lic)
-	// An entry with `label_file: ""` has NO per-sample upstream label, so its class and
-	// severity are constants this repository asserts. 163 labels — every cisco and skillcraft
-	// one — used to say "coordinates derived from the upstream's own labels" regardless, and
-	// carried a `derived_from.fidelity` string byte-identical to skillsgoat's. A reader
-	// inspecting one label could not tell a severity READ from an upstream field from a
-	// severity ASSERTED here. The entry-level fidelity block was honest about it; that honesty
-	// did not travel with the label, and the label is what a consumer reads.
-	hasUpstreamLabels := e.Derive.LabelFile == nil || *e.Derive.LabelFile != ""
-	note := "coordinates derived from the upstream's own labels; the artifact is vendored unchanged"
-	if !hasUpstreamLabels {
-		note = "the upstream ships no per-sample label, so class and severity are CONSTANTS this " +
-			"repository asserts rather than values it read; tier and dimension come from the " +
-			"category map. The artifact is vendored unchanged"
-	}
-	if c.HandReadDimension {
-		note = "dimension hand-read from the sample because the upstream labels this by technique only; other axes derived"
-	}
-	if c.Class == "benign" {
-		note = e.Derive.BenignNote
-		if note == "" {
-			note = "upstream benign; this entry does not state what that label was based on"
-		}
-	}
-	// A declared transform makes "vendored unchanged" false, and the label is what a consumer
-	// actually reads. An audit already found 163 labels carrying a fidelity string that
-	// described a different entry entirely; a note that survives a change to the bytes it
-	// describes is that same defect with a shorter fuse.
-	if len(e.Derive.Transforms) > 0 {
-		note = strings.TrimRight(strings.TrimSpace(
-			strings.ReplaceAll(note, "; the artifact is vendored unchanged", "")), ";. ")
-		note = strings.TrimRight(strings.TrimSpace(
-			strings.ReplaceAll(note, "The artifact is vendored unchanged", "")), ";. ")
-		ids := make([]string, 0, len(e.Derive.Transforms))
-		for _, t := range e.Derive.Transforms {
-			ids = append(ids, t.ID)
-		}
-		note += fmt.Sprintf("; the artifact is vendored with %s applied, declared in the manifest",
-			strings.Join(ids, " and "))
-	}
-	fmt.Fprintf(&b, "  note: %q\n", note)
+	fmt.Fprintf(&b, "  license: %s
+", lic)
+	fmt.Fprintf(&b, "  note: %q
+", originNote(e, c))
 	fmt.Fprintf(&b, "  added: %s\n", time.Now().Format("2006-01-02"))
 	// Derived coordinates come from an upstream label through a stated rule, not from running
 	// a scanner, so there is no run whose result could have leaked into the answer.
@@ -293,7 +256,7 @@ func renderLabel(e manifest.Entry, p Plan, treeDir string) string {
 	// none, and when benign labels carry no dimension or evasion at all, is the same defect as
 	// an unearned coordinate: a claim about provenance that the data does not support.
 	fid := "tier, severity and class mechanical; dimension and evasion via the category map"
-	if !hasUpstreamLabels {
+	if hasUpstreamLabels := e.Derive.LabelFile == nil || *e.Derive.LabelFile != ""; !hasUpstreamLabels {
 		fid = "class and severity are constants this entry asserts, NOT values read from an " +
 			"upstream label; tier and dimension come from the category map"
 	}
@@ -301,6 +264,9 @@ func renderLabel(e manifest.Entry, p Plan, treeDir string) string {
 	case c.Class == "benign":
 		fid = "class is a constant and benign labels carry no coordinates, so nothing is mapped; " +
 			"the judgement is in this entry's sampling design"
+	case c.HandReadDimension && c.ReadBy != "":
+		fid = "tier, severity and class mechanical; dimension read into dimension_overrides by " +
+			c.ReadBy
 	case c.HandReadDimension:
 		fid = "tier, severity and class mechanical; dimension hand-read into dimension_overrides"
 	}
@@ -420,4 +386,57 @@ func copyTree(src, dst string, ts []manifest.Transform, counts map[string]int) e
 		}
 		return copyFile(p, target, ts, counts)
 	})
+}
+
+// originNote is the label's origin.note: what the coordinates rest on, said in the label
+// itself, because the label is what a consumer reads.
+func originNote(e manifest.Entry, c Coord) string {
+	// An entry with `label_file: ""` has NO per-sample upstream label, so its class and
+	// severity are constants this repository asserts. 163 labels — every cisco and skillcraft
+	// one — used to say "coordinates derived from the upstream's own labels" regardless, and
+	// carried a `derived_from.fidelity` string byte-identical to skillsgoat's. A reader
+	// inspecting one label could not tell a severity READ from an upstream field from a
+	// severity ASSERTED here. The entry-level fidelity block was honest about it; that honesty
+	// did not travel with the label, and the label is what a consumer reads.
+	hasUpstreamLabels := e.Derive.LabelFile == nil || *e.Derive.LabelFile != ""
+	note := "coordinates derived from the upstream's own labels; the artifact is vendored unchanged"
+	if !hasUpstreamLabels {
+		note = "the upstream ships no per-sample label, so class and severity are CONSTANTS this " +
+			"repository asserts rather than values it read; tier and dimension come from the " +
+			"category map. The artifact is vendored unchanged"
+	}
+	if c.HandReadDimension {
+		note = "dimension hand-read from the sample because the upstream labels this by technique only; other axes derived"
+	}
+	if c.HandReadDimension && c.ReadBy != "" {
+		// `read` is defined as a person's reading. A machine's reading published as
+		// "hand-read" is the claim this note must not make; it names the reader and leaves the
+		// basis to the maintainer, as the benign review records read by an AI assistant do.
+		note = "dimension read from the sample by " + c.ReadBy + ", not by a person; `read` is " +
+			"defined as a person's reading, so whether this label keeps that basis is the corpus " +
+			"maintainer's call; other axes derived"
+	}
+	if c.Class == "benign" {
+		note = e.Derive.BenignNote
+		if note == "" {
+			note = "upstream benign; this entry does not state what that label was based on"
+		}
+	}
+	// A declared transform makes "vendored unchanged" false, and the label is what a consumer
+	// actually reads. An audit already found 163 labels carrying a fidelity string that
+	// described a different entry entirely; a note that survives a change to the bytes it
+	// describes is that same defect with a shorter fuse.
+	if len(e.Derive.Transforms) > 0 {
+		note = strings.TrimRight(strings.TrimSpace(
+			strings.ReplaceAll(note, "; the artifact is vendored unchanged", "")), ";. ")
+		note = strings.TrimRight(strings.TrimSpace(
+			strings.ReplaceAll(note, "The artifact is vendored unchanged", "")), ";. ")
+		ids := make([]string, 0, len(e.Derive.Transforms))
+		for _, t := range e.Derive.Transforms {
+			ids = append(ids, t.ID)
+		}
+		note += fmt.Sprintf("; the artifact is vendored with %s applied, declared in the manifest",
+			strings.Join(ids, " and "))
+	}
+	return note
 }
