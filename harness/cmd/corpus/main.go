@@ -321,7 +321,13 @@ func cmdValidate(root string) int {
 	}
 
 	// Duplicates: cross-class is an error, same-class is named and counted.
-	problems = append(problems, reportDuplicates(DuplicateTrees(labels))...)
+	excludedByAdj := map[string]bool{}
+	for id, a := range allAdjudications {
+		if a.Verdict == "exclude" {
+			excludedByAdj[id] = true
+		}
+	}
+	problems = append(problems, reportDuplicates(DuplicateTrees(labels), excludedByAdj)...)
 
 	// A pair that guards nothing passes every structural check. It is reported, named and
 	// counted rather than rejected, because the twin's known_gap is an honest declaration

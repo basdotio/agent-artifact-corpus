@@ -55,7 +55,7 @@ func TestWildAndConstructedNeverMerge(t *testing.T) {
 		{Sample: "m1", Verdict: "malicious"},
 		{Sample: "m2", Verdict: "benign"},
 	}
-	rep := Score(labels, verdicts, tax(), spec(), pop, prov())
+	rep := Score(labels, verdicts, tax(), spec(), pop, prov(), nil)
 
 	var collected, constructed *Group
 	for i := range rep.RecallByDimension {
@@ -84,7 +84,7 @@ func TestWildAndConstructedNeverMerge(t *testing.T) {
 func TestSmallGroupIsNotAFigure(t *testing.T) {
 	// One caught sample is 100% but the interval is enormous; it must not be dressed as a rate.
 	labels := []*label.Label{mal("m1", "fs-tech", "derived", "")}
-	rep := Score(labels, []Verdict{{Sample: "m1", Verdict: "malicious"}}, tax(), spec(), pop, prov())
+	rep := Score(labels, []Verdict{{Sample: "m1", Verdict: "malicious"}}, tax(), spec(), pop, prov(), nil)
 	if len(rep.RecallByDimension) != 1 {
 		t.Fatalf("want one group, got %d", len(rep.RecallByDimension))
 	}
@@ -103,7 +103,7 @@ func TestFalsePositiveByPopulation(t *testing.T) {
 		{Sample: "b2", Verdict: "benign"},
 		{Sample: "b3", Verdict: "benign"},
 	}
-	rep := Score(labels, verdicts, tax(), spec(), pop, prov())
+	rep := Score(labels, verdicts, tax(), spec(), pop, prov(), nil)
 	got := map[string]Group{}
 	for _, g := range rep.FPByPopulation {
 		got[g.Key] = g
@@ -116,6 +116,38 @@ func TestFalsePositiveByPopulation(t *testing.T) {
 	}
 }
 
+// An `exclude` adjudication removes a benign sample from the false-positive denominator — the
+// duplicate-copy case — while leaving it in the class total. A flag on the excluded sample is
+// not counted as a false positive, because the sample is no longer in the rate at all.
+func TestExcludeLeavesFalsePositiveDenominator(t *testing.T) {
+	labels := []*label.Label{
+		ben("b1", "harvested"), ben("b2", "harvested"),
+		ben("dup", "harvested"), // a byte-identical copy, adjudicated out
+	}
+	verdicts := []Verdict{
+		{Sample: "b1", Verdict: "malicious"}, // a false positive, counted
+		{Sample: "b2", Verdict: "benign"},
+		{Sample: "dup", Verdict: "malicious"}, // flagged, but excluded — must not count
+	}
+	rep := Score(labels, verdicts, tax(), spec(), pop, prov(), map[string]bool{"dup": true})
+
+	var h Group
+	for _, g := range rep.FPByPopulation {
+		if g.Key == "harvested" {
+			h = g
+		}
+	}
+	if h.N != 2 || h.Hits != 1 {
+		t.Errorf("harvested FP denominator: got n=%d flagged=%d, want 2/1 (dup excluded)", h.N, h.Hits)
+	}
+	if rep.BenignExcluded != 1 {
+		t.Errorf("BenignExcluded = %d, want 1", rep.BenignExcluded)
+	}
+	if rep.Benign != 3 {
+		t.Errorf("Benign class total = %d, want 3 — an excluded sample stays in the corpus", rep.Benign)
+	}
+}
+
 func TestAttributionOnlyScoresReadBasis(t *testing.T) {
 	labels := []*label.Label{
 		mal("m1", "exfil-tech", "derived", "read"),    // scoreable
@@ -125,7 +157,7 @@ func TestAttributionOnlyScoresReadBasis(t *testing.T) {
 		{Sample: "m1", Verdict: "malicious", Dimensions: []string{"exfiltration"}},
 		{Sample: "m2", Verdict: "malicious", Dimensions: []string{"filesystem"}}, // wrong, but not scored
 	}
-	rep := Score(labels, verdicts, tax(), spec(), pop, prov())
+	rep := Score(labels, verdicts, tax(), spec(), pop, prov(), nil)
 	if rep.Attribution.Scoreable != 1 {
 		t.Errorf("attribution scoreable = %d, want 1 (only the read-basis sample)", rep.Attribution.Scoreable)
 	}
@@ -140,7 +172,7 @@ func TestUncoveredAndUnknownAreTracked(t *testing.T) {
 		{Sample: "m1", Verdict: "malicious"},
 		{Sample: "ghost", Verdict: "malicious"}, // names a sample not in the corpus
 	}
-	rep := Score(labels, verdicts, tax(), spec(), pop, prov())
+	rep := Score(labels, verdicts, tax(), spec(), pop, prov(), nil)
 	if rep.Uncovered != 1 || len(rep.UncoveredIDs) != 1 || rep.UncoveredIDs[0] != "b1" {
 		t.Errorf("uncovered tracking wrong: %d %v", rep.Uncovered, rep.UncoveredIDs)
 	}
@@ -158,7 +190,7 @@ func TestHardNegativeReportedSeparately(t *testing.T) {
 		{Sample: "h1", Verdict: "malicious"}, // scanner wrongly fired on the near-miss
 		{Sample: "h2", Verdict: "benign"},
 	}
-	rep := Score(labels, verdicts, tax(), spec(), pop, prov())
+	rep := Score(labels, verdicts, tax(), spec(), pop, prov(), nil)
 	if rep.HardNegFlagged.N != 2 || rep.HardNegFlagged.Hits != 1 {
 		t.Errorf("hard-neg census wrong: n=%d flagged=%d, want 2/1", rep.HardNegFlagged.N, rep.HardNegFlagged.Hits)
 	}
@@ -186,7 +218,7 @@ func TestWildFixtureAndConstructedAreThreeSeparateBuckets(t *testing.T) {
 		{Sample: "m3", Verdict: "malicious"},
 	}
 	p := map[string]string{"an-entry": Wild, "a-fixture-set": Fixture}
-	rep := Score(labels, verdicts, tax(), spec(), pop, p)
+	rep := Score(labels, verdicts, tax(), spec(), pop, p, nil)
 
 	got := map[string]int{}
 	for _, g := range rep.RecallByDimension {
@@ -207,7 +239,7 @@ func TestUnknownProvenanceIsReportedNotDefaulted(t *testing.T) {
 	l := mal("m1", "exfil-tech", "derived", "")
 	l.Origin.DerivedFrom = &label.DerivedFrom{Entry: "never-judged"}
 	rep := Score([]*label.Label{l}, []Verdict{{Sample: "m1", Verdict: "malicious"}},
-		tax(), spec(), pop, map[string]string{})
+		tax(), spec(), pop, map[string]string{}, nil)
 
 	if len(rep.RecallByDimension) != 1 || rep.RecallByDimension[0].Evidence != Unclassified {
 		t.Errorf("want a single unclassified row, got %+v", rep.RecallByDimension)
@@ -220,7 +252,7 @@ func TestHandPinnedSampleDeclaresItsOwnProvenance(t *testing.T) {
 	l := mal("m1", "exfil-tech", "real-world", "")
 	l.Origin.Provenance = Fixture
 	rep := Score([]*label.Label{l}, []Verdict{{Sample: "m1", Verdict: "malicious"}},
-		tax(), spec(), pop, map[string]string{})
+		tax(), spec(), pop, map[string]string{}, nil)
 
 	if len(rep.RecallByDimension) != 1 || rep.RecallByDimension[0].Evidence != Fixture {
 		t.Errorf("want the label's own provenance honoured, got %+v", rep.RecallByDimension)

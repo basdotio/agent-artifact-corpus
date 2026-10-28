@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/label"
@@ -69,7 +70,7 @@ func TestCrossClassDuplicateIsAnError(t *testing.T) {
 	if len(groups) != 1 || !groups[0].CrossClass() {
 		t.Fatalf("cross-class duplicate not detected: %+v", groups)
 	}
-	if problems := reportDuplicates(groups); len(problems) != 1 {
+	if problems := reportDuplicates(groups, nil); len(problems) != 1 {
 		t.Fatalf("got %d problems, want 1 — a cross-class duplicate must fail, not merely be reported", len(problems))
 	}
 }
@@ -83,7 +84,7 @@ func TestSameClassDuplicateIsReportedNotFailed(t *testing.T) {
 	a := &label.Label{ID: "ben-a", Class: label.Benign, Path: tree(t, root, "a", same)}
 	b := &label.Label{ID: "ben-b", Class: label.Benign, Path: tree(t, root, "b", same)}
 
-	if problems := reportDuplicates(DuplicateTrees([]*label.Label{a, b})); len(problems) != 0 {
+	if problems := reportDuplicates(DuplicateTrees([]*label.Label{a, b}), nil); len(problems) != 0 {
 		t.Errorf("same-class duplicates must not fail the build: %v", problems)
 	}
 }
@@ -101,5 +102,39 @@ func TestEmptyTreesAreNotDuplicatesOfEachOther(t *testing.T) {
 	b := &label.Label{ID: "b", Class: label.Benign, Path: filepath.Join(root, "b")}
 	if groups := DuplicateTrees([]*label.Label{a, b}); len(groups) != 0 {
 		t.Errorf("empty trees grouped as duplicates: %+v", groups)
+	}
+}
+
+// `exclude` adjudications let a duplicate group be counted once. Nothing used to stop every
+// copy being excluded, which removes the shared bytes from the denominator entirely while each
+// recorded reason says "counted once". At least one copy must stay counted.
+func TestExcludingEveryCopyOfADuplicateIsAProblem(t *testing.T) {
+	g := []DupGroup{{IDs: []string{"ben-a", "ben-b", "ben-c"}, Classes: []string{"benign"}}}
+	all := map[string]bool{"ben-a": true, "ben-b": true, "ben-c": true}
+	got := reportDuplicates(g, all)
+	if len(got) != 1 || !strings.Contains(got[0], "every copy") {
+		t.Fatalf("excluding every copy must fail the build: %q", got)
+	}
+	if got := reportDuplicates(g, map[string]bool{"ben-b": true, "ben-c": true}); len(got) != 0 {
+		t.Fatalf("all but one excluded is the intended state, not a problem: %q", got)
+	}
+}
+
+// validate said a denominator was inflated by every redundant copy even after an adjudication
+// had taken some of them out, so it disagreed with score about the same corpus.
+func TestDuplicateHeaderCountsCopiesHeldOut(t *testing.T) {
+	g := []DupGroup{
+		{IDs: []string{"ben-a", "ben-b", "ben-c"}, Classes: []string{"benign"}},
+		{IDs: []string{"ben-x", "ben-y"}, Classes: []string{"benign"}},
+	}
+	none := duplicateHeader(g, nil)
+	if !strings.Contains(none, "inflating a denominator by 3 sample(s)") {
+		t.Fatalf("with nothing excluded the header is unchanged: %q", none)
+	}
+	held := duplicateHeader(g, map[string]bool{"ben-b": true, "ben-c": true})
+	for _, want := range []string{"3 redundant", "2 held out", "1 still inflating"} {
+		if !strings.Contains(held, want) {
+			t.Fatalf("header missing %q: %q", want, held)
+		}
 	}
 }
