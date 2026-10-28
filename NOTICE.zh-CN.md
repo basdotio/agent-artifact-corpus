@@ -4,7 +4,9 @@
 
 本仓库 `corpus/` 下由 basdotio 编写的内容依 MIT 授权（见 `LICENSE`）。
 
-`corpus/` 下**从第三方 vendored 进来的**样本各自保留原许可，逐项列在下面。每个这样的样本都在它的标签里记录 `origin.license` 和 `origin.source`（标签是 `corpus/<class>/<surface>/<id>.yaml`，放在样本树**旁边**，绝不放进树里），其许可必须与此表一致。
+`corpus/` 下**从第三方 vendored 进来的**样本各自保留原许可，逐项列在下面。每个这样的样本都在它的标签里记录 `origin.license` 和 `origin.source`（标签是 `corpus/<class>/<surface>/<id>.yaml`，放在样本树**旁边**，绝不放进树里），其许可必须与此表一致。标签里出现过的每一种第三方许可证，全文都放在 `LICENSES/` 下（Apache-2.0 第 4 条和 CC-BY-4.0 第 3 条都要求许可证文本随材料一起传播；MIT 的全文就是 `LICENSE`）。
+
+编纂者的许可不是内容的许可。凡是经由数据集到达本语料的样本（SkillMD-138K、skillet、automatelab），标签记录的是**原始仓库或原始包**的许可，由 `scripts/resolve-repo-licenses.py` 和 `scripts/resolve-npm-licenses.py` 查询一次后钉在 `manifest/pins/*-licenses.json` 里；数据集只作为「路径」记在后面。2026-10-28 之前这些标签写的是数据集的许可，校验器的宽松集检查放过了它，因为那个值本身在集合里——它是对的值，记在了错的东西上。
 
 当前 vendored 的第三方内容：
 
@@ -37,12 +39,16 @@
     没有任何规则能产出这两样。其余 18 个 fixture 已逐个读过并**刻意不引入**，
     理由记在 manifest/corpora.yaml 该条目的 hazards 里。
 
-  shenyimings/skillet —— MIT
+  shenyimings/skillet —— 基准本身 MIT；每棵树按它自己仓库的许可
     https://github.com/shenyimings/skillet @ b778fe53f456，benchmark/wild
-    483 个样本树，位于 corpus/benign/skills/sk-*，原样拷贝。它们是真实的公开 skill，
-    由 skillet 钉在各自的原始仓库和 commit 上；每个标签在 origin.source 里记录那个
-    原始仓库，因为假阳性率必须按来源报告，而把来自 131 个仓库的 483 个样本报成一个
-    数字，正是本仓库明令禁止的汇总数字。
+    464 个样本树，位于 corpus/benign/skills/sk-*，原样拷贝；上游该子集共 483 个，9 个
+    早先因重复或抓取失败排除，10 个于 2026-10-28 排除，因为其 SKILL.md 自己声明的是
+    Anthropic 的专有条款（anthropics/skills 那一族被他人转发的副本）——两批的逐条理由都在
+    manifest/corpora.yaml 该条目的 exclude_samples 里。它们是真实的公开 skill，由 skillet
+    钉在各自的原始仓库和 commit 上；每个标签在 origin.source 里记录那个原始仓库，在
+    origin.license 里记录那个仓库的许可（manifest/pins/repo-licenses.json），因为假阳性率
+    必须按来源报告，而把来自 131 个仓库的 464 个样本报成一个数字，正是本仓库明令禁止的
+    汇总数字。
 
   cisco-ai-defense/mcp-scanner —— Apache-2.0
     https://github.com/cisco-ai-defense/mcp-scanner @ be87b90d88bc，evals
@@ -60,21 +66,26 @@
     它们是土耳其语的注入防御参考文档，密集包含着它们要教防御者识别的那些字面载荷，
     而这正是它们成为硬负样本的原因。标签是手工钉的：differs_by 派生不出来。
 
-  automatelab/mcp-servers-tool-catalog —— CC-BY-4.0
+  automatelab/mcp-servers-tool-catalog —— 数据集的新增部分 CC-BY-4.0；每棵树按它自己
+  npm 包的许可（manifest/pins/npm-licenses.json，查自 registry.npmjs.org）
     https://huggingface.co/datasets/automatelab/mcp-servers-tool-catalog @ a413afb7b02a
-    357 个样本树，位于 corpus/benign/mcp/am-*，一个 package 一个，合计承载全部 9,922
+    353 个样本树，位于 corpus/benign/mcp/am-*，一个 package 一个，合计承载全部 9,922
     条工具声明。
 
     上游提供的是 parquet 表格而不是文件，所以这些树由 scripts/extract-automatelab.py
     从钉住的 parquet 生成；声明内容本身未作改动，没有任何一个工具列表被截断。
 
-  FayeZC/SkillMD-138K —— CC-BY-4.0
+  FayeZC/SkillMD-138K —— 编纂部分 CC-BY-4.0；每篇按它自己仓库的许可
     https://huggingface.co/datasets/FayeZC/SkillMD-138K @ 0d73048abf2f
-    2,000 篇 SKILL.md，位于 corpus/benign/skills/md-*，原样拷贝，来自 1,505 个不同的
-    原始仓库。
+    1,973 篇 SKILL.md，位于 corpus/benign/skills/md-*，原样拷贝，来自 1,481 个不同的
+    原始仓库：抽了 2,000 篇，4 篇早先因空内容或 symlink 捕获排除，23 篇于 2026-10-28
+    排除，因为文档自己声明的是 Anthropic 的专有条款或 CC-BY-NC-SA（逐篇理由在该条目的
+    exclude_samples 里）。
 
-    每个标签的 origin.source 记的是那个原始仓库，而不是这个数据集——因为 CC-BY 的署名
-    欠的是写下这篇 skill 的人，数据集只是它到达我们手里的路径，以「via」的形式记在后面。
+    每个标签的 origin.source 记的是那个原始仓库，而不是这个数据集，origin.license 记的是
+    GitHub 报告的那个仓库的许可（manifest/pins/repo-licenses.json）——因为数据集卡片自己
+    写着每篇文档「保留原作者/原仓库的版权与许可」，署名欠的是写下这篇 skill 的人，数据集
+    只是它到达我们手里的路径，以「via」的形式记在后面。
 
     这是一个 138,133 篇的总体的**样本**，不是总体本身。采样方案就是
     scripts/sample-skillmd.py：按「仓库 + 包路径」分层，每层取一篇，抽 2,000 层，

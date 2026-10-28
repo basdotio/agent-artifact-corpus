@@ -46,7 +46,17 @@
 
 ## 署名
 
-每一个 vendored 的样本都在它的标签里记录 `origin.license` 和 `origin.source`，并出现在 `NOTICE` 中。署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，所以这是许可证义务，不是记账。
+每一个 vendored 的样本都在它的标签里记录 `origin.license` 和 `origin.source`，并出现在 `NOTICE` 中。署名是 Apache-2.0 和 CC-BY-4.0 的一项条件，所以这是许可证义务，不是记账。标签里出现过的每一种第三方许可证全文都放在 `LICENSES/` 下，因为 Apache-2.0 第 4(a) 条和 CC-BY-4.0 第 3(a) 条要求随材料一起传播的是许可证本身，不只是它的名字。
+
+### 编纂者的许可不是内容的许可
+
+SkillMD-138K 是 CC-BY-4.0，skillet 是 MIT，automatelab 是 CC-BY-4.0——而每一家都在自己的卡片或 README 里写明，这只覆盖编纂工作，每篇 skill、每个包保留原作者的条款。有 2,470 棵树的标签记的是编纂者的许可，校验器放过了它：检查的是值在不在宽松集里，而 CC-BY-4.0 在。那是对的值，记在了错的东西上。
+
+2026-10-28 起这几个条目的 derive 规则带 `license_from`，从 `manifest/pins/repo-licenses.json` 和 `manifest/pins/npm-licenses.json` 读**原始仓库或原始包**的许可。这两个文件由 `scripts/resolve-repo-licenses.py`（GitHub GraphQL 的 `licenseInfo.spdxId`，1,612 个仓库）和 `scripts/resolve-npm-licenses.py`（registry.npmjs.org 的 `license` 字段，353 个包）生成，所以重新派生不需要联网，而且查询连同日期都有记录。仓库已不存在（`NOT_FOUND`）、没有许可证文件（`NONE`）、或有一份 GitHub 认不出的许可证文件（`OTHER`）的，和 GPL 一样过不了校验器，因为这三种都不是授权。
+
+**挂起，未解决（2026-10-28）。** 那次查询把 1,601 个标签——SkillMD-138K 的 64%、skillet 的 60%、automatelab 的 16%——放到了宽松集之外，绝大多数是仓库根本没放许可证文件，那等于零授权。老板决定先留在第 1 层，之后再在"删掉"和"改为本地重建的第 2 层"（钉住的 parquet 加种子脚本可以不 vendor 地复现它们）之间选。这三个条目在 `manifest/corpora.yaml` 里带 `license_review: deferred` 和一段说明；`make validate` 每次都会在 `licence DEFERRED, not passed` 下打印数量，标签里保持真实许可。读这几个条目上的假阳性数字时应知道：分母里含有本仓库可能无权再分发的材料。
+
+样本自己的 front matter 也可能声明仓库许可覆盖不了的条款：34 棵树声明的是 Anthropic 的专有 `LICENSE.txt`（anthropics/skills 那一族被 vendor 进别人仓库的副本）或 CC-BY-NC-SA，同一天移出第 1 层。逐棵理由在各条目的 `exclude_samples` 里。
 
 **标签与 `NOTICE` 的交叉校验尚未实现。** `make validate` 检查的是 `origin.license` 是否属于第 1 层允许的许可之一；它不读 `NOTICE`。在那项检查落地之前，让两者保持同步是人工的，这一点写在这里和 `NOTICE` 里，而不是被说成自动的。
 

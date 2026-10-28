@@ -81,6 +81,15 @@ type Entry struct {
 
 	Vendorable bool `yaml:"vendorable"`
 
+	// LicenseReview is "deferred" while an entry's samples are KNOWN to sit on upstream licences
+	// outside the permissive set and the decision about them (drop, or move to a locally
+	// rebuilt layer 2) is still open. The validator then reports those labels as one counted
+	// line instead of one failure each. It is not a pass: the labels keep the true licence, the
+	// line prints on every run, and the note says who deferred it and why. An entry may not
+	// defer silently — the note is required.
+	LicenseReview     string `yaml:"license_review"`
+	LicenseReviewNote string `yaml:"license_review_note"`
+
 	// Derive states how this upstream's own labels map onto our three axes, so a rule can
 	// produce derived coordinates instead of a person hand-pinning every sample. Absent means
 	// this corpus cannot be derived from and its samples, if used, must be pinned by hand.
@@ -256,6 +265,22 @@ type Derive struct {
 	//                            this corpus's measurements once already.
 	SourceFrom string `yaml:"source_from"`
 
+	// LicenseFrom overrides the entry's licence per sample with the ORIGINATING repository's or
+	// package's, read from a pins file kept under manifest/pins/ and resolved relative to the
+	// repository root:
+	//
+	//   pins:<file>:source-repo   key the pins file by the owner/repo that source_from recovered
+	//   pins:<file>:name          key it by the sample directory's name
+	//
+	// It exists because a compilation's licence covers the curation, not the content. SkillMD-138K
+	// is CC-BY-4.0 and says in its card that every SKILL.md "retains the copyright and license of
+	// its original author/repository"; skillet is MIT and says third-party content keeps its
+	// upstream licence. For 2,470 trees the label carried the compilation's licence, so the
+	// validator's permissive-set check passed on a value that described the wrong thing. The
+	// pins file is what a scripted lookup wrote down (scripts/resolve-repo-licenses.py), so a
+	// re-derivation reproduces the labels without a network.
+	LicenseFrom string `yaml:"license_from"`
+
 	// CategoryFrom says where the tokens fed to CategoryAxisMap come from:
 	//
 	//   field:<name>            a list field in the upstream label file (the default)
@@ -383,6 +408,16 @@ func (f *File) Validate() []error {
 		}
 		if e.License == "" {
 			bad("%s: license is empty — the license decides whether it may ever be vendored", e.ID)
+		}
+		switch e.LicenseReview {
+		case "":
+		case "deferred":
+			if strings.TrimSpace(e.LicenseReviewNote) == "" {
+				bad("%s: license_review is deferred with no license_review_note — a deferral "+
+					"nobody signed is a silent exemption", e.ID)
+			}
+		default:
+			bad("%s: license_review %q is neither empty nor \"deferred\"", e.ID, e.LicenseReview)
 		}
 		if !oneOf(e.Role, validRoles) {
 			bad("%s: role %q is not one of %s", e.ID, e.Role, strings.Join(validRoles, ", "))
