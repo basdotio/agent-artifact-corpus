@@ -59,6 +59,10 @@ type Sample struct {
 	// Pooling them makes `has a LICENSE.txt` look like a perfect benign predictor when all it
 	// predicts is which corpus a sample came from.
 	Group string
+
+	// Surfaces are the load paths the artifact sits on. Only LanguageSkew reads them: a scanner
+	// is pointed at a surface, not at a population, so what it sees is the surface pooled.
+	Surfaces []string
 }
 
 // Check returns the features that predict a class too well. A non-empty result fails the

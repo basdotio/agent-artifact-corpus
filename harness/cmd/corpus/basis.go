@@ -308,8 +308,16 @@ func reportRefutation(labels []*label.Label, rs *refute.Ruleset, entries []manif
 			}
 		}
 	}
+	// A duplicate-group member is a legitimate adjudication target too: `duplicate-or-contained`
+	// routes to `exclude_from_denominator`, and the only way to record that decision is an
+	// adjudication keyed to the redundant sample. It is allowed, not required — un-adjudicated
+	// duplicates are reported above and stay counted, the corpus's standing choice.
+	dupeID := map[string]bool{}
+	for _, f := range dupes {
+		dupeID[f.ID] = true
+	}
 	for _, id := range sortedKeys(adj) {
-		matched := false
+		matched := dupeID[id]
 		for _, ids := range hits {
 			for _, h := range ids {
 				if h == id {

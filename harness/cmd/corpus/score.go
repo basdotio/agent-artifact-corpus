@@ -86,7 +86,17 @@ func cmdScore(root string, args []string) int {
 		}
 	}
 
-	rep := score.Score(labels, verdicts, tax, basisSpec, populationOf, prov)
+	// A recorded `verdict: exclude` adjudication takes a benign sample out of the false-positive
+	// denominator — see manifest/corpora.yaml. Today these are the redundant copies of a
+	// duplicate group, so one set of bytes is counted once rather than N times.
+	excluded := map[string]bool{}
+	for id, a := range mf.Adjudications {
+		if a.Verdict == "exclude" {
+			excluded[id] = true
+		}
+	}
+
+	rep := score.Score(labels, verdicts, tax, basisSpec, populationOf, prov, excluded)
 	printReport(rep, labels)
 	// Appended, never interleaved: every line above is exactly what it was without -tool, so the
 	// full denominator is always on the page and the narrow one can only ever appear beside it.
@@ -191,6 +201,11 @@ func printReport(rep score.Report, labels []*label.Label) {
 	fmt.Println("  benign here means `somebody runs this`, on an `assumed` basis — these are flags,")
 	fmt.Println("  not confirmed false positives. Read one before you count it as an error.")
 	printGroups(rep.FPByPopulation)
+	if rep.BenignExcluded > 0 {
+		fmt.Printf("  (%d benign label(s) held out of this denominator by a recorded `exclude` "+
+			"adjudication — duplicate copies, counted once; see manifest `adjudications`)\n",
+			rep.BenignExcluded)
+	}
 	printReviewed(rep)
 	printAlertJustified(rep)
 

@@ -104,6 +104,11 @@ type Report struct {
 	// line so a reader can see what was set aside.
 	AlertJustified        int
 	AlertJustifiedFlagged int
+	// BenignExcluded is how many benign labels a `verdict: exclude` adjudication kept out of the
+	// false-positive denominator (the redundant copies of a duplicate group). They remain in
+	// rep.Benign, so this is the gap between the class total and the summed FP denominator —
+	// named here so a reader can see a denominator shrank and why, rather than finding it short.
+	BenignExcluded int
 
 	RecallByDimension []Group // split by Evidence; never a pooled total
 	RecallBySource    []Group // one source is a rate about that source
@@ -129,9 +134,14 @@ type Report struct {
 // Score computes the report. population is injected rather than recomputed so the scorer groups
 // false positives by the exact same batches the leakage gate does — one definition of "source",
 // checked in one place.
+// excluded names benign samples a recorded `verdict: exclude` adjudication removes from the
+// false-positive denominator — today, the redundant copies of a duplicate group, so one set of
+// bytes is counted once. The sample stays in the corpus and in the class total; it leaves only
+// this rate, which is what `exclude_from_denominator` means in taxonomy/refutation.yaml. A nil
+// map excludes nothing.
 func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 	spec *taxonomy.BasisSpec, population func(*label.Label) string,
-	provenance map[string]string) Report {
+	provenance map[string]string, excluded map[string]bool) Report {
 
 	byID := make(map[string]*label.Label, len(labels))
 	for _, l := range labels {
@@ -226,6 +236,14 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 			}
 
 		case label.Benign:
+			if excluded[l.ID] {
+				// A recorded exclusion (a duplicate copy) leaves the denominator here, not at
+				// load: it is still a benign label and still counted in rep.Benign above, so the
+				// class total and the rate it feeds disagree by exactly the excluded count, which
+				// rep.BenignExcluded names rather than hides.
+				rep.BenignExcluded++
+				break
+			}
 			if l.Truth.AlertJustified {
 				// Set aside before the tally: a flag here is correct behaviour and a silence
 				// is defensible too, so the sample can sit in neither side of a flag rate.

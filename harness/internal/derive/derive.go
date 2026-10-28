@@ -72,6 +72,9 @@ type Coord struct {
 	// confidence are never summed into one "derived" number.
 	HandReadDimension bool
 
+	// ReadBy names who read the sample when a dimension override records it was not a person.
+	ReadBy string
+
 	// DimensionEvidence is the quote backing a hand-read dimension, when the override records
 	// one. Nil means the judgement was made and its reasoning lives somewhere no checker can
 	// reach — which is the state 79 overrides started in.
@@ -347,6 +350,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 				// only basis allowed to score attribution. An override may correct a value, or
 				// supply the evidence for one, or both.
 				c.HandReadDimension = true
+				c.ReadBy = override.ReadBy
 				c.DimensionEvidence = override.Evidence
 				res.HandRead++
 			case sameSet(c.Dimensions, override.Dimensions):
@@ -365,6 +369,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 				// value for this sample; appending would leave the rejected one beside it.
 				c.Dimensions = append([]string{}, override.Dimensions...)
 				c.HandReadDimension = true
+				c.ReadBy = override.ReadBy
 				// The evidence travels with the coordinate so the generated label can carry a
 				// `read` basis. Absent evidence is not an error: the override is still a real
 				// hand-read judgement, it simply cannot be verified, and the label says so by
