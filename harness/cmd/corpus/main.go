@@ -229,10 +229,12 @@ func cmdValidate(root string) int {
 		group := populationOf(l)
 		samples = append(samples, leakage.Sample{
 			ID: l.ID, Class: string(l.Class), Files: files, Group: group,
+			Surfaces: []string(l.Surface),
 		})
 	}
 	leaks := leakage.Check(samples)
 	crossPop := leakage.CrossPopulation(samples)
+	langSkew := leakage.LanguageSkew(samples)
 
 	fmt.Printf("labels      %d\n", len(labels))
 	fmt.Printf("techniques  %d across %d dimensions\n", len(tax.Techniques), len(tax.Dimensions))
@@ -357,6 +359,8 @@ func cmdValidate(root string) int {
 			fmt.Printf("  %-22s %d samples, %d %s (%.0f%%)\n", f.Name, f.Total, f.With, f.Class, f.Purity()*100)
 		}
 	}
+
+	problems = append(problems, reportLanguageSkew(langSkew)...)
 
 	if len(problems) == 0 {
 		fmt.Println("\nok")
