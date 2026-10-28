@@ -243,17 +243,29 @@ measures.
   malicious samples are everything their upstreams had, and the 240 from SkillHarm are a
   seeded draw of 20 per risk from 641. A recall figure and a false-positive figure from this corpus
   therefore rest on different kinds of denominator, and cannot be combined into one score.
-- **One tool wired up.** `taxonomy/tools.yaml` has a single entry.
+- **No dimension has a wild recall rate yet.** `corpus score` splits recall into wild, fixture
+  and constructed, and on the wild row no dimension holds enough samples for a rate — at most
+  13. Every redistributable source of real-world malicious skills has now been read: all 204 of
+  `datadog-ai-skills` (23 derived once fixtures and copies of one campaign payload are removed)
+  and the 124 of `agent-skill-malware` (each a copy of the same few ClawHub lures, or a
+  defensive scanner mislabelled for quoting their IOCs). Larger sets with more distinct wild
+  samples exist but cannot be redistributed (MalSkillBench is for academic use only,
+  SkillTrustBench is NC-SA). Until new public material appears the wild row is coverage, and
+  the recall rates this corpus can report are rates about the fixture sources named beside them.
+- **One tool has rule-level expectations.** `taxonomy/tools.yaml` registers three scanners
+  (aguard, ccaudit, skill-scanner), but only aguard carries `expect` blocks, on 6 samples; the
+  other two are scored on `truth` alone.
 - **`NOTICE` is not cross-checked** against label licenses by `make validate`.
 - **One harness package has no tests**: `fetch`.
-- **7 of 32 dimension × tier cells have no sample.** `make stats` names them.
-- **Three surfaces have a benign side and no malicious side.** hooks, permission and connector
-  now hold 391 real harvested configs and 2 hand-read hard negatives, but zero malicious
-  samples, because no public corpus contains a weaponised hook or permission grant as an
-  artifact. So on those surfaces this corpus can measure over-alerting and cannot measure
-  recall at all. The two hard negatives there also pair with twins on the *skills* surface —
-  stated in their labels — which means a scanner that never parses a settings file goes quiet
-  for lack of coverage rather than by discriminating.
+- **5 of 36 dimension × tier cells have no sample.** `make stats` names them.
+- **Three surfaces have no wild malicious sample.** hooks, permission and connector hold 5, 6 and
+  5 malicious samples, every one reconstructed from a named disclosure (CVE-2025-59536 and the
+  like), because no public corpus contains a weaponised hook or permission grant as an
+  artifact. On those surfaces this corpus measures over-alerting against real configs (188, 168
+  and 121 benign by `make stats`) and coverage of the disclosed shapes — never a recall rate.
+  Some hard negatives there pair with twins on the *skills* surface — stated in their labels —
+  so a scanner that never parses a settings file can go quiet for lack of coverage rather than
+  by discriminating.
 - **The config harvest is not reproducible from its script.** GitHub code search ranks by
   relevance and returns a different hundred each day, so `scripts/harvest-claude-config.py`
   accumulates into `manifest/pins/claude-config.json` and `--from-pins` rebuilds exactly that
