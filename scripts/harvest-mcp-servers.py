@@ -379,9 +379,10 @@ def slug(s: str) -> str:
     return (re.sub(r"[^a-zA-Z0-9]+", "-", str(s)).strip("-").lower() or "unnamed")[:70]
 
 
-def clone_dir(repo: str, commit: str, directory: str, dest: pathlib.Path) -> tuple[int, int, str] | None:
+def clone_dir(repo: str, commit: str, directory: str, dest: pathlib.Path) -> tuple[int, int, str, int] | None:
     """Materialise one directory of the repository at the pinned commit into dest, applying
-    the bounds, and return (files, bytes, tree_sha256). None when the clone failed."""
+    the bounds, then make dest what git will commit (commit_view). Returns (files, bytes,
+    tree_sha256, ignored) over the committed view; None when the clone failed."""
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="harvest-"))
     try:
         url = f"https://github.com/{repo}.git"
@@ -400,7 +401,7 @@ def clone_dir(repo: str, commit: str, directory: str, dest: pathlib.Path) -> tup
         if dest.exists():
             shutil.rmtree(dest)
         dest.mkdir(parents=True)
-        files, total = [], 0
+        written: list[pathlib.Path] = []
         for dirpath, dirnames, filenames in os.walk(src, followlinks=False):
             dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS
                                  and not os.path.islink(os.path.join(dirpath, d)))
@@ -410,17 +411,22 @@ def clone_dir(repo: str, commit: str, directory: str, dest: pathlib.Path) -> tup
                     continue
                 if fn in LOCKFILES or fp.suffix.lower() in BINARY_EXT or fp.stat().st_size > MAX_FILE_BYTES:
                     continue
-                rel = fp.relative_to(src)
-                data = fp.read_bytes()
-                out = dest / rel
+                out = dest / fp.relative_to(src)
                 out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_bytes(data)
-                files.append((rel.as_posix(), hashlib.sha256(data).hexdigest()))
-                total += len(data)
-        h = hashlib.sha256()
-        for rel, digest in sorted(files):
-            h.update(rel.encode() + b"\0" + digest.encode() + b"\n")
-        return len(files), total, h.hexdigest()
+                out.write_bytes(fp.read_bytes())
+                written.append(out)
+        # Every file is written first so that the tree's own .gitignore and .gitattributes are
+        # on disk when git is asked about them.
+        try:
+            ignored = commit_view(written)
+        except RuntimeError as e:
+            # One tree's git failure fails that tree. Raised out of a clone thread it used to
+            # abort the whole harvest after other trees were already written, unpinned.
+            print(f"    {repo}: {e}", file=sys.stderr, flush=True)
+            shutil.rmtree(dest, ignore_errors=True)
+            return None
+        files, total, th = tree_hash_of(dest)
+        return files, total, th, ignored
     except subprocess.TimeoutExpired:
         return None
     finally:
@@ -440,6 +446,125 @@ def tree_hash_of(dest: pathlib.Path) -> tuple[int, int, str]:
     for rel, digest in sorted(files):
         h.update(rel.encode() + b"\0" + digest.encode() + b"\n")
     return len(files), total, h.hexdigest()
+
+
+def rebuild_if_matches(pin: Any, dest: pathlib.Path, clone: Any = None) -> str:
+    """Rebuild a pinned tree BESIDE its committed copy and swap it in only if it hashes to the
+    pin: 'ok', 'drifted' or 'failed'. A drifted or failed rebuild leaves the committed tree
+    exactly as it was. The sibling's name keeps the `gh-` prefix, so the repository's own
+    .gitattributes rules for harvested trees apply to it unchanged."""
+    clone = clone or clone_dir
+    side = dest.with_name(dest.name + ".rebuild")
+    shutil.rmtree(side, ignore_errors=True)
+    got = clone(pin.repo, pin.commit, pin.dir, side)
+    if got is None or got[2] != pin.tree_sha256:
+        shutil.rmtree(side, ignore_errors=True)
+        return "failed" if got is None else "drifted"
+    if dest.exists():
+        shutil.rmtree(dest)
+    side.rename(dest)
+    return "ok"
+
+
+# A pin is only an integrity claim if it describes what git COMMITS, and a vendored tree brings
+# its own git rules with it. Thirteen trees drifted because their own .gitignore made `git add`
+# skip files the hash had counted (one lost every *.md, another its .env), and the re-harvest
+# then deleted three more whose committed bytes had been rewritten by their own .gitattributes.
+# So the files on disk are made into exactly what git will store before anything is hashed.
+
+def git_ignored(paths: list[pathlib.Path], repo: pathlib.Path = ROOT) -> set[pathlib.Path]:
+    """The paths `git add` would skip in `repo`: every .gitignore that applies, the vendored
+    tree's own included. A path git already tracks is never ignored, as `git add` keeps it."""
+    if not paths:
+        return set()
+    rel = {p.relative_to(repo).as_posix(): p for p in paths}
+    r = subprocess.run(["git", "-C", str(repo), "check-ignore", "-z", "--stdin"],
+                       input="\0".join(rel) + "\0", capture_output=True, text=True)
+    if r.returncode not in (0, 1):  # 1 means "nothing ignored"; anything else is a failure
+        raise RuntimeError(f"git check-ignore failed: {r.stderr.strip()[:200]}")
+    return {rel[s] for s in r.stdout.split("\0") if s}
+
+
+# Attributes that make `git add` rewrite a file in ways this script does not model, and that
+# depend on the committer's machine (an LFS or other filter driver, a working-tree encoding,
+# `ident` collapsing $Id$). A file carrying one is not vendored, so a pin never depends on
+# which drivers happen to be installed where the harvest ran.
+UNMODELLED_ATTRS = ("filter", "working-tree-encoding", "ident")
+
+
+def git_attrs(paths: list[pathlib.Path], names: tuple[str, ...],
+              repo: pathlib.Path = ROOT) -> dict[pathlib.Path, dict[str, str]]:
+    """Each path's value for each named attribute as `git add` will apply them, nested
+    .gitattributes included. Unset attributes read "unspecified"."""
+    if not paths:
+        return {}
+    rel = {p.relative_to(repo).as_posix(): p for p in paths}
+    r = subprocess.run(["git", "-C", str(repo), "check-attr", "-z", "--stdin", *names],
+                       input="\0".join(rel) + "\0", capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"git check-attr failed: {r.stderr.strip()[:200]}")
+    out = {p: {n: "unspecified" for n in names} for p in rel.values()}
+    parts = r.stdout.split("\0")
+    for i in range(0, len(parts) - 2, 3):
+        out[rel[parts[i]]][parts[i + 1]] = parts[i + 2]
+    return out
+
+
+def git_text_attrs(paths: list[pathlib.Path], repo: pathlib.Path = ROOT) -> dict[pathlib.Path, tuple[str, str]]:
+    """Each path's (`text`, `eol`) attributes as `git add` will apply them."""
+    return {p: (a["text"], a["eol"]) for p, a in git_attrs(paths, ("text", "eol"), repo).items()}
+
+
+def as_committed(data: bytes, text: str, eol: str) -> bytes:
+    """The bytes git stores for `data` under these attributes. git rewrites CRLF to LF on add for
+    a path marked `text`, for `text=auto` when it judges the content to be text (approximated by
+    the absence of NUL, git's own first test), and for an `eol` when `text` is unspecified, since
+    eol implies text. `-text` and no attributes at all store the bytes as they are."""
+    if text == "auto":
+        normalise = b"\0" not in data
+    elif text == "unspecified":
+        normalise = eol in ("lf", "crlf")
+    else:
+        normalise = text == "set"
+    return data.replace(b"\r\n", b"\n") if normalise else data
+
+
+def commit_view(written: list[pathlib.Path], repo: pathlib.Path = ROOT) -> int:
+    """Make the vendored files on disk exactly what `git add` will commit: delete what git
+    ignores and what an unmodelled attribute would rewrite, and normalise line endings git would
+    normalise. Returns how many files were dropped, which the caller adds to `omitted`."""
+    ignored = git_ignored(written, repo)
+    kept = [p for p in written if p not in ignored]
+    attrs = git_attrs(kept, ("text", "eol") + UNMODELLED_ATTRS, repo)
+    unmodelled = {p for p, a in attrs.items()
+                  if any(a[n] not in ("unspecified", "unset") for n in UNMODELLED_ATTRS)}
+    for p in ignored | unmodelled:
+        p.unlink()
+    for p in kept:
+        if p in unmodelled:
+            continue
+        data = p.read_bytes()
+        stored = as_committed(data, attrs[p]["text"], attrs[p]["eol"])
+        if stored != data:
+            p.write_bytes(stored)
+    return len(ignored) + len(unmodelled)
+
+
+def still_qualifies(tree: pathlib.Path, surface: str) -> bool:
+    """Whether the vendored tree still holds what made it a sample — a server body for mcp, a
+    SKILL.md for skills. The bounds can drop the very file the search matched."""
+    files = [p for p in tree.rglob("*") if p.is_file()]
+    if surface == "skills":
+        return any(p.name == "SKILL.md" for p in files)
+    return any(p.suffix.lower() in CODE_EXT and is_server(p.read_text(errors="replace")) for p in files)
+
+
+def existing_tree_state(tree: pathlib.Path, pin: Any) -> str:
+    """'ok', 'missing' or 'drifted' for a tree an earlier run pinned. Only ever reported: a
+    tree whose bytes moved away from its pin is a question for a person, never a deletion."""
+    if not tree.is_dir():
+        return "missing"
+    return "ok" if tree_hash_of(tree)[2] == pin.tree_sha256 else "drifted"
 
 
 class Candidate(NamedTuple):
@@ -532,7 +657,8 @@ def render_label(pin: Pin, added: str, single_sha: str) -> str:
     what = ("the source of an MCP server somebody published" if pin.surface == "mcp"
             else "a skill somebody published, the directory around its SKILL.md")
     bounds = (f" {pin.omitted} file(s) inside that directory were not vendored (lockfiles, binaries, "
-              f"files over 200 KiB, dependency and cache directories), as the script's docstring states."
+              f"files over 200 KiB, dependency and cache directories, or files the tree's own "
+              f".gitignore keeps out of a commit), as the script's docstring states."
               if pin.omitted else "")
     sha_line = f"  sha256: {single_sha}\n" if single_sha else "  sha256: \"\"   # a tree, not a file; the pins file carries tree_sha256\n"
     return f"""# {MARKER}. Do not hand-edit:
@@ -582,6 +708,59 @@ def promoted_elsewhere(pin: Pin) -> bool:
             if needle in lab.read_text():
                 return True
     return False
+
+
+def reconcile_labels(all_pins: list[Any], fresh: set[str], added: str) -> dict[str, Any]:
+    """Write a label for every freshly vendored tree, keep every tree an earlier run pinned, and
+    remove harvest labels no pin claims any more. A previously pinned tree is never deleted for
+    no longer matching its pin: that is the path that turned drifted trees into orphan pins."""
+    written = unchanged = promoted_skips = 0
+    drifted_existing: list[tuple[str, str]] = []
+    keep_paths: set[pathlib.Path] = set()
+    for pin in all_pins:
+        tree = OUT / pin.surface / pin.name
+        label = tree.with_suffix(".yaml")
+        if promoted_elsewhere(pin):
+            promoted_skips += 1
+            continue
+        if label.exists() and MARKER not in label.read_text():
+            print(f"  refusing to overwrite a label this script did not write: {label.relative_to(ROOT)}")
+            keep_paths.update((label, tree))
+            continue
+        if pin.name not in fresh:
+            # A tree an earlier run pinned is never deleted here. This branch used to keep only
+            # trees that still hashed to their pin and let the removal pass below delete the rest
+            # while the pin survived — which is how the re-harvest turned three trees whose
+            # committed bytes had drifted into orphan pins. Drift is reported and the run fails.
+            state = existing_tree_state(tree, pin)
+            if state == "ok":
+                unchanged += 1
+            else:
+                drifted_existing.append((pin.name, state))
+            keep_paths.update((label, tree))
+            continue
+        single = ""
+        if pin.files == 1:
+            only_file = next(p for p in tree.rglob("*") if p.is_file())
+            single = hashlib.sha256(only_file.read_bytes()).hexdigest()
+        label.write_text(render_label(pin, added, single))
+        keep_paths.update((label, tree))
+        written += 1
+
+    removed = 0
+    for surface in ("mcp", "skills"):
+        d = OUT / surface
+        for lab in sorted(d.glob("gh-*.yaml")):
+            if lab in keep_paths or MARKER not in lab.read_text():
+                continue
+            tree = lab.with_suffix("")
+            if tree.is_dir():
+                shutil.rmtree(tree)
+            lab.unlink()
+            removed += 1
+
+    return {"written": written, "unchanged": unchanged, "promoted": promoted_skips,
+            "removed": removed, "drifted": drifted_existing}
 
 
 def main() -> int:
@@ -768,6 +947,7 @@ def main() -> int:
 
         print(f"\ncloning {len(jobs)} tree(s) at their pinned commits …", flush=True)
         results: list[Pin | None] = [None] * len(jobs)
+        reasons: list[str] = ["clone_failed"] * len(jobs)
 
         def do(i: int) -> None:
             phase, surface, repo, hit, ri, omitted, keep = jobs[i]
@@ -778,18 +958,22 @@ def main() -> int:
             if got is None:
                 shutil.rmtree(dest, ignore_errors=True)
                 return
-            files, nbytes, th = got
+            if not still_qualifies(dest, surface):
+                shutil.rmtree(dest, ignore_errors=True)
+                reasons[i] = "lost_its_hit"
+                return
+            files, nbytes, th, ignored = got
             results[i] = Pin(repo=repo, dir=directory, hit=hit, commit=ri.commit, license=ri.license,
                              created_at=ri.created_at, stars=ri.stars, phase=phase, surface=surface,
-                             files=files, omitted=omitted, bytes=nbytes, tree_sha256=th, name=name)
+                             files=files, omitted=omitted + ignored, bytes=nbytes, tree_sha256=th, name=name)
 
         with ThreadPoolExecutor(CLONE_WORKERS) as ex:
             for n, _ in enumerate(ex.map(do, range(len(jobs))), 1):
                 if n % 20 == 0:
                     print(f"    … cloned {n}/{len(jobs)}", flush=True)
-        for (phase, *_), pin in zip(jobs, results):
+        for (phase, *_), pin, why in zip(jobs, results, reasons):
             if pin is None:
-                tallies[phase]["clone_failed"] = tallies[phase].get("clone_failed", 0) + 1
+                tallies[phase][why] = tallies[phase].get(why, 0) + 1
             else:
                 new_pins.append(pin)
 
@@ -802,7 +986,8 @@ def main() -> int:
             print(f"  kept for layer 1  {kept}")
             dropped = tally.get("unlicensed", 0) + tally.get("non_permissive", 0)
             if dropped:
-                eligible = kept + dropped + tally.get("over_size", 0) + tally.get("clone_failed", 0)
+                eligible = (kept + dropped + tally.get("over_size", 0) + tally.get("clone_failed", 0)
+                            + tally.get("lost_its_hit", 0))
                 print(f"  licence exclusion, both figures: {eligible} repositories hold the artifact; "
                       f"{dropped} carry no licence or a non-permissive one and are NOT in the denominator — "
                       f"a rate measured here is a rate over permissively licensed repositories")
@@ -814,11 +999,7 @@ def main() -> int:
         drifted = failed = 0
 
         def rebuild(pin: Pin) -> str:
-            dest = OUT / pin.surface / pin.name
-            got = clone_dir(pin.repo, pin.commit, pin.dir, dest)
-            if got is None:
-                return "failed"
-            return "ok" if got[2] == pin.tree_sha256 else "drifted"
+            return rebuild_if_matches(pin, OUT / pin.surface / pin.name)
 
         with ThreadPoolExecutor(CLONE_WORKERS) as ex:
             for pin, status in zip(rows, ex.map(rebuild, rows)):
@@ -842,43 +1023,9 @@ def main() -> int:
     all_pins = sorted(merged.values(), key=lambda p: (p.surface, p.name))
     print(f"\npins: {before} recorded before this run, {len(merged) - before} newly found, {len(merged)} total")
 
-    written = unchanged = promoted_skips = 0
-    keep_paths: set[pathlib.Path] = set()
-    fresh = {p.name for p in new_pins}
-    for pin in all_pins:
-        tree = OUT / pin.surface / pin.name
-        label = tree.with_suffix(".yaml")
-        if promoted_elsewhere(pin):
-            promoted_skips += 1
-            continue
-        if label.exists() and MARKER not in label.read_text():
-            print(f"  refusing to overwrite a label this script did not write: {label.relative_to(ROOT)}")
-            keep_paths.update((label, tree))
-            continue
-        if pin.name not in fresh:
-            if tree.is_dir() and tree_hash_of(tree)[2] == pin.tree_sha256:
-                unchanged += 1
-                keep_paths.update((label, tree))
-            continue
-        single = ""
-        if pin.files == 1:
-            only_file = next(p for p in tree.rglob("*") if p.is_file())
-            single = hashlib.sha256(only_file.read_bytes()).hexdigest()
-        label.write_text(render_label(pin, added, single))
-        keep_paths.update((label, tree))
-        written += 1
-
-    removed = 0
-    for surface in ("mcp", "skills"):
-        d = OUT / surface
-        for lab in sorted(d.glob("gh-*.yaml")):
-            if lab in keep_paths or MARKER not in lab.read_text():
-                continue
-            tree = lab.with_suffix("")
-            if tree.is_dir():
-                shutil.rmtree(tree)
-            lab.unlink()
-            removed += 1
+    stats = reconcile_labels(all_pins, {p.name for p in new_pins}, added)
+    written, unchanged, promoted_skips = stats["written"], stats["unchanged"], stats["promoted"]
+    removed, drifted_existing = stats["removed"], stats["drifted"]
 
     PINS.parent.mkdir(parents=True, exist_ok=True)
     PINS.write_text(json.dumps(
@@ -886,7 +1033,9 @@ def main() -> int:
          "cutoff": CUTOFF,
          "note": "One pin per harvested tree, and the complete inventory of what this harvest "
                  "contributes to layer 1. tree_sha256 is sha256 over the sorted list of "
-                 "`<relative path>\\0<sha256 of content>\\n` for every file vendored; the label "
+                 "`<relative path>\\0<sha256 of content>\\n` for every file vendored, as git commits "
+                 "it: a file the tree's own .gitignore excludes is counted in `omitted`, and line "
+                 "endings are as the tree's own .gitattributes store them. The label "
                  "cannot carry it because the schema's sha256 names one file. This file "
                  "accumulates: GitHub search is not reproducible between runs, so `--from-pins` "
                  "rebuilds exactly this set and is the only way to reproduce a published figure. "
@@ -908,6 +1057,12 @@ def main() -> int:
     for k in sorted(by):
         print(f"    {k[0]:<8} {k[1]:<7} {by[k]}")
     print(f"  pins recorded in {PINS.relative_to(ROOT)}")
+    if drifted_existing:
+        print(f"\n{len(drifted_existing)} previously pinned tree(s) no longer match their pin and were "
+              f"left untouched — compare them with their pinned commit before re-pinning:")
+        for name, state in drifted_existing:
+            print(f"  {state:<8} {name}")
+        return 1
     return 0
 
 
