@@ -237,3 +237,35 @@ def test_promote_moves_only_decided_trees(m, tmp_path, monkeypatch, capsys):
     assert state["r1"]["decision"] == "derived" and state["r2"]["decision"] == "excluded" and state["r3"]["status"] == "queued"
     pins = json.loads(m.LICENSE_PINS.read_text())
     assert pins["acme-helper-1-0-0"]["license"] == "MIT-0" and "zeta-unread-1-0-0" not in pins
+
+
+def test_pools_partition_the_registry_verdicts(m):
+    rows = {
+        "malicious": {"clawscan_verdict": "malicious", "virustotal_malicious_count": 3},
+        "suspicious": {"clawscan_verdict": "suspicious"},
+        "vt-flagged": {"clawscan_verdict": "clean", "virustotal_malicious_count": 1},
+        "unknown": {"clawscan_verdict": "unknown"},
+        None: {"clawscan_verdict": "clean", "virustotal_malicious_count": 0},
+    }
+    for want, row in rows.items():
+        assert m.pool_of(row) == want
+    assert m.DEFAULT_POOLS == ("malicious",)
+
+
+def test_unknown_pool_is_refused(m):
+    with pytest.raises(SystemExit):
+        m.main(["status", "--pools", "malicious,nope"])
+
+
+def test_jsonl_rows_survive_unicode_line_separators(m, tmp_path):
+    p = tmp_path / "snap.jsonl"
+    rows = [{"id": "a", "skill_md_content": "one two\x85three\x0bfour"}, {"id": "b", "skill_md_content": "x"}]
+    p.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    assert [json.loads(l) for l in m.jsonl_lines(p)] == rows
+
+
+def test_excluded_samples_do_not_use_the_author_cap(m):
+    assert m.counts_against_cap({"status": "queued"})
+    assert m.counts_against_cap({"status": "decided", "decision": "derived"})
+    assert not m.counts_against_cap({"status": "decided", "decision": "excluded"})
+    assert not m.counts_against_cap({"status": "author-cap"})
