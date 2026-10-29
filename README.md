@@ -166,6 +166,7 @@ that layer 1 must never contain: no-license, CC-BY-NC-SA, AGPL.
 ```bash
 make validate    # check every label, the taxonomy, every manifest entry, the doc pairs
 make stats       # corpus composition, tool-neutral and per tool
+make table       # every sample, and every one read and left out, as CSV and xlsx
 make fetch       # materialise named layer-2 entries at their pinned commit (network)
 make test        # harness unit tests
 make score V=verdicts.jsonl   # grade a scanner's verdicts into recall, false positives, coverage
@@ -175,6 +176,15 @@ make score V=verdicts.jsonl   # grade a scanner's verdicts into recall, false po
 sample — the input side of the scoring loop: a runner iterates it, points its scanner at each
 `path`, and emits `{sample, verdict}` back for `corpus score`. It names no scanner and belongs
 here for the same reason the runner does not.
+
+[`table/samples.csv`](table/samples.csv) lists every sample, one row each: class, dimensions,
+tier, evasion, where the deciding content sits (file, line, quote, when someone read one), the
+basis of the dimension, provenance, source, licence and the date it was added.
+[`table/excluded.csv`](table/excluded.csv) lists every upstream sample named and left out, with
+the reason the manifest gives, and the ClawHub candidates never queued (publisher cap,
+duplicate, held-out). Both are rendered by `make table` from the labels and the manifest and
+are never edited by hand; CI fails when they are stale. `make table` also writes both as the
+two sheets of `out/corpus-table.xlsx`, which is not committed.
 
 `corpus fixtures` lists or materialises the injected-fault trees git cannot store — a 0111
 traverse-only directory, a FIFO SKILL.md, symlink cycles and escapes, a 4096-deep chain, an

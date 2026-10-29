@@ -13,7 +13,7 @@
 
 HARNESS := cd harness && go run ./cmd/corpus
 
-.PHONY: validate check-docs stats fetch derive derive-write test fmt help
+.PHONY: validate check-docs stats table fetch derive derive-write test fmt help
 
 help:
 	@echo "validate      check every label, the taxonomy, every manifest entry and the doc pairs (offline)"
@@ -22,6 +22,7 @@ help:
 	@echo "derive        dry-run coordinate derivation:  make derive E=\"skillsgoat\""
 	@echo "derive-write  write derived labels into corpus/: make derive-write E=\"skillsgoat\""
 	@echo "test          harness unit tests"
+	@echo "table         every sample, and every one left out, as CSV and a two-sheet xlsx"
 
 ## Dry run. Reports what coordinates an upstream would yield and where the mapping is
 ## incomplete. Writes nothing — reading coverage must not rewrite the corpus.
@@ -73,6 +74,11 @@ check-docs:
 
 stats:
 	@$(HARNESS) stats
+
+## Rendered from the labels and the manifest, never edited by hand. CI fails when the
+## committed CSVs differ from a fresh render; out/corpus-table.xlsx is not committed.
+table:
+	@$(HARNESS) table
 
 ## Network. Name the entries: `make fetch E="datadog-ai-skills skillsgoat"`.
 ## Bare `make fetch` lists what is available and fetches nothing — one manifest entry is

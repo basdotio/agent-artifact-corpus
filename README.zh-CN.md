@@ -96,9 +96,12 @@
 ```bash
 make validate    # 检查每个标签、taxonomy、每条 manifest 条目、文档双语成对
 make stats       # 语料库构成，工具中立的和按工具的
+make table       # 全部样本、以及读过但没收录的，输出成 CSV 和 xlsx
 make fetch       # 按钉住的 commit materialise 指定的第 2 层条目（联网）
 make test        # harness 单元测试
 ```
+
+[`table/samples.csv`](table/samples.csv) 每个样本一行：类别、维度、层级、规避手法、判定内容在哪（有人读过时给出文件、行号、原文）、维度的依据、出身、来源、许可证、添加日期。[`table/excluded.csv`](table/excluded.csv) 列出每个点名排除的上游样本和 manifest 给的理由，以及 ClawHub 没排进队的候选（作者上限、重复、留出集）。两份都由 `make table` 从标签和 manifest 生成，从不手改；过期了 CI 会失败。`make table` 还会把两份写成 `out/corpus-table.xlsx` 的两个工作表，这个文件不提交。
 
 `make validate` 是离线的，不需要安装任何扫描器。CI 在干净 checkout 上跑的就是同一批 target，所以那种「只因为你机器上多了点东西才能过」的情况会在那里暴露，而不是在别人的 clone 里。
 
