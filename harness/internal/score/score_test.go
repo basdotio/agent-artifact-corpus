@@ -258,3 +258,42 @@ func TestHandPinnedSampleDeclaresItsOwnProvenance(t *testing.T) {
 		t.Errorf("want the label's own provenance honoured, got %+v", rep.RecallByDimension)
 	}
 }
+
+// One population can hold very different artifacts. `harvested` holds MCP server source,
+// skills and settings configs, and a scanner flagged them at 22–34%, 19% and about 2% — a single
+// pooled 19% described none of them. A population spanning several surfaces is split by surface
+// beneath its own line; one on a single surface is not repeated.
+func TestFalsePositivesSplitBySurfaceWithinAPopulation(t *testing.T) {
+	on := func(l *label.Label, surfaces ...string) *label.Label { l.Surface = surfaces; return l }
+	labels := []*label.Label{
+		on(ben("s1", "harvested"), "mcp"), on(ben("s2", "harvested"), "mcp"), on(ben("s3", "harvested"), "mcp"),
+		on(ben("k1", "harvested"), "skills"), on(ben("k2", "harvested"), "skills"),
+		on(ben("both", "harvested"), "skills", "mcp"), // on two load paths: counted under both
+		on(ben("dup", "harvested"), "mcp"),            // excluded copy: in neither
+		on(ben("w1", "skillet-wild"), "skills"), on(ben("w2", "skillet-wild"), "skills"),
+	}
+	verdicts := []Verdict{
+		{Sample: "s1", Verdict: "malicious"}, {Sample: "s2", Verdict: "malicious"}, {Sample: "s3", Verdict: "benign"},
+		{Sample: "k1", Verdict: "benign"}, {Sample: "k2", Verdict: "benign"},
+		{Sample: "both", Verdict: "malicious"}, {Sample: "dup", Verdict: "malicious"},
+		{Sample: "w1", Verdict: "malicious"}, {Sample: "w2", Verdict: "benign"},
+	}
+	rep := Score(labels, verdicts, tax(), spec(), pop, prov(), map[string]bool{"dup": true})
+
+	got := map[string]Group{}
+	for _, g := range rep.FPBySurface["harvested"] {
+		got[g.Key] = g
+	}
+	if g := got["mcp"]; g.N != 4 || g.Hits != 3 {
+		t.Errorf("harvested · mcp = %d/%d, want 3 flagged of 4", g.Hits, g.N)
+	}
+	if g := got["skills"]; g.N != 3 || g.Hits != 1 {
+		t.Errorf("harvested · skills = %d/%d, want 1 flagged of 3", g.Hits, g.N)
+	}
+	if _, ok := rep.FPBySurface["skillet-wild"]; ok {
+		t.Error("a population on one surface must not be split into a copy of itself")
+	}
+	if len(rep.FPBySurface["harvested"]) != 2 || rep.FPBySurface["harvested"][0].Key != "mcp" {
+		t.Errorf("surfaces must come out in a stable order: %+v", rep.FPBySurface["harvested"])
+	}
+}
