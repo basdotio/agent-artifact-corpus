@@ -206,7 +206,8 @@ func cmdValidate(root string) int {
 
 	// Leakage gate
 	var samples []leakage.Sample
-	for _, l := range labels {
+	contents := contentFeaturesOf(labels)
+	for i, l := range labels {
 		files, ferr := treeFiles(l.Path)
 		if ferr != nil {
 			// Not swallowed. An unreadable tree silently becomes a zero-file sample, which
@@ -228,12 +229,22 @@ func cmdValidate(root string) int {
 		// pooled two batches that were built by different people for different reasons, which
 		// is exactly the pooling this gate exists to detect in other people's corpora.
 		group := populationOf(l)
+		// The bytes too, not only the tree: an author's habits sit in the text (the host every
+		// fixture calls, the word every payload uses, how long a fixture is), and the next
+		// batch is hard negatives and twins we write ourselves.
+		if contents[i].err != nil {
+			problems = append(problems, fmt.Sprintf("%s: cannot read the sample tree for content "+
+				"features: %v", l.Rel, contents[i].err))
+			continue
+		}
 		samples = append(samples, leakage.Sample{
-			ID: l.ID, Class: string(l.Class), Files: files, Group: group,
+			ID: l.ID, Class: string(l.Class), Files: files, Content: contents[i].features, Group: group,
 			Surfaces: []string(l.Surface),
 		})
 	}
 	leaks := leakage.Check(samples)
+	pairs := pairSamples(labels, samples)
+	pairLeaks := leakage.Check(pairs)
 	crossPop := leakage.CrossPopulation(samples)
 	langSkew := leakage.LanguageSkew(samples)
 
@@ -291,6 +302,7 @@ func cmdValidate(root string) int {
 			fmt.Printf("  not judgeable  %s — one class already exceeds the %.0f%% purity "+
 				"threshold\n", g, leakage.MaxPurity*100)
 		}
+		reportPairs(pairs)
 	}
 
 	// `entry` says what a scanner is pointed at, and until an audit probed it nothing ever
@@ -345,10 +357,10 @@ func cmdValidate(root string) int {
 	}
 
 	for _, f := range leaks {
-		problems = append(problems, fmt.Sprintf(
-			"leakage in %s: %q appears in %d of its samples and %d of them are %s (%.0f%% pure) "+
-				"— within one population a classifier can separate the classes without reading content",
-			f.Group, f.Name, f.Total, f.With, f.Class, f.Purity()*100))
+		problems = append(problems, leakProblem("in", f))
+	}
+	for _, f := range pairLeaks {
+		problems = append(problems, leakProblem("among", f))
 	}
 
 	// Not a failure, and not silenced either. These features separate the classes only once
