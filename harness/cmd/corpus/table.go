@@ -17,9 +17,11 @@ import (
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
 )
 
-// cmdTable writes the corpus as two tables a person can sort and filter: every sample that is
-// in (table/samples.csv) and every upstream sample that was read and left out
-// (table/excluded.csv), plus both as the two sheets of out/corpus-table.xlsx.
+// cmdTable writes the corpus as three tables a person can sort and filter: the malicious
+// samples (table/malicious.csv), the benign and hard-negative ones (table/benign.csv), and
+// every upstream sample that was read and left out (table/excluded.csv), plus all three as the
+// sheets of out/corpus-table.xlsx. Malicious and benign are apart because most columns of one
+// mean nothing for the other: a benign row has no dimension, tier or deciding line.
 //
 // Nothing in the tables is written by hand. They are rendered from the labels, the manifest's
 // exclude_samples and the ClawHub intake state, which stay the records of truth; a table kept
@@ -31,7 +33,7 @@ func cmdTable(root string, args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: corpus table")
 		return 2
 	}
-	samples, err := sampleRows(root)
+	mal, ben, err := sampleRows(root)
 	if err != nil {
 		fatal(err)
 	}
@@ -42,7 +44,7 @@ func cmdTable(root string, args []string) int {
 	if err := os.MkdirAll(filepath.Join(root, "table"), 0o755); err != nil {
 		fatal(err)
 	}
-	for name, rows := range map[string][][]string{"samples.csv": samples, "excluded.csv": excluded} {
+	for name, rows := range map[string][][]string{"malicious.csv": mal, "benign.csv": ben, "excluded.csv": excluded} {
 		if err := writeCSV(filepath.Join(root, "table", name), rows); err != nil {
 			fatal(err)
 		}
@@ -51,32 +53,39 @@ func cmdTable(root string, args []string) int {
 		fatal(err)
 	}
 	xlsx := filepath.Join(root, "out", "corpus-table.xlsx")
-	if err := writeXLSX(xlsx, []sheet{{"included", samples}, {"excluded", excluded}}); err != nil {
+	if err := writeXLSX(xlsx, []sheet{{"malicious", mal}, {"benign", ben}, {"excluded", excluded}}); err != nil {
 		fatal(err)
 	}
-	fmt.Printf("table/samples.csv   %d samples\ntable/excluded.csv  %d left out\n%s  both, as two sheets\n",
-		len(samples)-1, len(excluded)-1, rel(root, xlsx))
+	fmt.Printf("table/malicious.csv %d samples\ntable/benign.csv    %d samples (benign and hard-negative)\ntable/excluded.csv  %d left out\n%s  all three, as sheets\n",
+		len(mal)-1, len(ben)-1, len(excluded)-1, rel(root, xlsx))
 	return 0
 }
 
-var sampleHeader = []string{
-	"id", "class", "surface", "kind", "dimensions", "techniques", "tier", "evasion", "locus",
+var malHeader = []string{
+	"id", "surface", "kind", "dimensions", "techniques", "tier", "evasion", "locus",
 	"severity", "evidence_file", "evidence_lines", "evidence_quote", "dimension_basis",
 	"provenance", "origin", "entry", "source", "license", "added", "path",
 }
 
-func sampleRows(root string) ([][]string, error) {
+// A hard negative is listed with the benign samples; resembles and differs_by say what it
+// looks like and what makes it harmless, and are empty for every other benign row.
+var benHeader = []string{
+	"id", "class", "surface", "kind", "resembles", "differs_by",
+	"provenance", "origin", "entry", "source", "license", "added", "path",
+}
+
+func sampleRows(root string) (mal, ben [][]string, err error) {
 	labels, err := loadLabels(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tax, err := taxonomy.Load(filepath.Join(root, "taxonomy"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	prov := provenanceMap(root)
 	sort.Slice(labels, func(i, j int) bool { return labels[i].ID < labels[j].ID })
-	rows := [][]string{sampleHeader}
+	mal, ben = [][]string{malHeader}, [][]string{benHeader}
 	for _, l := range labels {
 		t := l.Truth
 		var file, lines, quote []string
@@ -91,16 +100,21 @@ func sampleRows(root string) ([][]string, error) {
 		if l.Origin.DerivedFrom != nil {
 			entry = l.Origin.DerivedFrom.Entry
 		}
-		rows = append(rows, []string{
-			l.ID, string(l.Class), strings.Join(l.Surface, ";"), l.Kind,
+		where := []string{score.EvidenceClass(l, prov), l.Origin.Type, entry, l.Origin.Source,
+			l.Origin.License, l.Origin.Added, l.Rel}
+		if l.Class != label.Malicious {
+			ben = append(ben, append([]string{l.ID, string(l.Class), strings.Join(l.Surface, ";"), l.Kind,
+				strings.Join(t.Resembles, ";"), t.DiffersBy}, where...))
+			continue
+		}
+		mal = append(mal, append([]string{
+			l.ID, strings.Join(l.Surface, ";"), l.Kind,
 			strings.Join(dimensionsFor(l, tax), ";"), strings.Join(t.Techniques, ";"), t.Tier,
 			strings.Join(t.Evasion, ";"), strings.Join(t.Locus, ";"), t.Severity,
 			strings.Join(file, "\n"), strings.Join(lines, "\n"), strings.Join(quote, "\n"), basis,
-			score.EvidenceClass(l, prov), l.Origin.Type, entry, l.Origin.Source, l.Origin.License,
-			l.Origin.Added, l.Rel,
-		})
+		}, where...))
 	}
-	return rows, nil
+	return mal, ben, nil
 }
 
 // dimensionsFor names a sample's dimensions whether its label gives them directly (derived) or
