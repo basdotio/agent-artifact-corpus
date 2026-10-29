@@ -200,7 +200,7 @@ func printReport(rep score.Report, labels []*label.Label) {
 	fmt.Println("\nflag rate on the benign pool — an estimate, reported per source:")
 	fmt.Println("  benign here means `somebody runs this`, on an `assumed` basis — these are flags,")
 	fmt.Println("  not confirmed false positives. Read one before you count it as an error.")
-	printGroups(rep.FPByPopulation)
+	printFPGroups(rep)
 	if rep.BenignExcluded > 0 {
 		fmt.Printf("  (%d benign label(s) held out of this denominator by a recorded `exclude` "+
 			"adjudication — duplicate copies, counted once; see manifest `adjudications`)\n",
@@ -320,6 +320,28 @@ func printRecall(gs []score.Group) {
 	fmt.Printf("  %-16s %-12s %6s   %s\n", "dimension", "evidence", "n", "result")
 	for _, g := range gs {
 		fmt.Printf("  %-16s %-12s %6d   %s\n", g.Key, g.Evidence, g.N, result(g))
+	}
+}
+
+// printFPGroups prints each benign population, and beneath one that spans several surfaces,
+// its rate on each surface — a pooled rate over MCP server source, skills and settings configs
+// at once describes none of them.
+func printFPGroups(rep score.Report) {
+	printGroups(rep.FPByPopulation)
+	split := false
+	for _, g := range rep.FPByPopulation {
+		if len(rep.FPBySurface[g.Key]) > 0 {
+			split = true
+		}
+	}
+	if !split {
+		return
+	}
+	fmt.Println("  by surface, for a population that spans several (a sample on two load paths counts under both):")
+	for _, g := range rep.FPByPopulation {
+		for _, s := range rep.FPBySurface[g.Key] {
+			fmt.Printf("    %-26s %6d   %s\n", g.Key+" · "+s.Key, s.N, result(s))
+		}
 	}
 }
 

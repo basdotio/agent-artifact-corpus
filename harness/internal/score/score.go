@@ -119,6 +119,13 @@ type Report struct {
 	// constant. The rows are kinds of evidence, never averaged.
 	RecallByBasis  []Group
 	FPByPopulation []Group
+
+	// FPBySurface splits a population that spans several surfaces, keyed by population. One
+	// population can hold very different artifacts: `harvested` holds MCP server source, skills
+	// and settings configs, which one scanner flagged at 22-34%, 19% and about 2%, so its pooled
+	// rate described none of them. A sample on two load paths counts under both, as in `make
+	// stats`. A population on a single surface has no entry.
+	FPBySurface    map[string][]Group
 	HardNegFlagged Group // census over the precision probe, reported alone
 
 	Attribution Attribution
@@ -161,6 +168,7 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 	bySource := map[string]*tally{}
 	byBasis := map[string]*tally{}
 	fp := map[string]*tally{}
+	fpSurface := map[string]map[string]*tally{} // population -> surface -> tally
 	hn := tally{}
 	attr := Attribution{}
 
@@ -258,6 +266,18 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 				fp[pop] = &tally{}
 			}
 			fp[pop].n++
+			if fpSurface[pop] == nil {
+				fpSurface[pop] = map[string]*tally{}
+			}
+			for _, s := range l.Surface {
+				if fpSurface[pop][s] == nil {
+					fpSurface[pop][s] = &tally{}
+				}
+				fpSurface[pop][s].n++
+				if v.Flagged() {
+					fpSurface[pop][s].hits++
+				}
+			}
 			if v.Flagged() {
 				fp[pop].hits++
 				// A flag on a sample a person has READ is the only kind this corpus can call a
@@ -301,6 +321,18 @@ func Score(labels []*label.Label, verdicts []Verdict, tax *taxonomy.Set,
 	sort.Slice(rep.RecallByBasis, func(i, j int) bool { return rep.RecallByBasis[i].Key < rep.RecallByBasis[j].Key })
 	for pop, t := range fp {
 		rep.FPByPopulation = append(rep.FPByPopulation, newGroup(pop, "", t.n, t.hits))
+	}
+	rep.FPBySurface = map[string][]Group{}
+	for pop, bySurface := range fpSurface {
+		if len(bySurface) < 2 {
+			continue
+		}
+		var gs []Group
+		for s, t := range bySurface {
+			gs = append(gs, newGroup(s, "", t.n, t.hits))
+		}
+		sort.Slice(gs, func(i, j int) bool { return gs[i].Key < gs[j].Key })
+		rep.FPBySurface[pop] = gs
 	}
 	rep.HardNegFlagged = newGroup("hard-negative", "", hn.n, hn.hits)
 

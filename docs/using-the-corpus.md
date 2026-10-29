@@ -161,6 +161,14 @@ and those ARE confirmed false positives. The count starts small and grows one re
 time; when it is zero the scorer says so in words, because a silent zero would read as "no
 confirmed false positives" when it means "nobody has looked".
 
+**A pooled flag rate over unlike artifacts describes none of them.** One population can hold
+very different things: `harvested` holds MCP server source, skills and settings configs. When a
+population spans several surfaces, the scorecard prints its rate on each surface beneath it. In
+one run a single pooled 19% was 28% on MCP server source, 19% on skills and 0–4% on settings
+configs, so anyone reading only the 19% would look in the wrong place. A sample on two load
+paths counts under both, as in `make stats`, so the surface rows can add up to more than the
+population.
+
 **A census and an estimate are never one number.** The 19 hard negatives ARE read
 individually — every one is a deliberate near-miss, so a flag on any of them is a confirmed false
 positive you can go look at. The thousands of benign samples are a sample of a population.
