@@ -175,6 +175,16 @@ anywhere.**
 (The companion rumour that the malicious directories are empty is false — all 3,944 contain
 a `SKILL.md`.)
 
+**`malskills-gt`** — the held-out set, seen from outside.
+`https://github.com/security-pride/MalSkills` @ `46d60f09cef0`, Apache-2.0 for the code
+only, **the skills carry no grant: never vendor**. 597 malicious ClawHub trees (100 distinct
+`SKILL.md`) from the ClawHavoc disclosure, recovered from the registry's archive history.
+*Hazards*: 580 of the 597 are byte-identical to the held-out set (`agent-skill-malware`) and 12
+are already derived from `datadog-ai-skills`. Of the rest, two models read 8 and both called 2
+malicious, but those two were published in January 2026, before ClawHub made skills MIT-0
+(2026-03-07), and were removed before it, so nothing licenses them. Koi's label is per account:
+three `sakaen736jih` versions are plain documentation.
+
 ### False-positive denominator — benign samples
 
 **`skillmd-138k`** — the primary denominator.

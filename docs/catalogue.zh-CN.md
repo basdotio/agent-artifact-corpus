@@ -143,6 +143,15 @@ skill 没法再从注册表取。
 *必须的预处理*：**测量任何东西之前，先从每个样本里删掉 `_meta.json`。**
 （"恶意目录是空的"那个传言是**假的** —— 3,944 个全都有 `SKILL.md`。）
 
+**`malskills-gt`** —— 从外面看到的留出集。
+`https://github.com/security-pride/MalSkills` @ `46d60f09cef0`，Apache-2.0 只管代码，
+**skill 本身没有任何授权：永不 vendoring**。597 个 ClawHub 恶意树（100 个不同的 `SKILL.md`），
+来自 ClawHavoc 披露，从注册表归档的历史里找回。
+*风险*：597 个里有 580 个和留出集（`agent-skill-malware`）逐字节相同，12 个已从
+`datadog-ai-skills` 派生。其余的里两个模型读了 8 个，都判恶意的有 2 个；但这 2 个发布于
+2026 年 1 月，早于 ClawHub 把 skill 定为 MIT-0（2026-03-07），而且在那之前就被下架，
+没有任何授权覆盖它们。Koi 的标签按账号打：`sakaen736jih` 有三个版本只是普通文档。
+
 ### 误报分母 —— 良性样本
 
 **`skillmd-138k`** —— 主分母。
