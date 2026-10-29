@@ -22,6 +22,7 @@ import (
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/leakage"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/manifest"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/refute"
+	"github.com/basdotio/agent-artifact-corpus/harness/internal/score"
 	"github.com/basdotio/agent-artifact-corpus/harness/internal/taxonomy"
 )
 
@@ -246,6 +247,7 @@ func cmdValidate(root string) int {
 	// What each label RESTS ON, and — for the benign half — whether anything was searched for
 	// before the word "benign" was written down. Both were previously unrecorded, which let a
 	// batch constant and a hand-read artifact print as the same kind of claim.
+	problems = deferLicenceFailures(problems, labels, allEntries)
 	problems = append(problems, reportBasis(labels, basisSpec)...)
 	problems = append(problems, reportRefutation(labels, refuteRules, allEntries, allAdjudications)...)
 	// Named even when clean, because the point of these three is that they were each added
@@ -510,16 +512,82 @@ func cmdStats(root string) int {
 		fmt.Printf("    %-14s mal %-4d ben %-4d hard-neg %d\n", s, m["malicious"], m["benign"], m["hard-negative"])
 	}
 
-	fmt.Println("  by origin")
+	fmt.Println("  by origin — how the LABEL was made (a rule, a person, a collector)")
 	for _, o := range []string{"real-world", "promoted", "reconstruction", "synthetic", "harvested", "derived"} {
 		if byOrigin[o] > 0 {
 			fmt.Printf("    %-14s %d\n", o, byOrigin[o])
 		}
 	}
 
+	// What the SAMPLE is, as opposed to how its label was made. The two were one report
+	// until 2026-10-28, and reading `derived 3427` as "3,427 not-real samples" was the
+	// natural mistake: that row mixes 1,973 real public skills with 240 LLM-written attacks.
+	// The buckets are the scorer's own, from the same function, so a reader of this table
+	// and of a scorecard are looking at the same split.
+	prov := provenanceMap(root)
+	byProv := map[string]map[string]int{}
+	for _, l := range labels {
+		ev := score.EvidenceClass(l, prov)
+		if byProv[ev] == nil {
+			byProv[ev] = map[string]int{}
+		}
+		byProv[ev][string(l.Class)]++
+	}
+	fmt.Println("  by provenance — what the SAMPLE is; never summed across rows")
+	for _, ev := range []string{score.Wild, score.Fixture, score.Synthetic, score.Injected, score.Constructed, score.Unclassified} {
+		if m := byProv[ev]; m != nil {
+			fmt.Printf("    %-14s mal %-4d ben %-4d hard-neg %d\n", ev, m["malicious"], m["benign"], m["hard-negative"])
+		}
+	}
+
 	// Truth-side composition. This is the half that describes the corpus to someone who has
 	// never run any scanner of ours, so every value in the vocabulary is listed including the
 	// ones with no sample: a named hole is actionable, an omitted one reads as covered.
+	// Locus, listed in vocabulary order including empty rows, like every other explanatory
+	// axis: a named hole is actionable, an omitted one reads as covered.
+	byLocus := map[string]int{}
+	withLocus := 0
+	for _, l := range labels {
+		if l.Class != label.Malicious {
+			continue
+		}
+		if len(l.Truth.Locus) > 0 {
+			withLocus++
+		}
+		for _, lc := range l.Truth.Locus {
+			byLocus[lc]++
+		}
+	}
+	fmt.Printf("  by locus — where the deciding content sits (%d of %d malicious carry one; a sample may carry several)\n",
+		withLocus, byClass["malicious"])
+	for _, lc := range tax.LocusOrder {
+		fmt.Printf("    %-18s %d\n", lc, byLocus[lc])
+	}
+
+	// Quoted evidence: how many malicious samples carry a located quote at all, and how many
+	// of the multi-dimension ones carry a quote that says which dimension it establishes.
+	withEv, multi, multiAttributed := 0, 0, 0
+	for _, l := range labels {
+		if l.Class != label.Malicious || l.Basis == nil || len(l.Basis.Evidence) == 0 {
+			continue
+		}
+		withEv++
+		if len(l.DimensionSet(tax)) > 1 {
+			multi++
+			named := 0
+			for _, ev := range l.Basis.Evidence {
+				if ev.Dimension != "" {
+					named++
+				}
+			}
+			if named > 0 {
+				multiAttributed++
+			}
+		}
+	}
+	fmt.Printf("  evidence — %d of %d malicious carry a located quote; of the %d on two or more dimensions,\n"+
+		"    %d say which dimension each quote establishes\n", withEv, byClass["malicious"], multi, multiAttributed)
+
 	fmt.Println("  by technique (truth — tool-neutral)")
 	for _, t := range sortedKeys(tax.Techniques) {
 		fmt.Printf("    %-22s performed %-4d resembled %d\n", t, performed[t], resembled[t])
@@ -752,6 +820,16 @@ func cmdDerive(root string, want []string) int {
 			continue
 		}
 
+		if d := e.Derive; strings.HasPrefix(d.LicenseFrom, "pins:") {
+			// The manifest names the pins file relative to the repository root; the derivation
+			// is handed an absolute path and never has to know where the repository is.
+			dd := *d
+			rest := strings.TrimPrefix(d.LicenseFrom, "pins:")
+			if i := strings.LastIndex(rest, ":"); i > 0 && !filepath.IsAbs(rest[:i]) {
+				dd.LicenseFrom = "pins:" + filepath.Join(root, rest[:i]) + rest[i:]
+			}
+			e.Derive = &dd
+		}
 		res, errs := derive.Derive(e, upRoot, tax)
 		fmt.Printf("%s — %s\n", id, e.Derive.Fidelity)
 		if res != nil {
@@ -1023,4 +1101,70 @@ func addCell(grid map[string]map[string]int, dimension, tier string) {
 		grid[dimension] = map[string]int{}
 	}
 	grid[dimension][tier]++
+}
+
+// provenanceMap reads every manifest entry's provenance, keyed by entry id — the scorer's
+// input for EvidenceClass, built here so `stats` and `score` split on the same reading.
+func provenanceMap(root string) map[string]string {
+	prov := map[string]string{}
+	manifests, _ := filepath.Glob(filepath.Join(root, "manifest", "*.yaml"))
+	for _, mp := range manifests {
+		f, err := manifest.Load(mp)
+		if err != nil {
+			continue
+		}
+		for _, e := range f.Entries {
+			if e.Provenance != "" {
+				prov[e.ID] = e.Provenance
+			}
+		}
+	}
+	return prov
+}
+
+// deferLicenceFailures turns the per-label "may not be vendored into layer 1" failures of an
+// entry whose manifest record says license_review: deferred into ONE line that prints on every
+// run. The labels keep the true licence; nothing is relabelled to pass. It exists because on
+// 2026-10-28 the originating-repository lookup put 1,601 derived labels outside the permissive
+// set at once, and the decision about them (drop, or rebuild locally as layer 2) was deferred
+// rather than taken — a deferral has to stay visible or it becomes the new normal.
+func deferLicenceFailures(problems []string, labels []*label.Label, entries []manifest.Entry) []string {
+	deferred := map[string]string{}
+	for _, e := range entries {
+		if e.LicenseReview == "deferred" {
+			deferred[e.ID] = e.LicenseReviewNote
+		}
+	}
+	if len(deferred) == 0 {
+		return problems
+	}
+	relEntry := map[string]string{}
+	for _, l := range labels {
+		if l.Origin.DerivedFrom != nil {
+			relEntry[l.Rel] = l.Origin.DerivedFrom.Entry
+		}
+	}
+	const marker = "may not be vendored into layer 1"
+	kept := problems[:0]
+	count := map[string]int{}
+	for _, p := range problems {
+		rel, _, _ := strings.Cut(p, ": ")
+		if id, ok := relEntry[rel]; ok && deferred[id] != "" && strings.Contains(p, marker) {
+			count[id]++
+			continue
+		}
+		kept = append(kept, p)
+	}
+	if len(count) > 0 {
+		total := 0
+		for _, id := range sortedKeys(count) {
+			total += count[id]
+		}
+		fmt.Printf("licence     DEFERRED, not passed — %d label(s) sit on upstream licences outside "+
+			"the permissive set and stay in layer 1 by a recorded decision:\n", total)
+		for _, id := range sortedKeys(count) {
+			fmt.Printf("              %-26s %5d   %s\n", id, count[id], deferred[id])
+		}
+	}
+	return kept
 }

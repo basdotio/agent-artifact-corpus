@@ -73,7 +73,41 @@ by anyone.
 
 Every vendored sample records `origin.license` and `origin.source` in its label, and appears
 in `NOTICE`. Attribution is a condition of Apache-2.0 and CC-BY-4.0, so this is a license
-obligation, not bookkeeping.
+obligation, not bookkeeping. The full text of each third-party license that appears in a
+label is kept under `LICENSES/`, because Apache-2.0 §4(a) and CC-BY-4.0 §3(a) require the
+license itself to accompany the material, not only its name.
+
+### A compilation's license is not its contents'
+
+SkillMD-138K is CC-BY-4.0, skillet is MIT, automatelab is CC-BY-4.0 — and each says, in its
+own card or README, that this covers the curation and that every skill or package keeps its
+author's terms. For 2,470 trees the label carried the compilation's license, and the
+validator accepted it: the check is that the value is in the permissive set, and CC-BY-4.0
+is. It was the right value for the wrong thing.
+
+Since 2026-10-28 those entries carry `license_from` in their derive rule, which reads the
+ORIGINATING repository's or package's license from `manifest/pins/repo-licenses.json` and
+`manifest/pins/npm-licenses.json`. Those files are written by `scripts/resolve-repo-licenses.py`
+(GitHub GraphQL `licenseInfo.spdxId`, 1,612 repositories) and `scripts/resolve-npm-licenses.py`
+(registry.npmjs.org `license`, 353 packages), so a re-derivation reproduces the labels without
+a network and the lookup is on record with its date. A repository that is gone (`NOT_FOUND`),
+has no license file (`NONE`), or has one GitHub cannot classify (`OTHER`) fails the validator
+exactly as GPL would, because none of those is a grant.
+
+**Deferred, not resolved (2026-10-28).** That lookup put 1,601 labels — 64% of SkillMD-138K's,
+60% of skillet's, 16% of automatelab's — outside the permissive set, overwhelmingly repositories
+with no license file at all, which is a zero grant. The owner chose to keep them in layer 1 for
+now and decide later between dropping them and rebuilding them locally as layer 2 (the pinned
+parquet plus the seeded script reproduce them without vendoring). Those three entries carry
+`license_review: deferred` with a note in `manifest/corpora.yaml`; `make validate` prints the
+count on every run under `licence DEFERRED, not passed`, and the labels keep the true license.
+A reader of a false-positive figure over those entries should know that the denominator
+includes material this repository may not be entitled to redistribute.
+
+A sample's own front matter can also declare terms its repository's license does not override:
+34 trees declared Anthropic's proprietary `LICENSE.txt` (the anthropics/skills family vendored
+into other people's repositories) or CC-BY-NC-SA, and left layer 1 the same day. The reasons
+are per sample in the entries' `exclude_samples`.
 
 **The label-to-`NOTICE` cross-check is not implemented yet.** `make validate` checks that
 `origin.license` is one of the licenses layer 1 permits; it does not read `NOTICE`. Until

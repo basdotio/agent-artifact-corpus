@@ -50,12 +50,17 @@ type Coord struct {
 	Class      string
 	Dimensions []string
 	Evasion    []string
+	Locus      []string // where the deciding content sits; explanatory, from the category map
 	Tier       string
 	Severity   string
 
 	// Source is the originating repository when the entry is a collection of them. Empty means
 	// the entry itself is the source.
 	Source string
+
+	// License is the originating repository's or package's licence when the entry's derive rule
+	// names a pins file (license_from). Empty means the entry's own licence applies.
+	License string
 
 	// IsFile says the upstream sample is a single file, to be wrapped in a directory of its own
 	// when vendored. Set from sample_is_file, or per match under mixed_shapes.
@@ -135,6 +140,10 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			case "tier":
 				if _, ok := tax.Tiers[val]; !ok {
 					bad("%s: category_axis_map[%q] targets tier %q, which is not in the vocabulary", e.ID, cat, val)
+				}
+			case "locus":
+				if _, ok := tax.Loci[val]; !ok {
+					bad("%s: category_axis_map[%q] targets locus %q, which is not in the vocabulary", e.ID, cat, val)
 				}
 			}
 		}
@@ -232,6 +241,15 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			}
 		}
 
+		if d.LicenseFrom != "" {
+			lic, lerr := licenseFromPins(d.LicenseFrom, c.Source, filepath.Base(dir))
+			if lerr != nil {
+				bad("%s/%s: %v", e.ID, up.ID, lerr)
+			} else {
+				c.License = lic
+			}
+		}
+
 		verdict := resolve(d.ClassFrom, up.Verdict, dir)
 		switch verdict {
 		case "malicious":
@@ -281,7 +299,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			targets, mapped := d.CategoryAxisMap[cat]
 			if !mapped {
 				bad("%s: upstream category %q has no category_axis_map entry — map it to dim:, "+
-					"evasion:, tier: or ignore; leaving it out silently drops the axis it carries", e.ID, cat)
+					"evasion:, tier:, locus: or ignore; leaving it out silently drops the axis it carries", e.ID, cat)
 				continue
 			}
 			for _, target := range targets {
@@ -297,6 +315,10 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 				case "evasion":
 					if c.Class == "malicious" {
 						c.Evasion = appendUnique(c.Evasion, val)
+					}
+				case "locus":
+					if c.Class == "malicious" {
+						c.Locus = appendUnique(c.Locus, val)
 					}
 				case "tier":
 					// Where an id prefix gave a tier it is authoritative and a disagreement is
@@ -647,4 +669,53 @@ func sameSet(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// pinsRecord is the one field this package reads from a pins file; the scripts that write the
+// files record more (when it was checked, via what) for a reader, not for the derivation.
+type pinsRecord struct {
+	License string `json:"license"`
+}
+
+// licenseFromPins resolves a `license_from` spec for one sample. The pins file path is used as
+// given — the caller resolves it against the repository root — and is read once per call,
+// which is cheap next to walking a tree and keeps this function free of hidden state.
+func licenseFromPins(spec, source, name string) (string, error) {
+	rest, ok := strings.CutPrefix(spec, "pins:")
+	if !ok {
+		return "", fmt.Errorf("license_from %q must be pins:<file>:<source-repo|name>", spec)
+	}
+	i := strings.LastIndex(rest, ":")
+	if i < 0 {
+		return "", fmt.Errorf("license_from %q must be pins:<file>:<source-repo|name>", spec)
+	}
+	file, key := rest[:i], rest[i+1:]
+	var k string
+	switch key {
+	case "source-repo":
+		if source == "" {
+			return "", fmt.Errorf("license_from keys by source-repo but source_from recovered no repository")
+		}
+		k = source
+	case "name":
+		k = name
+	default:
+		return "", fmt.Errorf("license_from key %q is neither source-repo nor name", key)
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("license_from pins file: %w", err)
+	}
+	var pins map[string]pinsRecord
+	if err := json.Unmarshal(b, &pins); err != nil {
+		return "", fmt.Errorf("license_from pins file %s is not a JSON object: %w", filepath.Base(file), err)
+	}
+	rec, has := pins[k]
+	if !has {
+		return "", fmt.Errorf("pins file %s has no entry for %q — run the resolve script", filepath.Base(file), k)
+	}
+	if rec.License == "" {
+		return "", fmt.Errorf("pins file %s records no licence for %q", filepath.Base(file), k)
+	}
+	return rec.License, nil
 }

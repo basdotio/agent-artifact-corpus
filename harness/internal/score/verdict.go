@@ -22,6 +22,14 @@ type Verdict struct {
 	Verdict    string   `json:"verdict"`
 	Severity   string   `json:"severity"`
 	Dimensions []string `json:"dimensions"`
+
+	// Files is where the scanner says the problem is, as paths relative to the sample tree.
+	// Optional. When present on a caught malicious sample that carries quoted evidence, the
+	// scorer checks whether one of them is the file the quote came from — "caught it for the
+	// right reason" as opposed to "flagged the tree". Line numbers are deliberately not
+	// compared: scanners disagree on how to count them and a file is the unit a person
+	// would open.
+	Files []string `json:"files"`
 }
 
 // Flagged is true when the scanner called this sample an attack. A scanner's own richer states

@@ -64,8 +64,13 @@ nothing to do with detection:
 
 Neither is obviously wrong when you read individual samples, which is why this belongs in a
 build gate rather than a review checklist. A human reading samples one at a time cannot see
-a distribution. Its successor ships the mechanism worth copying: `metrics/leakage.py` fails
-the build when any structural feature with support ≥8 predicts the label at ≥95% purity.
+a distribution. The mechanism worth having is a build gate that fails when any structural
+feature with support ≥8 predicts the label at ≥95% purity; this repository implements it in
+`harness/internal/leakage` and `make validate` runs it. (An earlier version of this rule
+credited the gate to MaliciousSkillBench's `metrics/leakage.py`. That file does not exist in
+that repository, checked 2026-10-28; what MaliciousSkillBench does is a split-level overlap
+audit over five axes plus a hand-curated audit of generator scaffold strings, which is a
+different and complementary check.)
 
 **4. "No scanner complained" is not evidence of benignity.** Ranked strongest to weakest:
 cryptographic attestation (only `NVIDIA/skills`) → enterprise permissive publication under
@@ -140,7 +145,7 @@ count it alongside either.
 
 **`skilltrustbench`** — best structure, worst licence.
 `https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench` @ `f90517b7058f`,
-**CC-BY-NC-SA-4.0**, **never vendor**. 3,877 malicious, 1,643 benign.
+**CC-BY-NC-SA-4.0**, **never vendor**. 2,863 malicious, 1,643 benign, plus 1,014 `suspicious` — a weaker label (risky coding pattern, no hidden trigger) that must not be summed with malicious; an earlier version of this line did.
 *Hazards*: NonCommercial plus ShareAlike contagion, so local measurement and aggregate
 figures only; contains the four Trail of Bits samples.
 *Unique value*: the **`injected_d8` subset** — 119 samples, 118 labelled `normal`, described

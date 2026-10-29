@@ -53,6 +53,8 @@ type Entry struct {
 	// `fixture` a third party authored it as a test case. Real enough to be worth catching and
 	//           not ours to imagine, but coverage of THEIR chosen shapes, not a sample of the
 	//           world's.
+	// `synthetic` / `injected` — see validProvenance: generated outright, or generated into a
+	//           real base. Both are coverage, and the scorer keeps them apart from `fixture`.
 	//
 	// Samples we author ourselves never reach here: their labels carry origin.type
 	// `reconstruction` or `synthetic` and the scorer classes them from that.
@@ -80,6 +82,15 @@ type Entry struct {
 	Prep []string `yaml:"prep"`
 
 	Vendorable bool `yaml:"vendorable"`
+
+	// LicenseReview is "deferred" while an entry's samples are KNOWN to sit on upstream licences
+	// outside the permissive set and the decision about them (drop, or move to a locally
+	// rebuilt layer 2) is still open. The validator then reports those labels as one counted
+	// line instead of one failure each. It is not a pass: the labels keep the true licence, the
+	// line prints on every run, and the note says who deferred it and why. An entry may not
+	// defer silently — the note is required.
+	LicenseReview     string `yaml:"license_review"`
+	LicenseReviewNote string `yaml:"license_review_note"`
 
 	// Derive states how this upstream's own labels map onto our three axes, so a rule can
 	// produce derived coordinates instead of a person hand-pinning every sample. Absent means
@@ -256,6 +267,22 @@ type Derive struct {
 	//                            this corpus's measurements once already.
 	SourceFrom string `yaml:"source_from"`
 
+	// LicenseFrom overrides the entry's licence per sample with the ORIGINATING repository's or
+	// package's, read from a pins file kept under manifest/pins/ and resolved relative to the
+	// repository root:
+	//
+	//   pins:<file>:source-repo   key the pins file by the owner/repo that source_from recovered
+	//   pins:<file>:name          key it by the sample directory's name
+	//
+	// It exists because a compilation's licence covers the curation, not the content. SkillMD-138K
+	// is CC-BY-4.0 and says in its card that every SKILL.md "retains the copyright and license of
+	// its original author/repository"; skillet is MIT and says third-party content keeps its
+	// upstream licence. For 2,470 trees the label carried the compilation's licence, so the
+	// validator's permissive-set check passed on a value that described the wrong thing. The
+	// pins file is what a scripted lookup wrote down (scripts/resolve-repo-licenses.py), so a
+	// re-derivation reproduces the labels without a network.
+	LicenseFrom string `yaml:"license_from"`
+
 	// CategoryFrom says where the tokens fed to CategoryAxisMap come from:
 	//
 	//   field:<name>            a list field in the upstream label file (the default)
@@ -342,11 +369,24 @@ func Load(path string) (*File, error) {
 
 var validRoles = []string{"fp-denominator", "recall", "hard-negative", "touchstone", "probe"}
 
-// validProvenance is deliberately two words and not three. "Ours" is not an option here: a
+// validProvenance names what a third party's artifacts ARE. "Ours" is not an option here: a
 // sample this repository authored carries it in its own label (origin.type reconstruction or
 // synthetic) and never reaches a manifest entry, so offering the value would create a second
 // place to make the same claim — and eventually two places that disagree.
-var validProvenance = []string{"wild", "fixture"}
+//
+//	wild       existed because somebody made it for real
+//	fixture    a person authored it as a test case (skillsgoat, cisco's numbered examples)
+//	synthetic  a generator authored it — an LLM or a template — with no real base artifact
+//	           (SkillHarm: every sample names the model that wrote it)
+//	injected   a generator inserted a payload into a REAL benign base artifact (Skill-Inject:
+//	           84 templates over real carrier skills). The base is wild, the attack is not,
+//	           and a scanner's score on it says something about neither alone
+//
+// `synthetic` and `injected` were one word, `fixture`, until 2026-10-28. MaliciousSkillBench's
+// cross-source result is the reason they are not: a learned model keeps its recall on synthetic
+// samples and loses it on injected ones, because the injected half teaches the template rather
+// than the attack. Pooling the two hides exactly that.
+var validProvenance = []string{"wild", "fixture", "synthetic", "injected"}
 
 // validAxisTarget checks the shape of a category_axis_map value. The value after the colon
 // (the actual axis member) is checked against the taxonomy in the derive package, where the
@@ -355,7 +395,7 @@ func validAxisTarget(t string) bool {
 	if t == "ignore" {
 		return true
 	}
-	for _, prefix := range []string{"dim:", "evasion:", "tier:"} {
+	for _, prefix := range []string{"dim:", "evasion:", "tier:", "locus:"} {
 		if strings.HasPrefix(t, prefix) && len(t) > len(prefix) {
 			return true
 		}
@@ -383,6 +423,16 @@ func (f *File) Validate() []error {
 		}
 		if e.License == "" {
 			bad("%s: license is empty — the license decides whether it may ever be vendored", e.ID)
+		}
+		switch e.LicenseReview {
+		case "":
+		case "deferred":
+			if strings.TrimSpace(e.LicenseReviewNote) == "" {
+				bad("%s: license_review is deferred with no license_review_note — a deferral "+
+					"nobody signed is a silent exemption", e.ID)
+			}
+		default:
+			bad("%s: license_review %q is neither empty nor \"deferred\"", e.ID, e.LicenseReview)
 		}
 		if !oneOf(e.Role, validRoles) {
 			bad("%s: role %q is not one of %s", e.ID, e.Role, strings.Join(validRoles, ", "))

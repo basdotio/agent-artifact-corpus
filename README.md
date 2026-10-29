@@ -92,7 +92,7 @@ Short introductions suitable for a post are in [`articles.md`](docs/articles.md)
 
 | Tool | Rule-level expectations | Note |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,075 layer-1 samples | the only one so far — see *Known gaps* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,042 layer-1 samples | the only one so far — see *Known gaps* |
 
 No second scanner has been wired up yet. Until one is, the tool-neutral claims above are a
 property of the schema rather than a demonstrated result, and that distinction is the reason
@@ -185,8 +185,8 @@ blocks `rm -rf`.
 `corpus score` reads a scanner's output as JSONL — one `{"sample","verdict"}` object per line,
 with optional `severity` and `dimensions` — and prints recall per dimension and per source,
 the flag rate on each benign population, the hard-negative census, and attribution over the
-read-basis samples. It keeps three lines the corpus is built on: **wild**, **fixture** and
-**constructed** samples never merge into one number — only the first can back a claim about the
+read-basis samples. It keeps the lines the corpus is built on: **wild**, **fixture**,
+**synthetic**, **injected** and **constructed** samples never merge into one number — only the first can back a claim about the
 world, and a third party's test fixtures are not it — a per-source rate is labelled a rate about
 that source, and a group too small for a tight interval is printed as a bare count, not a
 figure. It grades against `truth`; it never decides what passes.
@@ -214,8 +214,8 @@ shows up there rather than in someone else's clone.
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,075 labels
-  carry such a block; the other 5,069 are pure `truth` and need no scanner to check. A
+- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,042 labels
+  carry such a block; the other 5,036 are pure `truth` and need no scanner to check. A
   scanner's rule list belongs to that scanner, so `taxonomy/tools.yaml` reaches it only
   through an environment variable and the validator now **rejects** a `rules_source.path`
   that leaves this repository. That rule exists because aguard's used to be
@@ -238,7 +238,7 @@ measures.
   needs a script under `scripts/` between the fetch and the derive. The scripts are pinned and
   seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
   entries in one command.
-- **The benign side is a sample; the malicious side is a census, with one exception.** 4,506
+- **The benign side is a sample; the malicious side is a census, with one exception.** 4,473
   benign samples are drawn from stated populations under stated designs; 310 of the 550
   malicious samples are everything their upstreams had, and the 240 from SkillHarm are a
   seeded draw of 20 per risk from 641. A recall figure and a false-positive figure from this corpus

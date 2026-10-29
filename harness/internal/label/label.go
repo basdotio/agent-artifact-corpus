@@ -174,6 +174,27 @@ type Origin struct {
 	DerivedFrom *DerivedFrom `yaml:"derived_from"`
 }
 
+// DimensionSet is every dimension the sample sits on: the ones named directly by a derived
+// label, and the ones its techniques imply through the taxonomy. Order follows the taxonomy.
+func (l *Label) DimensionSet(tax *taxonomy.Set) []string {
+	set := map[string]bool{}
+	for _, d := range l.Truth.Dimensions {
+		set[d] = true
+	}
+	for _, t := range l.Truth.Techniques {
+		if tt, ok := tax.Techniques[t]; ok && tt.Dimension != "" {
+			set[tt.Dimension] = true
+		}
+	}
+	var out []string
+	for _, d := range tax.Dimensions {
+		if set[d] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // DerivedFrom points a derived label back at the upstream it came from.
 type DerivedFrom struct {
 	Entry  string `yaml:"entry"`  // manifest entry id the sample was fetched or vendored from
@@ -241,6 +262,27 @@ type Truth struct {
 	// list means none, which is what the calibration tier requires.
 	Evasion []string `yaml:"evasion"`
 
+	// Locus names where the deciding content sits, from the closed vocabulary in
+	// taxonomy/techniques.yaml: the skill body, a named companion document, a PDF, an existing
+	// script, a new one, a config file, a tool description. It is the third explanatory axis
+	// beside tier and evasion — tier says how deep, evasion says by what mechanism, locus
+	// says in which file. It exists because a scanner's misses sort by this before anything
+	// else: on one held-out draw recall ran from 29% inside PDFs to 88% inside modified
+	// scripts, and that spread was invisible in the labels. Malicious and hard-negative only.
+	Locus []string `yaml:"locus"`
+
+	// AlertJustified marks a BENIGN sample whose author meant no harm but whose behaviour
+	// crosses a safety boundary in the open: a skill that disables the sandbox, borrows another
+	// application's credentials, lets a remote file rewrite the global instructions, or runs a
+	// destructive step without confirmation. The boundary with malicious is SkillTrustBench's:
+	// nothing is hidden and nothing is force-triggered. A scanner that flags one of these is
+	// not wrong, and one that stays quiet is not wrong either, so the scorer counts them on
+	// their own line — outside both the flag-rate numerator and its denominator. It is a
+	// marker, not a fourth class: the sample stays benign and the denominator stays honest.
+	// Requires `reviewed` (somebody read it) and a reason.
+	AlertJustified    bool   `yaml:"alert_justified"`
+	AlertJustifiedWhy string `yaml:"alert_justified_why"`
+
 	Note string `yaml:"note"`
 }
 
@@ -281,6 +323,10 @@ type KnownGap struct {
 var (
 	validSurfaces = []string{"skills", "hooks", "permission", "mcp", "connector", "instruction"}
 	validOrigins  = []string{"real-world", "promoted", "reconstruction", "synthetic", "harvested", "derived"}
+	// validProvenance mirrors the manifest's: what a sample IS, as opposed to how its label was
+	// made (origin.type). A hand-pinned sample states it here; a derived one inherits it from its
+	// entry, which is why the scorer reads both.
+	validProvenance = []string{"wild", "fixture", "synthetic", "injected"}
 
 	// truthSeverities is the tool-neutral ladder. Per-tool bounds are checked against that
 	// tool's own ladder from taxonomy/tools.yaml instead.
@@ -289,7 +335,13 @@ var (
 	// permissiveLicenses may be vendored into layer 1. Everything else belongs in manifest/
 	// — see docs/licensing.md. No-license material is the strictest case (zero grant), not
 	// the loosest.
-	permissiveLicenses = []string{"MIT", "Apache-2.0", "BSD-3-Clause", "BSD-2-Clause", "CC-BY-4.0", "CC0-1.0", "ISC"}
+	permissiveLicenses = []string{"MIT", "Apache-2.0", "BSD-3-Clause", "BSD-2-Clause", "CC-BY-4.0", "CC0-1.0", "ISC",
+		// Added 2026-10-28 when origin.license started recording the ORIGINATING repository's
+		// licence rather than the compilation's: these four are permissive in the same sense
+		// as the seven above, and real repositories behind SkillMD-138K use them. MPL-2.0 is
+		// deliberately absent: file-level copyleft is still copyleft, and five samples are
+		// not worth a special case.
+		"Unlicense", "MIT-0", "0BSD", "Zlib"}
 )
 
 func Load(path string) (*Label, error) {
@@ -330,6 +382,9 @@ func (l *Label) Validate(tax *taxonomy.Set) []error {
 
 	if !oneOf(l.Origin.Type, validOrigins) {
 		bad("origin.type %q is not one of %s", l.Origin.Type, strings.Join(validOrigins, ", "))
+	}
+	if l.Origin.Provenance != "" && !oneOf(l.Origin.Provenance, validProvenance) {
+		bad("origin.provenance %q is not one of %s", l.Origin.Provenance, strings.Join(validProvenance, ", "))
 	}
 
 	derived := l.Origin.Type == "derived"
@@ -430,6 +485,10 @@ func (l *Label) validateTruth(tax *taxonomy.Set) []error {
 			bad("%s sample lists truth.techniques — a benign sample performs none; if it "+
 				"looks like one, that is truth.resembles", l.Class)
 		}
+		if l.Class == Benign && len(l.Truth.Locus) > 0 {
+			bad("benign sample sets truth.locus — there is no deciding content to locate; a " +
+				"look-alike that has one is a hard negative")
+		}
 		if len(l.Truth.Dimensions) > 0 {
 			bad("%s sample lists truth.dimensions — only malicious samples sit on the recall "+
 				"axis; a benign look-alike names what it resembles", l.Class)
@@ -437,6 +496,39 @@ func (l *Label) validateTruth(tax *taxonomy.Set) []error {
 		if l.Truth.Severity != "" {
 			bad("%s sample sets truth.severity — the correct report on it is no finding, "+
 				"which is not a point on the ladder", l.Class)
+		}
+	}
+
+	if l.Truth.AlertJustified || l.Truth.AlertJustifiedWhy != "" {
+		switch {
+		case l.Class != Benign:
+			bad("truth.alert_justified is for benign samples only — a %s sample is already "+
+				"on the other side of that line", l.Class)
+		case !l.Truth.AlertJustified:
+			bad("truth.alert_justified_why is set but alert_justified is not — a reason with " +
+				"no claim")
+		case strings.TrimSpace(l.Truth.AlertJustifiedWhy) == "":
+			bad("truth.alert_justified needs alert_justified_why — the boundary crossed has " +
+				"to be named, or the marker is a way to park a false positive")
+		case l.Reviewed == nil:
+			bad("truth.alert_justified requires a `reviewed` block — the claim that a flag " +
+				"here is correct is a reading, and a reading has a date, a verdict and a note")
+		}
+	}
+
+	for _, lc := range l.Truth.Locus {
+		if _, ok := tax.Loci[lc]; !ok {
+			bad("truth.locus names %q, which is not in taxonomy/techniques.yaml", lc)
+		}
+	}
+
+	if l.Basis != nil {
+		dims := l.DimensionSet(tax)
+		for i, ev := range l.Basis.Evidence {
+			if ev.Dimension != "" && !oneOf(ev.Dimension, dims) {
+				bad("basis.evidence[%d].dimension %q is not one of this sample's dimensions %v — "+
+					"a quote establishes a dimension the sample carries, or it establishes nothing", i, ev.Dimension, dims)
+			}
 		}
 	}
 

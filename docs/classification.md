@@ -292,6 +292,59 @@ number without the threshold beside it is decoration.
 
 ---
 
+## How the public corpora's labels map onto these axes
+
+Four public corpora label the same kind of artifact with their own vocabularies. This table is
+what lets a figure measured locally on one of them be reported in our terms, and it is also the
+check that our nine dimensions lose nothing of theirs. Every row lands; no dimension had to be
+added. Recorded 2026-10-28.
+
+**MalSkillBench — 15 behaviours → 9 dimensions**
+
+| theirs | ours |
+|---|---|
+| data exfiltration, credential theft, system-prompt leak | exfiltration (credential theft with no egress is reconnaissance) |
+| remote execution | execution |
+| poisoning | supply-chain |
+| persistence, reverse shell | backdoor |
+| ransomware, content tampering | filesystem |
+| resource abuse | resource-abuse |
+| privilege escalation, safety bypass | permission |
+| role hijack, instruction override, goal hijack | injection |
+
+Their three "vectors" (code injection / prompt injection / hybrid) are our `injection` versus
+`execution` distinction in `techniques.yaml` — read-to-work versus run-to-work. Their ten
+"insertion strategies" are `locus`.
+
+**SkillTrustBench — T01..T09 → 9 dimensions, plus the third class**
+
+| theirs | ours |
+|---|---|
+| T01 instruction hijack | injection |
+| T02 memory poisoning | injection, plus backdoor when it persists |
+| T03 remote fetch and execute | execution, evasion `external-fetch` |
+| T04 embedded malicious code | execution (then whatever it achieves: exfiltration, backdoor…) |
+| T05 privilege escalation | permission |
+| T06 persistence | backdoor |
+| T07 tool hijack | supply-chain, or injection for MCP tool poisoning |
+| T08 unsafe dependency | supply-chain |
+| T09 insecure coding | **not malicious** — benign, with `alert_justified` where it crosses a boundary in the open |
+| `suspicious` (risky pattern, no hidden trigger) | benign with `truth.alert_justified`; set aside from the flag rate on both sides |
+
+**MaliciousSkillBench — four auxiliary axes → ours**
+
+| theirs | ours |
+|---|---|
+| intent (malicious / benign / vulnerable / dual-use / uncertain) | class (malicious / benign / hard-negative) plus `alert_justified` |
+| label strength (strong / moderate / silver / weak) | `basis.class` (read / upstream / derived / assumed) — kinds of evidence, deliberately not an ordinal; `corpus score` splits recall on it |
+| evidence type (human+runtime / runtime / static / scanner / constructed) | `basis.class` with its mandatory companions (`evidence.quote`, `source_field`, `rule`, `assumption`), and `reviewed` on the benign side |
+| provenance (wild / synthetic / injected / backdoored / test_fixture / mixed) | `provenance` (wild / fixture / synthetic / injected) plus `constructed` from `origin.type` |
+
+**ClawHub Security Signals** — clean / suspicious / malicious from a GPT judge over three
+scanners. A verdict, not a label: `malicious` rows are intake candidates that a person reads
+before a label exists; `suspicious` is not used (the pinned file holds 228 such rows against
+the paper's 25,504, unexplained); `clean` means "nothing flagged it".
+
 ## Why this classification
 
 Grouped by **what kind of statement the result supports**, not by what part of the code is

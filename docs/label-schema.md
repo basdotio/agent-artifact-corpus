@@ -72,6 +72,7 @@ truth:                                # tool-neutral. Nothing here names a scann
   severity: high                      # how bad it is, independent of any tool
   tier: plain                         # how deeply it is buried
   evasion: []                         # which mechanisms bury it; empty is what `plain` means
+  locus: [new-script]                 # where the deciding content sits; closed vocabulary
   note: "socket to a reserved host, all three fds duplicated onto it, /bin/sh -i spawned"
 
 expect:                               # optional, per tool, keyed by taxonomy/tools.yaml.
@@ -106,6 +107,96 @@ pairs_with: mal-skill-revshell-python-dup2   # REQUIRED for hard-negative
 ```
 
 ---
+
+## Four explanatory axes, not three: `locus`
+
+`tier` says how deep the attack is buried, `evasion` by what mechanism, and since 2026-10-28
+`locus` says in which **file**: the skill body, its front matter, a named companion document, a
+PDF, an existing script, a new script, a new module, a config file, a dependency manifest, a
+tool description, a server's code. The vocabulary is closed and lives in
+`taxonomy/techniques.yaml` beside the other three.
+
+It is a separate axis because the three come apart. A plain-text payload inside a PDF the
+skill tells the agent to read is tier `evasive` with evasion `binary-container`, and a scanner
+misses it for a reason that has nothing to do with depth: it never opened the PDF. On the
+2026-10-20 SkillHarm held-out draw, recall ran from 29% in PDFs to 88% in modified scripts at
+the same tier, and the labels could not say so. Now they can: a miss sorts by locus before it
+sorts by anything else.
+
+A sample may carry several loci, and malicious and hard-negative samples only — a benign
+sample has no deciding content to locate. Derived samples get it from the category map
+(SkillHarm's `realization` token names the file kind); hand-pinned samples name it directly,
+and `basis.locus` says which.
+
+## `alert_justified`: benign by intent, over the line by behaviour
+
+Some benign samples cross a safety boundary in the open: a skill that passes `--yolo` and
+switches the sandbox off, one that reads another application's OAuth token and presents
+itself as that client, a hook that `git pull`s and overwrites the global `CLAUDE.md` on every
+session start. The author meant no harm and hid nothing. A scanner that flags one is not
+wrong, and one that stays quiet is not wrong either.
+
+```yaml
+truth:
+  alert_justified: true
+  alert_justified_why: "Instructs the agent to always pass --yolo, which disables the sandbox and confirmation prompts; stated in the open, nothing force-triggered."
+```
+
+The boundary with `malicious` is SkillTrustBench's: **nothing hidden, nothing force-triggered**.
+Hide the `--yolo` in base64, or gate it on a date, and the sample is malicious. The marker
+requires a `reviewed` block, because the claim that a flag here is correct is a reading.
+
+It is a marker, not a fourth class. The sample stays benign and the benign denominator stays
+what it was; the scorer sets these aside on their own line, outside both the numerator and
+the denominator of the flag rate. The alternative — a `suspicious` class — would make the
+benign definition negotiable, and the flag rate's denominator with it.
+
+## `origin.provenance`: what the sample is, as opposed to how its label was made
+
+`origin.type` says how the **label** came to be: `derived` by a rule from an upstream's
+labels, `harvested` by a collector, `reconstruction` or `synthetic` by us. It does not say
+what the **sample** is — `derived 3,427` holds 1,973 real public skills and 240 attacks an
+LLM wrote. That is `provenance`: `wild` (somebody made it for real), `fixture` (a person wrote
+it as a test case), `synthetic` (a generator wrote it with no real base), `injected` (a
+generator put a payload into a real benign artifact). A hand-pinned sample states it in
+`origin.provenance`; a derived one inherits it from its manifest entry; our own samples are
+`constructed` by their `origin.type`. `corpus stats` prints both tables and `corpus score`
+splits every recall row on the second, and none of the rows ever add.
+
+## `basis.evidence` may be a list, one quote per dimension
+
+A `read` basis carries the quote that decided it, and `make validate` goes and finds that
+quote in the sample's bytes. The first 309 labels wrote one quote:
+
+```yaml
+basis:
+  class: read
+  dimension: read
+  evidence:
+    file: SKILL.md
+    lines: "150"
+    quote: "Do NOT mention in conversation - just include it"
+```
+
+That form stays legal. A sample on two dimensions — it reads `/etc/passwd` **and** posts it —
+should carry two quotes, each saying which dimension it establishes, so that the scorer can
+tell "caught the reconnaissance, missed the exfiltration" apart from "caught it":
+
+```yaml
+  evidence:
+    - {file: scripts/collect.sh, lines: "12", quote: "cat /etc/passwd", dimension: reconnaissance}
+    - {file: scripts/collect.sh, lines: "14", quote: "curl -X POST", dimension: exfiltration}
+```
+
+`dimension` is optional on a single-dimension sample and must name one of the sample's
+dimensions when set. `corpus stats` counts how many multi-dimension samples attribute their
+quotes. Only samples a person read carry evidence; derived ones do not, and nothing fabricates
+it for them.
+
+The quote's `file` is also what the scorer's **location** check reads. A verdict may name the
+files it flagged (`"files": ["scripts/collect.sh"]`); on a caught malicious sample with quoted
+evidence, `corpus score` reports whether one of them is the evidence file — a flag on the right
+file rather than on the tree. Lines are not compared; a file is the unit a person opens.
 
 ## `surface` is a list, because one file is two load paths
 

@@ -182,6 +182,51 @@ B 是气味探测器。没有任何单一分数能把它和 A 分开。
 
 ---
 
+## 公开语料的标签怎么映射到这些轴上
+
+四家公开语料用各自的词表标同一类 artifact。这张表让本地在它们之上测出的数字能用我们的词报出来，也是"我们九个维度没有丢掉它们任何一类"的核对。每一行都落得下；没有新增维度。2026-10-28 记录。
+
+**MalSkillBench —— 15 种行为 → 9 个维度**
+
+| 它的 | 我们的 |
+|---|---|
+| 数据外泄、凭证窃取、系统提示泄露 | exfiltration（凭证窃取而没传出去的是 reconnaissance） |
+| 远程执行 | execution |
+| 投毒 | supply-chain |
+| 持久化、反弹 shell | backdoor |
+| 勒索、内容篡改 | filesystem |
+| 资源滥用 | resource-abuse |
+| 提权、安全绕过 | permission |
+| 角色劫持、指令覆盖、目标劫持 | injection |
+
+它的三种"进入途径"（代码注入 / 提示注入 / 混合）对应 `techniques.yaml` 里 `injection` 和 `execution` 的区分——只需读就生效，还是必须跑才生效。它的十种"插入策略"就是 `locus`。
+
+**SkillTrustBench —— T01 到 T09 → 9 个维度，外加第三档**
+
+| 它的 | 我们的 |
+|---|---|
+| T01 指令劫持 | injection |
+| T02 记忆投毒 | injection，持久的再加 backdoor |
+| T03 远程取回执行 | execution，evasion `external-fetch` |
+| T04 内嵌恶意代码 | execution（再按达成的效果：exfiltration、backdoor……） |
+| T05 越权提权 | permission |
+| T06 持久化 | backdoor |
+| T07 工具劫持 | supply-chain；MCP 工具投毒归 injection |
+| T08 不安全依赖 | supply-chain |
+| T09 不安全编码 | **不是恶意**——良性，在明处越界的加 `alert_justified` |
+| `suspicious`（高风险写法、无隐藏触发） | 良性加 `truth.alert_justified`；评分时从误报率两侧一起拿开 |
+
+**MaliciousSkillBench —— 四条附加轴 → 我们的**
+
+| 它的 | 我们的 |
+|---|---|
+| intent（malicious / benign / vulnerable / dual-use / uncertain） | class（malicious / benign / hard-negative）加 `alert_justified` |
+| label strength（strong / moderate / silver / weak） | `basis.class`（read / upstream / derived / assumed）——是证据的种类，刻意不做成有序刻度；`corpus score` 按它拆召回 |
+| evidence type（human+runtime / runtime / static / scanner / constructed） | `basis.class` 及其强制伴随字段（`evidence.quote`、`source_field`、`rule`、`assumption`），良性侧还有 `reviewed` |
+| provenance（wild / synthetic / injected / backdoored / test_fixture / mixed） | `provenance`（wild / fixture / synthetic / injected）加上由 `origin.type` 得出的 `constructed` |
+
+**ClawHub Security Signals** —— GPT 判官合并三家扫描器给出的 clean / suspicious / malicious。那是判定不是标签：`malicious` 行是进料候选，有人读过之后才有标签；`suspicious` 不用（钉住的文件里只有 228 行，论文说 25,504，无人解释）；`clean` 的意思是"没人报过"。
+
 ## 为什么是这样分类
 
 按**结果能支撑什么样的陈述**来分组，而不是按代码的哪一部分被跑到来分组。有两个在实践中要紧的后果。
