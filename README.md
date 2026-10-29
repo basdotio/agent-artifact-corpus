@@ -92,7 +92,7 @@ Short introductions suitable for a post are in [`articles.md`](docs/articles.md)
 
 | Tool | Rule-level expectations | Note |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,053 layer-1 samples | the only one so far — see *Known gaps* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,059 layer-1 samples | the only one so far — see *Known gaps* |
 
 No second scanner has been wired up yet. Until one is, the tool-neutral claims above are a
 property of the schema rather than a demonstrated result, and that distinction is the reason
@@ -214,8 +214,8 @@ shows up there rather than in someone else's clone.
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,053 labels
-  carry such a block; the other 5,047 are pure `truth` and need no scanner to check. A
+- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,059 labels
+  carry such a block; the other 5,053 are pure `truth` and need no scanner to check. A
   scanner's rule list belongs to that scanner, so `taxonomy/tools.yaml` reaches it only
   through an environment variable and the validator now **rejects** a `rules_source.path`
   that leaves this repository. That rule exists because aguard's used to be
@@ -239,9 +239,9 @@ measures.
   seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
   entries in one command.
 - **The benign side is a sample; the malicious side is a census, with two exceptions.** 4,473
-  benign samples are drawn from stated populations under stated designs; 310 of the 561
+  benign samples are drawn from stated populations under stated designs; 310 of the 567
   malicious samples are everything their upstreams had, the 240 from SkillHarm are a
-  seeded draw of 20 per risk from 641, and the 11 from `clawhub-live` are the candidates two
+  seeded draw of 20 per risk from 641, and the 17 from `clawhub-live` are the candidates two
   independent AI readers (or, for the ones they left open, two models) both read as malicious, out of 279 the registry's judge flagged. A recall figure and a false-positive figure from this corpus
   therefore rest on different kinds of denominator, and cannot be combined into one score.
 - **No dimension has a wild recall rate yet.** `corpus score` splits recall into wild, fixture

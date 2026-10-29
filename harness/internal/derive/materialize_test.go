@@ -328,3 +328,15 @@ func TestMachineReadDimensionIsDisclosedInTheLabel(t *testing.T) {
 		t.Fatalf("the rendered label must name the reader everywhere it describes the reading:\n%s", label)
 	}
 }
+
+func TestSourceURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"owner/repo":                   "https://github.com/owner/repo",
+		"owner/repo/tree/main/x":       "https://github.com/owner/repo/tree/main/x",
+		"https://clawhub.ai/a/b@1.0.0": "https://clawhub.ai/a/b@1.0.0",
+	} {
+		if got := sourceURL(in); got != want {
+			t.Errorf("sourceURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

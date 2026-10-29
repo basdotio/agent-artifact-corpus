@@ -232,7 +232,7 @@ func renderLabel(e manifest.Entry, p Plan, treeDir string) string {
 		// The originating repository, not the collection that pinned it. A false positive rate
 		// has to be reported per source, and that is impossible if every sample names the
 		// aggregator instead of where it actually came from.
-		src = fmt.Sprintf("https://github.com/%s (via %s @ %s)", c.Source, e.ID, short12(e.Commit))
+		src = fmt.Sprintf("%s (via %s @ %s)", sourceURL(c.Source), e.ID, short12(e.Commit))
 	}
 	fmt.Fprintf(&b, "  source: %q\n", src)
 	lic := e.License
@@ -440,4 +440,14 @@ func originNote(e manifest.Entry, c Coord) string {
 			strings.Join(ids, " and "))
 	}
 	return note
+}
+
+// sourceURL turns a coordinate's source into a link. Most sources are GitHub "owner/repo"
+// paths; a source that is already a URL (a registry page, as clawhub-live's sidecars give)
+// is used as it is, not glued onto github.com.
+func sourceURL(src string) string {
+	if strings.Contains(src, "://") {
+		return src
+	}
+	return "https://github.com/" + src
 }
