@@ -81,7 +81,7 @@ popularity or vendor curation, none of them a security review.
 
 ---
 
-## Pinned and fetchable (19)
+## Pinned and fetchable (20)
 
 Each is pinned to a commit in the manifest and fetched with
 `make fetch E="<id>"`.
@@ -98,6 +98,20 @@ roughly 26 (13%) are other scanners' synthetic tests rather than in-the-wild sam
 archives are zip-encrypted with the password `infected`. Overlaps `trailofbits-overt`.
 *Required prep*: **deduplicate by author and by canonical tree hash before counting**, or
 recall measures whether one template was caught.
+
+**`clawhub-live`** — the one malicious source that keeps producing.
+`https://huggingface.co/datasets/OpenClaw/clawhub-security-signals-live`, re-exported every
+Sunday, **MIT** (the skills themselves **MIT-0** by the registry's publishing terms), vendorable.
+About 280 rows the registry's own judge calls malicious at any time, SKILL.md and bundle files
+included.
+*Hazards*: the verdict is a scanner's opinion (61% sensitivity / 81% specificity on a human
+reference set), so a row is a *candidate* and becomes a sample only with a line a person read
+and quoted; campaigns are one publisher under many slugs; the export is sanitized and hidden
+skills cannot be re-fetched from the registry.
+*Required prep*: `scripts/intake-clawhub.py` weekly — it diffs against the last export, refuses
+anything in the held-out set by hash or name, caps every publisher at 5 across all weeks, and
+writes a read list; decisions go into `dimension_overrides` or `exclude_samples`, then
+`promote` and derive. Nothing is derived on the verdict alone.
 
 **`skillsgoat`** — capability probe.
 `https://github.com/optimuslabs-io/skillsgoat` @ `c03d70d80c32`, **MIT**, vendorable.

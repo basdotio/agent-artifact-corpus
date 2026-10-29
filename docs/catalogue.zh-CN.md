@@ -71,7 +71,7 @@ Glama 的 `qualityScore`（**付费位**）、各种信誉分，全是流行度�
 
 ---
 
-## 已钉住可直接拉取的 19 份
+## 已钉住可直接拉取的 20 份
 
 每一份都在 manifest 里钉到了 commit，用 `make fetch E="<id>"` 取。
 
@@ -85,6 +85,17 @@ Glama 的 `qualityScore`（**付费位**）、各种信誉分，全是流行度�
 别家扫描器的合成测试而非在野样本；压缩包用密码 `infected` 加密。与 `trailofbits-overt` 重叠。
 *必须的预处理*：**按作者和 canonical 树哈希去重后再计数**，否则召回率测的是
 "有没有抓住一个模板"。
+
+**`clawhub-live`** —— 唯一会持续产出的恶意来源。
+`https://huggingface.co/datasets/OpenClaw/clawhub-security-signals-live`，每周日重新导出，
+**MIT**（skill 本身按注册表发布条款为 **MIT-0**），可 vendoring。任一时刻约 280 行被注册表自己的
+判官判为恶意，带 SKILL.md 和附件。
+*风险*：判定是扫描器的意见（在人工参照集上敏感度 61%、特异度 81%），所以一行只是*候选*，
+要有人读过、引了那一行才成为样本；一个发布者换很多 slug 发同一个活动；导出是脱敏版，被隐藏的
+skill 没法再从注册表取。
+*必须的预处理*：每周跑 `scripts/intake-clawhub.py` —— 和上次导出做差分，按哈希和名字拒掉留出集，
+每个发布者跨周累计最多 5 个，写出待读清单；决定写进 `dimension_overrides` 或 `exclude_samples`，
+再 `promote` 和派生。没有任何样本只凭判定入库。
 
 **`skillsgoat`** —— 能力探针。
 `https://github.com/optimuslabs-io/skillsgoat` @ `c03d70d80c32`，**MIT**，可 vendoring。
