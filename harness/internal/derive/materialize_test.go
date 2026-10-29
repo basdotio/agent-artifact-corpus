@@ -135,6 +135,20 @@ func TestMaterializeCopiesTreeAndWritesLabel(t *testing.T) {
 			t.Fatalf("label missing %q:\n%s", want, got)
 		}
 	}
+
+	// Re-deriving must keep the date the sample entered the corpus.
+	old := strings.Replace(string(got), "  added: "+addedOf(got), "  added: 2001-02-03", 1)
+	write(dir+".yaml", old)
+	if _, _, werrs := Materialize(repo, upRoot, e, plans); len(werrs) != 0 {
+		t.Fatalf("re-materialise: %v", werrs)
+	}
+	again, err := os.ReadFile(dir + ".yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addedOf(again) != "2001-02-03" {
+		t.Fatalf("re-derivation restamped added: %q", addedOf(again))
+	}
 }
 
 // A hand-pinned label carries judgements a rule cannot reproduce. A re-derivation flattening
@@ -323,7 +337,7 @@ func TestMachineReadDimensionIsDisclosedInTheLabel(t *testing.T) {
 		t.Fatalf("a machine reading must not be called hand-read: %s", got)
 	}
 	// The derivation's fidelity line travels with the label too, and must not say it either.
-	label := renderLabel(materialEntry(), Plan{Coord: c, LocalID: "mal-skill-x"}, "")
+	label := renderLabel(materialEntry(), Plan{Coord: c, LocalID: "mal-skill-x"}, "", "2026-10-30")
 	if strings.Contains(label, "hand-read") || !strings.Contains(label, "dimension read into dimension_overrides by an AI assistant") {
 		t.Fatalf("the rendered label must name the reader everywhere it describes the reading:\n%s", label)
 	}
