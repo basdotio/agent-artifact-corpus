@@ -273,21 +273,25 @@ def snapshot(commit: str, pool: str) -> pathlib.Path:
     return SNAPSHOTS / f"{commit}.{pool}.jsonl"
 
 
-def fetch(force: bool = False, pools: tuple[str, ...] = DEFAULT_POOLS) -> tuple[str, list[pathlib.Path]] | None:
+def fetch(force: bool = False, pools: tuple[str, ...] = DEFAULT_POOLS,
+          commit: str | None = None) -> tuple[str, list[pathlib.Path]] | None:
     """(commit, one snapshot per pool). A pool already cached for this commit is not refetched,
-    so adding a pool later costs one stream, not a re-queue of the others."""
+    so adding a pool later costs one stream, not a re-queue of the others. `commit` reads a past
+    export instead of the current one (see --commit)."""
     state = load_json(STATE, {})
-    commit = current_commit()
+    past = commit is not None
+    commit = commit or current_commit()
     missing = [p for p in pools if not snapshot(commit, p).exists()]
     if not missing:
         print(f"fetch: snapshots for {commit[:12]} already cached ({', '.join(pools)})")
         return commit, [snapshot(commit, p) for p in pools]
-    if state.get("last_commit") == commit and not force and set(missing) <= set(state.get("pools_fetched", ["malicious"])):
+    if not past and state.get("last_commit") == commit and not force and set(missing) <= set(state.get("pools_fetched", ["malicious"])):
         print(f"fetch: no new export since {state.get('last_fetched')} (commit {commit[:12]}); --force to refetch")
         return None
     print(f"fetch: dataset commit {commit[:12]}, pools {', '.join(missing)}")
     got: dict[str, list[dict]] = {}
-    if missing == ["malicious"]:
+    # The filter endpoint serves the current revision only.
+    if missing == ["malicious"] and not past:
         rows = fetch_malicious_via_filter(commit)
         if rows is not None:
             got = {"malicious": rows}
@@ -331,6 +335,20 @@ def heldout_pin() -> None:
 
 
 # ----------------------------------------------------------------------------- queue
+
+def read_tree_hashes(rows_state: dict) -> dict[str, str]:
+    """SKILL.md hash -> tree, for every tree queued or decided in any earlier export."""
+    out = {}
+    for rec in rows_state.values():
+        if rec.get("status") not in ("queued", "decided"):
+            continue
+        for d in (QUEUE, EXTRACTED):
+            p = d / rec["tree"] / "SKILL.md"
+            if p.is_file():
+                out[norm_hash(p.read_text(errors="replace"))] = rec["tree"]
+                break
+    return out
+
 
 def layer1_skill_hashes() -> dict[str, str]:
     have = {}
@@ -451,7 +469,7 @@ def read_list_entry(name: str, row: dict, sidecar: dict, shared: dict[str, set[s
     return "\n".join(lines)
 
 
-def queue(commit: str, snap: pathlib.Path) -> None:
+def queue(commit: str, snap: pathlib.Path, past: bool = False) -> None:
     if not HELDOUT_PIN.exists():
         sys.exit(f"queue: {HELDOUT_PIN.relative_to(ROOT)} is missing. Run `scripts/intake-clawhub.py heldout-pin` "
                  "first (it needs the layer-2 cache). Without it this step cannot keep the held-out set out, so it does not run.")
@@ -473,6 +491,9 @@ def queue(commit: str, snap: pathlib.Path) -> None:
     layer1 = layer1_skill_hashes()
     seen_hashes = {norm_hash(r["skill_md_content"]): rows_state[r["id"]]["tree"] for r in rows
                    if r["id"] in rows_state and rows_state[r["id"]].get("status") in ("queued", "decided")}
+    # Rows of other exports are not in this snapshot, so their SKILL.md is read off the trees.
+    # Without this a past export re-queues, under a new row id, a tree already read and excluded.
+    seen_hashes.update(read_tree_hashes(rows_state))
     owner_count: dict[str, int] = {}
     for rec in rows_state.values():
         if counts_against_cap(rec):
@@ -499,8 +520,9 @@ def queue(commit: str, snap: pathlib.Path) -> None:
         shared = {h: corpus_hosts[h] for h in hosts_in(texts) if h in corpus_hosts and h not in BORING_HOSTS}
         entries.append((row, name, sidecar, shared))
 
-    state["last_commit"] = commit
-    state["last_fetched"] = week
+    if not past:
+        state["last_commit"] = commit
+        state["last_fetched"] = week
     save_json(STATE, state)
 
     if entries:
@@ -631,6 +653,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("step", nargs="?", default="weekly", choices=["weekly", "fetch", "queue", "promote", "status", "heldout-pin"])
     ap.add_argument("--force", action="store_true", help="refetch even when the dataset commit is unchanged")
+    ap.add_argument("--commit", help="read this past export (a dataset commit) instead of the current one; "
+                    "the weekly bookkeeping (last export seen) is left alone")
     ap.add_argument("--pools", default=",".join(DEFAULT_POOLS),
                     help=f"registry verdicts to take as candidates, comma-separated, from {', '.join(POOLS)}")
     a = ap.parse_args(argv)
@@ -646,10 +670,10 @@ def main(argv: list[str] | None = None) -> int:
     if a.step == "status":
         status()
         return 0
-    got = fetch(force=a.force, pools=pools)
+    got = fetch(force=a.force, pools=pools, commit=a.commit)
     if a.step == "fetch":
         return 0
-    if got is None:
+    if got is None and not a.commit:
         commit = load_json(STATE, {}).get("last_commit")
         snaps = [snapshot(commit, p) for p in pools if commit and snapshot(commit, p).exists()]
         if not snaps:
@@ -657,7 +681,7 @@ def main(argv: list[str] | None = None) -> int:
         got = (commit, snaps)
     commit, snaps = got
     for snap in snaps:
-        queue(commit, snap)
+        queue(commit, snap, past=bool(a.commit))
     state = load_json(STATE, {})
     state["pools_fetched"] = sorted(set(state.get("pools_fetched", ["malicious"])) | set(pools))
     save_json(STATE, state)
