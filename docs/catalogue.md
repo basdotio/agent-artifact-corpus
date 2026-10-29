@@ -64,9 +64,13 @@ nothing to do with detection:
 
 Neither is obviously wrong when you read individual samples, which is why this belongs in a
 build gate rather than a review checklist. A human reading samples one at a time cannot see
-a distribution. The mechanism worth having is a build gate that fails when any structural
-feature with support ≥8 predicts the label at ≥95% purity; this repository implements it in
-`harness/internal/leakage` and `make validate` runs it. (An earlier version of this rule
+a distribution. The mechanism worth having is a build gate that fails when any feature with
+support ≥8 predicts the label at ≥95% purity — structural (a filename, an extension, a file
+count) or content (a host or address literal, a self-describing word such as `exfil`, a
+length bucket, a hidden codepoint), within one population, and separately across each hard
+negative and its twin; this repository implements it in `harness/internal/leakage` and
+`make validate` runs it. Content features were added 2026-10-29, before the first batch of
+hard negatives this repository writes itself, because an author's tells sit in the text. (An earlier version of this rule
 credited the gate to MaliciousSkillBench's `metrics/leakage.py`. That file does not exist in
 that repository, checked 2026-10-28; what MaliciousSkillBench does is a split-level overlap
 audit over five axes plus a hand-curated audit of generator scaffold strings, which is a
