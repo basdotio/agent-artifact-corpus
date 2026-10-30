@@ -1,0 +1,41 @@
+id: mal-mcp-dd-npm-redhat-kessel-mcp-worm
+class: malicious
+surface: mcp
+kind: skill
+entry: .
+
+origin:
+  type: real-world
+  # Supply-chain compromise: @redhat-cloud-services/hcc-kessel-mcp is a real Red Hat Hybrid
+  # Cloud Console MCP server; this version adds a preinstall hook running a 4 MB root index.js
+  # that is not in the package's own file list. hcc-pf-mcp and hcc-feo-mcp carry the same worm
+  # family under different wrappers and are left out.
+  provenance: wild
+  source: "https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45, samples/npm/compromised_lib/@redhat-cloud-services/hcc-kessel-mcp@0.3.1"
+  license: Apache-2.0
+  note: >-
+    index.js unwraps a char-code + ROT layer, decrypts an AES blob, installs Bun and runs a
+    credential stealer targeting AWS, Vault, Kubernetes, GitHub and npm tokens and the cloud
+    metadata service. The third reader confirmed this by static decryption, never by running it.
+    Read on 2026-10-30 under the majority rule: gpt-6.1-sol unsure, gpt-5.5 and Claude
+    (claude-opus-5-5) malicious. The dist/ server code itself is clean.
+  added: 2026-10-30
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: index.js
+    lines: "1"
+    quote: "try{eval(function(s,n){return s.replace(/[a-zA-Z]/g,function(c){var b=c<=\"Z\"?65:97;return String.fromCharCode("
+  # The quoted eval wrapper is the first of three encoding layers; nothing behavioural is
+  # readable without decoding it, so the payload is buried by encoding — evasive, base64-wrapper
+  # (the corpus's tag for an encoded payload handed to an evaluator).
+
+truth:
+  techniques: [install-hook-execution, env-exfiltration]
+  severity: critical
+  tier: evasive
+  evasion: [base64-wrapper]

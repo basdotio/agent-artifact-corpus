@@ -42,8 +42,17 @@ file or a `license:` line is flagged on the read list, because the acceptable-us
 forbids republishing someone else's code and such a file is the sign of it. The reader decides;
 `promote` writes the licence pins file from what the reader left in place.
 
-WHAT IS DELIBERATELY NOT TAKEN. `suspicious` rows (the survey found the frozen set's suspicious
-tier inconsistent with its own paper and the judge's specificity at 81%); rows the registry
+POOLS. `--pools` picks which of the registry's verdicts become candidates (default
+`malicious`). The registry's verdict only chooses what gets read; the reading decides
+the class, so a pool is worth taking whenever reading it finds samples. `suspicious` was left
+out at first (the survey found the frozen set's suspicious tier inconsistent with its own
+paper); on 2026-10-29 all 116 queued suspicious rows were read by two models and none was kept (of
+92 vt-flagged and 23 unknown, one was), so the default stays `malicious` and the others are
+there for a re-check, not for every week. Also
+available: `vt-flagged` (judged clean, but at least one VirusTotal engine says malicious) and
+`unknown` (no judge verdict). Each pool is cached as its own snapshot.
+
+WHAT IS DELIBERATELY NOT TAKEN. Rows the registry
 hides from its API (the sanitized export is the only legal copy, and it is what is used);
 anything from the `packageReleases` table (plugins are not skills).
 
@@ -174,6 +183,13 @@ def load_json(p: pathlib.Path, default):
     return json.loads(p.read_text()) if p.exists() else default
 
 
+def jsonl_lines(p: pathlib.Path) -> list[str]:
+    """Non-empty lines of a JSON-lines file. Split on "\\n" only: str.splitlines() also breaks on
+    U+2028, U+0085 and friends, which skill text carries inside JSON strings and which then cut a
+    row in two."""
+    return [l for l in p.read_text().split("\n") if l.strip()]
+
+
 def save_json(p: pathlib.Path, obj) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
@@ -214,46 +230,80 @@ def fetch_malicious_via_filter(commit: str) -> list[dict] | None:
     return rows
 
 
-def fetch_malicious_via_stream(commit: str) -> list[dict]:
+POOLS = {
+    "malicious": lambda r: r.get("clawscan_verdict") == "malicious",
+    "suspicious": lambda r: r.get("clawscan_verdict") == "suspicious",
+    "vt-flagged": lambda r: r.get("clawscan_verdict") == "clean" and (r.get("virustotal_malicious_count") or 0) > 0,
+    "unknown": lambda r: r.get("clawscan_verdict") == "unknown",
+}
+DEFAULT_POOLS = ("malicious",)
+
+
+def pool_of(row: dict) -> str | None:
+    return next((name for name, keep in POOLS.items() if keep(row)), None)
+
+
+def fetch_pools_via_stream(commit: str, pools: tuple[str, ...]) -> dict[str, list[dict]]:
     url = HF_EXPORT.format(commit=commit)
-    print(f"  streaming {url} (about 2.8 GB; only malicious rows are kept)")
-    rows: list[dict] = []
+    print(f"  streaming {url} (about 2.8 GB; only rows in {', '.join(pools)} are kept)")
+    out: dict[str, list[dict]] = {p: [] for p in pools}
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     n = 0
     with urllib.request.urlopen(req, timeout=600) as r:
         for raw in r:
             n += 1
-            if b'"malicious"' not in raw:
+            # Cheap prefilter: a clean row with no VirusTotal hit is the overwhelming majority.
+            if "vt-flagged" not in pools and b'"clean"' in raw and b'"malicious"' not in raw and b'"suspicious"' not in raw and b'"unknown"' not in raw:
                 continue
             row = json.loads(raw)
-            if row.get("clawscan_verdict") == "malicious":
-                rows.append(row)
+            p = pool_of(row)
+            if p in out:
+                out[p].append(row)
             if n % 10000 == 0:
-                print(f"    {n} rows read, {len(rows)} malicious so far")
-    print(f"  {n} rows read, {len(rows)} malicious")
-    return rows
+                print(f"    {n} rows read, " + ", ".join(f"{k} {len(v)}" for k, v in out.items()))
+    print(f"  {n} rows read, " + ", ".join(f"{k} {len(v)}" for k, v in out.items()))
+    return out
 
 
-def fetch(force: bool = False) -> tuple[str, pathlib.Path] | None:
+def fetch_malicious_via_stream(commit: str) -> list[dict]:
+    return fetch_pools_via_stream(commit, ("malicious",))["malicious"]
+
+
+def snapshot(commit: str, pool: str) -> pathlib.Path:
+    return SNAPSHOTS / f"{commit}.{pool}.jsonl"
+
+
+def fetch(force: bool = False, pools: tuple[str, ...] = DEFAULT_POOLS,
+          commit: str | None = None) -> tuple[str, list[pathlib.Path]] | None:
+    """(commit, one snapshot per pool). A pool already cached for this commit is not refetched,
+    so adding a pool later costs one stream, not a re-queue of the others. `commit` reads a past
+    export instead of the current one (see --commit)."""
     state = load_json(STATE, {})
-    commit = current_commit()
-    snap = SNAPSHOTS / f"{commit}.malicious.jsonl"
-    if snap.exists():
-        print(f"fetch: snapshot {commit[:12]} already cached ({sum(1 for _ in snap.open())} rows)")
-        return commit, snap
-    if state.get("last_commit") == commit and not force:
+    past = commit is not None
+    commit = commit or current_commit()
+    missing = [p for p in pools if not snapshot(commit, p).exists()]
+    if not missing:
+        print(f"fetch: snapshots for {commit[:12]} already cached ({', '.join(pools)})")
+        return commit, [snapshot(commit, p) for p in pools]
+    if not past and state.get("last_commit") == commit and not force and set(missing) <= set(state.get("pools_fetched", ["malicious"])):
         print(f"fetch: no new export since {state.get('last_fetched')} (commit {commit[:12]}); --force to refetch")
         return None
-    print(f"fetch: dataset commit {commit[:12]}")
-    rows = fetch_malicious_via_filter(commit)
-    if rows is None:
-        rows = fetch_malicious_via_stream(commit)
+    print(f"fetch: dataset commit {commit[:12]}, pools {', '.join(missing)}")
+    got: dict[str, list[dict]] = {}
+    # The filter endpoint serves the current revision only.
+    if missing == ["malicious"] and not past:
+        rows = fetch_malicious_via_filter(commit)
+        if rows is not None:
+            got = {"malicious": rows}
+    if not got:
+        got = fetch_pools_via_stream(commit, tuple(missing))
     SNAPSHOTS.mkdir(parents=True, exist_ok=True)
-    with snap.open("w") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"fetch: {len(rows)} malicious rows cached at {snap.relative_to(ROOT)}")
-    return commit, snap
+    for p, rows in got.items():
+        with snapshot(commit, p).open("w") as f:
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        print(f"fetch: {len(rows)} {p} rows cached at {snapshot(commit, p).relative_to(ROOT)}")
+    return commit, [snapshot(commit, p) for p in pools]
 
 
 # ----------------------------------------------------------------------------- held-out pin
@@ -262,7 +312,7 @@ def heldout_pin() -> None:
     if not HELDOUT_SOURCE.exists():
         sys.exit(f"heldout-pin: {HELDOUT_SOURCE.relative_to(ROOT)} is missing; run scripts/prep-agent-skill-malware.py first")
     hashes, names = set(), set()
-    for line in HELDOUT_SOURCE.read_text().splitlines():
+    for line in jsonl_lines(HELDOUT_SOURCE):
         if not line.strip():
             continue
         row = json.loads(line)
@@ -285,6 +335,20 @@ def heldout_pin() -> None:
 
 
 # ----------------------------------------------------------------------------- queue
+
+def read_tree_hashes(rows_state: dict) -> dict[str, str]:
+    """SKILL.md hash -> tree, for every tree queued or decided in any earlier export."""
+    out = {}
+    for rec in rows_state.values():
+        if rec.get("status") not in ("queued", "decided"):
+            continue
+        for d in (QUEUE, EXTRACTED):
+            p = d / rec["tree"] / "SKILL.md"
+            if p.is_file():
+                out[norm_hash(p.read_text(errors="replace"))] = rec["tree"]
+                break
+    return out
+
 
 def layer1_skill_hashes() -> dict[str, str]:
     have = {}
@@ -323,6 +387,12 @@ BORING_HOSTS = {"github.com", "raw.githubusercontent.com", "gist.github.com", "c
                 "docs.clawhub.ai", "docs.openclaw.ai", "openclaw.ai", "npmjs.com", "www.npmjs.com", "pypi.org",
                 "api.openai.com", "api.anthropic.com", "google.com", "www.google.com", "www.googleapis.com",
                 "www.w3.org", "www.patreon.com", "json-schema.org", "img.shields.io", "huggingface.co"}
+
+
+def counts_against_cap(rec: dict) -> bool:
+    """Queued, or read and kept. A sample read and excluded is not a sample in the corpus and
+    does not use up its author's five."""
+    return rec.get("status") == "queued" or (rec.get("status") == "decided" and rec.get("decision") == "derived")
 
 
 def decide(row: dict, *, state: dict, heldout: dict, layer1: dict[str, str], seen_hashes: dict[str, str],
@@ -399,7 +469,7 @@ def read_list_entry(name: str, row: dict, sidecar: dict, shared: dict[str, set[s
     return "\n".join(lines)
 
 
-def queue(commit: str, snap: pathlib.Path) -> None:
+def queue(commit: str, snap: pathlib.Path, past: bool = False) -> None:
     if not HELDOUT_PIN.exists():
         sys.exit(f"queue: {HELDOUT_PIN.relative_to(ROOT)} is missing. Run `scripts/intake-clawhub.py heldout-pin` "
                  "first (it needs the layer-2 cache). Without it this step cannot keep the held-out set out, so it does not run.")
@@ -409,20 +479,24 @@ def queue(commit: str, snap: pathlib.Path) -> None:
     rows_state: dict = state.setdefault("rows", {})
     week = date.today().isoformat()
 
-    rows = [json.loads(l) for l in snap.read_text().splitlines() if l.strip()]
-    new = [r for r in rows if r["id"] not in rows_state]
+    rows = [json.loads(l) for l in jsonl_lines(snap)]
+    # A row the cap turned away is looked at again: the cap counts what is queued or kept, and
+    # either can have room later (a sample is excluded, so its slot frees).
+    new = [r for r in rows if r["id"] not in rows_state or rows_state[r["id"]].get("status") == "author-cap"]
     # Stable order: highest judge confidence first, then oldest-looking version first, then
     # slug — so the cap falls on the later re-publications of a campaign, not on the first.
     conf_rank = {"high": 0, "medium": 1, "low": 2}
     new.sort(key=lambda r: (conf_rank.get(r.get("clawscan_confidence"), 3), r["skill_slug"], r.get("skill_version") or ""))
 
     layer1 = layer1_skill_hashes()
-    seen_hashes = {norm_hash(json.loads(l)["skill_md_content"]): rows_state[json.loads(l)["id"]]["tree"]
-                   for l in snap.read_text().splitlines() if l.strip()
-                   and json.loads(l)["id"] in rows_state and rows_state[json.loads(l)["id"]].get("status") in ("queued", "decided")}
+    seen_hashes = {norm_hash(r["skill_md_content"]): rows_state[r["id"]]["tree"] for r in rows
+                   if r["id"] in rows_state and rows_state[r["id"]].get("status") in ("queued", "decided")}
+    # Rows of other exports are not in this snapshot, so their SKILL.md is read off the trees.
+    # Without this a past export re-queues, under a new row id, a tree already read and excluded.
+    seen_hashes.update(read_tree_hashes(rows_state))
     owner_count: dict[str, int] = {}
     for rec in rows_state.values():
-        if rec.get("status") in ("queued", "decided"):
+        if counts_against_cap(rec):
             owner_count[rec["owner"]] = owner_count.get(rec["owner"], 0) + 1
     corpus_hosts = corpus_malicious_hosts()
 
@@ -446,8 +520,9 @@ def queue(commit: str, snap: pathlib.Path) -> None:
         shared = {h: corpus_hosts[h] for h in hosts_in(texts) if h in corpus_hosts and h not in BORING_HOSTS}
         entries.append((row, name, sidecar, shared))
 
-    state["last_commit"] = commit
-    state["last_fetched"] = week
+    if not past:
+        state["last_commit"] = commit
+        state["last_fetched"] = week
     save_json(STATE, state)
 
     if entries:
@@ -468,10 +543,12 @@ def queue(commit: str, snap: pathlib.Path) -> None:
                 f"`{QUEUE.relative_to(ROOT)}/`; each has a `.source.json` beside it with the registry's signals.", "",
                 "Skipped this week (recorded in manifest/pins/clawhub-intake.json with reasons): "
                 + ", ".join(f"{k} {v}" for k, v in sorted(tally.items()) if k != "queued"), "", "---", ""]
-        (QUEUE / "READ-LIST.md").write_text("\n".join(head) + "\n\n".join(read_list_entry(n, r, s, sh) for r, n, s, sh in ordered) + "\n")
+        pool = snap.name.split(".")[1] if snap.name.count(".") >= 2 else "malicious"
+        read_list = QUEUE / ("READ-LIST.md" if pool == "malicious" else f"READ-LIST.{pool}.md")
+        read_list.write_text("\n".join(head) + "\n\n".join(read_list_entry(n, r, s, sh) for r, n, s, sh in ordered) + "\n")
     print(f"queue: {len(new)} new row(s) since last intake — " + ", ".join(f"{k} {v}" for k, v in sorted(tally.items())))
     if entries:
-        print(f"       read list: {(QUEUE / 'READ-LIST.md').relative_to(ROOT)}")
+        print(f"       read list: {read_list.relative_to(ROOT)}")
 
 
 # ----------------------------------------------------------------------------- promote
@@ -576,7 +653,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("step", nargs="?", default="weekly", choices=["weekly", "fetch", "queue", "promote", "status", "heldout-pin"])
     ap.add_argument("--force", action="store_true", help="refetch even when the dataset commit is unchanged")
+    ap.add_argument("--commit", help="read this past export (a dataset commit) instead of the current one; "
+                    "the weekly bookkeeping (last export seen) is left alone")
+    ap.add_argument("--pools", default=",".join(DEFAULT_POOLS),
+                    help=f"registry verdicts to take as candidates, comma-separated, from {', '.join(POOLS)}")
     a = ap.parse_args(argv)
+    pools = tuple(p for p in a.pools.split(",") if p)
+    if bad := [p for p in pools if p not in POOLS]:
+        ap.error(f"unknown pool(s) {bad}; choose from {', '.join(POOLS)}")
     if a.step == "heldout-pin":
         heldout_pin()
         return 0
@@ -586,17 +670,21 @@ def main(argv: list[str] | None = None) -> int:
     if a.step == "status":
         status()
         return 0
-    got = fetch(force=a.force)
+    got = fetch(force=a.force, pools=pools, commit=a.commit)
     if a.step == "fetch":
         return 0
-    if got is None:
-        state = load_json(STATE, {})
-        commit = state.get("last_commit")
-        snap = SNAPSHOTS / f"{commit}.malicious.jsonl" if commit else None
-        if not snap or not snap.exists():
+    if got is None and not a.commit:
+        commit = load_json(STATE, {}).get("last_commit")
+        snaps = [snapshot(commit, p) for p in pools if commit and snapshot(commit, p).exists()]
+        if not snaps:
             return 0
-        got = (commit, snap)
-    queue(*got)
+        got = (commit, snaps)
+    commit, snaps = got
+    for snap in snaps:
+        queue(commit, snap, past=bool(a.commit))
+    state = load_json(STATE, {})
+    state["pools_fetched"] = sorted(set(state.get("pools_fetched", ["malicious"])) | set(pools))
+    save_json(STATE, state)
     status()
     return 0
 

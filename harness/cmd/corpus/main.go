@@ -52,6 +52,8 @@ func main() {
 		os.Exit(cmdFixtures(root, os.Args[2:]))
 	case "samples":
 		os.Exit(cmdSamples(root, os.Args[2:]))
+	case "table":
+		os.Exit(cmdTable(root, os.Args[2:]))
 	default:
 		usage()
 		os.Exit(2)
@@ -68,7 +70,8 @@ func usage() {
   refute     write a refutation_search record into every benign label (--write)
   score      grade a scanner's verdicts (JSONL) into recall, false positives and coverage
   fixtures   list or materialise the injected-fault trees git cannot store
-  samples    emit every sample as JSONL {id, path, class} — the input side a runner iterates`)
+  samples    emit every sample as JSONL {id, path, class} — the input side a runner iterates
+  table      render table/samples.csv, table/excluded.csv and out/corpus-table.xlsx`)
 }
 
 // ---------- validate ----------

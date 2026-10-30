@@ -92,7 +92,7 @@ Short introductions suitable for a post are in [`articles.md`](docs/articles.md)
 
 | Tool | Rule-level expectations | Note |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,042 layer-1 samples | the only one so far — see *Known gaps* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,071 layer-1 samples | the only one so far — see *Known gaps* |
 
 No second scanner has been wired up yet. Until one is, the tool-neutral claims above are a
 property of the schema rather than a demonstrated result, and that distinction is the reason
@@ -166,6 +166,7 @@ that layer 1 must never contain: no-license, CC-BY-NC-SA, AGPL.
 ```bash
 make validate    # check every label, the taxonomy, every manifest entry, the doc pairs
 make stats       # corpus composition, tool-neutral and per tool
+make table       # every sample, and every one read and left out, as CSV and xlsx
 make fetch       # materialise named layer-2 entries at their pinned commit (network)
 make test        # harness unit tests
 make score V=verdicts.jsonl   # grade a scanner's verdicts into recall, false positives, coverage
@@ -175,6 +176,17 @@ make score V=verdicts.jsonl   # grade a scanner's verdicts into recall, false po
 sample — the input side of the scoring loop: a runner iterates it, points its scanner at each
 `path`, and emits `{sample, verdict}` back for `corpus score`. It names no scanner and belongs
 here for the same reason the runner does not.
+
+[`table/malicious.csv`](table/malicious.csv) lists every malicious sample, one row each:
+dimensions, tier, evasion, where the deciding content sits (file, line, quote, when someone
+read one), the basis of the dimension, provenance, source, licence and the date it was added.
+[`table/benign.csv`](table/benign.csv) lists the benign and hard-negative samples with the
+columns that apply to them; a hard negative also says what it resembles and what it differs by.
+[`table/excluded.csv`](table/excluded.csv) lists every upstream sample named and left out, with
+the reason the manifest gives, and the ClawHub candidates never queued (publisher cap,
+duplicate, held-out). All three are rendered by `make table` from the labels and the manifest and
+are never edited by hand; CI fails when they are stale. `make table` also writes all three as the
+three sheets of `out/corpus-table.xlsx`, which is not committed.
 
 `corpus fixtures` lists or materialises the injected-fault trees git cannot store — a 0111
 traverse-only directory, a FIFO SKILL.md, symlink cycles and escapes, a 4096-deep chain, an
@@ -214,8 +226,8 @@ shows up there rather than in someone else's clone.
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,042 labels
-  carry such a block; the other 5,036 are pure `truth` and need no scanner to check. A
+- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,071 labels
+  carry such a block; the other 5,065 are pure `truth` and need no scanner to check. A
   scanner's rule list belongs to that scanner, so `taxonomy/tools.yaml` reaches it only
   through an environment variable and the validator now **rejects** a `rules_source.path`
   that leaves this repository. That rule exists because aguard's used to be
@@ -238,20 +250,25 @@ measures.
   needs a script under `scripts/` between the fetch and the derive. The scripts are pinned and
   seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
   entries in one command.
-- **The benign side is a sample; the malicious side is a census, with one exception.** 4,473
-  benign samples are drawn from stated populations under stated designs; 310 of the 550
-  malicious samples are everything their upstreams had, and the 240 from SkillHarm are a
-  seeded draw of 20 per risk from 641. A recall figure and a false-positive figure from this corpus
+- **The benign side is a sample; the malicious side is a census, with two exceptions.** 4,473
+  benign samples are drawn from stated populations under stated designs; 310 of the 579
+  malicious samples are everything their upstreams had, the 240 from SkillHarm are a
+  seeded draw of 20 per risk from 641, and the 20 from `clawhub-live` are the candidates a majority of
+  readers read as malicious (two AI readers or two models; where the two models split, Claude as a third), out of 279 the registry's judge flagged; the 1 from `maliciousskillbench-wild` is likewise what two models both read as malicious out of 186; the 13 from the two `datadog-npm*` npm entries are what a majority of readers read as malicious among the agent-named packages of DataDog's npm set. A recall figure and a false-positive figure from this corpus
   therefore rest on different kinds of denominator, and cannot be combined into one score.
 - **No dimension has a wild recall rate yet.** `corpus score` splits recall into wild, fixture
   and constructed, and on the wild row no dimension holds enough samples for a rate — at most
   13. Every redistributable source of real-world malicious skills has now been read: all 204 of
   `datadog-ai-skills` (23 derived once fixtures and copies of one campaign payload are removed)
   and the 124 of `agent-skill-malware` (each a copy of the same few ClawHub lures, or a
-  defensive scanner mislabelled for quoting their IOCs). Larger sets with more distinct wild
+  defensive scanner mislabelled for quoting their IOCs), and the 186 wild texts
+  `maliciousskillbench-wild` carries for MaliciousAgentSkillsBench and SkillLeakBench (SKILL.md
+  only, without the scripts their malice was confirmed in, so 1 is derived). Larger sets with more distinct wild
   samples exist but cannot be redistributed (MalSkillBench is for academic use only,
-  SkillTrustBench is NC-SA). Until new public material appears the wild row is coverage, and
-  the recall rates this corpus can report are rates about the fixture sources named beside them.
+  SkillTrustBench is NC-SA). `clawhub-live` is the one source that keeps producing: a weekly
+  intake of registry-flagged skills, 20 derived from the first 279 candidates. Until it has
+  accumulated, the wild row is coverage, and the recall rates this corpus can report are rates
+  about the fixture sources named beside them.
 - **One tool has rule-level expectations.** `taxonomy/tools.yaml` registers three scanners
   (aguard, ccaudit, skill-scanner), but only aguard carries `expect` blocks, on 6 samples; the
   other two are scored on `truth` alone.
