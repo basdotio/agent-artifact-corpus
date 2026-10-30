@@ -8,12 +8,13 @@ many versions per package. Folding that into the ai-skills script would make its
 one-zip contract false. So the npm fetch and selection live here.
 
 WHAT IS SELECTED, AND WHY SO FEW. 1,000+ packages carry the malicious_intent flag; ~128 have an
-agent-ish name; this keeps FIVE. Every one was read (two subagent passes, then the deciding
-quote located in the bytes here) and kept only if it is BOTH a real MCP server AND genuinely
-malicious. The rest were either generic npm malware wearing an mcp-ish name (a dropper, a
-/etc/passwd preinstall, a wallet stealer — real, but not an MCP server and not on a surface this
-corpus has), or clean republishes flagged by mistake (airtable-mcp, a WaterCrawl fork). Ten of
-thousands filtered to five is the honest size of "malicious MCP servers in the wild, captured".
+agent-ish name; this keeps SEVEN. Every one was read (two model passes, then the deciding quote
+located in the bytes here) and kept only if it is BOTH a real MCP server AND genuinely malicious.
+The rest were either generic npm malware wearing an mcp-ish name (a dropper, a /etc/passwd
+preinstall, a wallet stealer — real, but not an MCP server and not on a surface this corpus has),
+or clean republishes flagged by mistake (airtable-mcp, a benign WaterCrawl republish — distinct
+from the malicious @iflow-mcp WaterCrawl fork kept below). Ten of thousands filtered to seven is
+the honest size of "malicious MCP servers in the wild, captured".
 
 ONE VERSION PER PACKAGE. A package ships many versioned zips; they are near-duplicates and
 `corpus validate` refuses those. The version carrying the payload is pinned by hand below — not
@@ -40,6 +41,8 @@ KEEPERS = {
     "birdmania1namecheap-mcp": "dd-npm-namecheap-affiliate-injection",
     "mcp-server-fixthis": "dd-npm-fixthis-exchange-exfil",
     "mcp-server-todo": "dd-npm-todo-wallet-exfil",
+    "iflow-mcpwatercrawl-watercrawl-mcp": "dd-npm-iflow-watercrawl-hidden-eval",
+    "excluder-mcp": "dd-npm-excluder-env-exfil",
 }
 
 

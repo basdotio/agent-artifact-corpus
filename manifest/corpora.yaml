@@ -439,18 +439,46 @@ entries:
     # holds 1,000+ malicious_intent packages, almost none of them agent artifacts.
     provenance: wild
     subset: samples/npm/malicious_intent
-    malicious: 5
+    malicious: 7
     benign: 0
     vendorable: true
     hazards:
-      - "NOT the whole of samples/npm. That subset carries 1,000+ malicious_intent packages, overwhelmingly generic npm malware (droppers, /etc/passwd preinstalls, wallet stealers) on no surface this corpus models. ~128 have an agent-ish name; ~23 are MCP-shaped; these 5 are the ones that are BOTH a real MCP server AND malicious on reading. A recall figure here is over 5 read samples, not over the subset"
-      - "the 5 are selected by READING, not by name. Name matches rejected by reading include clean republishes flagged by mistake (an airtable-mcp, a WaterCrawl fork, a Playwright-MCP fork) and generic malware wearing an mcp-ish name — kept out the same way ~175 datadog-ai-skills samples are"
+      - "NOT the whole of samples/npm. That subset carries 1,000+ malicious_intent packages, overwhelmingly generic npm malware (droppers, /etc/passwd preinstalls, wallet stealers) on no surface this corpus models. ~128 have an agent-ish name; ~23 are MCP-shaped; these 7 are the ones that are BOTH a real MCP server AND malicious on reading. A recall figure here is over 7 read samples, not over the subset"
+      - "the 7 are selected by READING, not by name. Name matches rejected by reading include clean republishes flagged by mistake (an airtable-mcp, a benign WaterCrawl republish, a Playwright-MCP fork) and generic malware wearing an mcp-ish name — kept out the same way ~175 datadog-ai-skills samples are"
+      - "the last 2 (2026-10-30, @iflow-mcp/watercrawl-watercrawl-mcp, excluder-mcp) were read by two models (gpt-6.1-sol, gpt-5.5); both called each malicious and the quote was checked against its line. watercrawl hides an eval payload in Unicode variation selectors in the server entry; excluder's tool exfiltrates .env/wallet files. These are malicious IN THE SERVER CODE — distinct from datadog-npm-compromised, where the malice is an install/load hook on an otherwise-real package"
       - "disjoint from datadog-ai-skills despite the shared upstream repo and commit: that entry vendors samples/ai-skills (SKILL.md trees), this one vendors samples/npm packages. No sample is in both, so they are NOT declared as overlaps — a false overlap would suppress correct pooling"
       - "ONE VERSION PER PACKAGE is vendored. A package ships many near-duplicate versioned zips; the version carrying the payload is pinned by hand, because the malice is not always in the latest tag, and `corpus validate` refuses near-duplicates"
       - "these are LIVE malware. The archives are zip-encrypted with the password `infected`, the malware-corpus convention. scripts/prep-datadog-npm.py copies already-extracted bytes; it never executes them, and `corpus fetch` deliberately does not unpack"
       - "@lanyer640 (reverse shell :2333) and mcp-server-todo (wallet exfil :4433) hardcode the same C2 host 45.115.38.27 — plausibly one actor. Counted as two samples because they are two published packages with two distinct techniques, but a source-diversity read should know they may share an author"
     prep:
-      - "extract the five keeper packages (unzip with password `infected`) into cache/datadog-npm-mcp/_extracted/, then run scripts/prep-datadog-npm.py to vendor them into corpus/malicious/mcp/dd-npm-*"
+      - "extract the seven keeper packages (unzip with password `infected`) into cache/datadog-npm-mcp/_extracted/, then run scripts/prep-datadog-npm.py to vendor them into corpus/malicious/mcp/dd-npm-*"
+      - "labels are hand-pinned, not derived: each carries basis.class read with a quote validate locates in the sample's own bytes"
+
+  - id: datadog-npm-compromised
+    name: "DataDog malicious-software-packages-dataset (samples/npm, compromised agent packages)"
+    url: https://github.com/DataDog/malicious-software-packages-dataset
+    commit: d156188d1e45763d6cb7995543a428de6c4056b8
+    sha256: ""
+    license: Apache-2.0
+    role: recall
+    # real agent-ecosystem packages whose a published version was supply-chain-compromised to run
+    # an attacker payload at install or plugin-load time, while the advertised function stays
+    # intact. DataDog's compromised_lib pool, distinct from malicious_intent (packages published
+    # TO be malware). This is the corpus's first in-the-wild supply-chain coverage.
+    provenance: wild
+    subset: samples/npm/compromised_lib
+    malicious: 3
+    benign: 0
+    vendorable: true
+    overlaps: []
+    hazards:
+      - "SUPPLY-CHAIN, NOT MALICIOUS-AS-WRITTEN-BY-ITS-AUTHOR. These are real, trusted packages (an AntV chart MCP server, a knowledge-graph MCP server, a MemOS OpenClaw plugin) whose compromised VERSION carries the payload. The malice is an npm lifecycle hook (preinstall/postInstall) or a plugin load hook — technique install-hook-execution — not the server's or plugin's own function. That is why they are a separate entry from datadog-npm-mcp, whose 7 are malicious in the server code itself"
+      - "the 3 were read by two models (gpt-6.1-sol, gpt-5.5) on 2026-10-30; both called each malicious and the quote was checked against its line. Selected from every agent/MCP/skill-named package in the compromised_lib pool, deduplicated by payload"
+      - "DEDUPLICATED BY PAYLOAD. mcp-knowledge-base ships the byte-identical bundle.js to mcp-knowledge-graph and is left out. The ~13 'Bun worm' carriers (postman-mcp-server, browserbase/mcp, mcp-use, seezo, redhat hcc-*-mcp, openclaw-cn/*, …) share one 10 MB obfuscated blob a reader cannot confirm, so they fail the both-models rule and are not here; a recall figure is over 3 read samples"
+      - "NO EXECUTABLE BINARIES ARE VENDORED. memtensor's per-platform `sckit` stage-zero executables are the live payload and are stripped by scripts/prep-datadog-npm-compromised.py (which refuses to write if one leaks). What is kept is the readable loader lib/sckit.js and its base64 config — the harm the label quotes — plus the inert .sckit/ca-roots.pem. The two npm payloads (antv's obfuscated index.js, the knowledge-graph bundle.js) are text, kept as written"
+      - "these are LIVE malware. scripts/prep-datadog-npm-compromised.py copies already-extracted bytes; it never executes them, and `corpus fetch` deliberately does not unpack"
+    prep:
+      - "extract the keeper packages (unzip with password `infected`) into cache/datadog-npm-compromised/_extracted/{antvmcp-server-chart, mcp-knowledge-graph, memtensormemos-cloud-openclaw-plugin}/, then run scripts/prep-datadog-npm-compromised.py to vendor them (memtensor's binaries stripped) into corpus/malicious/{mcp,connector}/dd-npm-*"
       - "labels are hand-pinned, not derived: each carries basis.class read with a quote validate locates in the sample's own bytes"
 
   - id: clawhub-live

