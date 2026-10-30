@@ -1,0 +1,69 @@
+/**
+ * @packageDocumentation
+ * Shared helpers used by multiple tool modules. Internal to `@squawk/mcp` and
+ * not re-exported from the package entrypoint.
+ */
+/**
+ * Reduces an array of {@link ParseRecordErrorLike} entries to a JSON-friendly
+ * shape. Used by every weather fetch tool to surface partial parse failures
+ * in `structuredContent` without leaking thrown error objects.
+ *
+ * @param errors - Per-record parse errors as returned by `@squawk/weather/fetch`.
+ * @returns The errors with each `error` value reduced to its message string.
+ */
+export function summarizeParseErrors(errors) {
+    return errors.map((err) => ({
+        raw: err.raw,
+        message: extractErrorMessage(err.error),
+    }));
+}
+/**
+ * Reduces an unknown thrown value to a string message. Used uniformly by tool
+ * handlers that catch errors thrown by lower-level parsers so the resulting
+ * MCP payloads never leak raw `Error` objects, while non-`Error` throwables
+ * (rare, but possible from third-party code) still produce a meaningful
+ * message via `String(err)`.
+ *
+ * @param err - The thrown value caught in a `try`/`catch`.
+ * @returns The error's message string when `err` is an `Error`, otherwise
+ *          `String(err)`.
+ */
+export function extractErrorMessage(err) {
+    return err instanceof Error ? err.message : String(err);
+}
+/**
+ * Runs a synchronous parser inside a tool handler and packages the outcome
+ * into the MCP result shape. On success the parsed record is returned as
+ * pretty JSON in `content` and as `structuredContent[resultKey]`. On failure
+ * the parser message is forwarded verbatim and the result is flagged
+ * `isError: true` so the model can react to the failure.
+ *
+ * The return type is intentionally an inline literal rather than a named
+ * interface: the MCP SDK's tool-result type carries an `[x: string]: unknown`
+ * index signature that nominal interfaces do not satisfy without explicit
+ * declaration, while inline object types are accepted at the call site
+ * through TypeScript's freshness rules.
+ *
+ * @param raw - The raw input string passed to the parser.
+ * @param parser - A pure parser function that may throw on bad input.
+ * @param resultKey - The key under which the parsed record is exposed in
+ *                    `structuredContent`.
+ * @returns The MCP tool result.
+ */
+export function runParser(raw, parser, resultKey) {
+    try {
+        const parsed = parser(raw);
+        return {
+            content: [{ type: 'text', text: JSON.stringify(parsed, null, 2) }],
+            structuredContent: { [resultKey]: parsed },
+        };
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+            content: [{ type: 'text', text: `Parse failed: ${message}` }],
+            structuredContent: { [resultKey]: null },
+            isError: true,
+        };
+    }
+}
