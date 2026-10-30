@@ -92,7 +92,7 @@ Short introductions suitable for a post are in [`articles.md`](docs/articles.md)
 
 | Tool | Rule-level expectations | Note |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,067 layer-1 samples | the only one so far — see *Known gaps* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,070 layer-1 samples | the only one so far — see *Known gaps* |
 
 No second scanner has been wired up yet. Until one is, the tool-neutral claims above are a
 property of the schema rather than a demonstrated result, and that distinction is the reason
@@ -226,8 +226,8 @@ shows up there rather than in someone else's clone.
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,067 labels
-  carry such a block; the other 5,061 are pure `truth` and need no scanner to check. A
+- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,070 labels
+  carry such a block; the other 5,064 are pure `truth` and need no scanner to check. A
   scanner's rule list belongs to that scanner, so `taxonomy/tools.yaml` reaches it only
   through an environment variable and the validator now **rejects** a `rules_source.path`
   that leaves this repository. That rule exists because aguard's used to be
@@ -251,10 +251,10 @@ measures.
   seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
   entries in one command.
 - **The benign side is a sample; the malicious side is a census, with two exceptions.** 4,473
-  benign samples are drawn from stated populations under stated designs; 310 of the 575
+  benign samples are drawn from stated populations under stated designs; 310 of the 578
   malicious samples are everything their upstreams had, the 240 from SkillHarm are a
-  seeded draw of 20 per risk from 641, and the 19 from `clawhub-live` are the candidates two
-  independent AI readers (or, for the ones they left open or excluded on one reading, two models) both read as malicious, out of 279 the registry's judge flagged; the 1 from `maliciousskillbench-wild` is likewise what two models both read as malicious out of 186; the 10 from the two `datadog-npm*` npm entries are what two models both read as malicious among the agent-named packages of DataDog's npm set. A recall figure and a false-positive figure from this corpus
+  seeded draw of 20 per risk from 641, and the 20 from `clawhub-live` are the candidates a majority of
+  readers read as malicious (two AI readers or two models; where the two models split, Claude as a third), out of 279 the registry's judge flagged; the 1 from `maliciousskillbench-wild` is likewise what two models both read as malicious out of 186; the 12 from the two `datadog-npm*` npm entries are what a majority of readers read as malicious among the agent-named packages of DataDog's npm set. A recall figure and a false-positive figure from this corpus
   therefore rest on different kinds of denominator, and cannot be combined into one score.
 - **No dimension has a wild recall rate yet.** `corpus score` splits recall into wild, fixture
   and constructed, and on the wild row no dimension holds enough samples for a rate — at most
@@ -266,7 +266,7 @@ measures.
   only, without the scripts their malice was confirmed in, so 1 is derived). Larger sets with more distinct wild
   samples exist but cannot be redistributed (MalSkillBench is for academic use only,
   SkillTrustBench is NC-SA). `clawhub-live` is the one source that keeps producing: a weekly
-  intake of registry-flagged skills, 19 derived from the first 279 candidates. Until it has
+  intake of registry-flagged skills, 20 derived from the first 279 candidates. Until it has
   accumulated, the wild row is coverage, and the recall rates this corpus can report are rates
   about the fixture sources named beside them.
 - **One tool has rule-level expectations.** `taxonomy/tools.yaml` registers three scanners

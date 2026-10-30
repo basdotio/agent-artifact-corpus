@@ -9,10 +9,13 @@ package's advertised function stays intact. Different pool, different provenance
 selection lives in its own script.
 
 WHAT IS SELECTED. Every compromised_lib package with an agent/MCP/skill name was read; these
-THREE are the ones both models called malicious under the maintainer's rule, deduplicated by
-payload (mcp-knowledge-base shares mcp-knowledge-graph's bundle.js byte for byte and is left
-out; the ~13 "Bun worm" carriers share one 10 MB obfuscated blob that a reader cannot confirm,
-so they fail the both-models rule and are left out).
+FIVE are the ones a majority of readers called malicious, deduplicated by payload. Three were
+kept on two-model agreement. Two more came in on 2026-10-30 under the majority rule, when a third
+reader (Claude, with file search) found what the truncated first reading could not: one carrier
+of the "Shai-Hulud" Bun worm (@postman/postman-mcp-server, whose setup_bun.js and
+bun_environment.js are byte-identical in browserbase/mcp, mcp-use and ~10 others, all left out)
+and one of the redhat hcc-*-mcp worm (hcc-kessel-mcp; hcc-pf-mcp is the same family and is left
+out). mcp-knowledge-base shares mcp-knowledge-graph's bundle.js byte for byte and is left out.
 
 ONE VERSION PER PACKAGE, pinned by hand below to the version that carries the payload.
 
@@ -39,6 +42,8 @@ KEEPERS = {
     "antvmcp-server-chart": ("mcp", "dd-npm-antv-mcp-chart-preinstall", False),
     "mcp-knowledge-graph": ("mcp", "dd-npm-knowledge-graph-workflow-exfil", False),
     "memtensormemos-cloud-openclaw-plugin": ("connector", "dd-npm-memtensor-openclaw-stage0", True),
+    "postmanpostman-mcp-server": ("mcp", "dd-npm-postman-mcp-shai-hulud", False),
+    "redhat-cloud-serviceshcc-kessel-mcp": ("mcp", "dd-npm-redhat-kessel-mcp-worm", False),
 }
 
 # Executable stage-zero binaries that must never be vendored, by basename.
