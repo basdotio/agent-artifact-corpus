@@ -50,7 +50,7 @@
 
 | 工具 | 规则级期望 | 备注 |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | 有，覆盖 5,061 个第 1 层样本中的 6 个 | 目前唯一一个 —— 见*已知缺口* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | 有，覆盖 5,062 个第 1 层样本中的 6 个 | 目前唯一一个 —— 见*已知缺口* |
 
 还没有接入第二个扫描器。在接入之前，上面那些工具中立的说法是 schema 的性质，而不是已被证明的结果，把这个区别说出来正是这一节存在的理由。
 
@@ -117,11 +117,11 @@ make test        # harness 单元测试
 
 写明而不是略去，用的是这份语料要求被测扫描器遵守的同一条原则。
 
-- **`expect.<tool>` 里的规则 ID 不在这里校验，这是设计如此。** 5,061 个标签里只有 6 个带 expect 块，其余 5,055 个是纯 `truth`，不需要任何扫描器就能检查。一个扫描器的规则清单属于那个扫描器，所以 `taxonomy/tools.yaml` 只通过环境变量去找它，并且校验器现在会**拒绝**任何走出本仓库的 `rules_source.path`。这条规则的由来：aguard 的路径曾经是 `../agent-guard/docs/rules.md`，某台机器上的一个同级目录。没有任何东西坏掉——而这正是问题所在：`make validate` 在那台机器上报「73 ids, 56 carry a dimension」，在别处报「not checked」，于是这份语料自己的校验结果取决于作者的目录布局。真正剩下的缺口在别处：**还没有任何扫描器的仓库 clone 这份语料、用它自己的规则去检查它自己的 `expect` 块**，而那才是这项检查该待的地方。
+- **`expect.<tool>` 里的规则 ID 不在这里校验，这是设计如此。** 5,062 个标签里只有 6 个带 expect 块，其余 5,056 个是纯 `truth`，不需要任何扫描器就能检查。一个扫描器的规则清单属于那个扫描器，所以 `taxonomy/tools.yaml` 只通过环境变量去找它，并且校验器现在会**拒绝**任何走出本仓库的 `rules_source.path`。这条规则的由来：aguard 的路径曾经是 `../agent-guard/docs/rules.md`，某台机器上的一个同级目录。没有任何东西坏掉——而这正是问题所在：`make validate` 在那台机器上报「73 ids, 56 carry a dimension」，在别处报「not checked」，于是这份语料自己的校验结果取决于作者的目录布局。真正剩下的缺口在别处：**还没有任何扫描器的仓库 clone 这份语料、用它自己的规则去检查它自己的 `expect` 块**，而那才是这项检查该待的地方。
 - **`sha256` 在第 1 层已被校验，在第 2 层仍然是空的。** 393 个采集来的配置文件各自带着采集时那份字节的哈希，`make validate` 会从 vendoring 的 artifact 重新算出全部 393 个并在不一致时失败。1,197 个采集来的服务器和 skill **树**做不到这一点：标签的 `sha256` 指一个文件，放在树上会被拒绝，所以它们的完整性声明是 `manifest/pins/mcp-servers.json` 里的 `tree_sha256`，由 `scripts/harvest-mcp-servers.py --from-pins` 重算，不由 `make validate` 校验。而每条 *manifest* 条目的 `sha256` 依然是空的、拉取器只核对钉住的 commit：一个引用在本地没有字节可供哈希，所以第 2 层的完整性仍然只靠 git。
 - **表格形态的上游没法只靠 `make fetch` 复现。** `automatelab-mcp-tools` 和 `SkillMD-138K` 给的是 parquet 表格而不是样本树，所以在 fetch 和 derive 之间各自还要过一个 `scripts/` 下的脚本。脚本本身是钉住且带固定种子的，但 `make derive` 不会去调它们，所以一个干净的 clone 没法用一条命令重建这两条。
-- **良性侧是抽样，恶性侧是普查，有两个例外。** 4,473 个良性样本是按写明的方案从写明的总体里抽出来的；569 个恶性样本里有 310 个是各自上游手里的全部，240 个来自 SkillHarm，是从 641 个里按固定种子每类风险抽 20 个得到的，另外 19 个来自 `clawhub-live`，是注册表判官标出的 279 个候选里两位独立 AI 读者（它们没定下来的、或只凭一位读者排除的，改由两个模型）都读为恶意的那几个。因此这份语料给出的召回数字和假阳性数字，靠的是两种不同性质的分母，不能合成一个分数。
-- **还没有任何维度有野生召回率。** `corpus score` 把召回拆成 wild、fixture、constructed 三类；wild 那一行没有任何维度的样本够报出率——最多 13 个。能再分发的真实世界恶意 skill 来源现在都已读完：`datadog-ai-skills` 全部 204 个（去掉 fixture 和同一活动载荷的副本后派生 23 个），以及 `agent-skill-malware` 的 124 个（每一个都是同几个 ClawHub 诱饵的副本，或是因为引用了它们的 IOC 而被误标的防御扫描器）。含更多不同野生样本的更大数据集存在，但不能再分发（MalSkillBench 仅限学术使用，SkillTrustBench 是 NC-SA）。`clawhub-live` 是唯一持续产出的来源：每周收注册表标出的 skill，首批 279 个候选里派生了 6 个。在它积累起来之前，wild 那一行代表的是覆盖度；这份语料今天能报的召回率，是关于旁边标明的那些 fixture 来源的率。
+- **良性侧是抽样，恶性侧是普查，有两个例外。** 4,473 个良性样本是按写明的方案从写明的总体里抽出来的；570 个恶性样本里有 310 个是各自上游手里的全部，240 个来自 SkillHarm，是从 641 个里按固定种子每类风险抽 20 个得到的，另外 19 个来自 `clawhub-live`，是注册表判官标出的 279 个候选里两位独立 AI 读者（它们没定下来的、或只凭一位读者排除的，改由两个模型）都读为恶意的那几个；`maliciousskillbench-wild` 的 1 个同样是 186 个里两个模型都读为恶意的。因此这份语料给出的召回数字和假阳性数字，靠的是两种不同性质的分母，不能合成一个分数。
+- **还没有任何维度有野生召回率。** `corpus score` 把召回拆成 wild、fixture、constructed 三类；wild 那一行没有任何维度的样本够报出率——最多 13 个。能再分发的真实世界恶意 skill 来源现在都已读完：`datadog-ai-skills` 全部 204 个（去掉 fixture 和同一活动载荷的副本后派生 23 个），以及 `agent-skill-malware` 的 124 个（每一个都是同几个 ClawHub 诱饵的副本，或是因为引用了它们的 IOC 而被误标的防御扫描器），以及 `maliciousskillbench-wild` 为 MaliciousAgentSkillsBench 和 SkillLeakBench 补上的 186 篇野生正文（只有 SKILL.md，没有当初在其中确认恶意的脚本，所以只派生了 1 个）。含更多不同野生样本的更大数据集存在，但不能再分发（MalSkillBench 仅限学术使用，SkillTrustBench 是 NC-SA）。`clawhub-live` 是唯一持续产出的来源：每周收注册表标出的 skill，首批 279 个候选里派生了 19 个。在它积累起来之前，wild 那一行代表的是覆盖度；这份语料今天能报的召回率，是关于旁边标明的那些 fixture 来源的率。
 - **只有一个工具带规则级期望。** `taxonomy/tools.yaml` 登记了三个扫描器（aguard、ccaudit、skill-scanner），但只有 aguard 带 `expect` 块，覆盖 6 个样本；另外两个只按 `truth` 计分。
 - **`NOTICE` 没有被 `make validate` 与标签的许可证做交叉校验。**
 - **harness 里有一个包没有测试**：`fetch`。
