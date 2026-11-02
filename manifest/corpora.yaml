@@ -453,6 +453,50 @@ entries:
       - "extract the five keeper packages (unzip with password `infected`) into cache/datadog-npm-mcp/_extracted/, then run scripts/prep-datadog-npm.py to vendor them into corpus/malicious/mcp/dd-npm-*"
       - "labels are hand-pinned, not derived: each carries basis.class read with a quote validate locates in the sample's own bytes"
 
+  - id: clawhub-live
+    name: "HF OpenClaw/clawhub-security-signals-live (weekly intake of judge=malicious rows)"
+    url: https://huggingface.co/datasets/OpenClaw/clawhub-security-signals-live
+    commit: c2f898973da85feaa62789f5e1e934d2aad6a667   # the export at the first intake; each tree's sidecar records the commit it came from
+    sha256: ""
+    license: MIT
+    role: recall
+    # real skills published to a real registry; the registry's own pipeline flagged them
+    provenance: wild
+    malicious: 284                  # rows with clawscan_verdict=malicious in the pinned export; grows weekly
+    benign: 0
+    vendorable: true
+    overlaps: [datadog-ai-skills, agent-skill-malware, clawhub-security-signals]
+    hazards:
+      - "A MOVING SOURCE, TAKEN IN WEEKLY. The dataset is re-exported every Sunday and `main` changes; the entry's commit is the export of the first intake and the count grows. What pins a sample is its own sidecar (`<name>.source.json`: hf_commit, row id, ClawHub owner/slug@version), written by scripts/intake-clawhub.py, and the intake state in manifest/pins/clawhub-intake.json names every row ever seen with the decision taken"
+      - "THE REGISTRY'S VERDICT IS A SCANNER'S OPINION. `malicious` is the GPT judge merging VirusTotal, static rules and SkillSpector; a 276-sample human reference set (arXiv 2609.17274) measured it at 61% sensitivity and 81% specificity. So a row is a CANDIDATE: it enters this corpus only through dimension_overrides, with the line a person read and quoted, and a row read as not malicious is excluded by name with the reason. Nothing from this entry is derived on the verdict alone"
+      - "HELD-OUT EXCLUSION IS MECHANICAL. agent-skill-malware is ClawHub content no scanner author has read, and must stay so. The intake refuses any candidate matching a held-out row by normalised SKILL.md hash or by skill name (manifest/pins/heldout-skillmd-sha256.json holds hashes and names, not content) and refuses to run without that pin file"
+      - "AT MOST 5 SAMPLES PER PUBLISHER, ACROSS ALL WEEKS. ClawHub campaigns are one account re-publishing one lure under many slugs (DataDog's set: 54 of 204 from one account; 55 copies of one fake-prerequisite lure). The cap is enforced by the intake and counts queued and derived samples; excluded ones do not count. Campaign copies that differ in bytes still reach the reader, who excludes them as `copy of <name>` — the read list names the corpus samples a candidate shares a lure host with"
+      - "SANITIZED EXPORT, NOT THE REGISTRY BUNDLE. Rows carry the SKILL.md and bundle files as OpenClaw's public export sanitizes them (secret-like values redacted, some package contents excluded). A judged-malicious skill is hidden from the registry API and the documentation forbids mirroring hidden content, so the export is the only copy there is; a tree here may lack a file the publisher shipped, and the sidecar lists what it has"
+      - "LICENCE: MIT-0 BY THE REGISTRY'S TERMS. OpenClaw's documentation (docs.openclaw.ai/clawhub/skill-format and /clawhub/cli, read 2026-10-29): `All skills published on ClawHub are licensed under MIT-0` and `ClawHub does not support per-skill license overrides`. The pins file records MIT-0 per sample. A bundle that ships its own LICENSE file or a front-matter `license:` line is flagged on the read list, because the acceptable-usage policy forbids republishing someone else's code and such a file is what that looks like; the reader decides"
+      - "ClawHub registry metadata (`_meta.json`) ships inside some bundles, as it does in datadog-ai-skills; vendored as the export carries it. Inside this single-class population it predicts nothing; pooled, it marks class, and the cross-population report says so"
+      - "`suspicious` rows are NOT candidates. The frozen set's suspicious tier disagrees with its own paper by two orders of magnitude and nobody has explained it; the live set's is the same pipeline"
+    prep:
+      - "scripts/intake-clawhub.py heldout-pin      # once, needs cache/agent-skill-malware (scripts/prep-agent-skill-malware.py)"
+      - "scripts/intake-clawhub.py                  # weekly: fetch the export, queue new malicious rows under cache/clawhub-live/_queue/, write READ-LIST.md"
+      - "read cache/clawhub-live/_queue/READ-LIST.md; for each candidate add EITHER a dimension_overrides entry with the quoted line OR an exclude_samples line with the reason"
+      - "scripts/intake-clawhub.py promote          # decided trees move to _extracted/; then make derive E=clawhub-live, derive-write, validate"
+    derive:
+      layout: "_extracted/*"
+      surface: skills
+      id_prefix: ch
+      class_from: "constant:malicious"
+      label_file: ""
+      tier_from: "constant:plain"
+      severity_from: "constant:high"
+      source_from: "sidecar:<name>.source.json:source"
+      license_from: "pins:manifest/pins/clawhub-licenses.json:name"
+      fidelity: >-
+        The class is a constant this repository asserts after a person read the sample — the
+        registry's verdict put it on the read list and nothing else. Every dimension is read off
+        the artifact and carries the quote that supports it. Tier and severity are constants and
+        say so in each label's basis block.
+      dimension_overrides: {}
+      exclude_samples: {}
   - id: skillsgoat
     name: "optimuslabs-io/skillsgoat"
     url: https://github.com/optimuslabs-io/skillsgoat
