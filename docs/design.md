@@ -188,8 +188,9 @@ domains; benign samples never do. One regex scores perfectly and generalises to 
 
 Its successor ships the mechanism worth copying: `metrics/leakage.py` is a **mechanical
 release gate** — any structural feature with support ≥8 that predicts the label at ≥95%
-purity fails the build. `make validate` implements the same idea here. A corpus that can be
-solved without reading content is not a corpus.
+purity fails the build. `make validate` implements the same idea here, over the tree's shape and, since
+2026-10-29, over literals in its text. A corpus that can be solved without reading content
+the way a scanner must is not a corpus.
 
 **Circular benign labels.** Smithery `verified`, Glama `qualityScore` (a paid placement),
 reputation scores — all popularity or vendor curation, none a security review.

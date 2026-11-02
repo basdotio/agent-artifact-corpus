@@ -52,6 +52,11 @@ type Sample struct {
 	Class string
 	Files []string
 
+	// Content is what ContentFeatures read off the bytes — host literals, address classes,
+	// self-describing words, length buckets, character-set tells. Empty when the caller did not
+	// read the tree, in which case the gate is the structural one it was before.
+	Content []string
+
 	// Group is the population a sample belongs to: the manifest entry it was derived from, or
 	// "hand-pinned". The gate tests WITHIN a population, because comparing a curated attack
 	// fixture against a real-world public skill is a category error — real repositories ship
@@ -250,6 +255,9 @@ func featuresOf(s Sample, skip string) []string {
 		}
 	}
 	add(fmt.Sprintf("filecount:%s", bucket(len(s.Files))))
+	for _, f := range s.Content {
+		add(f)
+	}
 	return out
 }
 
