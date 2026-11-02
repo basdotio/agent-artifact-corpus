@@ -60,7 +60,8 @@ nothing to do with detection:
   3,944 malicious ones. **The classes separate at 97% purity without reading a single
   skill.** Delete that file before any measurement.
 - **`skillfortifybench`**: malicious samples use RFC-2606 reserved domains and benign ones
-  never do. One regex scores perfectly and generalises to nothing.
+  never do. One regex scores perfectly and generalises to nothing. (Its malicious half is now
+  vendored, read and capped, without the benign half, for exactly this reason.)
 
 Neither is obviously wrong when you read individual samples, which is why this belongs in a
 build gate rather than a review checklist. A human reading samples one at a time cannot see
@@ -203,6 +204,21 @@ MIT or Apache-2.0 licence file were considered, and each label carries the base 
 templates repeat byte for byte across servers; two (a squatting decoy that returns a fixed status,
 a preference-steering description) were ruled not malicious and are excluded whole. Capped at five
 per attack type and two per base server.
+
+**`skillfortifybench`** and **`skillfortifybench-mcp`** — a generated scanner benchmark.
+`https://github.com/qualixar/skillfortifybench` @ `eb9d5a9cbfa1`, MIT. Its malicious half, in three
+formats (Claude skill, MCP config, OpenClaw skill), written by the paper's seeded generator; the two
+entries are the one source split by surface. 36 malicious skills and 14 malicious MCP configs,
+provenance `synthetic`, across 10 of its 13 attack types: two models read the whole upstream
+malicious half without its labels, and four doubtful
+templates were ruled once each (a secret printed to the server's own stdout, a temp-cache wipe and
+an overt `chmod 777` are out; logs wiped under a cache-cleanup pretext is in). Its squatting and
+typosquatting types carry nothing harmful behind the lookalike name and yield none.
+*Hazards*: the shortcut below. Most attacker hosts name their role (`loader.backdoor.example.com`),
+kept as published, so recall here is an upper bound; the benign half, which holds no URL at all, is
+not admitted; the inline `SKILLFORTIFYBENCH:INERT` banner is stripped by a declared transform; trees
+are named by format and hash, not by the upstream id that spells out the class. Capped at five per
+attack type.
 
 ### False-positive denominator — benign samples
 
