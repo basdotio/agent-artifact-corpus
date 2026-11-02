@@ -639,7 +639,8 @@ def status() -> None:
     by_owner: dict[str, int] = {}
     for rec in rows_state.values():
         by_status[rec["status"]] = by_status.get(rec["status"], 0) + 1
-        if rec["status"] in ("queued", "decided"):
+        # Same count the cap itself uses: an excluded sample does not use up its author's five.
+        if counts_against_cap(rec):
             by_owner[rec["owner"]] = by_owner.get(rec["owner"], 0) + 1
     print(f"status: last export {state.get('last_commit', '')[:12]} fetched {state.get('last_fetched')}; "
           + ", ".join(f"{k} {v}" for k, v in sorted(by_status.items())))
