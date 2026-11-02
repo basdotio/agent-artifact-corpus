@@ -251,12 +251,12 @@ measures.
   seeded, but `make derive` does not run them, so a clean clone cannot rebuild those two
   entries in one command.
 - **The benign side is a sample; the malicious side is a census, with two exceptions.** 4,473
-  benign samples are drawn from stated populations under stated designs, and 69 more are
+  benign samples are drawn from stated populations under stated designs, and 61 more are
   registry-flagged candidates that reading found not malicious but over a safety boundary in
-  the open (`alert_justified`, set aside from the flag rate on both sides); 310 of the 579
+  the open (`alert_justified`, set aside from the flag rate on both sides); 310 of the 587
   malicious samples are everything their upstreams had, the 240 from SkillHarm are a
-  seeded draw of 20 per risk from 641, and the 20 from `clawhub-live` are the candidates a majority of
-  readers read as malicious (two AI readers or two models; where the two models split, Claude as a third), out of 279 the registry's judge flagged; the 1 from `maliciousskillbench-wild` is likewise what two models both read as malicious out of 186; the 13 from the two `datadog-npm*` npm entries are what a majority of readers read as malicious among the agent-named packages of DataDog's npm set. A recall figure and a false-positive figure from this corpus
+  seeded draw of 20 per risk from 641, and the 28 from `clawhub-live` are the candidates a majority of
+  readers read as malicious (two AI readers or two models; where the two models split, Claude as a third), out of 279 the registry's judge flagged (8 of them placed there on 2026-11-02 by two models' rulings on the SkillPay stubs and one CI-hijacking template); the 1 from `maliciousskillbench-wild` is likewise what two models both read as malicious out of 186; the 13 from the two `datadog-npm*` npm entries are what a majority of readers read as malicious among the agent-named packages of DataDog's npm set. A recall figure and a false-positive figure from this corpus
   therefore rest on different kinds of denominator, and cannot be combined into one score.
 - **No dimension has a wild recall rate yet.** `corpus score` splits recall into wild, fixture
   and constructed, and on the wild row no dimension holds enough samples for a rate — at most
@@ -268,7 +268,7 @@ measures.
   only, without the scripts their malice was confirmed in, so 1 is derived). Larger sets with more distinct wild
   samples exist but cannot be redistributed (MalSkillBench is for academic use only,
   SkillTrustBench is NC-SA). `clawhub-live` is the one source that keeps producing: a weekly
-  intake of registry-flagged skills, 20 derived from the first 279 candidates. Until it has
+  intake of registry-flagged skills, 28 derived so far. Until it has
   accumulated, the wild row is coverage, and the recall rates this corpus can report are rates
   about the fixture sources named beside them.
 - **One tool has rule-level expectations.** `taxonomy/tools.yaml` registers three scanners

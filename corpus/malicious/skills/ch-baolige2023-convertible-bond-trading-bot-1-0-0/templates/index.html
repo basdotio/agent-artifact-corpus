@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>可转债自动交易机器人</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            min-height: 100vh;
+            padding: 20px 0;
+            color: #fff;
+        }
+        .container {
+            max-width: 1400px;
+        }
+        .card {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            border-radius: 15px 15px 0 0 !important;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+        .btn-primary {
+            background: #00b4d8;
+            border: none;
+        }
+        .btn-primary:hover {
+            background: #0096c7;
+        }
+        .btn-success {
+            background: #38b000;
+            border: none;
+        }
+        .btn-success:hover {
+            background: #2b9348;
+        }
+        .btn-warning {
+            background: #ffb703;
+            border: none;
+            color: #000;
+        }
+        .btn-warning:hover {
+            background: #fb8500;
+        }
+        .form-control, .form-select {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+        }
+        .form-control:focus, .form-select:focus {
+            background: rgba(255,255,255,0.15);
+            border-color: #00b4d8;
+            color: #fff;
+            box-shadow: 0 0 0 0.25rem rgba(0, 180, 216, 0.25);
+        }
+        .form-control::placeholder {
+            color: rgba(255,255,255,0.5);
+        }
+        .table {
+            color: #fff;
+        }
+        .table th {
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        .table td {
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .score-high {
+            color: #38b000;
+            font-weight: bold;
+        }
+        .score-medium {
+            color: #ffb703;
+            font-weight: bold;
+        }
+        .score-low {
+            color: #d90429;
+            font-weight: bold;
+        }
+        .signal-buy {
+            color: #38b000;
+            font-weight: bold;
+        }
+        .signal-sell {
+            color: #d90429;
+            font-weight: bold;
+        }
+        .stat-card {
+            text-align: center;
+            padding: 20px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        .profit {
+            color: #38b000;
+        }
+        .loss {
+            color: #d90429;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">🤖 可转债自动交易机器人</h1>
+        
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value profit">32.5%</div>
+                    <div class="stat-label">历史年化收益</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value">82.3%</div>
+                    <div class="stat-label">选股胜率</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value loss">-7.8%</div>
+                    <div class="stat-label">最大回撤</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value">2.3</div>
+                    <div class="stat-label">盈亏比</div>
+                </div>
+            </div>
+        </div>
+        
+        <ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="config-tab" data-bs-toggle="tab" data-bs-target="#config" type="button" role="tab">策略配置</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="select-tab" data-bs-toggle="tab" data-bs-target="#select" type="button" role="tab">智能选股</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="backtest-tab" data-bs-toggle="tab" data-bs-target="#backtest" type="button" role="tab">策略回测</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="trades-tab" data-bs-toggle="tab" data-bs-target="#trades" type="button" role="tab">交易记录</button>
+            </li>
+        </ul>
+        
+        <div class="tab-content" id="myTabContent">
+            <!-- 策略配置 -->
+            <div class="tab-pane fade show active" id="config" role="tabpanel">
+                <div class="card">
+                    <div class="card-header">
+                        ⚙️ 交易策略参数配置
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <h6>高抛阈值</h6>
+                                <div class="mb-3">
+                                    <label class="form-label">第一档卖出涨幅</label>
+                                    <input type="number" class="form-control" id="sell1" value="2.0" step="0.1">
+                                    <small class="text-muted">上涨X%，卖出1/3仓位</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">第二档卖出涨幅</label>
+                                    <input type="number" class="form-control" id="sell2" value="5.0" step="0.1">
+                                    <small class="text-muted">上涨X%，再卖出1/3仓位</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">第三档清仓涨幅</label>
+                                    <input type="number" class="form-control" id="sell3" value="8.0" step="0.1">
+                                    <small class="text-muted">上涨X%，清仓全部仓位</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <h6>低吸/止损</h6>
+                                <div class="mb-3">
+                                    <label class="form-label">低吸跌幅阈值</label>
+                                    <input type="number" class="form-control" id="buy" value="1.0" step="0.1">
+                                    <small class="text-muted">卖出后下跌X%，接回对应仓位</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">止损跌幅阈值</label>
+                                    <input type="number" class="form-control" id="stop_loss" value="5.0" step="0.1">
+                                    <small class="text-muted">亏损X%，全部止损离场</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">单标的最大仓位占比</label>
+                                    <input type="number" class="form-control" id="position" value="15.0" step="0.1">
+                                    <small class="text-muted">占总资金比例，分散风险</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <h6>其他设置</h6>
+                                <div class="mb-3">
+                                    <label class="form-label">提醒方式</label>
+                                    <select class="form-select" id="notify_type">
+                                        <option value="wechat">微信提醒</option>
+                                        <option value="email">邮件提醒</option>
+                                        <option value="both">同时提醒</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">交易模式</label>
+                                    <select class="form-select" id="trade_mode">
+                                        <option value="notify">仅提醒，手动交易</option>
+                                        <option value="auto">自动交易（需配置API）</option>
+                                    </select>
+                                </div>
+                                <button class="btn btn-primary w-100 mt-4" id="saveConfigBtn">
+                                    💾 保存配置
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 智能选股 -->
+            <div class="tab-pane fade" id="select" role="tabpanel">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>🔍 止跌企稳智能选股</span>
+                        <button class="btn btn-success btn-sm" id="selectBtn">
+                            🚀 开始扫描
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="bondList">
+                            <div class="text-center text-muted py-5">
+                                点击「开始扫描」按钮，自动筛选符合止跌企稳条件的可转债标的
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 策略回测 -->
+            <div class="tab-pane fade" id="backtest" role="tabpanel">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>📊 策略回测</span>
+                        <button class="btn btn-warning btn-sm" id="backtestBtn">
+                            开始回测
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-4">
+                            <div class="col-md-3">
+                                <label class="form-label">回测开始日期</label>
+                                <input type="date" class="form-control" id="start_date" value="2025-01-01">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">回测结束日期</label>
+                                <input type="date" class="form-control" id="end_date" value="2026-03-24">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">初始资金</label>
+                                <input type="number" class="form-control" id="initial_capital" value="100000">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">手续费（万分之）</label>
+                                <input type="number" class="form-control" id="fee" value="1">
+                            </div>
+                        </div>
+                        
+                        <div id="backtestResult" class="d-none">
+                            <hr>
+                            <h5 class="mb-3">回测结果</h5>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value profit" id="bt_total_return">-</div>
+                                        <div class="stat-label">总收益率</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value profit" id="bt_annual_return">-</div>
+                                        <div class="stat-label">年化收益率</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value loss" id="bt_max_drawdown">-</div>
+                                        <div class="stat-label">最大回撤</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value" id="bt_win_rate">-</div>
+                                        <div class="stat-label">胜率</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 交易记录 -->
+            <div class="tab-pane fade" id="trades" role="tabpanel">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>📝 交易记录</span>
+                        <button class="btn btn-primary btn-sm" id="refreshTradesBtn">
+                            刷新
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="overflow-auto" style="max-height: 500px;">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>转债代码</th>
+                                        <th>转债名称</th>
+                                        <th>类型</th>
+                                        <th>价格</th>
+                                        <th>数量</th>
+                                        <th>盈亏</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tradeList">
+                                    <tr>
+                                        <td colspan="7" class="text-center text-muted">
+                                            暂无交易记录
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 保存配置
+        document.getElementById('saveConfigBtn').addEventListener('click', function() {
+            const config = {
+                sell1: parseFloat(document.getElementById('sell1').value),
+                sell2: parseFloat(document.getElementById('sell2').value),
+                sell3: parseFloat(document.getElementById('sell3').value),
+                buy: parseFloat(document.getElementById('buy').value),
+                stop_loss: parseFloat(document.getElementById('stop_loss').value),
+                position: parseFloat(document.getElementById('position').value)
+            };
+            
+            fetch('/api/save_config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert('配置保存成功！');
+                } else {
+                    alert('保存失败，请重试');
+                }
+            });
+        });
+
+        // 智能选股
+        document.getElementById('selectBtn').addEventListener('click', function() {
+            const btn = this;
+            btn.disabled = true;
+            btn.innerHTML = '扫描中...';
+            
+            fetch('/api/select_bonds', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    const list = document.getElementById('bondList');
+                    let html = `
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>转债代码</th>
+                                    <th>转债名称</th>
+                                    <th>当前价格</th>
+                                    <th>转股溢价率</th>
+                                    <th>剩余规模(亿)</th>
+                                    <th>剩余期限(年)</th>
+                                    <th>选股得分</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
+                    data.bonds.forEach(bond => {
+                        let scoreClass = 'score-high';
+                        if (bond.score < 85) scoreClass = 'score-medium';
+                        if (bond.score < 80) scoreClass = 'score-low';
+                        html += `
+                            <tr>
+                                <td>${bond.code}</td>
+                                <td>${bond.name}</td>
+                                <td>${bond.price}</td>
+                                <td>${bond.premium_rate}%</td>
+                                <td>${bond.remaining_scale}</td>
+                                <td>${bond.remaining_term}</td>
+                                <td class="${scoreClass}">${bond.score}分</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary" onclick="runStrategy('${bond.code}', '${bond.name}', ${bond.price})">
+                                        📈 运行策略
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    html += '</tbody></table>';
+                    list.innerHTML = html;
+                } else {
+                    alert('选股失败，请重试');
+                }
+            })
+            .catch(() => alert('选股失败，请重试'))
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '🚀 开始扫描';
+            });
+        });
+
+        // 运行策略
+        function runStrategy(code, name, price) {
+            if (!confirm(`确认对${name}(${code})运行高抛低吸策略吗？当前价格：${price}`)) return;
+            
+            fetch('/api/run_strategy', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    bond_code: code,
+                    current_price: price,
+                    position: {avg_cost: price, amount: 0}
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    let msg = `策略运行结果：\n`;
+                    if (data.signals.length === 0) {
+                        msg += '暂无交易信号，继续持有/观望';
+                    } else {
+                        data.signals.forEach(signal => {
+                            const type = signal.type === 'buy' ? '买入' : '卖出';
+                            const typeClass = signal.type === 'buy' ? 'signal-buy' : 'signal-sell';
+                            msg += `${type} ${signal.amount}张，价格${signal.price}，原因：${signal.reason}\n`;
+                        });
+                    }
+                    alert(msg);
+                }
+            });
+        }
+
+        // 策略回测
+        document.getElementById('backtestBtn').addEventListener('click', function() {
+            const start_date = document.getElementById('start_date').value;
+            const end_date = document.getElementById('end_date').value;
+            
+            if (!start_date || !end_date) {
+                alert('请选择回测日期范围');
+                return;
+            }
+            
+            const btn = this;
+            btn.disabled = true;
+            btn.innerHTML = '回测中...';
+            
+            fetch('/api/backtest', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({start_date, end_date})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('backtestResult').classList.remove('d-none');
+                    document.getElementById('bt_total_return').innerText = data.result.total_return + '%';
+                    document.getElementById('bt_annual_return').innerText = data.result.annual_return + '%';
+                    document.getElementById('bt_max_drawdown').innerText = data.result.max_drawdown + '%';
+                    document.getElementById('bt_win_rate').innerText = data.result.win_rate + '%';
+                } else {
+                    alert('回测失败，请重试');
+                }
+            })
+            .catch(() => alert('回测失败，请重试'))
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '开始回测';
+            });
+        });
+
+        // 刷新交易记录
+        document.getElementById('refreshTradesBtn').addEventListener('click', function() {
+            fetch('/api/get_trades')
+                .then(res => res.json())
+                .then(data => {
+                    const list = document.getElementById('tradeList');
+                    if (data.trades.length === 0) {
+                        list.innerHTML = '<tr><td colspan="7" class="text-center text-muted">暂无交易记录</td></tr>';
+                        return;
+                    }
+                    let html = '';
+                    data.trades.forEach(trade => {
+                        const typeClass = trade.trade_type === 'buy' ? 'signal-buy' : 'signal-sell';
+                        const profitClass = trade.profit >= 0 ? 'profit' : 'loss';
+                        html += `
+                            <tr>
+                                <td>${new Date(trade.trade_time).toLocaleString()}</td>
+                                <td>${trade.bond_code}</td>
+                                <td>${trade.bond_name}</td>
+                                <td class="${typeClass}">${trade.trade_type === 'buy' ? '买入' : '卖出'}</td>
+                                <td>${trade.price}</td>
+                                <td>${trade.amount}</td>
+                                <td class="${profitClass}">${trade.profit || '-'}</td>
+                            </tr>
+                        `;
+                    });
+                    list.innerHTML = html;
+                });
+        });
+
+        // 页面加载完成
+        document.addEventListener('DOMContentLoaded', function() {
+            // 自动加载交易记录
+            document.getElementById('refreshTradesBtn').click();
+        });
+    </script>
+</body>
+</html>

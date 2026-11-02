@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media Content Scraper</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            min-height: 100vh;
+            padding: 20px 0;
+        }
+        .container {
+            max-width: 1200px;
+        }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background: #28a745;
+            color: white;
+            border-radius: 15px 15px 0 0 !important;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+        .btn-primary {
+            background: #28a745;
+            border: none;
+        }
+        .btn-primary:hover {
+            background: #218838;
+        }
+        .task-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        .status-pending { color: #ffc107; font-weight: bold; }
+        .status-running { color: #007bff; font-weight: bold; }
+        .status-completed { color: #28a745; font-weight: bold; }
+        .status-failed { color: #dc3545; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center text-white mb-4">🕷️ Social Media Content Scraper Pro</h1>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        New Scraping Task
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Platform</label>
+                            <select class="form-select" id="platform">
+                                <option value="wechat">WeChat Official Account</option>
+                                <option value="instagram">Instagram Profile</option>
+                                <option value="tiktok">TikTok Profile</option>
+                                <option value="youtube">YouTube Channel</option>
+                                <option value="twitter">Twitter/X Profile</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Profile URL</label>
+                            <input type="text" class="form-control" id="url" placeholder="https://...">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Number of posts to scrape</label>
+                            <select class="form-select" id="count">
+                                <option value="10">Latest 10 posts</option>
+                                <option value="50">Latest 50 posts</option>
+                                <option value="100">Latest 100 posts</option>
+                                <option value="0">All posts</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Export format</label>
+                            <select class="form-select" id="format">
+                                <option value="markdown">Markdown</option>
+                                <option value="html">HTML</option>
+                                <option value="txt">Plain Text</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary w-100" id="startBtn">
+                            🚀 Start Scraping
+                        </button>
+                        <hr>
+                        <h6>Your Tasks</h6>
+                        <div id="taskList" class="list-group">
+                            <div class="list-group-item text-center text-muted">
+                                Loading...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        Task Details
+                    </div>
+                    <div class="card-body" id="result">
+                        <div class="text-center text-muted py-5">
+                            Create a new scraping task to see results
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Load tasks
+        function loadTasks() {
+            fetch('/tasks')
+                .then(res => res.json())
+                .then(data => {
+                    const list = document.getElementById('taskList');
+                    if (data.tasks.length === 0) {
+                        list.innerHTML = '<div class="list-group-item text-center text-muted">No tasks yet</div>';
+                        return;
+                    }
+                    list.innerHTML = '';
+                    data.tasks.forEach(task => {
+                        const item = document.createElement('a');
+                        item.className = 'list-group-item list-group-item-action';
+                        item.href = 'javascript:;';
+                        const statusClass = `status-${task.status}`;
+                        item.innerHTML = `
+                            <strong>${task.official_account}</strong><br>
+                            <small>
+                                <span class="${statusClass}">${task.status.toUpperCase()}</span> | 
+                                ${task.completed_count}/${task.total_count} posts | 
+                                ${new Date(task.created_at).toLocaleString()}
+                            </small>
+                        `;
+                        item.onclick = () => loadTask(task.id);
+                        list.appendChild(item);
+                    });
+                });
+        }
+
+        // Load task
+        function loadTask(id) {
+            fetch(`/task/${id}`)
+                .then(res => res.json())
+                .then(data => {
+                    renderTask(data.task, data.articles);
+                });
+        }
+
+        // Render task
+        function renderTask(task, articles) {
+            const result = document.getElementById('result');
+            const statusClass = `status-${task.status}`;
+            result.innerHTML = `
+                <div class="mb-4">
+                    <h5>Task Info</h5>
+                    <p><strong>Platform:</strong> ${task.official_account}</p>
+                    <p><strong>Status:</strong> <span class="${statusClass}">${task.status.toUpperCase()}</span></p>
+                    <p><strong>Progress:</strong> ${task.completed_count}/${task.total_count} posts</p>
+                    <p><strong>Created at:</strong> ${new Date(task.created_at).toLocaleString()}</p>
+                </div>
+                
+                ${task.status === 'completed' ? `
+                <div class="mt-4 mb-4">
+                    <button class="btn btn-success me-2" onclick="exportTask('${task.id}', 'markdown')">📥 Export as Markdown</button>
+                    <button class="btn btn-success me-2" onclick="exportTask('${task.id}', 'html')">📥 Export as HTML</button>
+                    <button class="btn btn-success" onclick="exportTask('${task.id}', 'txt')">📥 Export as Text</button>
+                </div>
+                ` : ''}
+                
+                <h6>Scraped Articles (${articles.length})</h6>
+                <div class="overflow-auto" style="max-height: 500px;">
+                    ${articles.map(article => `
+                        <div class="task-item">
+                            <strong>${article.title}</strong><br>
+                            <small>
+                                ${new Date(article.publish_time).toLocaleDateString()} | 
+                                👁️ ${article.read_count} | 👍 ${article.like_count}
+                            </small>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // Start task
+        document.getElementById('startBtn').addEventListener('click', function() {
+            const platform = document.getElementById('platform').value;
+            const url = document.getElementById('url').value;
+            const count = document.getElementById('count').value;
+            const format = document.getElementById('format').value;
+            
+            if (!url) {
+                alert('Please enter profile URL');
+                return;
+            }
+            
+            const btn = this;
+            btn.disabled = true;
+            btn.innerHTML = 'Starting...';
+            
+            fetch('/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({url, count, platform, format})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    loadTasks();
+                    alert('Task started successfully!');
+                } else {
+                    alert('Failed to start task: ' + data.error);
+                }
+            })
+            .catch(() => alert('Failed to start task, please try again'))
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '🚀 Start Scraping';
+            });
+        });
+
+        // Export task
+        function exportTask(taskId, format) {
+            window.open(`/export/${taskId}?format=${format}`, '_blank');
+        }
+
+        // Page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadTasks();
+            // Refresh tasks every 5 seconds
+            setInterval(loadTasks, 5000);
+        });
+    </script>
+</body>
+</html>

@@ -21,7 +21,7 @@ import os
 # ─────────────────────────────────────────
 BILLING_API_URL = "https://skillpay.me"
 # API Key（已配置）
-BILLING_API_KEY = "sk_f03aa8f8bbcf79f7aa11c112d904780f22e62add1464e3c41a79600a451eb1d2"
+BILLING_API_KEY = ""
 # SKILL_ID（已配置）
 SKILL_ID = "dc2ff7e7-172c-4e78-a450-0522abb0cf31"
 # ─────────────────────────────────────────
