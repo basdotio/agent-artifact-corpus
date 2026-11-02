@@ -57,6 +57,15 @@ func basisBlock(e manifest.Entry, c Coord) string {
 			"every sample collected from %s is treated as %s; nothing about this particular "+
 				"sample was examined", e.ID, c.Class)
 	}
+	if c.AlertJustified != nil {
+		// Benign stays `assumed` even after a reading: reading finds no attack, it cannot prove
+		// there is none (taxonomy/basis.yaml). The entry's own constant is malicious, so the
+		// batch sentence above would be false; this one says what actually happened.
+		classBasis, sourceField, sourceValue = "assumed", "", ""
+		lines[0] = "  class: assumed"
+		assumption = fmt.Sprintf("a %s candidate read and found not malicious (see `reviewed`); "+
+			"a benign class rests on the absence of a finding, never on proof", e.ID)
+	}
 	if classBasis == "upstream" {
 		sourceField, sourceValue = classField, classValue
 	}

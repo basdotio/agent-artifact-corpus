@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  gptr-mcp:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MCP_TRANSPORT=sse
+      - DOCKER_CONTAINER=true
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      # Mount logs directory for persistent logging
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Add a reverse proxy for production
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - gptr-mcp
+    restart: unless-stopped
+    profiles:
+      - production
+
+networks:
+  gptr-mcp-net:
+    driver: bridge
+    # To connect to existing n8n network, run:
+    # docker network connect n8n-mcp-net gptr-mcp 

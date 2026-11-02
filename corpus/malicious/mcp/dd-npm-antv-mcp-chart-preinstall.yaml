@@ -1,0 +1,39 @@
+id: mal-mcp-dd-npm-antv-mcp-chart-preinstall
+class: malicious
+surface: mcp
+kind: skill
+entry: .
+
+origin:
+  type: real-world
+  # Supply-chain compromise: @antv/mcp-server-chart is a real, widely-used chart-generation MCP
+  # server; this published version was compromised to add an npm preinstall hook that runs an
+  # obfuscated root index.js at install time, unrelated to the server's function. From DataDog's
+  # compromised_lib pool (a legitimate package with a malicious version), not malicious_intent.
+  provenance: wild
+  source: "https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45, samples/npm/compromised_lib/@antv/mcp-server-chart@0.10.10"
+  license: Apache-2.0
+  note: >-
+    package.json adds `"preinstall": "bun run index.js"`, and that root index.js is a heavily
+    obfuscated single-line payload with no connection to chart generation; it runs on `npm
+    install`, before the MCP server is ever started.
+  added: 2026-10-30
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: package.json
+    lines: "19"
+    quote: "\"preinstall\": \"bun run index.js\""
+  # The preinstall hook is literal in package.json, but what it runs is the obfuscated index.js
+  # beside it, not the manifest line — the payload is split from its trigger and buried in
+  # obfuscation, so evasive tier with evasion split-across-files.
+
+truth:
+  techniques: [install-hook-execution]
+  severity: high
+  tier: evasive
+  evasion: [split-across-files]

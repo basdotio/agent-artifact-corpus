@@ -1,0 +1,85 @@
+name: Docker Build & Publish
+
+on:
+  release:
+    types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build and push (e.g., 1.0.1)'
+        required: true
+        type: string
+
+jobs:
+  docker:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    # Only run if the release workflow completed successfully, a release was published, or manually triggered
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          fetch-depth: 0
+      
+      - name: Get package version
+        id: package-version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Using manual version: $VERSION"
+          else
+            VERSION=$(node -p "require('./package.json').version")
+            echo "Using package.json version: $VERSION"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+        
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: watercrawl/mcp
+          tags: |
+            type=raw,value=v${{ steps.package-version.outputs.version }}
+            type=raw,value=latest
+            type=sha,format=short
+            type=raw,value={{branch}}-{{sha}}
+            
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Check if Docker Hub secrets exist
+        id: check-secrets
+        run: |
+          if [ -n "${{ secrets.DOCKER_USERNAME }}" ] && [ -n "${{ secrets.DOCKER_PASSWORD }}" ]; then
+            echo "has_docker_secrets=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_docker_secrets=false" >> $GITHUB_OUTPUT
+          fi
+        
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        # Only run this step if Docker Hub credentials are available
+        if: steps.check-secrets.outputs.has_docker_secrets == 'true'
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          # Only push if Docker Hub credentials are available
+          push: ${{ steps.check-secrets.outputs.has_docker_secrets == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.package-version.outputs.version }}

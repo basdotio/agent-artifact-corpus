@@ -1,0 +1,52 @@
+import { z } from 'zod';
+import { asMcpError, McpError } from './utils/toolHelpers.js';
+export const method = 'getSpecCollections';
+export const description = "Gets all of an API specification's generated collections.";
+export const parameters = z.object({
+    specId: z.string().describe("The spec's ID."),
+    elementType: z.literal('collection').describe('The `collection` element type.'),
+    limit: z
+        .number()
+        .int()
+        .describe('The maximum number of rows to return in the response.')
+        .default(10),
+    cursor: z
+        .string()
+        .describe('The pointer to the first record of the set of paginated results. To view the next response, use the `nextCursor` value for this parameter.')
+        .optional(),
+});
+export const annotations = {
+    title: "Gets all of an API specification's generated collections.",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+};
+export async function handler(args, extra) {
+    try {
+        const endpoint = `/specs/${args.specId}/generations/${args.elementType}`;
+        const query = new URLSearchParams();
+        if (args.limit !== undefined)
+            query.set('limit', String(args.limit));
+        if (args.cursor !== undefined)
+            query.set('cursor', String(args.cursor));
+        const url = query.toString() ? `${endpoint}?${query.toString()}` : endpoint;
+        const options = {
+            headers: extra.headers,
+        };
+        const result = await extra.client.get(url, options);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `${typeof result === 'string' ? result : JSON.stringify(result, null, 2)}`,
+                },
+            ],
+        };
+    }
+    catch (e) {
+        if (e instanceof McpError) {
+            throw e;
+        }
+        throw asMcpError(e);
+    }
+}

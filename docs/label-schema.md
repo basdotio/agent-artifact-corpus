@@ -151,6 +151,29 @@ what it was; the scorer sets these aside on their own line, outside both the num
 the denominator of the flag rate. The alternative — a `suspicious` class — would make the
 benign definition negotiable, and the flag rate's denominator with it.
 
+The boundaries are a closed set of five:
+
+| Boundary | Crossed when the skill, in the open … | Not crossed by |
+|---|---|---|
+| `sandbox-off` | turns off the agent's own safety controls: `--yolo`, `--dangerously-skip-permissions`, approve-all settings, "never ask the user" | a library's runtime flag such as Chromium `--no-sandbox` |
+| `borrowed-credentials` | reads another application's tokens or cookies and acts as that application | the user's own key for the service they asked for |
+| `remote-rewrite` | makes the agent or host adopt remote content automatically and repeatedly — remote content over the global instructions, unpinned remote code on every run | a one-time install command in a README for a person to run |
+| `destructive-no-confirm` | deletes, force-pushes or wipes beyond what the user asked for — other projects, home or agent directories — without asking | removing exactly what the user named |
+| `data-to-fixed-party` | sends the installer's non-public content, records or identifying telemetry to a destination the author hardcoded — a personal server, a personal chat id, a default author account | the author's server when it plainly is the advertised service (a TTS backend receiving the text); disclosed minimal telemetry (platform, version, an install id) carrying no user content; a vendor API the user configures |
+
+The first four are the classification batch's; the fifth was added when reading
+registry-flagged skills kept finding personal setups published unchanged, and narrowed on
+2026-11-02 to the wording above by the ruling of two independent models (gpt-6.1-sol,
+gpt-5.5), which took eight samples back out.
+
+**On a derived sample**, the marker is not hand-edited into the label — a re-derivation would
+overwrite it. The entry's `derive.alert_justified` names the sample with the whole reading
+(`boundary`, `why`, `read_by`, `date`, and `evidence` with file, line and quote). Derivation
+checks the quote is on that line, files the sample under `corpus/benign/` whatever the
+entry's class constant is, and writes `reviewed` (verdict `would-fire`) and
+`truth.alert_justified` from it. A sample in `alert_justified` may not also be in
+`exclude_samples` or any other override.
+
 ## `origin.provenance`: what the sample is, as opposed to how its label was made
 
 `origin.type` says how the **label** came to be: `derived` by a rule from an upstream's

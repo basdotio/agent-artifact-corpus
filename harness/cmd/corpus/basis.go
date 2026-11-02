@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -253,9 +254,31 @@ func reportRefutation(labels []*label.Label, rs *refute.Ruleset, entries []manif
 		m   refute.Marker
 	}
 	var markers []popMarker
+	var cleared []refute.ClearedMarker
+	if p := rs.Pattern("label-bearing-marker"); p != nil {
+		cleared = p.Cleared
+	}
+	usedClear := map[int]bool{}
 	for _, pop := range sortedPopulations(byPop) {
 		for _, m := range refute.LabelBearingMarkers(byPop[pop], minMarkerSupport, maxMarkerPurity) {
+			i := slices.IndexFunc(cleared, func(c refute.ClearedMarker) bool {
+				return c.Population == pop && c.Substring == m.Substring
+			})
+			if i >= 0 {
+				usedClear[i] = true
+				fmt.Printf("  marker cleared  %q in %q (%d sample(s), %.0f%% %s): %s\n",
+					m.Substring, pop, m.Support, m.Purity*100, m.Class, cleared[i].Why)
+				continue
+			}
 			markers = append(markers, popMarker{pop, m})
+		}
+	}
+	for i, c := range cleared {
+		// A clearance that answers no hit any more would outlive its reason and silently cover
+		// the next marker to reach that substring.
+		if !usedClear[i] {
+			problems = append(problems, fmt.Sprintf("taxonomy/refutation.yaml label-bearing-marker: "+
+				"cleared %q in %q matches no marker any more — remove the clearance", c.Substring, c.Population))
 		}
 	}
 

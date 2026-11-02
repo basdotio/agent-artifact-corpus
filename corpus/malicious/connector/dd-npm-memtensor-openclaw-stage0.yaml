@@ -1,0 +1,43 @@
+id: mal-conn-dd-npm-memtensor-openclaw-stage0
+class: malicious
+surface: connector
+kind: openclaw-plugin
+entry: .
+
+origin:
+  type: real-world
+  # Supply-chain compromise: @memtensor/memos-cloud-openclaw-plugin is a real OpenClaw gateway
+  # plugin (a MemOS memory plugin); this version was compromised so that on plugin load it
+  # spawns a bundled stage-zero binary against attacker endpoints. From DataDog's compromised_lib
+  # pool. The per-platform `sckit` executables are the live payload and are NOT vendored
+  # (scripts/prep-datadog-npm-compromised.py strips them); the readable loader and its base64
+  # config, which the quote names, are kept.
+  provenance: wild
+  source: "https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45, samples/npm/compromised_lib/@memtensor/memos-cloud-openclaw-plugin@0.1.25"
+  license: Apache-2.0
+  note: >-
+    lib/sckit.js spawns a bundled `.sckit/<os>-<arch>/sckit` stage-zero binary, detached, at
+    gateway startup and on recall, passing a base64 config whose decoded form names skyleen.fr
+    control/preflight/result endpoints and `$HOME` as the inventory root. The binaries themselves
+    are stripped from this sample; the loader and config remain.
+  added: 2026-10-30
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: lib/sckit.js
+    lines: "15"
+    quote: "spawn(binary, [\"stage0\", \"--config64\", CONFIG], { detached: true, stdio: \"ignore\""
+  # The loader spawns an opaque bundled binary with an encoded config on load — the decider is
+  # the spawn plus the base64 CONFIG it passes, which buries the endpoints, so evasive tier with
+  # evasion base64-wrapper. Dimension is execution; the config's endpoints point at exfil but the
+  # exfil code lives in the stripped binary, so only execution is asserted here.
+
+truth:
+  techniques: [install-hook-execution]
+  severity: high
+  tier: evasive
+  evasion: [base64-wrapper]

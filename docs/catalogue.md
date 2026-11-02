@@ -60,7 +60,8 @@ nothing to do with detection:
   3,944 malicious ones. **The classes separate at 97% purity without reading a single
   skill.** Delete that file before any measurement.
 - **`skillfortifybench`**: malicious samples use RFC-2606 reserved domains and benign ones
-  never do. One regex scores perfectly and generalises to nothing.
+  never do. One regex scores perfectly and generalises to nothing. (Its malicious half is now
+  vendored, read and capped, without the benign half, for exactly this reason.)
 
 Neither is obviously wrong when you read individual samples, which is why this belongs in a
 build gate rather than a review checklist. A human reading samples one at a time cannot see
@@ -174,6 +175,61 @@ anywhere.**
 *Required prep*: **delete `_meta.json` from every sample before measuring anything.**
 (The companion rumour that the malicious directories are empty is false — all 3,944 contain
 a `SKILL.md`.)
+
+**`malskills-gt`** — the held-out set, seen from outside.
+`https://github.com/security-pride/MalSkills` @ `46d60f09cef0`, Apache-2.0 for the code
+only, **the skills carry no grant: never vendor**. 597 malicious ClawHub trees (100 distinct
+`SKILL.md`) from the ClawHavoc disclosure, recovered from the registry's archive history.
+*Hazards*: 580 of the 597 are byte-identical to the held-out set (`agent-skill-malware`) and 12
+are already derived from `datadog-ai-skills`. Of the rest, two models read 8 and both called 2
+malicious, but those two were published in January 2026, before ClawHub made skills MIT-0
+(2026-03-07), and were removed before it, so nothing licenses them. Koi's label is per account:
+three `sakaen736jih` versions are plain documentation.
+
+**`maliciousskillbench-wild`** — wild texts two upstreams withheld.
+`https://huggingface.co/datasets/ProtectSkills/MaliciousSkillBench` @ `d4b42ce5766a`, data
+CC-BY-4.0, third-party skills on their upstream terms (both upstreams MIT): vendorable on the
+same compiler's-licence basis as `datadog-ai-skills`. 186 in-the-wild malicious `SKILL.md` texts
+from MaliciousAgentSkillsBench (153) and SkillLeakBench (33), whose own releases are labels only.
+*Hazards*: `SKILL.md` only — the upstreams confirmed malice by running the scripts, which are not
+here — so of the 185 distinct texts two models read, three were called malicious by both; one is
+a SkillHarm copy filed as wild, one a held-out ClawHub campaign, so 1 is derived.
+
+**`mcp-variants`** — attacks injected into real MCP servers.
+`https://github.com/yms0527/awesome-mcp-servers` @ `e8303ec7a14d`, MIT for the repository but each
+variant is a modified copy of someone else's server, so only the 103 of 190 whose tree carries an
+MIT or Apache-2.0 licence file were considered, and each label carries the base server's licence.
+55 malicious samples, provenance `injected`, across 13 of the 15 attack types.
+*Hazards*: injected, never wild — real server code plus a planted attack. Several injection
+templates repeat byte for byte across servers; two (a squatting decoy that returns a fixed status,
+a preference-steering description) were ruled not malicious and are excluded whole. Capped at five
+per attack type and two per base server.
+
+**`skillfortifybench`** and **`skillfortifybench-mcp`** — a generated scanner benchmark.
+`https://github.com/qualixar/skillfortifybench` @ `eb9d5a9cbfa1`, MIT. Its malicious half, in three
+formats (Claude skill, MCP config, OpenClaw skill), written by the paper's seeded generator; the two
+entries are the one source split by surface. 36 malicious skills and 14 malicious MCP configs,
+provenance `synthetic`, across 10 of its 13 attack types: two models read the whole upstream
+malicious half without its labels, and four doubtful
+templates were ruled once each (a secret printed to the server's own stdout, a temp-cache wipe and
+an overt `chmod 777` are out; logs wiped under a cache-cleanup pretext is in). Its squatting and
+typosquatting types carry nothing harmful behind the lookalike name and yield none.
+*Hazards*: the shortcut below. Most attacker hosts name their role (`loader.backdoor.example.com`),
+kept as published, so recall here is an upper bound; the benign half, which holds no URL at all, is
+not admitted; the inline `SKILLFORTIFYBENCH:INERT` banner is stripped by a declared transform; trees
+are named by format and hash, not by the upstream id that spells out the class. Capped at five per
+attack type.
+
+**`skill-inject`** — injection lines inserted into real public skills.
+`https://github.com/aisa-group/skill-inject` @ `182f3d9d9836`, MIT for the repository; each tree under
+its carrier skill's licence. The upstream ships carriers and injection definitions and builds each
+sample at run time; `scripts/prep-skill-inject.py` repeats that build without running its code. Only
+carriers whose origin was traced are used (wshobson/agents, claude-cookbooks, anthropics/skills
+examples, huggingface/skills, the authors' own), never Anthropic's proprietary document skills, which
+leaves 47 of 84 injections buildable. 25 malicious samples, provenance `injected`.
+*Hazards*: two models and a third vote read all 47 without the upstream's obvious/contextual split;
+injections that only make the agent skip a check or write worse code, with no one benefiting, are
+out. Capped at two per carrier. The exfiltration hosts are the authors' live collection servers.
 
 ### False-positive denominator — benign samples
 

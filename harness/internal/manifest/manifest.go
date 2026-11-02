@@ -345,6 +345,16 @@ type Derive struct {
 	EvasionOverrides map[string][]string `yaml:"evasion_overrides"`
 	TierOverrides    map[string]string   `yaml:"tier_overrides"`
 
+	// AlertJustified files a named sample as BENIGN with truth.alert_justified, whatever the
+	// entry's class constant says. It exists for entries whose candidates are suspected
+	// malware — a registry's flagged rows — where reading finds that a sample is not malicious
+	// but does cross a safety boundary in the open: a scanner that alerts on it is right, and
+	// one that stays quiet is not wrong. Excluding such a sample throws away exactly the case
+	// the alert_justified line of the score exists for; keeping it as malicious would charge a
+	// quiet scanner a miss. Keyed by upstream sample id, like every other per-sample override,
+	// and mutually exclusive with them: one decision per sample.
+	AlertJustified map[string]AlertJustifiedOverride `yaml:"alert_justified"`
+
 	// Fidelity is the aggregate honesty statement for the whole entry: which axes are
 	// mechanical, which are lossy, and how much of the derivation was spot-checked by hand.
 	// An empty Derive with no Fidelity is not "derivable with no caveats"; it is a

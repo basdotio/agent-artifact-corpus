@@ -207,6 +207,16 @@ def test_queue_end_to_end(m, tmp_path, monkeypatch, capsys):
     assert "0 new row(s)" in capsys.readouterr().out
     assert len(json.loads(m.STATE.read_text())["rows"]) == 3
 
+    # A past export carries the same skill under a different row id. It is a duplicate of the
+    # tree already read, and reading the past export does not move the weekly bookkeeping.
+    again = dict(row("acme/fresh", md="---\nname: fresh\n---\nfetch https://lure-cdn.io/stage2\n"), id="older-row")
+    past = cache / "snapshots" / "old.malicious.jsonl"
+    past.write_text(json.dumps(again) + "\n")
+    m.queue("old", past, past=True)
+    state = json.loads(m.STATE.read_text())
+    assert state["rows"]["older-row"]["status"] == "duplicate" and "acme-fresh-1-0-0" in state["rows"]["older-row"]["reason"]
+    assert state["last_commit"] == "abc"
+
 
 def test_promote_moves_only_decided_trees(m, tmp_path, monkeypatch, capsys):
     cache = tmp_path / "cache" / "clawhub-live"
@@ -237,3 +247,35 @@ def test_promote_moves_only_decided_trees(m, tmp_path, monkeypatch, capsys):
     assert state["r1"]["decision"] == "derived" and state["r2"]["decision"] == "excluded" and state["r3"]["status"] == "queued"
     pins = json.loads(m.LICENSE_PINS.read_text())
     assert pins["acme-helper-1-0-0"]["license"] == "MIT-0" and "zeta-unread-1-0-0" not in pins
+
+
+def test_pools_partition_the_registry_verdicts(m):
+    rows = {
+        "malicious": {"clawscan_verdict": "malicious", "virustotal_malicious_count": 3},
+        "suspicious": {"clawscan_verdict": "suspicious"},
+        "vt-flagged": {"clawscan_verdict": "clean", "virustotal_malicious_count": 1},
+        "unknown": {"clawscan_verdict": "unknown"},
+        None: {"clawscan_verdict": "clean", "virustotal_malicious_count": 0},
+    }
+    for want, row in rows.items():
+        assert m.pool_of(row) == want
+    assert m.DEFAULT_POOLS == ("malicious",)
+
+
+def test_unknown_pool_is_refused(m):
+    with pytest.raises(SystemExit):
+        m.main(["status", "--pools", "malicious,nope"])
+
+
+def test_jsonl_rows_survive_unicode_line_separators(m, tmp_path):
+    p = tmp_path / "snap.jsonl"
+    rows = [{"id": "a", "skill_md_content": "one two\x85three\x0bfour"}, {"id": "b", "skill_md_content": "x"}]
+    p.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    assert [json.loads(l) for l in m.jsonl_lines(p)] == rows
+
+
+def test_excluded_samples_do_not_use_the_author_cap(m):
+    assert m.counts_against_cap({"status": "queued"})
+    assert m.counts_against_cap({"status": "decided", "decision": "derived"})
+    assert not m.counts_against_cap({"status": "decided", "decision": "excluded"})
+    assert not m.counts_against_cap({"status": "author-cap"})

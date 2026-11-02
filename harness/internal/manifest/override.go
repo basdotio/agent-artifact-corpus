@@ -20,6 +20,26 @@ type Evidence struct {
 	Quote string `yaml:"quote"`
 }
 
+// AlertJustifiedBoundaries is the closed set of safety boundaries an alert_justified sample may
+// cross in the open. The first four are the classification batch's (2026-10-28); the fifth
+// names the case reading registry-flagged skills kept finding: a personal setup published
+// unchanged, sending the installer's data to the author's own server or chat.
+var AlertJustifiedBoundaries = []string{
+	"sandbox-off", "borrowed-credentials", "remote-rewrite", "destructive-no-confirm", "data-to-fixed-party",
+}
+
+// AlertJustifiedOverride is the reading that moves one sample of a malicious-candidate entry to
+// the benign side with truth.alert_justified. Every field is required: the marker is a claim
+// that a flag here is correct, and a claim with no reader, date, boundary or located line is a
+// way to park a false positive.
+type AlertJustifiedOverride struct {
+	Boundary string    `yaml:"boundary"`
+	Why      string    `yaml:"why"`
+	ReadBy   string    `yaml:"read_by"`
+	Date     string    `yaml:"date"`
+	Evidence *Evidence `yaml:"evidence"`
+}
+
 // DimensionOverride is a hand-read dimension for one upstream sample, optionally carrying the
 // evidence for it.
 //

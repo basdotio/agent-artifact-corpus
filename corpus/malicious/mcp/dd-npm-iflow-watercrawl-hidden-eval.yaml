@@ -1,0 +1,40 @@
+id: mal-mcp-dd-npm-iflow-watercrawl-hidden-eval
+class: malicious
+surface: mcp
+kind: skill
+entry: .
+
+origin:
+  type: real-world
+  # Captured npm malware: @iflow-mcp/watercrawl-watercrawl-mcp, published to npm and flagged
+  # malicious_intent by DataDog. A WaterCrawl MCP server fork whose src/index.ts hides an eval
+  # payload inside Unicode variation selectors. Distinct from the benign WaterCrawl republish
+  # the datadog-npm-mcp hazards say reading rejected — this fork is the malicious one.
+  provenance: wild
+  source: "https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45, samples/npm/malicious_intent/@iflow-mcp/watercrawl-watercrawl-mcp@1.3.4"
+  license: Apache-2.0
+  note: >-
+    the SSE entry point decodes a string of invisible variation-selector code points
+    (U+FE00..U+FE0F and U+E0100..U+E01EF) back into bytes and hands them to eval, so an attacker
+    payload runs in the server process while the file reads as ordinary crawler code.
+  added: 2026-10-30
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: src/index.ts
+    lines: "32"
+    quote: "w >= 0xfe00 && w <= 0xfe0f"
+  # The decoder that reconstructs the hidden payload from variation selectors is the deciding
+  # element: it only exists to turn invisible characters into code that eval runs. The payload
+  # itself is carried in zero-width form, so the transformation buries it — evasive tier,
+  # evasion zero-width.
+
+truth:
+  techniques: [tool-body-dynamic-exec]
+  severity: critical
+  tier: evasive
+  evasion: [zero-width]

@@ -55,7 +55,7 @@ ShareAlike 条款具有传染性。`anthropics/skills` 是**专有的**：逐 sk
 - **`malskillbench`**：`_meta.json` 在 4,000 个良性样本里有 3,878 个，在 3,944 个恶意样本里
   **一个都没有**。**不读任何 skill 内容就能以 97% 纯度把两类分开。** 用前必须删掉那个文件。
 - **`skillfortifybench`**：恶意样本用 RFC-2606 保留域名，良性样本一个都不用。
-  一行正则满分，泛化到真实世界是 0%。
+  一行正则满分，泛化到真实世界是 0%。（正因如此，它的恶意一半读过、封顶后已入库，良性一半没有收。）
 
 逐个样本读的时候两份都看不出问题，所以这件事属于**构建闸门**而不是评审清单 ——
 一个人一次读一个样本，看不见分布。值得有的机制是一道构建闸门：任何支持度 ≥8 的结构特征能以
@@ -142,6 +142,50 @@ skill 没法再从注册表取。
 *风险*：**严重标签泄漏**，见上面第 3 条。
 *必须的预处理*：**测量任何东西之前，先从每个样本里删掉 `_meta.json`。**
 （"恶意目录是空的"那个传言是**假的** —— 3,944 个全都有 `SKILL.md`。）
+
+**`malskills-gt`** —— 从外面看到的留出集。
+`https://github.com/security-pride/MalSkills` @ `46d60f09cef0`，Apache-2.0 只管代码，
+**skill 本身没有任何授权：永不 vendoring**。597 个 ClawHub 恶意树（100 个不同的 `SKILL.md`），
+来自 ClawHavoc 披露，从注册表归档的历史里找回。
+*风险*：597 个里有 580 个和留出集（`agent-skill-malware`）逐字节相同，12 个已从
+`datadog-ai-skills` 派生。其余的里两个模型读了 8 个，都判恶意的有 2 个；但这 2 个发布于
+2026 年 1 月，早于 ClawHub 把 skill 定为 MIT-0（2026-03-07），而且在那之前就被下架，
+没有任何授权覆盖它们。Koi 的标签按账号打：`sakaen736jih` 有三个版本只是普通文档。
+
+**`maliciousskillbench-wild`** —— 两个上游没放出来的野生正文。
+`https://huggingface.co/datasets/ProtectSkills/MaliciousSkillBench` @ `d4b42ce5766a`，数据
+CC-BY-4.0，第三方 skill 按上游条款（两个上游都是 MIT）：和 `datadog-ai-skills` 一样按编纂者的
+许可 vendoring。186 篇野生恶意 `SKILL.md`，来自 MaliciousAgentSkillsBench（153）和
+SkillLeakBench（33），这两家自己只发了标签。
+*风险*：只有 `SKILL.md` —— 上游是跑脚本才确认恶意的，脚本不在这里 —— 所以两个模型读完 185 篇
+不同正文，都判恶意的只有 3 篇；其中一篇是被标成野生的 SkillHarm 副本，一篇属于留出集里的
+ClawHub 活动，最后派生 1 个。
+
+**`mcp-variants`** —— 植入真实 MCP server 的攻击。
+`https://github.com/yms0527/awesome-mcp-servers` @ `e8303ec7a14d`，仓库是 MIT，但每个变体都改自别人的
+server，所以只考虑了 190 个里树中带 MIT 或 Apache-2.0 许可证文件的 103 个，每个标签记的是底本的许可证。
+收 55 个恶意样本，出身 `injected`，覆盖 15 类攻击里的 13 类。
+*风险*：是植入的，不是在野的——真实 server 代码加上人为植入的攻击。有几种植入模板在多个 server 里逐字重复；
+其中两种（只返回固定状态的抢注假工具、只在描述里引导 agent 偏好自己）被裁定不算恶意，整类排除。
+每类攻击最多 5 个、每个底本最多 2 个。
+
+**`skillfortifybench`** 和 **`skillfortifybench-mcp`** —— 生成出来的扫描器基准。
+`https://github.com/qualixar/skillfortifybench` @ `eb9d5a9cbfa1`，MIT。取它的恶意一半，三种格式（Claude
+skill、MCP 配置、OpenClaw skill），由论文的定种子生成器写出；两个条目是同一个来源按 surface 拆开。收 skill
+36 个、MCP 配置 14 个，都是恶意，出身 `synthetic`，覆盖它 13 类攻击里的 10 类：两个模型不看上游标签读完整个恶意一半，四种存疑模板
+各裁定一次（把密钥打印到 server 自己的 stdout、只清临时缓存、明着 `chmod 777` 不收；借清缓存之名删日志收）。
+它的抢注和拼写抢注两类，仿冒的名字背后没有任何有害动作，一个都没收。
+*风险*：就是下面说的捷径。多数攻击者主机名自报身份（`loader.backdoor.example.com`），按发布原样保留，所以
+这里的召回率是上限；良性一半一个 URL 都没有，不收；行内的 `SKILLFORTIFYBENCH:INERT` 标记由声明过的 transform
+剥掉；树按格式加哈希命名，不用会直接写出类别的上游 id。每类攻击最多 5 个。
+
+**`skill-inject`** —— 插进真实公开 skill 的注入指令。
+`https://github.com/aisa-group/skill-inject` @ `182f3d9d9836`，仓库是 MIT，每棵树按它的载体 skill 的许可证。
+上游只发载体和注入定义，样本在运行时拼装；`scripts/prep-skill-inject.py` 照它的做法拼，不运行它的代码。只用出处
+查得到的载体（wshobson/agents、claude-cookbooks、anthropics/skills 示例、huggingface/skills、作者自己写的），
+Anthropic 专有的文档类 skill 一概不用，于是 84 条注入里能拼的是 47 条。收 25 个恶意样本，出身 `injected`。
+*风险*：两个模型加第三票读完 47 条，不沿用上游"明显/情境"的划分；只让 agent 跳过检查、写出更差代码而没有
+获益方的注入不收。每个载体最多 2 个。外传地址是作者自己在用的收集服务器。
 
 ### 误报分母 —— 良性样本
 

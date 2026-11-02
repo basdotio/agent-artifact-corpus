@@ -1,0 +1,67 @@
+import { z } from 'zod';
+import { ContentType } from '../clients/postman.js';
+import { asMcpError, McpError } from './utils/toolHelpers.js';
+export const method = 'createResponseComment';
+export const description = 'Creates a comment on a response. To create a reply on an existing comment, include the \\`threadId\\` property in the request body.\n\n**Note:**\n\nThis endpoint accepts a max of 10,000 characters.\n';
+export const parameters = z.object({
+    collectionId: z.string().describe("The collection's unique ID."),
+    responseId: z.string().describe("The response's unique ID."),
+    body: z.string().describe('The contents of the comment.'),
+    threadId: z
+        .number()
+        .int()
+        .describe("The comment's thread ID. To create a reply on an existing comment, include this property.")
+        .optional(),
+    tags: z
+        .object({
+        '{{userName}}': z
+            .object({
+            type: z.literal('user').describe('The `user` value.'),
+            id: z.string().describe("The user's ID."),
+        })
+            .describe("An object that contains information about the tagged user. The object's name is the user's Postman username. For example, `@user-postman`.")
+            .optional(),
+    })
+        .describe('Information about users tagged in the `body` comment.')
+        .optional(),
+});
+export const annotations = {
+    title: 'Creates a comment on a response. To create a reply on an existing comment, include the \\`threadId\\` property in the request body.\n\n**Note:**\n\nThis endpoint accepts a max of 10,000 characters.\n',
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+};
+export async function handler(args, extra) {
+    try {
+        const endpoint = `/collections/${args.collectionId}/responses/${args.responseId}/comments`;
+        const query = new URLSearchParams();
+        const url = query.toString() ? `${endpoint}?${query.toString()}` : endpoint;
+        const bodyPayload = {};
+        if (args.body !== undefined)
+            bodyPayload.body = args.body;
+        if (args.threadId !== undefined)
+            bodyPayload.threadId = args.threadId;
+        if (args.tags !== undefined)
+            bodyPayload.tags = args.tags;
+        const options = {
+            body: JSON.stringify(bodyPayload),
+            contentType: ContentType.Json,
+            headers: extra.headers,
+        };
+        const result = await extra.client.post(url, options);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `${typeof result === 'string' ? result : JSON.stringify(result, null, 2)}`,
+                },
+            ],
+        };
+    }
+    catch (e) {
+        if (e instanceof McpError) {
+            throw e;
+        }
+        throw asMcpError(e);
+    }
+}

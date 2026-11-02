@@ -56,6 +56,19 @@ type Pattern struct {
 	Signal       string `yaml:"signal"`
 	OnMatch      string `yaml:"on_match"`
 	ExpectedRate string `yaml:"expected_rate"`
+
+	// Cleared names marker hits a person has read and found to describe BEHAVIOUR, not the
+	// label — the boundary this pattern's own `not` draws, which no frequency count can see.
+	// Only label-bearing-marker takes them. Each is one substring in one population with the
+	// reason written down, so a clearance is as visible as the hit it answers.
+	Cleared []ClearedMarker `yaml:"cleared"`
+}
+
+// ClearedMarker is one read-and-cleared marker hit.
+type ClearedMarker struct {
+	Population string `yaml:"population"`
+	Substring  string `yaml:"substring"`
+	Why        string `yaml:"why"`
 }
 
 type refutationFile struct {
@@ -92,6 +105,16 @@ func Load(dir string) (*Ruleset, error) {
 	return &Ruleset{Version: rf.Version, Actions: rf.Actions, Patterns: rf.Patterns}, nil
 }
 
+// Pattern returns the pattern with the given id, or nil.
+func (r *Ruleset) Pattern(id string) *Pattern {
+	for i := range r.Patterns {
+		if r.Patterns[i].ID == id {
+			return &r.Patterns[i]
+		}
+	}
+	return nil
+}
+
 // KnownAction reports whether id is a declared on_match action.
 func (r *Ruleset) KnownAction(id string) bool {
 	return slices.ContainsFunc(r.Actions, func(a Action) bool { return a.ID == id })
@@ -124,6 +147,15 @@ func (r *Ruleset) Validate() []error {
 		}
 		if !r.KnownAction(p.OnMatch) {
 			bad("pattern %q has on_match %q, which is not a declared action", p.ID, p.OnMatch)
+		}
+		if len(p.Cleared) > 0 && p.ID != "label-bearing-marker" {
+			bad("pattern %q has `cleared` entries; only label-bearing-marker takes them", p.ID)
+		}
+		for _, c := range p.Cleared {
+			if c.Population == "" || c.Substring == "" || strings.TrimSpace(c.Why) == "" {
+				bad("pattern %q: a cleared marker needs population, substring and why — a "+
+					"clearance with no reason is a gate switched off", p.ID)
+			}
 		}
 	}
 	return errs

@@ -1,0 +1,42 @@
+id: mal-mcp-dd-npm-postman-mcp-shai-hulud
+class: malicious
+surface: mcp
+kind: skill
+entry: .
+
+origin:
+  type: real-world
+  # Supply-chain compromise: @postman/postman-mcp-server is Postman's real MCP server; this
+  # version carries the "Shai-Hulud" npm worm. The preinstall hook runs setup_bun.js, which
+  # installs Bun and runs the 10 MB obfuscated bun_environment.js. The same two files, byte for
+  # byte, ride ~13 agent-named packages in DataDog's compromised_lib pool (browserbase/mcp,
+  # mcp-use, …); this one represents the payload and the rest are left out.
+  provenance: wild
+  source: "https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45, samples/npm/compromised_lib/@postman/postman-mcp-server@2.4.12"
+  license: Apache-2.0
+  note: >-
+    the worm harvests npm, GitHub and cloud credentials (it bundles trufflehog), republishes the
+    victim's own npm packages with itself inside using the stolen token, plants a GitHub Actions
+    workflow and a self-hosted runner, and falls back to shredding files under $HOME. Read on
+    2026-10-30 under the majority rule: gpt-6.1-sol unsure (its view of the file was truncated),
+    gpt-5.5 and Claude (claude-opus-5-5, with file search) malicious.
+  added: 2026-10-30
+  labeled_before_run: true
+
+basis:
+  class: read
+  dimension: read
+  tier: read
+  evidence:
+    file: bun_environment.js
+    lines: "1"
+    quote: "await Bun['$']`npm publish ${_0x4fc35c}`"
+  # The self-publish call with the stolen token is the worm's propagation step, found inside
+  # the one-line obfuscated payload. The trigger (preinstall -> setup_bun.js) is in a different
+  # file from the payload, and the payload is obfuscated — evasive, split-across-files.
+
+truth:
+  techniques: [install-hook-execution, env-exfiltration]
+  severity: critical
+  tier: evasive
+  evasion: [split-across-files]
