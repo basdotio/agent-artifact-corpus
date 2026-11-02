@@ -105,6 +105,43 @@
     LLM（design_agent_id）写出来的，所以它们是 fixture，不是在野样本。
     署名：SkillHarm，OSU NLP group（osunlp），arXiv 2606.02540，CC-BY-4.0。
 
+  DataDog/malicious-software-packages-dataset —— Apache-2.0
+    https://github.com/DataDog/malicious-software-packages-dataset @ d156188d1e45
+    36 个样本树：23 个在 corpus/malicious/skills/dd-* 下，来自 samples/ai-skills；13 个在
+    corpus/malicious/{mcp,connector}/dd-npm-* 下，来自 samples/npm（带 agent 名称的 MCP server
+    和被投毒的 agent 包）。上游把每个样本存成用 README 里公开的密码加密的 zip，prep 脚本解开后
+    原样复制，只有一个被投毒包里编译好的第零阶段二进制（`sckit`）没有 vendor，可读的加载器
+    保留了。标签是读过之后生成的
+    （origin.type `derived`）。
+
+  ClawHub 技能，经 OpenClaw/clawhub-security-signals-live —— 逐个技能 MIT-0
+    https://huggingface.co/datasets/OpenClaw/clawhub-security-signals-live @ c2f898973da8
+    （每个 sidecar 写着它来自哪一期导出）
+    67 个样本树：28 个在 corpus/malicious/skills/ch-* 下，39 个在 corpus/benign/skills/ch-*
+    下（alert_justified）。2026-03-07 起在 ClawHub 发布的技能一律是 MIT-0，不要求署名；每个
+    标签的 origin.source 仍写着它在 clawhub.ai 上的技能名和版本。原样复制，只有
+    manifest/corpora.yaml 里声明的 transform 去掉了可能还有效的凭证（Discord webhook token、
+    Telegram bot token、SkillPay 商户密钥），每个 transform 改了几处都有校验。
+
+  AI45Lab/skill-safety-bench —— Apache-2.0
+    https://github.com/AI45Lab/skill-safety-bench @ e0589d7b68c7
+    9 个样本树在 corpus/malicious/skills/ssb-* 下，原样复制。标签是生成的。
+
+  ProtectSkills/MaliciousSkillBench（在野正文）—— MIT，即来源数据集的许可证
+    https://huggingface.co/datasets/ProtectSkills/MaliciousSkillBench @ d4b42ce5766a
+    23 个样本树：1 个在 corpus/malicious/skills/msb-* 下，22 个在 corpus/benign/skills/msb-*
+    下（alert_justified），每个都是来自 MaliciousAgentSkillsBench 或 SkillLeakBench 的
+    SKILL.md 正文，两者都是 MIT；每个标签的 origin.source 写明出自哪一个。原样复制。
+
+  yms0527/awesome-mcp-servers（malicious-mcp-variants）—— 每棵树按**它的底本 server** 的
+  许可证：MIT 34 个，Apache-2.0 21 个
+    https://github.com/yms0527/awesome-mcp-servers @ e8303ec7a14d
+    55 个样本树在 corpus/malicious/mcp/mv-* 下：数据集作者往真实开源 MCP server 里植入了
+    攻击。仓库本身是 MIT，但别人 server 的修改版仍带那个 server 的许可证，所以只收树里自带
+    MIT 或 Apache-2.0 许可证文件的变体，那份文件随树一起保留。Apache-2.0 底本是数据集作者
+    改的，不是这里改的；树按发布时的样子 vendor。逐树许可证见
+    manifest/pins/mcp-variants-licenses.json。
+
   modelcontextprotocol/servers —— Apache-2.0（尚未重新授权的贡献仍为 MIT）
     https://github.com/modelcontextprotocol/servers @ bbb701e7ac1e，src
     7 个样本树在 corpus/benign/mcp/ref-* 下，从该 commit 的 src/<server>/ 目录原样复制，
