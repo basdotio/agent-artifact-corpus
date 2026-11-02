@@ -1,0 +1,93 @@
+name: Garak LLM Vulnerability Scan
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    # Run weekly on Monday at 2am UTC
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Ollama model to scan'
+        required: false
+        default: 'llama2'
+      probes:
+        description: 'Specific probes to run (leave empty for all)'
+        required: false
+        default: ''
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        uv pip install --system -e .
+
+    - name: Install Ollama
+      run: |
+        curl -fsSL https://ollama.com/install.sh | sh
+
+    - name: Start Ollama service
+      run: |
+        ollama serve &
+        sleep 5
+
+    - name: Pull Ollama model
+      run: |
+        MODEL="${{ github.event.inputs.model || 'llama2' }}"
+        ollama pull $MODEL
+
+    - name: List available models
+      run: |
+        ollama list
+
+    - name: Run Garak scan
+      run: |
+        MODEL="${{ github.event.inputs.model || 'llama2' }}"
+        PROBES="${{ github.event.inputs.probes }}"
+
+        if [ -z "$PROBES" ]; then
+          uv run garak-scan --model "$MODEL" --output-dir ./scan-results
+        else
+          uv run garak-scan --model "$MODEL" --probes "$PROBES" --output-dir ./scan-results
+        fi
+      continue-on-error: true
+
+    - name: Upload scan results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: garak-scan-results
+        path: scan-results/
+        retention-days: 30
+
+    - name: Display scan summary
+      if: always()
+      run: |
+        echo "## Garak Scan Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ -f scan-results/*.report.jsonl ]; then
+          echo "✅ Scan completed. Results uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download the scan results from the workflow artifacts." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ No scan results found." >> $GITHUB_STEP_SUMMARY
+        fi

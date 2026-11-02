@@ -92,7 +92,7 @@ Short introductions suitable for a post are in [`articles.md`](docs/articles.md)
 
 | Tool | Rule-level expectations | Note |
 |---|---|---|
-| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,140 layer-1 samples | the only one so far — see *Known gaps* |
+| [`aguard`](https://github.com/basdotio/agent-guard) | yes, on 6 of the 5,195 layer-1 samples | the only one so far — see *Known gaps* |
 
 No second scanner has been wired up yet. Until one is, the tool-neutral claims above are a
 property of the schema rather than a demonstrated result, and that distinction is the reason
@@ -226,8 +226,8 @@ shows up there rather than in someone else's clone.
 Declared rather than omitted, on the same principle this corpus applies to the scanners it
 measures.
 
-- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,140 labels
-  carry such a block; the other 5,134 are pure `truth` and need no scanner to check. A
+- **Rule ids in `expect.<tool>` blocks are not verified here, by design.** 6 of 5,195 labels
+  carry such a block; the other 5,189 are pure `truth` and need no scanner to check. A
   scanner's rule list belongs to that scanner, so `taxonomy/tools.yaml` reaches it only
   through an environment variable and the validator now **rejects** a `rules_source.path`
   that leaves this repository. That rule exists because aguard's used to be
@@ -253,10 +253,10 @@ measures.
 - **The benign side is a sample; the malicious side is a census, with two exceptions.** 4,473
   benign samples are drawn from stated populations under stated designs, and 61 more are
   registry-flagged candidates that reading found not malicious but over a safety boundary in
-  the open (`alert_justified`, set aside from the flag rate on both sides); 310 of the 587
+  the open (`alert_justified`, set aside from the flag rate on both sides); 310 of the 642
   malicious samples are everything their upstreams had, the 240 from SkillHarm are a
   seeded draw of 20 per risk from 641, and the 28 from `clawhub-live` are the candidates a majority of
-  readers read as malicious (two AI readers or two models; where the two models split, Claude as a third), out of 279 the registry's judge flagged (8 of them placed there on 2026-11-02 by two models' rulings on the SkillPay stubs and one CI-hijacking template); the 1 from `maliciousskillbench-wild` is likewise what two models both read as malicious out of 186; the 13 from the two `datadog-npm*` npm entries are what a majority of readers read as malicious among the agent-named packages of DataDog's npm set. A recall figure and a false-positive figure from this corpus
+  readers read as malicious (two AI readers or two models; where the two models split, Claude as a third), out of 279 the registry's judge flagged (8 of them placed there on 2026-11-02 by two models' rulings on the SkillPay stubs and one CI-hijacking template); the 1 from `maliciousskillbench-wild` is likewise what two models both read as malicious out of 186; the 13 from the two `datadog-npm*` npm entries are what a majority of readers read as malicious among the agent-named packages of DataDog's npm set; and the 55 from `mcp-variants` are attacks injected into real MCP servers, read the same way and capped at five per attack type and two per base server. A recall figure and a false-positive figure from this corpus
   therefore rest on different kinds of denominator, and cannot be combined into one score.
 - **No dimension has a wild recall rate yet.** `corpus score` splits recall into wild, fixture
   and constructed, and on the wild row no dimension holds enough samples for a rate — at most
