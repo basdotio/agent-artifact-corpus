@@ -134,11 +134,12 @@
     SKILL.md 正文，两者都是 MIT；每个标签的 origin.source 写明出自哪一个。原样复制。
 
   yms0527/awesome-mcp-servers（malicious-mcp-variants）—— 每棵树按**它的底本 server** 的
-  许可证：MIT 34 个，Apache-2.0 21 个
+  许可证：MIT 35 个，Apache-2.0 21 个，Unlicense 1 个
     https://github.com/yms0527/awesome-mcp-servers @ e8303ec7a14d
-    55 个样本树在 corpus/malicious/mcp/mv-* 下：数据集作者往真实开源 MCP server 里植入了
-    攻击。仓库本身是 MIT，但别人 server 的修改版仍带那个 server 的许可证，所以只收树里自带
-    MIT 或 Apache-2.0 许可证文件的变体，那份文件随树一起保留。Apache-2.0 底本是数据集作者
+    57 个样本树在 corpus/malicious/mcp/mv-* 下：数据集作者往真实开源 MCP server 里植入了
+    攻击。仓库本身是 MIT，但别人 server 的修改版仍带那个 server 的许可证，所以只收许可证宽松的
+    变体，并且许可证随树一起保留：要么变体本来就带着那份文件，要么（有两个）从底本 server 自己的
+    仓库取来加进树里。Apache-2.0 底本是数据集作者
     改的，不是这里改的；树按发布时的样子 vendor。逐树许可证见
     manifest/pins/mcp-variants-licenses.json。
 

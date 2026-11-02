@@ -201,9 +201,11 @@ a SkillHarm copy filed as wild, one a held-out ClawHub campaign, so 1 is derived
 
 **`mcp-variants`** — attacks injected into real MCP servers.
 `https://github.com/yms0527/awesome-mcp-servers` @ `e8303ec7a14d`, MIT for the repository but each
-variant is a modified copy of someone else's server, so only the 103 of 190 whose tree carries an
-MIT or Apache-2.0 licence file were considered, and each label carries the base server's licence.
-55 malicious samples, provenance `injected`, across 13 of the 15 attack types.
+variant is a modified copy of someone else's server, so only the 110 of 190 with a permissive
+licence were considered — 103 whose tree carries the licence file, 7 whose base server's own
+repository does, its LICENSE then added to the tree — and each label carries the base server's licence.
+57 malicious samples, provenance `injected`, across 13 of the 15 attack types. 13 of the 20 Tool
+Poisoning variants are empty gitlinks, never published.
 *Hazards*: injected, never wild — real server code plus a planted attack. Several injection
 templates repeat byte for byte across servers; two (a squatting decoy that returns a fixed status,
 a preference-steering description) were ruled not malicious and are excluded whole. Capped at five
