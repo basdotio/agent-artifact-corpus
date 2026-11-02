@@ -142,6 +142,15 @@
     改的，不是这里改的；树按发布时的样子 vendor。逐树许可证见
     manifest/pins/mcp-variants-licenses.json。
 
+  qualixar/skillfortifybench —— MIT，Copyright (c) 2025-2026 Varun Pratap Bhardwaj
+    https://github.com/qualixar/skillfortifybench @ eb9d5a9cbfa1
+    50 个样本树：36 个在 corpus/malicious/skills/sf-* 下（Claude skill 改名为 SKILL.md，或
+    OpenClaw skill 的 .claw/、.openclaw/ 目录），14 个在 corpus/malicious/mcp/sfm-* 下
+    （mcp.json），取自该基准的恶意一半，逐个读过后选入。原样复制，只有每个文件里那一行
+    `SKILLFORTIFYBENCH:INERT` 标记被 strip-skillfortifybench-inert 去掉；那行标记里写着
+    "Licensed MIT"，所以这份声明现在由本条目承载。
+    署名：SkillFortifyBench，arXiv 2603.00195。
+
   modelcontextprotocol/servers —— Apache-2.0（尚未重新授权的贡献仍为 MIT）
     https://github.com/modelcontextprotocol/servers @ bbb701e7ac1e，src
     7 个样本树在 corpus/benign/mcp/ref-* 下，从该 commit 的 src/<server>/ 目录原样复制，
