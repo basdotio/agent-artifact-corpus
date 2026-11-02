@@ -265,6 +265,9 @@ func renderLabel(e manifest.Entry, p Plan, treeDir, added string) string {
 			"upstream label; tier and dimension come from the category map"
 	}
 	switch {
+	case c.AlertJustified != nil:
+		fid = "class set to benign by an alert_justified override against the entry's constant; " +
+			"benign labels carry no coordinates, and the reading behind the marker is in `reviewed`"
 	case c.Class == "benign":
 		fid = "class is a constant and benign labels carry no coordinates, so nothing is mapped; " +
 			"the judgement is in this entry's sampling design"
@@ -304,6 +307,21 @@ func renderLabel(e manifest.Entry, p Plan, treeDir, added string) string {
 		if len(c.Locus) > 0 {
 			fmt.Fprintf(&b, "  locus: [%s]\n", strings.Join(c.Locus, ", "))
 		}
+	}
+	if aj := c.AlertJustified; aj != nil {
+		// `reviewed` before `truth`, as in the hand-marked samples: who read it and what they
+		// concluded, then the claim that reading supports. The located line goes in the note —
+		// a benign class stays `assumed`, so there is no `read` axis to hang it on, and
+		// checkAlertJustified has already found it on that line.
+		fmt.Fprintf(&b, "\nreviewed:\n")
+		fmt.Fprintf(&b, "  date: %s\n", aj.Date)
+		fmt.Fprintf(&b, "  verdict: would-fire\n")
+		fmt.Fprintf(&b, "  note: %q\n", fmt.Sprintf("Read %s by %s, not by a person. Not malicious; "+
+			"crosses the %s boundary in the open. Deciding line %s:%s: %s",
+			aj.Date, aj.ReadBy, aj.Boundary, aj.Evidence.File, aj.Evidence.Lines, aj.Evidence.Quote))
+		fmt.Fprintf(&b, "\ntruth:\n")
+		fmt.Fprintf(&b, "  alert_justified: true\n")
+		fmt.Fprintf(&b, "  alert_justified_why: %q\n", aj.Boundary+": "+aj.Why)
 	}
 	return b.String()
 }
@@ -428,6 +446,11 @@ func originNote(e manifest.Entry, c Coord) string {
 		if note == "" {
 			note = "upstream benign; this entry does not state what that label was based on"
 		}
+	}
+	if c.AlertJustified != nil {
+		note = "a candidate this entry would otherwise call malicious; reading found it not " +
+			"malicious but crossing a safety boundary in the open, so it is filed benign with " +
+			"truth.alert_justified (see `reviewed`). The artifact is vendored unchanged"
 	}
 	// A declared transform makes "vendored unchanged" false, and the label is what a consumer
 	// actually reads. An audit already found 163 labels carrying a fidelity string that

@@ -23,7 +23,9 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -79,6 +81,11 @@ type Coord struct {
 	// one. Nil means the judgement was made and its reasoning lives somewhere no checker can
 	// reach — which is the state 79 overrides started in.
 	DimensionEvidence *manifest.Evidence
+
+	// AlertJustified is set when an alert_justified override moved this sample to the benign
+	// side: the reading that did it, carried through so the label can record it in `reviewed`
+	// and `truth.alert_justified`. Nil for every sample whose class is the entry's own.
+	AlertJustified *manifest.AlertJustifiedOverride
 }
 
 // Result is a derivation's output together with the accounting a reviewer needs: which
@@ -90,6 +97,9 @@ type Result struct {
 
 	// HandRead counts samples whose dimension came from a hand-read override.
 	HandRead int
+
+	// AlertJustified counts samples an alert_justified override moved to the benign side.
+	AlertJustified int
 
 	// Excluded counts samples left out by exclude_tokens. Declared exclusions are counted so a
 	// shrinking denominator is never invisible.
@@ -334,6 +344,38 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 			}
 		}
 
+		if aj, ok := d.AlertJustified[up.ID]; ok {
+			usedOverride[up.ID] = true
+			for _, other := range []struct {
+				name string
+				has  bool
+			}{
+				{"exclude_samples", hasKey(d.ExcludeSamples, up.ID)},
+				{"dimension_overrides", hasKey(d.DimensionOverrides, up.ID)},
+				{"evasion_overrides", hasKey(d.EvasionOverrides, up.ID)},
+				{"tier_overrides", hasKey(d.TierOverrides, up.ID)},
+			} {
+				if other.has {
+					bad("%s/%s: is in both alert_justified and %s; one decision per sample", e.ID, up.ID, other.name)
+				}
+			}
+			if errsAJ := checkAlertJustified(aj, dir, c.IsFile); len(errsAJ) > 0 {
+				for _, m := range errsAJ {
+					bad("%s/%s: alert_justified %s", e.ID, up.ID, m)
+				}
+				continue
+			}
+			// Benign: the malicious-only axes resolved above describe a class this sample no
+			// longer has, and a benign label carries none of them.
+			c.Class = "benign"
+			c.Dimensions, c.Evasion, c.Locus, c.Tier, c.Severity = nil, nil, nil, "", ""
+			ajCopy := aj
+			c.AlertJustified = &ajCopy
+			res.AlertJustified++
+			res.Coords = append(res.Coords, c)
+			continue
+		}
+
 		if reason, ok := d.ExcludeSamples[up.ID]; ok {
 			usedOverride[up.ID] = true
 			res.Excluded++
@@ -429,6 +471,7 @@ func Derive(e manifest.Entry, root string, tax *taxonomy.Set) (*Result, []error)
 		{"dimension_overrides", keysOfOverrides(d.DimensionOverrides)},
 		{"evasion_overrides", keysOfSlice(d.EvasionOverrides)},
 		{"tier_overrides", keysOf(d.TierOverrides)},
+		{"alert_justified", keysOfAJ(d.AlertJustified)},
 	} {
 		for _, k := range m.keys {
 			if !usedOverride[k] {
@@ -648,6 +691,60 @@ func keysOfTargets(m map[string]manifest.Targets) []string {
 		out = append(out, k)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func keysOfAJ(m map[string]manifest.AlertJustifiedOverride) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func hasKey[V any](m map[string]V, k string) bool {
+	_, ok := m[k]
+	return ok
+}
+
+// checkAlertJustified refuses an alert_justified override that does not carry a whole reading:
+// a boundary from the closed set, a reason, who read it and when, and a quote that is really on
+// the cited line of the cited file. The quote is checked here, at derivation, because a benign
+// label has no `read` axis to hang it on — its class stays `assumed` — so the validator's
+// evidence check never sees it; this is the one place that can.
+func checkAlertJustified(aj manifest.AlertJustifiedOverride, dir string, isFile bool) []string {
+	var out []string
+	if !slices.Contains(manifest.AlertJustifiedBoundaries, aj.Boundary) {
+		out = append(out, fmt.Sprintf("boundary %q is not one of %v", aj.Boundary, manifest.AlertJustifiedBoundaries))
+	}
+	if strings.TrimSpace(aj.Why) == "" {
+		out = append(out, "has no why — the boundary crossed has to be named")
+	}
+	if strings.TrimSpace(aj.ReadBy) == "" {
+		out = append(out, "has no read_by")
+	}
+	if _, err := time.Parse("2006-01-02", aj.Date); err != nil {
+		out = append(out, fmt.Sprintf("date %q is not YYYY-MM-DD", aj.Date))
+	}
+	ev := aj.Evidence
+	switch {
+	case isFile:
+		out = append(out, "is on a single-file sample; the override needs a tree to locate its quote in")
+	case ev == nil || ev.File == "" || ev.Lines == "" || ev.Quote == "":
+		out = append(out, "needs evidence with file, lines and quote")
+	default:
+		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(ev.File)))
+		if err != nil {
+			out = append(out, fmt.Sprintf("evidence file %q cannot be read: %v", ev.File, err))
+			break
+		}
+		n, err := strconv.Atoi(ev.Lines)
+		lines := strings.Split(string(b), "\n")
+		if err != nil || n < 1 || n > len(lines) || !strings.Contains(lines[n-1], ev.Quote) {
+			out = append(out, fmt.Sprintf("quote is not on line %s of %s", ev.Lines, ev.File))
+		}
+	}
 	return out
 }
 

@@ -69,8 +69,10 @@ var malHeader = []string{
 
 // A hard negative is listed with the benign samples; resembles and differs_by say what it
 // looks like and what makes it harmless, and are empty for every other benign row.
+// alert_justified carries the boundary a benign sample crosses in the open, when it has one —
+// the rows the score sets aside from the flag rate.
 var benHeader = []string{
-	"id", "class", "surface", "kind", "resembles", "differs_by",
+	"id", "class", "surface", "kind", "resembles", "differs_by", "alert_justified",
 	"provenance", "origin", "entry", "source", "license", "added", "path",
 }
 
@@ -104,7 +106,7 @@ func sampleRows(root string) (mal, ben [][]string, err error) {
 			l.Origin.License, l.Origin.Added, l.Rel}
 		if l.Class != label.Malicious {
 			ben = append(ben, append([]string{l.ID, string(l.Class), strings.Join(l.Surface, ";"), l.Kind,
-				strings.Join(t.Resembles, ";"), t.DiffersBy}, where...))
+				strings.Join(t.Resembles, ";"), t.DiffersBy, t.AlertJustifiedWhy}, where...))
 			continue
 		}
 		mal = append(mal, append([]string{
