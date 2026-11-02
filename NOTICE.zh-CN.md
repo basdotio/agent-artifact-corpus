@@ -151,6 +151,16 @@
     "Licensed MIT"，所以这份声明现在由本条目承载。
     署名：SkillFortifyBench，arXiv 2603.00195。
 
+  aisa-group/skill-inject —— 仓库是 MIT；每棵树按**它的载体**的许可证：MIT（wshobson/agents，
+  Copyright (c) 2024 Seth Hobson；anthropics/claude-cookbooks，Copyright (c) 2023 Anthropic；作者自己写的）
+  或 Apache-2.0（anthropics/skills、huggingface/skills）
+    https://github.com/aisa-group/skill-inject @ 182f3d9d9836
+    25 个样本树在 corpus/malicious/skills/si-* 下。上游不发成品样本；scripts/prep-skill-inject.py
+    复制载体 skill，在上游构建器插入的位置插入注入那一行，再复制载荷脚本，不运行上游代码。Apache-2.0
+    载体经 Skill-Inject 作者这样插入后即为修改版。逐树的载体出处和许可证见
+    manifest/pins/skill-inject-licenses.json 和各自的 sidecar。
+    署名：Skill-Inject，arXiv 2602.20156。
+
   modelcontextprotocol/servers —— Apache-2.0（尚未重新授权的贡献仍为 MIT）
     https://github.com/modelcontextprotocol/servers @ bbb701e7ac1e，src
     7 个样本树在 corpus/benign/mcp/ref-* 下，从该 commit 的 src/<server>/ 目录原样复制，

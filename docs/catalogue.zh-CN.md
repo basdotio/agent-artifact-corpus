@@ -179,6 +179,14 @@ skill、MCP 配置、OpenClaw skill），由论文的定种子生成器写出；
 这里的召回率是上限；良性一半一个 URL 都没有，不收；行内的 `SKILLFORTIFYBENCH:INERT` 标记由声明过的 transform
 剥掉；树按格式加哈希命名，不用会直接写出类别的上游 id。每类攻击最多 5 个。
 
+**`skill-inject`** —— 插进真实公开 skill 的注入指令。
+`https://github.com/aisa-group/skill-inject` @ `182f3d9d9836`，仓库是 MIT，每棵树按它的载体 skill 的许可证。
+上游只发载体和注入定义，样本在运行时拼装；`scripts/prep-skill-inject.py` 照它的做法拼，不运行它的代码。只用出处
+查得到的载体（wshobson/agents、claude-cookbooks、anthropics/skills 示例、huggingface/skills、作者自己写的），
+Anthropic 专有的文档类 skill 一概不用，于是 84 条注入里能拼的是 47 条。收 25 个恶意样本，出身 `injected`。
+*风险*：两个模型加第三票读完 47 条，不沿用上游"明显/情境"的划分；只让 agent 跳过检查、写出更差代码而没有
+获益方的注入不收。每个载体最多 2 个。外传地址是作者自己在用的收集服务器。
+
 ### 误报分母 —— 良性样本
 
 **`skillmd-138k`** —— 主分母。

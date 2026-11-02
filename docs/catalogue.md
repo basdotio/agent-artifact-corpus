@@ -220,6 +220,17 @@ not admitted; the inline `SKILLFORTIFYBENCH:INERT` banner is stripped by a decla
 are named by format and hash, not by the upstream id that spells out the class. Capped at five per
 attack type.
 
+**`skill-inject`** — injection lines inserted into real public skills.
+`https://github.com/aisa-group/skill-inject` @ `182f3d9d9836`, MIT for the repository; each tree under
+its carrier skill's licence. The upstream ships carriers and injection definitions and builds each
+sample at run time; `scripts/prep-skill-inject.py` repeats that build without running its code. Only
+carriers whose origin was traced are used (wshobson/agents, claude-cookbooks, anthropics/skills
+examples, huggingface/skills, the authors' own), never Anthropic's proprietary document skills, which
+leaves 47 of 84 injections buildable. 25 malicious samples, provenance `injected`.
+*Hazards*: two models and a third vote read all 47 without the upstream's obvious/contextual split;
+injections that only make the agent skip a check or write worse code, with no one benefiting, are
+out. Capped at two per carrier. The exfiltration hosts are the authors' live collection servers.
+
 ### False-positive denominator — benign samples
 
 **`skillmd-138k`** — the primary denominator.
