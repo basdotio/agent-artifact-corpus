@@ -226,6 +226,24 @@ not admitted; the inline `SKILLFORTIFYBENCH:INERT` banner is stripped by a decla
 are named by format and hash, not by the upstream id that spells out the class. Capped at five per
 attack type.
 
+**`connor`** — hand-written proof-of-concept MCP servers.
+`https://github.com/yiheng98/Connor` @ `326ab9116699`, Apache-2.0 for its `PoCs/` directory. The
+artifact of arXiv 2604.01905: 114 small FastMCP servers, each with one attack planted through one of
+19 components (a tool description, a parameter description or default, a tool body, a resource, a
+return value, the launch command) toward one of six goals (backdoor, payload execution, ransomware,
+reverse shell, stealing, sabotage). 30 malicious samples, provenance `synthetic`: two models
+(glm-5.3 and deepseek-chat) read all 114 without the upstream's directory labels, both read 111 as
+malicious, 108 of those had both readers' quotes found on the cited line, and the cap keeps five per
+goal, spread over all 19 components.
+*Hazards*: synthetic, never wild. The second reader called every tree it answered malicious, so the
+judgement is one model's plus a mechanical quote check, and these are not the readers of the earlier
+synthetic sources. Half the kept servers name one attacker host (`attacker.controlled:8080`) that
+appears nowhere else in the corpus, kept as published. The web responses the attacker's server would
+return (`PoCs/response/`) are in no tree, so a server whose attack arrives in a fetched page shows
+only the fetch. Trees are named by hash, not by the upstream path that spells out the goal. The
+repository's `Dataset/` is third-party material under other terms and nothing was taken from it; the
+upstream NOTICE travels in this repository's NOTICE.
+
 **`skill-inject`** — injection lines inserted into real public skills.
 `https://github.com/aisa-group/skill-inject` @ `182f3d9d9836`, MIT for the repository; each tree under
 its carrier skill's licence. The upstream ships carriers and injection definitions and builds each
