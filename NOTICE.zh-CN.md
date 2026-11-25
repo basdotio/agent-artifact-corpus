@@ -162,6 +162,27 @@
     manifest/pins/skill-inject-licenses.json 和各自的 sidecar。
     署名：Skill-Inject，arXiv 2602.20156。
 
+  yiheng98/Connor（手写的恶意 MCP server 演示）—— Apache-2.0，Copyright 2026 The Connor Authors
+    https://github.com/yiheng98/Connor @ 326ab9116699，PoCs/
+    30 个样本树，位于 corpus/malicious/mcp/cnr-*，每个是一个演示 server 的三个文件
+    （main.py、mcp.json、pyproject.toml），原样拷贝并各自包进一个按哈希命名的目录，取自作者
+    公开的 114 个；逐个读过后选入，每种攻击目标最多 5 个。该仓库的 Dataset/ 目录是第三方材料，
+    适用别的条款，一个文件都没有取。
+    署名："From Component Manipulation to System Compromise: Understanding and Detecting
+    Malicious MCP Servers"，arXiv 2604.01905。
+    上游的 NOTICE 要求任何副本、改编或发布都保留，原文如下：
+
+      Connor Proof-of-Concept Materials
+      Copyright 2026 The Connor Authors
+
+      These proof-of-concept materials are intended solely for educational and
+      defensive security research.
+
+      Any copy, adaptation, or publication based on these materials must retain this notice.
+
+      Availability of these materials does not constitute authorization to access,
+      test, or interfere with systems or data without permission.
+
   modelcontextprotocol/servers —— Apache-2.0（尚未重新授权的贡献仍为 MIT）
     https://github.com/modelcontextprotocol/servers @ bbb701e7ac1e，src
     7 个样本树在 corpus/benign/mcp/ref-* 下，从该 commit 的 src/<server>/ 目录原样复制，
